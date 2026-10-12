@@ -564,15 +564,15 @@ export class FormView {
         // GREYMARCH: tell the voice display where this head is on screen (the microphone icon is drawn there while they talk)
         try { if (headScreenPos[2] > 0) (SpApiInteractor.getControllerInstance().emitter as any).emit("greymarchHead", { name: model.appearance.name, x: textXPos, y: textYPos, rw: resolution.width, rh: resolution.height }); } catch (e) { /* the voice display is a nicety */ }
 
-        // GREYMARCH: a character who introduced themselves to this player shows their NAME over their head; everyone else keeps the character ID
+        // GREYMARCH: a character who introduced themselves to this player shows their NAME and their ID over their head; everyone else shows the ID only
         let gmShown: string = model.appearance.name;
-        try { const gmG: any = Function("return this")(); const gmN = gmG.__gmKnown && gmG.__gmKnown[this.getRemoteRefrId()]; if (gmN) gmShown = String(gmN); } catch (gmErr) { /* the ID stays */ }
+        try { const gmG: any = Function("return this")(); const gmN = gmG.__gmKnown && gmG.__gmKnown[this.getRemoteRefrId()]; if (gmN) gmShown = String(gmN) + " (" + model.appearance.name + ")"; } catch (gmErr) { /* the ID stays */ }
         if (this.textNameId && this.textNameShown !== gmShown) { setTextString(this.textNameId, gmShown); this.textNameShown = gmShown; }
 
         if (!this.textNameId && headScreenPos[2] > 0) {
           this.textNameShown = gmShown;
           this.textNameId = createText(textXPos, textYPos, gmShown, [1, 1, 1, 0.8]); // GREYMARCH: the floating name is the character ID; the game's own display name is "Stranger" or the name you were introduced to
-          setTextSize(this.textNameId, 0.35); // GREYMARCH: 30% smaller than SkyMP's 0.5
+          setTextSize(this.textNameId, 0.4375); // GREYMARCH: 12.5% smaller than SkyMP's 0.5 (was 30% smaller, then made 25% bigger)
           SpApiInteractor.getControllerInstance().emitter.emit("nicknameCreate", {
             remoteRefrId: this.getRemoteRefrId(),
             textId: this.textNameId

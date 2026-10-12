@@ -692,14 +692,15 @@ export class GreymarchBridge {
     // HOUSES AND STORAGE: the names staff gave doors ("Breezehome") are shown by every game instead of the base game's, and an owned door says who owns it on a second line
     // ("Owned by: Alda Ring"). The server sends { reference id: { label, owner } }; a door with no label of its own keeps the game's name above the owner line; a door that loses
     // both goes back to the game's own name. Every few seconds the name is compared and set again if it differs, so a redesignation or a new owner shows within moments.
-    // The game's own "E Open / Guard Barracks" text for a load door comes from where the door leads and ignores the name set above (the log shows the name is kept). So for a door staff named or
-    // gave an owner, the game's text is hidden (blockActivation's hide flag; activation itself still works, doors are blocked for SkyMP already) and the chat page draws the same prompt with the
-    // server's name and owner. Checked every 100 ms: only the door in the crosshair is looked at.
+    // The game's own "E Open / Guard Barracks" text for a load door comes from where the door leads and ignores the name set above (the log shows the name is kept), so it is overridden by force:
+    // (1) the game's prompt text field in the HUD (Scaleform) is overwritten with the door's text every 100 ms while the door is in the crosshair; the fields that exist and what they held are logged
+    // once per door so the right one is known; (2) until that is seen to work, the chat page draws the same prompt itself. Only the door in the crosshair is looked at.
     greymarchDoorPrompt(now: any): any {
         if (now < (this.greymarchDoorPromptNext || 0)) return;
         this.greymarchDoorPromptNext = now + 100;
         var text = "";
         var want = this.greymarchDoorNames || {};
+        var forced = false;
         if (!this.greymarchScreenUp && !this.greymarchMenuOn && !this.greymarchAdminOn && this.greymarchChatOn) {
             try {
                 var ref = this.sp.Game.getCurrentCrosshairRef();
@@ -707,19 +708,36 @@ export class GreymarchBridge {
                 var done = this.greymarchDoorNamesDone || {};
                 if (remote && want[remote] !== undefined && done[remote]) {
                     text = String(done[remote]);
-                    ref.blockActivation(true, true);
-                    this.greymarchDoorHidden = ref;
-                    if (!this.greymarchDoorHideLogged) { this.greymarchDoorHideLogged = true; this.greymarchLog("props: the game's own text hidden on door " + Number(remote).toString(16) + ", ours is drawn"); }
+                    forced = this.greymarchDoorForce(remote, text);
                 }
             } catch (e) { text = ""; if (!this.greymarchDoorPromptErr) { this.greymarchDoorPromptErr = true; this.greymarchLog("props: door prompt failed (" + e + ")"); } }
         }
-        if (text !== (this.greymarchDoorPromptText || "")) {
-            if (!text && this.greymarchDoorHidden) { try { this.greymarchDoorHidden.blockActivation(true, false); } catch (e2) { /* the door is gone */ } this.greymarchDoorHidden = null; } // a door that is no longer named shows the game's own text again
-            this.greymarchDoorPromptText = text;
-            this.greymarchChatToPage("door", text);
+        var draw = forced ? "" : text; // our own drawing is only needed while the game's text could not be overwritten
+        if (draw !== (this.greymarchDoorPromptText || "")) {
+            this.greymarchDoorPromptText = draw;
+            this.greymarchChatToPage("door", draw);
         }
     }
-    greymarchDoorNamesApply(now: any): any {
+    // Overwrite the HUD's rollover (activate) text with the door's text. Returns true when the game's own text now reads ours.
+    greymarchDoorForce(remote: any, text: string): any {
+        var ui = this.sp.Ui;
+        var hud = "HUD Menu";
+        var base = "_root.HUDMovieBaseInstance.";
+        var fields = ["RolloverNameInstance.text", "RolloverText.text", "RolloverInfoInstance.text", "RolloverName.text", "RolloverNameInstance.RolloverName.text"];
+        var logged = this.greymarchDoorForceLogged || (this.greymarchDoorForceLogged = {});
+        var any = false, ok = false;
+        for (var i = 0; i < fields.length; i++) {
+            var cur = "";
+            try { cur = String(ui.getString(hud, base + fields[i]) || ""); } catch (e) { cur = ""; }
+            if (!logged[remote + fields[i]]) { logged[remote + fields[i]] = 1; this.greymarchLog("props: HUD field " + fields[i] + " holds '" + cur + "' while looking at door " + Number(remote).toString(16)); }
+            if (!cur.length) continue;
+            if (cur === text) { ok = true; any = true; continue; }
+            if (cur.length < 3 || cur === "Open" || cur === "E") continue; // the button letter and the verb are not the name
+            try { ui.setString(hud, base + fields[i], text); any = true; } catch (e2) { /* this build has no such field */ }
+        }
+        if (any && !this.greymarchDoorForceLoggedOk) { this.greymarchDoorForceLoggedOk = true; this.greymarchLog("props: overwrote the HUD prompt text on door " + Number(remote).toString(16)); }
+        return ok;
+    }    greymarchDoorNamesApply(now: any): any {
         if (now < (this.greymarchDoorNamesNext || 0)) return;
         this.greymarchDoorNamesNext = now + 3000;
         var want = this.greymarchDoorNames || {};
