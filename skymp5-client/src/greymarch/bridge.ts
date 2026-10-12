@@ -688,22 +688,32 @@ export class GreymarchBridge {
         var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify(body) };
         this.controller.emitter.emit("sendMessage", { message: message, reliability: "reliable" });
     }
-    // HOUSES AND STORAGE: the names staff gave doors ("Breezehome") are shown by every game instead of the base game's. The server sends { reference id: name } and a door that loses its name goes back to the game's own.
+    // HOUSES AND STORAGE: the names staff gave doors ("Breezehome") are shown by every game instead of the base game's, and an owned door says who owns it on a second line
+    // ("Owned by: Alda Ring"). The server sends { reference id: { label, owner } }; a door with no label of its own keeps the game's name above the owner line; a door that loses
+    // both goes back to the game's own name. Every few seconds the name is compared and set again if it differs, so a redesignation or a new owner shows within moments.
     greymarchDoorNamesApply(now: any): any {
         if (now < (this.greymarchDoorNamesNext || 0)) return;
         this.greymarchDoorNamesNext = now + 3000;
         var want = this.greymarchDoorNames || {};
         var done = this.greymarchDoorNamesDone || (this.greymarchDoorNamesDone = {});
+        var orig = this.greymarchDoorOrig || (this.greymarchDoorOrig = {}); // the game's own name of each door we have renamed
+        var NL = String.fromCharCode(10);
         var sp = this.sp;
         for (var id in want) {
+            var w = want[id];
+            var label = typeof w === "string" ? w : String((w && w.label) || "");
+            var owner = typeof w === "string" ? "" : String((w && w.owner) || "");
             var local = misc.remoteIdToLocalId(Number(id));
             if (!local) continue;
             var o: any = null;
             try { o = sp.ObjectReference.from(sp.Game.getFormEx(local)); } catch (e0) { o = null; }
             if (!o) continue;
             try {
-                if (String(o.getDisplayName()) !== want[id]) o.setDisplayName(want[id], true);
-                done[id] = want[id];
+                if (orig[id] === undefined) orig[id] = String(o.getDisplayName());
+                var base = label || orig[id];
+                var text = owner ? base + NL + "Owned by: " + owner : base;
+                if (String(o.getDisplayName()) !== text) o.setDisplayName(text, true);
+                done[id] = text;
             } catch (e1) { if (!this.greymarchDoorErr) { this.greymarchDoorErr = true; this.greymarchLog("props: could not name door " + id + " (" + e1 + ")"); } }
         }
         for (var id2 in done) {

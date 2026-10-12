@@ -92,3 +92,31 @@ test("a door this game has not loaded, or cannot rename, never breaks the game a
   gm.greymarchPacket({ customPacketType: "greymarchProps", doors: "nonsense" });
   gm.greymarchDoorNamesApply(20000);
 });
+
+const NL = String.fromCharCode(10);
+
+test("an owned door shows its name with 'Owned by: ...' on a second line; a door with no name of its own keeps the game's name above it", () => {
+  const { gm, objectFor } = make();
+  gm.greymarchPacket({ customPacketType: "greymarchProps", doors: { 512: { label: "Breezehome", owner: "Alda Ring" }, 513: { label: "", owner: "Bram Hale" } } });
+  gm.greymarchDoorNamesApply(10000);
+  assert.strictEqual(objectFor(0x1200).name, "Breezehome" + NL + "Owned by: Alda Ring");
+  assert.strictEqual(objectFor(0x1201).name, "Door 1201" + NL + "Owned by: Bram Hale", "the base game's own name stays on top");
+});
+
+test("a redesignation, a new owner and a removed owner all change what the door says within a few seconds", () => {
+  const { gm, objectFor } = make();
+  gm.greymarchPacket({ customPacketType: "greymarchProps", doors: { 512: { label: "Breezehome", owner: "Alda Ring" } } });
+  gm.greymarchDoorNamesApply(10000);
+  gm.greymarchPacket({ customPacketType: "greymarchProps", doors: { 512: { label: "Breezehome Manor", owner: "Alda Ring" } } }); // staff redesignate it
+  gm.greymarchDoorNamesApply(10001);
+  assert.strictEqual(objectFor(0x1200).name, "Breezehome Manor" + NL + "Owned by: Alda Ring");
+  gm.greymarchPacket({ customPacketType: "greymarchProps", doors: { 512: { label: "Breezehome Manor", owner: "Bram Hale" } } }); // a new owner
+  gm.greymarchDoorNamesApply(10002);
+  assert.strictEqual(objectFor(0x1200).name, "Breezehome Manor" + NL + "Owned by: Bram Hale");
+  gm.greymarchPacket({ customPacketType: "greymarchProps", doors: { 512: { label: "Breezehome Manor", owner: "" } } }); // the owner is removed
+  gm.greymarchDoorNamesApply(10003);
+  assert.strictEqual(objectFor(0x1200).name, "Breezehome Manor");
+  gm.greymarchPacket({ customPacketType: "greymarchProps", doors: { 512: { label: "", owner: "" } } }); // nothing left but the base name
+  gm.greymarchDoorNamesApply(10004);
+  assert.strictEqual(objectFor(0x1200).name, "Door 1200", "back to the game's own name");
+});
