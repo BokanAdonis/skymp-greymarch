@@ -199,6 +199,9 @@ export class AuthService extends ClientListener {
       case 'greymarchGhosts':
       case 'greymarchStats':
       case 'greymarchKill':
+      case 'greymarchKnown':
+      case 'greymarchMenuReply':
+      case 'greymarchMenuEvent':
         this.gm.greymarchPacket(msgContent);
         break;
       // case 'loginRequired':

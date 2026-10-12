@@ -565,7 +565,7 @@ export class FormView {
         try { if (headScreenPos[2] > 0) (SpApiInteractor.getControllerInstance().emitter as any).emit("greymarchHead", { name: model.appearance.name, x: textXPos, y: textYPos, rw: resolution.width, rh: resolution.height }); } catch (e) { /* the voice display is a nicety */ }
 
         if (!this.textNameId && headScreenPos[2] > 0) {
-          this.textNameId = createText(textXPos, textYPos, refr.getDisplayName(), [1, 1, 1, 0.8]);
+          this.textNameId = createText(textXPos, textYPos, model.appearance.name, [1, 1, 1, 0.8]); // GREYMARCH: the floating name is the character ID; the game's own display name is "Stranger" or the name you were introduced to
           setTextSize(this.textNameId, 0.35); // GREYMARCH: 30% smaller than SkyMP's 0.5
           SpApiInteractor.getControllerInstance().emitter.emit("nicknameCreate", {
             remoteRefrId: this.getRemoteRefrId(),
