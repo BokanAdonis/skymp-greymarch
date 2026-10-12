@@ -243,6 +243,8 @@ export class RemoteServer extends ClientListener {
   }
 
   private onTeleportMessage(event: ConnectionMessage<TeleportMessage> | ConnectionMessage<TeleportMessage2>): void {
+    // GREYMARCH diagnostics: where the server moves someone (door travel)
+    try { const gmT: any = event.message; const gmPl = Game.getPlayer()!; const gmCur = gmPl.getWorldSpace() || gmPl.getParentCell(); (this.controller.emitter as any).emit("greymarchStage", "door/teleport: the server moves " + ("idx" in gmT ? "someone else (idx " + gmT.idx + ")" : "me") + " to world/cell " + Number(gmT.worldOrCell).toString(16) + " at " + Math.round(gmT.pos[0]) + "," + Math.round(gmT.pos[1]) + "," + Math.round(gmT.pos[2]) + " (I am in " + (gmCur ? gmCur.getFormID().toString(16) : "?") + " at " + Math.round(gmPl.getPositionX()) + "," + Math.round(gmPl.getPositionY()) + "," + Math.round(gmPl.getPositionZ()) + ")"); } catch (gmErr) { /* diagnostics only */ }
     const msg = event.message;
     once('update', () => {
       const id = ("idx" in msg && typeof msg.idx === "number") ? this.getIdManager().getId(msg.idx) : this.getMyActorIndex();

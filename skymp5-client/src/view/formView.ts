@@ -561,10 +561,12 @@ export class FormView {
         const resolution = getScreenResolution();
         const textXPos = Math.round(headScreenPos[0] * resolution.width);
         const textYPos = Math.round((1 - headScreenPos[1]) * resolution.height);
+        // GREYMARCH: tell the voice display where this head is on screen (the microphone icon is drawn there while they talk)
+        try { if (headScreenPos[2] > 0) (SpApiInteractor.getControllerInstance().emitter as any).emit("greymarchHead", { name: model.appearance.name, x: textXPos, y: textYPos, rw: resolution.width, rh: resolution.height }); } catch (e) { /* the voice display is a nicety */ }
 
         if (!this.textNameId && headScreenPos[2] > 0) {
           this.textNameId = createText(textXPos, textYPos, refr.getDisplayName(), [1, 1, 1, 0.8]);
-          setTextSize(this.textNameId, 0.5);
+          setTextSize(this.textNameId, 0.35); // GREYMARCH: 30% smaller than SkyMP's 0.5
           SpApiInteractor.getControllerInstance().emitter.emit("nicknameCreate", {
             remoteRefrId: this.getRemoteRefrId(),
             textId: this.textNameId
@@ -587,6 +589,8 @@ export class FormView {
   }
 
   private isSweetHidePerson(refr: ObjectReference): boolean {
+    // GREYMARCH: anyone the server listed as invisible has no floating name
+    try { const gmGlobal: any = Function("return this")(); if (gmGlobal.__gmInvisible && gmGlobal.__gmInvisible[this.getRemoteRefrId()]) return true; } catch (gmErr) { /* names stay as they are */ }
     const actor = Actor.from(refr)
     if (!actor) {
       return false;

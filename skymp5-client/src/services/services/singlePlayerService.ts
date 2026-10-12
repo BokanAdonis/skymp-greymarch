@@ -14,6 +14,7 @@ export class SinglePlayerService extends ClientListener {
 
     private onGameLoad(event: GameLoadEvent) {
         if (!event.isCausedBySkyrimPlatform && !this._isSinglePlayer) {
+            try { (this.controller.emitter as any).emit("greymarchStage", "stage: SWITCHING TO SINGLE-PLAYER (a game load SkyMP did not start)"); } catch (e) { /* GREYMARCH: diagnostics only */ }
             this.sp.Debug.messageBox(
                 'Save has been loaded in multiplayer, switching to the single-player mode',
             );

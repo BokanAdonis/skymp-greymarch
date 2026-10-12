@@ -10,6 +10,7 @@ import { TimersService } from "./timersService";
 import { MasterApiAuthStatus } from "../messages_http/masterApiAuthStatus";
 import { logTrace, logError } from "../../logging";
 import { ConnectionMessage } from "../events/connectionMessage";
+import { GreymarchBridge } from "../../greymarch/bridge"; // GREYMARCH
 import { CreateActorMessage } from "../messages/createActorMessage";
 import { CustomPacketMessage } from "../messages/customPacketMessage";
 import { NetworkingService } from "./networkingService";
@@ -111,6 +112,8 @@ try {
 }
 
 export class AuthService extends ClientListener {
+  private gm: GreymarchBridge; // GREYMARCH: character select, staff panel, voice display (see src/greymarch/bridge.ts)
+
   constructor(private sp: Sp, private controller: CombinedController) {
     super();
 
@@ -123,6 +126,7 @@ export class AuthService extends ClientListener {
     this.controller.on("browserMessage", (e) => this.onBrowserMessage(e));
     this.controller.on("tick", () => this.onTick());
     this.controller.once("update", () => this.onceUpdate());
+    this.gm = new GreymarchBridge(this.sp, this.controller); // GREYMARCH
   }
 
   private onAuthNeeded(e: AuthNeededEvent) {
@@ -185,6 +189,18 @@ export class AuthService extends ClientListener {
     }
 
     switch (msgContent["customPacketType"]) {
+      // GREYMARCH: character select and staff packets from the server
+      case 'greymarchSelect':
+      case 'greymarchEntered':
+      case 'greymarchError':
+      case 'greymarchAdminReply':
+      case 'greymarchNotice':
+      case 'greymarchFx':
+      case 'greymarchGhosts':
+      case 'greymarchStats':
+      case 'greymarchKill':
+        this.gm.greymarchPacket(msgContent);
+        break;
       // case 'loginRequired':
       //   logTrace(this, 'loginRequired received');
       //   this.loginWithSkympIoCredentials();
@@ -241,6 +257,12 @@ export class AuthService extends ClientListener {
     logTrace(this, `Showing widgets and starting loop`);
 
     authData = this.readAuthDataFromDisk();
+    // GREYMARCH: the launcher already logged the player in, so skip the join menu and connect straight away
+    if (authData && (this.sp.settings["skymp5-client"] as any)["greymarch-autoplay"]) {
+      this.writeAuthDataToDisk(authData);
+      this.controller.emitter.emit("authAttempt", { authGameData: { remote: authData } });
+      return;
+    }
     this.refreshWidgets();
     this.sp.browser.setVisible(true);
     this.sp.browser.setFocused(true);
