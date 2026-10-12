@@ -78,8 +78,9 @@ test("the names staff gave doors are put on the doors every few seconds, only wh
   assert.strictEqual(objectFor(0x1200).name, "Breezehome");
   gm.greymarchPacket({ customPacketType: "greymarchProps", doors: { 513: "Honeyside" } }); // the first door lost its name
   gm.greymarchDoorNamesApply(18001);
-  assert.strictEqual(objectFor(0x1200).name, "", "back to the game's own name");
+  assert.strictEqual(objectFor(0x1200).name, "Door 1200", "back to the game's own name, never an empty one");
   assert.strictEqual(objectFor(0x1201).name, "Honeyside");
+  assert.ok(![...log.names.values()].some((v) => v === ""), "an empty display name is never set (it crashes the game)");
 });
 
 test("a door this game has not loaded, or cannot rename, never breaks the game and is reported once", () => {

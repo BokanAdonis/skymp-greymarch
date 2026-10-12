@@ -709,17 +709,19 @@ export class GreymarchBridge {
             try { o = sp.ObjectReference.from(sp.Game.getFormEx(local)); } catch (e0) { o = null; }
             if (!o) continue;
             try {
-                if (orig[id] === undefined) orig[id] = String(o.getDisplayName());
+                if (orig[id] === undefined) { var own = String(o.getDisplayName() || ""); orig[id] = own.length ? own : "Door"; } // the game's own name; never empty (an empty display name can crash the game)
                 var base = label || orig[id];
                 var text = owner ? base + NL + "Owned by: " + owner : base;
-                if (String(o.getDisplayName()) !== text) o.setDisplayName(text, true);
+                if (text.length && String(o.getDisplayName()) !== text) o.setDisplayName(text, true);
                 done[id] = text;
             } catch (e1) { if (!this.greymarchDoorErr) { this.greymarchDoorErr = true; this.greymarchLog("props: could not name door " + id + " (" + e1 + ")"); } }
         }
         for (var id2 in done) {
             if (want[id2] !== undefined) continue;
             var l2 = misc.remoteIdToLocalId(Number(id2));
-            try { var o2 = l2 ? sp.ObjectReference.from(sp.Game.getFormEx(l2)) : null; if (o2) o2.setDisplayName("", true); } catch (e2) { /* the door is not loaded: it keeps its name until it is */ }
+            // The door goes back to the game's OWN name, which was remembered before it was first renamed. NEVER set an empty name: that is what crashed the game (and everybody near the door) when an owner was removed.
+            var back = orig[id2];
+            try { var o2 = l2 && back ? sp.ObjectReference.from(sp.Game.getFormEx(l2)) : null; if (o2 && String(o2.getDisplayName()) !== back) o2.setDisplayName(back, true); } catch (e2) { /* the door is not loaded: it keeps its name until it is */ }
             delete done[id2];
         }
     }
