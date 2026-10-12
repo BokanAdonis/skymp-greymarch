@@ -309,7 +309,7 @@ export class GreymarchBridge {
         var down = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true);
         if (e.isUp === true) down = false;
         if (e.code === 1 && down && this.greymarchChatTyping) { this.greymarchChatClose(); return; } // Esc cancels whenever the input is open (the messages stay on screen), whatever the key-up history says
-        if (e.code === 28) { if (down && e.isRepeating !== true) this.greymarchChatWanted = Date.now(); return; } // Enter: the chat is opened from the update phase (greymarchChatPending), where the game's menus can be asked about; a held key does not repeat it and a missed key-up can never swallow the next press
+        if (e.code === 28) { if (down && e.isRepeating !== true) { this.greymarchChatWanted = Date.now(); if (!this.greymarchEnterSeen) { this.greymarchEnterSeen = true; this.greymarchLog("chat: the first Enter press reached the game"); } } return; } // Enter: the chat is opened from the update phase (greymarchChatPending), where the game's menus can be asked about; a held key does not repeat it and a missed key-up can never swallow the next press
         var was = this["greymarchKey" + e.code];
         this["greymarchKey" + e.code] = down;
         if (e.code === 45 && !down && was) { this.greymarchMenuRelease(); return; } // X let go
@@ -668,7 +668,8 @@ export class GreymarchBridge {
     greymarchInMenu(): any {
         var ui = this.sp.Ui;
         var menus = ["Console", "Console Native UI Menu", "InventoryMenu", "MagicMenu", "FavoritesMenu", "MapMenu", "Journal Menu", "StatsMenu", "TweenMenu", "ContainerMenu", "BarterMenu", "GiftMenu", "Dialogue Menu", "MessageBoxMenu", "Crafting Menu", "Lockpicking Menu", "Sleep/Wait Menu", "Book Menu", "Training Menu", "LevelUp Menu", "RaceSex Menu", "MainMenu", "Loading Menu", "Cursor Menu", "Custom Menu", "TutorialMenu", "MistMenu"];
-        for (var i = 0; i < menus.length; i++) { try { if (ui.isMenuOpen(menus[i])) return true; } catch (e) { /* a menu this game does not know */ } }
+        for (var i = 0; i < menus.length; i++) { try { if (ui.isMenuOpen(menus[i])) { this.greymarchMenuName = menus[i]; return true; } } catch (e) { /* a menu this game does not know */ } }
+        this.greymarchMenuName = "";
         return false;
     }
     // The chat page answers every "show" (a few seconds apart) with whether it is really typing. If the game thinks otherwise, the game gives way: a keyboard that the page is not using is released,
@@ -711,8 +712,16 @@ export class GreymarchBridge {
         if (Date.now() - at > 1000) return; // a press from long ago
         if (this.greymarchChatTyping) return; // already typing: a key reaching the game now must never close or restart the input
         if (Date.now() - (this.greymarchChatClosedAt || 0) < 400) return; // the Enter that just SENT a line, or a held key, must not open the input again
-        if (this.greymarchInMenu()) return;
+        if (this.greymarchInMenu()) { this.greymarchChatWhy("Enter ignored: the game says '" + this.greymarchMenuName + "' is open"); return; }
         this.greymarchChatOpen();
+        if (!this.greymarchChatTyping) this.greymarchChatWhy("Enter did not open the input (chat on: " + !!this.greymarchChatOn + ", select screen: " + !!this.greymarchScreenUp + ", staff panel: " + !!this.greymarchAdminOn + ", X menu: " + !!this.greymarchMenuOn + ")");
+    }
+    // Why a key press did nothing, to the server log (at most once every 5 seconds, so a held key cannot flood it)
+    greymarchChatWhy(text: string): any {
+        var now = Date.now();
+        if (now < (this.greymarchChatWhyNext || 0)) return;
+        this.greymarchChatWhyNext = now + 5000;
+        this.greymarchLog("chat: " + text);
     }
     // Start typing. Not over the select screen, the staff panel or the X menu.
     greymarchChatOpen(): any {
