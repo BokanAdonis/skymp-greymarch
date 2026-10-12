@@ -5,6 +5,7 @@
 #include <array>
 #include <fmt/format.h>
 #include <memory>
+#include <string>
 #include <unordered_set>
 
 namespace espm {
@@ -12,10 +13,24 @@ namespace espm {
 int32_t CombineBrowser::Impl::GetFileIndex(const char* fileName) const noexcept
 {
   // returns index of sources array or -1 if not found
+  // GREYMARCH: plugin names are compared WITHOUT regard to capitals, like Skyrim does on Windows. One plugin may name its master "ccbgssse001-fish.esm" and
+  // another "ccBGSSSE001-Fish.esm"; on Linux an exact comparison would call both "unresolved".
   if (fileName[0] != '\0') {
+    const auto lower = [](char ch) {
+      return (ch >= 'A' && ch <= 'Z') ? static_cast<char>(ch - 'A' + 'a') : ch;
+    };
+    const std::string want(fileName);
     for (size_t i = 0; i < sources.size(); ++i) {
-      if (sources[i].fileName == fileName) {
-        return i;
+      const std::string& have = sources[i].fileName;
+      if (have.size() != want.size()) {
+        continue;
+      }
+      bool same = true;
+      for (size_t k = 0; k < have.size() && same; ++k) {
+        same = lower(have[k]) == lower(want[k]);
+      }
+      if (same) {
+        return static_cast<int32_t>(i);
       }
     }
   }
