@@ -40,7 +40,8 @@ jobs:
             test -n "$F"
             cp "$F" server-dist.tar.gz
           fi
-          ls -l server-dist.tar.gz      - name: Check what is inside
+          ls -l server-dist.tar.gz
+      - name: Check what is inside
         run: |
           set -euo pipefail
           tar -tzf server-dist.tar.gz | head -40
