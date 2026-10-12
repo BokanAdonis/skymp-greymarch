@@ -140,6 +140,7 @@ export class GreymarchBridge {
     // Runs every frame in the UPDATE phase (registered in the constructor): that is the only place Skyrim functions such as Game.getFormEx may be called. Cheap when there is nothing to do. Any error lifts the veil instead of trapping the player.
     greymarchTick(): any {
         this.greymarchDoorNamesApply(Date.now());
+        this.greymarchDoorPrompt(Date.now());
         this.greymarchWorldViewGuard(Date.now()); // other players are drawn only while SkyMP's world view is on: see greymarchWorldViewGuard
         if (this.greymarchChatOn && Date.now() >= (this.greymarchChatNext || 0)) { this.greymarchChatNext = Date.now() + 5000; this.greymarchChatToPage("show", true); }
         if (this.greymarchMenuEscAt && Date.now() - this.greymarchMenuEscAt > 700) { this.greymarchMenuEscAt = 0; this.greymarchMenuHide(); } // Esc, and the menu page did not close itself
@@ -691,6 +692,33 @@ export class GreymarchBridge {
     // HOUSES AND STORAGE: the names staff gave doors ("Breezehome") are shown by every game instead of the base game's, and an owned door says who owns it on a second line
     // ("Owned by: Alda Ring"). The server sends { reference id: { label, owner } }; a door with no label of its own keeps the game's name above the owner line; a door that loses
     // both goes back to the game's own name. Every few seconds the name is compared and set again if it differs, so a redesignation or a new owner shows within moments.
+    // The game's own "E Open / Guard Barracks" text for a load door comes from where the door leads and ignores the name set above (the log shows the name is kept). So for a door staff named or
+    // gave an owner, the game's text is hidden (blockActivation's hide flag; activation itself still works, doors are blocked for SkyMP already) and the chat page draws the same prompt with the
+    // server's name and owner. Checked every 100 ms: only the door in the crosshair is looked at.
+    greymarchDoorPrompt(now: any): any {
+        if (now < (this.greymarchDoorPromptNext || 0)) return;
+        this.greymarchDoorPromptNext = now + 100;
+        var text = "";
+        var want = this.greymarchDoorNames || {};
+        if (!this.greymarchScreenUp && !this.greymarchMenuOn && !this.greymarchAdminOn && this.greymarchChatOn) {
+            try {
+                var ref = this.sp.Game.getCurrentCrosshairRef();
+                var remote = ref ? misc.localIdToRemoteId(ref.getFormID()) : 0;
+                var done = this.greymarchDoorNamesDone || {};
+                if (remote && want[remote] !== undefined && done[remote]) {
+                    text = String(done[remote]);
+                    ref.blockActivation(true, true);
+                    this.greymarchDoorHidden = ref;
+                    if (!this.greymarchDoorHideLogged) { this.greymarchDoorHideLogged = true; this.greymarchLog("props: the game's own text hidden on door " + Number(remote).toString(16) + ", ours is drawn"); }
+                }
+            } catch (e) { text = ""; if (!this.greymarchDoorPromptErr) { this.greymarchDoorPromptErr = true; this.greymarchLog("props: door prompt failed (" + e + ")"); } }
+        }
+        if (text !== (this.greymarchDoorPromptText || "")) {
+            if (!text && this.greymarchDoorHidden) { try { this.greymarchDoorHidden.blockActivation(true, false); } catch (e2) { /* the door is gone */ } this.greymarchDoorHidden = null; } // a door that is no longer named shows the game's own text again
+            this.greymarchDoorPromptText = text;
+            this.greymarchChatToPage("door", text);
+        }
+    }
     greymarchDoorNamesApply(now: any): any {
         if (now < (this.greymarchDoorNamesNext || 0)) return;
         this.greymarchDoorNamesNext = now + 3000;
