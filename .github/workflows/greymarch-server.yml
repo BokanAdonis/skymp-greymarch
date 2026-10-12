@@ -1,0 +1,20 @@
+name: Greymarch server build
+
+# Builds OUR server (Linux, the same Docker build upstream uses) from the branch you run it on. Manual only: it takes a long time (the first run
+# builds all libraries, roughly an hour or more) and uses GitHub Actions minutes. The result is the artifact ubuntu-vcpkg-deps_dist.tar.gz.
+# Tests are OFF by default: they download Skyrim .esm files from a third-party GitLab. Turn "run_tests" on only if you are happy with that.
+on:
+  workflow_dispatch:
+    inputs:
+      run_tests:
+        description: "Also build and run the unit tests (downloads Skyrim .esm files from a third-party GitLab)"
+        type: boolean
+        default: false
+
+jobs:
+  server:
+    uses: ./.github/workflows/linux-build-base.yml
+    with:
+      base_system: ubuntu-vcpkg-deps
+      skip_tests: ${{ !inputs.run_tests }}
+      extra_build_args: ${{ inputs.run_tests && '--target=skymp5-server --target=unit' || '--target=skymp5-server' }}
