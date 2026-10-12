@@ -718,25 +718,23 @@ export class GreymarchBridge {
             this.greymarchChatToPage("door", draw);
         }
     }
-    // Overwrite the HUD's rollover (activate) text with the door's text. Returns true when the game's own text now reads ours.
+    // Overwrite the HUD's rollover (activate) text with the door's text. The log of a real door showed where it lives: RolloverNameInstance.text holds the verb and where the door leads ("Open", a line
+    // break, "Whiterun"); the door's own display name sits in RolloverText.text. So the line after the verb is replaced by ours and the verb stays. Returns true when the game's own text now reads ours.
     greymarchDoorForce(remote: any, text: string): any {
         var ui = this.sp.Ui;
         var hud = "HUD Menu";
-        var base = "_root.HUDMovieBaseInstance.";
-        var fields = ["RolloverNameInstance.text", "RolloverText.text", "RolloverInfoInstance.text", "RolloverName.text", "RolloverNameInstance.RolloverName.text"];
-        var logged = this.greymarchDoorForceLogged || (this.greymarchDoorForceLogged = {});
-        var any = false, ok = false;
-        for (var i = 0; i < fields.length; i++) {
-            var cur = "";
-            try { cur = String(ui.getString(hud, base + fields[i]) || ""); } catch (e) { cur = ""; }
-            if (!logged[remote + fields[i]]) { logged[remote + fields[i]] = 1; this.greymarchLog("props: HUD field " + fields[i] + " holds '" + cur + "' while looking at door " + Number(remote).toString(16)); }
-            if (!cur.length) continue;
-            if (cur === text) { ok = true; any = true; continue; }
-            if (cur.length < 3 || cur === "Open" || cur === "E") continue; // the button letter and the verb are not the name
-            try { ui.setString(hud, base + fields[i], text); any = true; } catch (e2) { /* this build has no such field */ }
-        }
-        if (any && !this.greymarchDoorForceLoggedOk) { this.greymarchDoorForceLoggedOk = true; this.greymarchLog("props: overwrote the HUD prompt text on door " + Number(remote).toString(16)); }
-        return ok;
+        var field = "_root.HUDMovieBaseInstance.RolloverNameInstance.text";
+        var cur = "";
+        try { cur = String(ui.getString(hud, field) || ""); } catch (e) { return false; }
+        if (!this.greymarchDoorForceLogged) { this.greymarchDoorForceLogged = true; this.greymarchLog("props: the game's prompt on door " + Number(remote).toString(16) + " reads '" + cur + "'"); }
+        if (!cur.length) return false;
+        var m = cur.match(/[\r\n]+/);
+        var sep = m ? m[0] : String.fromCharCode(10);
+        var verb = m ? cur.substring(0, cur.indexOf(sep)) : cur;
+        var want = verb + sep + text;
+        if (cur === want) return true;
+        try { ui.setString(hud, field, want); } catch (e2) { return false; }
+        return false; // checked again 100 ms later; true once the game keeps it
     }    greymarchDoorNamesApply(now: any): any {
         if (now < (this.greymarchDoorNamesNext || 0)) return;
         this.greymarchDoorNamesNext = now + 3000;

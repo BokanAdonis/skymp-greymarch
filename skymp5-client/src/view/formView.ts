@@ -564,15 +564,21 @@ export class FormView {
         // GREYMARCH: tell the voice display where this head is on screen (the microphone icon is drawn there while they talk)
         try { if (headScreenPos[2] > 0) (SpApiInteractor.getControllerInstance().emitter as any).emit("greymarchHead", { name: model.appearance.name, x: textXPos, y: textYPos, rw: resolution.width, rh: resolution.height }); } catch (e) { /* the voice display is a nicety */ }
 
-        // GREYMARCH: a character who introduced themselves to this player shows their NAME and their ID over their head; everyone else shows the ID only
-        let gmShown: string = model.appearance.name;
-        try { const gmG: any = Function("return this")(); const gmN = gmG.__gmKnown && gmG.__gmKnown[this.getRemoteRefrId()]; if (gmN) gmShown = String(gmN) + " (" + model.appearance.name + ")"; } catch (gmErr) { /* the ID stays */ }
-        if (this.textNameId && this.textNameShown !== gmShown) { setTextString(this.textNameId, gmShown); this.textNameShown = gmShown; }
+        // GREYMARCH: a character who introduced themselves to this player shows their NAME (large) with their ID UNDER it (smaller); everyone else shows the ID alone
+        let gmName: string = "";
+        try { const gmG: any = Function("return this")(); const gmN = gmG.__gmKnown && gmG.__gmKnown[this.getRemoteRefrId()]; if (gmN) gmName = String(gmN); } catch (gmErr) { /* the ID stays */ }
+        const gmMain: string = gmName || model.appearance.name;
+        const gmMainSize: number = gmName ? 0.503 : 0.4375; // 0.4375 is the size of a lone ID; a name is 15% bigger than that
+        const gmIdSize: number = 0.372; // 15% smaller than a lone ID
+        const gmIdY: number = textYPos + Math.round(resolution.height * 0.024);
+        if (this.textNameId && this.textNameShown !== gmMain) { setTextString(this.textNameId, gmMain); setTextSize(this.textNameId, gmMainSize); this.textNameShown = gmMain; }
+        if (gmName && !this.textIdId && this.textNameId) { this.textIdId = createText(textXPos, gmIdY, model.appearance.name, [1, 1, 1, 0.8]); setTextSize(this.textIdId, gmIdSize); }
+        if (!gmName && this.textIdId) { destroyText(this.textIdId); this.textIdId = undefined; }
 
         if (!this.textNameId && headScreenPos[2] > 0) {
-          this.textNameShown = gmShown;
-          this.textNameId = createText(textXPos, textYPos, gmShown, [1, 1, 1, 0.8]); // GREYMARCH: the floating name is the character ID; the game's own display name is "Stranger" or the name you were introduced to
-          setTextSize(this.textNameId, 0.4375); // GREYMARCH: 12.5% smaller than SkyMP's 0.5 (was 30% smaller, then made 25% bigger)
+          this.textNameShown = gmMain;
+          this.textNameId = createText(textXPos, textYPos, gmMain, [1, 1, 1, 0.8]); // GREYMARCH: the floating name is the character ID; the game's own display name is "Stranger" or the name you were introduced to
+          setTextSize(this.textNameId, gmMainSize);
           SpApiInteractor.getControllerInstance().emitter.emit("nicknameCreate", {
             remoteRefrId: this.getRemoteRefrId(),
             textId: this.textNameId
@@ -584,9 +590,9 @@ export class FormView {
           }
           if (this.textNameId) {
             setTextPos(this.textNameId, textXPos, textYPos);
+            if (this.textIdId) setTextPos(this.textIdId, textXPos, gmIdY);
           }
-        }
-      } else {
+        }      } else {
         this.removeNickname();
       }
     } else {
@@ -614,6 +620,7 @@ export class FormView {
       destroyText(this.textNameId);
       this.textNameId = undefined;
     }
+    if (this.textIdId) { destroyText(this.textIdId); this.textIdId = undefined; }
   }
 
   private getAppearanceBasedBase(): number {
@@ -701,6 +708,7 @@ export class FormView {
   private localImmortal = false;
   private textNameId: number | undefined = undefined;
   private textNameShown: string | undefined = undefined;
+  private textIdId: number | undefined = undefined; // GREYMARCH: the ID line under an introduced character's name
 
 
   public static isDisplayingNicknames: boolean = true;
