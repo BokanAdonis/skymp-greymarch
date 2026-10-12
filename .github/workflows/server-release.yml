@@ -1,0 +1,53 @@
+name: Server release
+
+# Turns a finished "Greymarch server build" run into a GitHub release (so the launcher repo can fetch it with a read-only token and deploy it).
+# Manual: give the run id of the build (the number at the end of its URL).
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "Run id of a finished Greymarch server build"
+        required: true
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get the build
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ inputs.run_id }}
+        run: |
+          set -euo pipefail
+          mkdir art
+          gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" -n ubuntu-vcpkg-deps_dist.tar.gz -D art
+          find art -type f | head
+          # the artifact is either the tarball itself or a zip that holds it
+          F="$(find art -name '*.tar.gz' | head -1)"
+          if [ -z "$F" ]; then
+            Z="$(find art -name '*.zip' | head -1)"
+            [ -n "$Z" ] && unzip -o "$Z" -d art
+            F="$(find art -name '*.tar.gz' | head -1)"
+          fi
+          test -n "$F"
+          cp "$F" server-dist.tar.gz
+          ls -l server-dist.tar.gz
+      - name: Check what is inside
+        run: |
+          set -euo pipefail
+          tar -tzf server-dist.tar.gz | head -40
+          tar -tzf server-dist.tar.gz | grep -E '(^|/)dist/server/dist_back/skymp5-server\.js$'
+          tar -tzf server-dist.tar.gz | grep -E '(^|/)dist/server/scam_native\.node$'
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ inputs.run_id }}
+        run: |
+          set -euo pipefail
+          SHA="$(gh run view "$RUN_ID" --repo "$GITHUB_REPOSITORY" --json headSha -q .headSha)"
+          gh release create "server-$RUN_ID" server-dist.tar.gz --repo "$GITHUB_REPOSITORY" --target "$SHA" \
+            --title "Server build $RUN_ID" --notes "Built from commit $SHA by Greymarch server build run $RUN_ID."
