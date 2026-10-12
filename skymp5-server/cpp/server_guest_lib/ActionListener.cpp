@@ -802,6 +802,10 @@ void ActionListener::OnChangeValues(const RawMessageData& rawMsgData,
       newVal = CropHealthRegeneration(newVal, timeAfterRegeneration, actor);
     } else if (av == espm::ActorValue::Magicka) {
       newVal = CropMagickaRegeneration(newVal, timeAfterRegeneration, actor);
+    } else if (av == espm::ActorValue::Stamina) {
+      // GREYMARCH: stamina was never cropped, so a modified client could keep it full. Perks and potions can speed regeneration up, so allow
+      // twice the normal rate: it still stops "always full", and normal play never gets near it.
+      newVal = CropStaminaRegeneration(newVal, timeAfterRegeneration * 2.f, actor);
     }
 
     if (!MathUtils::IsNearlyEqual(newVal, *inputVal)) {
@@ -839,9 +843,15 @@ float CalculateCurrentHealthPercentage(const MpActor& actor, float damage,
   const uint32_t raceId = actor.GetRaceId();
   WorldState* espmProvider = actor.GetParent();
 
-  const float baseHealth =
+  float baseHealth =
     GetBaseActorValues(espmProvider, baseId, raceId, actor.GetTemplateChain())
       .health;
+
+  // GREYMARCH: a maximum set by the gamemode (staff stat setter) replaces the race's
+  const auto& maxHealthOverride = actor.GetMaxVitalsOverride().health;
+  if (maxHealthOverride.has_value() && *maxHealthOverride >= 1.f) {
+    baseHealth = *maxHealthOverride;
+  }
 
   if (outBaseHealth) {
     *outBaseHealth = baseHealth;

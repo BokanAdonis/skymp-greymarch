@@ -171,6 +171,17 @@ public:
   void DropItem(const uint32_t baseId, const Inventory::Entry& entry);
   void SetIsBlockActive(bool isBlockActive);
   bool IsBlockActive() const;
+
+  // GREYMARCH: maximum Health / Magicka / Stamina set by the gamemode (staff stat setter). The server uses them for damage, so what the
+  // player's own game shows is also what the server does. Not saved: the gamemode sets them again whenever the player enters the world.
+  struct MaxVitalsOverride
+  {
+    std::optional<float> health;
+    std::optional<float> magicka;
+    std::optional<float> stamina;
+  };
+  void SetMaxVitalsOverride(const MaxVitalsOverride& maxVitals);
+  const MaxVitalsOverride& GetMaxVitalsOverride() const;
   NiPoint3 GetViewDirection() const;
   void IncreaseBlockCount() noexcept;
   void ResetBlockCount() noexcept;
