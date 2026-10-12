@@ -15,6 +15,7 @@
 #include "IsOpenBinding.h"
 #include "LastAnimEventBinding.h"
 #include "LocationalDataBinding.h"
+#include "MaxVitalsBinding.h"
 #include "NeighborsBinding.h"
 #include "OnlinePlayersBinding.h"
 #include "PercentagesBinding.h"
@@ -42,6 +43,7 @@ PropertyBindingFactory::CreateStandardPropertyBindings()
   result["isOnline"] = std::make_shared<IsOnlineBinding>();
   result["isOpen"] = std::make_shared<IsOpenBinding>();
   result["locationalData"] = std::make_shared<LocationalDataBinding>();
+  result["maxVitals"] = std::make_shared<MaxVitalsBinding>(); // GREYMARCH
   result["neighbors"] = std::make_shared<NeighborsBinding>();
   result["onlinePlayers"] = std::make_shared<OnlinePlayersBinding>();
   result["percentages"] = std::make_shared<PercentagesBinding>();

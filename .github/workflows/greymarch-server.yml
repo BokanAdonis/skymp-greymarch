@@ -1,0 +1,13 @@
+name: Greymarch server build
+
+# Builds OUR server (Linux, the same Docker build upstream uses) and runs its unit tests. Manual only: it takes a long time (the first run
+# builds all libraries, roughly an hour or more) and uses GitHub Actions minutes. The result is the artifact ubuntu-vcpkg-deps_dist.tar.gz.
+on:
+  workflow_dispatch:
+
+jobs:
+  server:
+    uses: ./.github/workflows/linux-build-base.yml
+    with:
+      base_system: ubuntu-vcpkg-deps
+      extra_build_args: --target=skymp5-server --target=unit
