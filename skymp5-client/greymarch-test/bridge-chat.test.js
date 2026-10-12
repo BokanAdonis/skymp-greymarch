@@ -45,7 +45,7 @@ test("the chat appears when the loading veil lifts, keeps the browser layer on, 
   assert.deepStrictEqual(toPage().pop(), { fn: "hide", arg: true });
 });
 
-test("Y opens the input; Esc cancels; the page letting go gives the keyboard back; a Y the GAME receives while the chat thinks it is typing means the page lost the keyboard, so it opens again", () => {
+test("Y opens the input; Esc cancels; the page letting go gives the keyboard back; a Y typed while the input is open changes nothing (it never closes or restarts it)", () => {
   const { gm, log, toPage } = make();
   gm.greymarchChatShow();
   log.visible.length = 0;
@@ -54,9 +54,10 @@ test("Y opens the input; Esc cancels; the page letting go gives the keyboard bac
   assert.deepStrictEqual(log.focused, [true]);
   assert.deepStrictEqual(toPage().pop(), { fn: "open", arg: {} });
   assert.strictEqual(toPage().filter((m) => m.fn === "open").length, 1);
-  enter(gm); // the game got a Y: the page does not have the keyboard
-  assert.strictEqual(gm.greymarchChatTyping, true);
-  assert.strictEqual(toPage().filter((m) => m.fn === "open").length, 2, "stale typing state is recovered from");
+  enter(gm); enter(gm); // a Y typed as a letter
+  assert.strictEqual(gm.greymarchChatTyping, true, "still typing");
+  assert.strictEqual(toPage().filter((m) => m.fn === "open").length, 1, "the input was not reopened");
+  assert.ok(!toPage().some((m) => m.fn === "close"), "and not closed");
   gm.greymarchKey({ code: 1, isDown: false }); gm.greymarchKey({ code: 1, isDown: true });
   assert.strictEqual(gm.greymarchChatTyping, false);
   assert.deepStrictEqual(toPage().pop(), { fn: "close", arg: true });

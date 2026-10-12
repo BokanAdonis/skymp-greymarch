@@ -675,7 +675,7 @@ export class GreymarchBridge {
         if (!at) return;
         this.greymarchChatWanted = 0;
         if (Date.now() - at > 1000) return; // a press from long ago
-        if (this.greymarchChatTyping) { this.greymarchChatTyping = false; } // the game got a Y while the chat says it is typing: the page does not have the keyboard, so that state is stale; start again
+        if (this.greymarchChatTyping) return; // already typing: a Y is just a letter and must never close or restart the input
         if (this.greymarchInMenu()) return;
         this.greymarchChatOpen();
     }
