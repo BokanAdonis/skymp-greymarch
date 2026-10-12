@@ -36,7 +36,8 @@ jobs:
           - name: Checkout
             uses: actions/checkout@v6
             with:
-              repository: skyrim-multiplayer/skymp
+              repository: ${{ github.repository }} # GREYMARCH: build OUR fork, not upstream
+              ref: ${{ github.sha }}
               token: ${{ secrets.combined_server_token || github.token }}
               submodules: recursive
               fetch-depth: 0
