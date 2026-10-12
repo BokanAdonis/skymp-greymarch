@@ -12,6 +12,7 @@ import { SinglePlayerService } from "../services/services/singlePlayerService";
 const PAGE_SCRIPT = "(function(){if(window.__gmSend)return;var f=document.createElement('iframe');f.id='greymarch-frame';f.src='greymarch-select.html';f.style.cssText='position:fixed;left:0;top:0;width:100%;height:100%;border:0;z-index:2147483647;background:#05080d;display:none';var ready=false,queue=[];window.addEventListener('message',function(e){if(e.source!==f.contentWindow)return;var d=e.data;if(!d)return;if(d.greymarchReady){ready=true;queue.forEach(function(q){f.contentWindow.postMessage({greymarchIn:q},'*')});queue=[]}else if(d.greymarchOut&&window.skyrimPlatform){window.skyrimPlatform.sendMessage('greymarch',JSON.stringify(d.greymarchOut))}});window.__gmSend=function(m){f.style.display=m.fn==='hide'?'none':'block';if(ready)f.contentWindow.postMessage({greymarchIn:m},'*');else queue.push(m)};document.body.appendChild(f)})();";
 const HUD_SCRIPT = "(function(){if(window.__gmHud)return;var f=document.createElement('iframe');f.id='greymarch-hud-frame';f.src='greymarch-hud.html';f.style.cssText='position:fixed;left:0;top:0;width:100%;height:100%;border:0;z-index:2147483000;background:transparent;pointer-events:none';f.setAttribute('allowtransparency','true');var ready=false,queue=[];window.addEventListener('message',function(e){if(e.source!==f.contentWindow)return;var d=e.data;if(!d)return;if(d.greymarchReady){ready=true;queue.forEach(function(q){f.contentWindow.postMessage({greymarchIn:q},'*')});queue=[]}else if(d.greymarchOut&&window.skyrimPlatform){window.skyrimPlatform.sendMessage('greymarch',JSON.stringify(d.greymarchOut))}});window.__gmHudSend=function(m){if(ready)f.contentWindow.postMessage({greymarchIn:m},'*');else queue.push(m)};window.__gmHud=f;document.body.appendChild(f)})();";
 const ADMIN_SCRIPT = "(function(){if(window.__gmAdminSend)return;var f=document.createElement('iframe');f.id='greymarch-admin-frame';f.src='greymarch-admin.html';f.style.cssText='position:fixed;left:0;top:0;width:100%;height:100%;border:0;z-index:2147483200;background:transparent;display:block;pointer-events:none';f.setAttribute('allowtransparency','true');var ready=false,queue=[];window.addEventListener('message',function(e){if(e.source!==f.contentWindow)return;var d=e.data;if(!d)return;if(d.greymarchReady){ready=true;queue.forEach(function(q){f.contentWindow.postMessage({greymarchIn:q},'*')});queue=[]}else if(d.greymarchOut&&window.skyrimPlatform){window.skyrimPlatform.sendMessage('greymarch',JSON.stringify(d.greymarchOut))}});window.__gmAdminSend=function(m){if(m.fn==='show')f.style.pointerEvents='auto';else if(m.fn==='hide')f.style.pointerEvents='none';if(ready)f.contentWindow.postMessage({greymarchIn:m},'*');else queue.push(m)};document.body.appendChild(f)})();";
+const CHAT_SCRIPT = "(function(){if(window.__gmChatSend)return;var f=document.createElement('iframe');f.id='greymarch-chat-frame';f.src='greymarch-chat.html';f.style.cssText='position:fixed;left:0;top:0;width:100%;height:100%;border:0;z-index:2147483100;background:transparent;display:block;pointer-events:none';f.setAttribute('allowtransparency','true');var ready=false,queue=[];window.addEventListener('message',function(e){if(e.source!==f.contentWindow)return;var d=e.data;if(!d)return;if(d.greymarchReady){ready=true;queue.forEach(function(q){f.contentWindow.postMessage({greymarchIn:q},'*')});queue=[]}else if(d.greymarchOut&&window.skyrimPlatform){window.skyrimPlatform.sendMessage('greymarch',JSON.stringify(d.greymarchOut))}});window.__gmChatSend=function(m){if(m.fn==='open'){f.style.pointerEvents='auto';try{f.focus()}catch(x){}}else if(m.fn==='close'||m.fn==='hide')f.style.pointerEvents='none';if(ready)f.contentWindow.postMessage({greymarchIn:m},'*');else queue.push(m)};document.body.appendChild(f)})();";
 const MENU_SCRIPT = "(function(){if(window.__gmMenuSend)return;var f=document.createElement('iframe');f.id='greymarch-menu-frame';f.src='greymarch-menu.html';f.style.cssText='position:fixed;left:0;top:0;width:100%;height:100%;border:0;z-index:2147483210;background:transparent;display:block;pointer-events:none';f.setAttribute('allowtransparency','true');var ready=false,queue=[];window.addEventListener('message',function(e){if(e.source!==f.contentWindow)return;var d=e.data;if(!d)return;if(d.greymarchReady){ready=true;queue.forEach(function(q){f.contentWindow.postMessage({greymarchIn:q},'*')});queue=[]}else if(d.greymarchOut&&window.skyrimPlatform){window.skyrimPlatform.sendMessage('greymarch',JSON.stringify(d.greymarchOut))}});window.__gmMenuSend=function(m){if(m.fn==='show'){f.style.pointerEvents='auto';try{f.focus()}catch(x){}}else if(m.fn==='hide')f.style.pointerEvents='none';if(ready)f.contentWindow.postMessage({greymarchIn:m},'*');else queue.push(m)};document.body.appendChild(f);document.addEventListener('keyup',function(e){if(e.key==='x'||e.key==='X'){try{f.contentWindow.postMessage({greymarchIn:{fn:'release'}},'*')}catch(x){}}});document.addEventListener('keydown',function(e){if(e.key==='Escape'){try{f.contentWindow.postMessage({greymarchIn:{fn:'escape'}},'*')}catch(x){}}})})();";
 
 export class GreymarchBridge {
@@ -43,6 +44,8 @@ export class GreymarchBridge {
         if (type === "greymarchStats") { this.greymarchStatsWant = msg.stats && typeof msg.stats === "object" ? msg.stats : null; return; }
         if (type === "greymarchKill") { this.greymarchKillMe(); return; }
         if (type === "greymarchKnown") { this.greymarchKnown = msg.names && typeof msg.names === "object" ? msg.names : {}; this.greymarchNamesNext = 0; return; }
+        if (type === "greymarchChatLine") { this.greymarchChatToPage("line", msg); return; }
+        if (type === "greymarchChatInfo") { this.greymarchChatToPage("info", msg); return; }
         if (type === "greymarchMenuReply") { this.greymarchMenuToPage("reply", msg); return; }
         if (type === "greymarchMenuEvent") { if ((msg.type === "trade_invite" || msg.type === "trade") && !this.greymarchMenuOn) this.greymarchMenuShow({ mode: "invite", looking: 0 }); this.greymarchMenuToPage("event", msg); return; }
         if (type === "greymarchFx") { this.greymarchFxWant = { noclip: !!msg.noclip, speed: Number(msg.speed) || 100, frozen: !!msg.frozen, god: !!msg.god }; if (msg.me) this.greymarchMeActor = msg.me; return; }
@@ -52,6 +55,7 @@ export class GreymarchBridge {
             // From here on the game reports "alive" to the server every 3 seconds (greymarchTick). If the game dies, the LAST alive line in the server log tells
             // how far it got and when, even when the player's own logs are unusable.
             this.greymarchBeat = { next: Date.now() + 3000, n: 0, until: Date.now() + 15 * 60 * 1000 };
+            this.greymarchChatHide();
             this.greymarchLog("stage: the character select screen is shown (" + (msg.characters ? msg.characters.length : 0) + " character(s))");
             this.sp.browser.setVisible(true);
             this.sp.browser.setFocused(true);
@@ -125,14 +129,16 @@ export class GreymarchBridge {
         this.greymarchToPage("hide");
         this.sp.browser.setFocused(false);
         this.greymarchScreenUp = false;
-        this.sp.browser.setVisible(!!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn); // stays visible (but never focused) while the voice display is on; the staff panel keeps it up and focused
+        this.sp.browser.setVisible(!!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn); // stays visible (but never focused) while the voice display is on; the staff panel keeps it up and focused
         if (this.greymarchAdminOn) this.sp.browser.setFocused(true);
+        this.greymarchChatShow();
         this.greymarchLog("veil lifted (" + why + ") after " + (job ? Date.now() - job.at : "?") + " ms");
         this.sp.printConsole("[greymarch] veil lifted (" + why + ")");
     }
     // Runs every frame in the UPDATE phase (registered in the constructor): that is the only place Skyrim functions such as Game.getFormEx may be called. Cheap when there is nothing to do. Any error lifts the veil instead of trapping the player.
     greymarchTick(): any {
         this.greymarchWorldViewGuard(Date.now()); // other players are drawn only while SkyMP's world view is on: see greymarchWorldViewGuard
+        if (this.greymarchChatOn && Date.now() >= (this.greymarchChatNext || 0)) { this.greymarchChatNext = Date.now() + 5000; this.greymarchChatToPage("show", true); }
         if (this.greymarchMenuEscAt && Date.now() - this.greymarchMenuEscAt > 700) { this.greymarchMenuEscAt = 0; this.greymarchMenuHide(); } // Esc, and the menu page did not close itself
         this.greymarchToastTick(Date.now());
         this.greymarchEffects(); // staff effects: noclip, speed, frozen, ghosts (cheap: does real work every 400 ms)
@@ -243,7 +249,7 @@ export class GreymarchBridge {
         this.greymarchVoice = { hud: hud, speaking: ids };
         this.greymarchHudOn = hud;
         // the page is shown (never focused) while the display is on, hidden when it is off; the select screen and the veil decide for themselves while they are up
-        if (changed && !this.greymarchScreenUp) { try { this.sp.browser.setVisible(hud); this.sp.browser.setFocused(false); } catch (err) { /* nothing to do */ } }
+        if (changed && !this.greymarchScreenUp) { try { this.sp.browser.setVisible(hud || !!this.greymarchChatOn); if (!this.greymarchChatTyping) this.sp.browser.setFocused(false); } catch (err) { /* nothing to do */ } }
     }
     greymarchBrowserMessage(e: any): any {
         if (!e.arguments || e.arguments[0] !== "greymarch") return;
@@ -253,6 +259,8 @@ export class GreymarchBridge {
         if (data && data.type === "release") { this.greymarchLift("the screen released it"); return; } // the screen's own safety timer
         if (data && data.type === "admin") { this.greymarchAdminSend(data); return; } // the staff panel asks the server for something (the SERVER decides if it is allowed)
         if (data && data.type === "admin-close") { this.greymarchAdminHide(); return; }
+        if (data && data.type === "chat") { this.greymarchChatSend(data); return; } // the chatbox sends a line, or asks what this player may use (the SERVER decides)
+        if (data && data.type === "chat-focus") { this.greymarchChatFocus(data.on); return; }
         if (data && data.type === "menu") { this.greymarchMenuSend(data); return; } // the X menu asks the server for something (the SERVER decides)
         if (data && data.type === "menu-close") { this.greymarchMenuHide(); return; }
         if (!data || (data.type !== "play" && data.type !== "create" && data.type !== "delete")) return;
@@ -282,7 +290,7 @@ export class GreymarchBridge {
     greymarchAdminHide(): any {
         this.greymarchAdminOn = false;
         this.greymarchAdminToPage("hide", true);
-        if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchHudOn || !!this.greymarchMenuOn); }
+        if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchHudOn || !!this.greymarchMenuOn || !!this.greymarchChatOn); }
     }
     greymarchAdminSend(data: any): any {
         var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchAdmin", rid: data.rid, op: data.op, args: data.args }) };
@@ -290,14 +298,16 @@ export class GreymarchBridge {
     }
     // F7 opens the panel (the page itself closes it with F7 or Escape). Escape also closes it from here, because the game un-focuses the browser on Escape.
     greymarchKey(e: any): any {
-        if (e.code !== 65 && e.code !== 1 && e.code !== 45) return;
+        if (e.code !== 65 && e.code !== 1 && e.code !== 45 && e.code !== 28) return;
         var down = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true);
         if (e.isUp === true) down = false;
         var was = this["greymarchKey" + e.code];
         this["greymarchKey" + e.code] = down;
         if (e.code === 45 && !down && was) { this.greymarchMenuRelease(); return; } // X let go
         if (!down || was) return;
-        if (e.code === 45 && !this.greymarchMenuOn && !this.greymarchAdminOn) this.greymarchMenuHold(); // X held while looking at a player
+        if (e.code === 28) { this.greymarchChatOpen(); return; } // Enter
+        if (e.code === 1 && this.greymarchChatTyping) { this.greymarchChatClose(); return; }
+        if (e.code === 45 && !this.greymarchMenuOn && !this.greymarchAdminOn && !this.greymarchChatTyping) this.greymarchMenuHold(); // X held while looking at a player
         else if (e.code === 1 && this.greymarchMenuOn) this.greymarchMenuEscape();
         else if (e.code === 65 && !this.greymarchAdminOn && !this.greymarchMenuOn) this.greymarchAdminShow();
         else if (e.code === 1 && this.greymarchAdminOn) this.greymarchAdminHide();
@@ -389,7 +399,7 @@ export class GreymarchBridge {
     greymarchToastTick(now: any): any {
         if (!this.greymarchToastUntil || now < this.greymarchToastUntil) return;
         this.greymarchToastUntil = 0;
-        if (!this.greymarchAdminOn && !this.greymarchMenuOn && !this.greymarchHudOn && !this.greymarchScreenUp) { try { this.sp.browser.setVisible(false); } catch (e2) { /* fine */ } }
+        if (!this.greymarchAdminOn && !this.greymarchMenuOn && !this.greymarchHudOn && !this.greymarchChatOn && !this.greymarchScreenUp) { try { this.sp.browser.setVisible(false); } catch (e2) { /* fine */ } }
     }
     // KILL: staff kill a character from THEIR OWN game, which is the one thing every SkyMP build lets a game do to its own character.
     greymarchKillMe(): any {
@@ -579,7 +589,7 @@ export class GreymarchBridge {
         this.greymarchMenuOn = false;
         this.greymarchMenuToPage("hide", true);
         this.greymarchMenuEscAt = 0;
-        if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchHudOn || !!this.greymarchAdminOn); }
+        if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchChatOn); }
     }
     greymarchMenuSend(data: any): any {
         var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchMenu", rid: data.rid, op: data.op, args: data.args }) };
@@ -615,5 +625,54 @@ export class GreymarchBridge {
                 seen[remote] = { at: now };
             }
         }
+    }
+    // ---- THE CHATBOX. The page is Platform/UI/greymarch-chat.html, always on screen (bottom left) once you are in the world; Enter opens the input, the page sends, the SERVER decides who hears it.
+    greymarchChatToPage(fn: any, arg: any): any {
+        var json = JSON.stringify({ fn: fn, arg: arg });
+        try {
+            this.sp.browser.executeJavaScript(CHAT_SCRIPT + "window.__gmChatSend(" + json + ");");
+        } catch (err) {
+            this.sp.printConsole("[greymarch] could not reach the chatbox: " + err);
+        }
+    }
+    greymarchChatShow(): any {
+        this.greymarchChatOn = true;
+        try { this.sp.browser.setVisible(true); } catch (e) { /* the page layer is not available */ }
+        this.greymarchChatToPage("show", true);
+        this.greymarchChatNext = Date.now() + 5000;
+    }
+    greymarchChatHide(): any {
+        if (!this.greymarchChatOn && !this.greymarchChatTyping) return;
+        this.greymarchChatOn = false;
+        this.greymarchChatTyping = false;
+        this.greymarchChatToPage("hide", true);
+    }
+    // Enter: start typing. Not over the select screen, the staff panel or the X menu.
+    greymarchChatOpen(): any {
+        if (!this.greymarchChatOn || this.greymarchChatTyping || this.greymarchScreenUp || this.greymarchAdminOn || this.greymarchMenuOn) return;
+        if (Date.now() - (this.greymarchChatClosedAt || 0) < 400) return; // the Enter that just SENT a line must not open the input again
+        this.greymarchChatTyping = true;
+        this.sp.browser.setVisible(true);
+        this.sp.browser.setFocused(true);
+        this.greymarchChatToPage("open", {});
+    }
+    greymarchChatClose(): any {
+        if (!this.greymarchChatTyping) return;
+        this.greymarchChatToPage("close", true);
+        this.greymarchChatFocus(false);
+    }
+    // the page tells us when it has the keyboard (typing) and when it lets go
+    greymarchChatFocus(on: any): any {
+        this.greymarchChatTyping = !!on;
+        if (!on) this.greymarchChatClosedAt = Date.now();
+        if (on) { this.sp.browser.setVisible(true); this.sp.browser.setFocused(true); return; }
+        if (!this.greymarchScreenUp && !this.greymarchAdminOn && !this.greymarchMenuOn) this.sp.browser.setFocused(false);
+        this.greymarchChatToPage("close", true); // the page layer lets the mouse through again
+    }
+    greymarchChatSend(data: any): any {
+        var body: any = { customPacketType: "greymarchChat", op: data.op === "send" ? "send" : "init" };
+        if (body.op === "send") { body.text = String(data.text || "").slice(0, 300); body.tab = data.tab === "staff" ? "staff" : "local"; }
+        var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify(body) };
+        this.controller.emitter.emit("sendMessage", { message: message, reliability: "reliable" });
     }
 }
