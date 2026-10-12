@@ -180,3 +180,35 @@ test("an input the page no longer has the keyboard for is closed after a moment,
   assert.strictEqual(gm.greymarchChatTyping, false);
   assert.ok(!toPage().some((m) => m.fn === "close" && m.arg && m.arg.hide), "a lost keyboard closes the input but does not hide the chat");
 });
+const sync = (gm, typing) => gm.greymarchBrowserMessage({ arguments: ["greymarch", JSON.stringify({ type: "chat-sync", typing })] });
+
+test("the page's answer keeps the game honest: a lock the page is not using is released, a fresh input is left alone, and an idle chat never holds the keyboard", () => {
+  const { gm, log } = make();
+  gm.greymarchChatShow();
+  enter(gm);
+  assert.strictEqual(gm.greymarchChatTyping, true);
+  sync(gm, false); // answer sent just as it opened: ignored
+  assert.strictEqual(gm.greymarchChatTyping, true, "an input opened a moment ago stays");
+  gm.greymarchChatOpenedAt = Date.now() - 3000;
+  log.focused.length = 0;
+  sync(gm, false); // the page is not typing, the game thought it was: movement would be locked
+  assert.strictEqual(gm.greymarchChatTyping, false);
+  assert.deepStrictEqual(log.focused.pop(), false, "the keyboard is given back");
+  log.focused.length = 0;
+  sync(gm, false); // neither is typing: the keyboard is released anyway
+  assert.deepStrictEqual(log.focused, [false]);
+  sync(gm, true); // the page is showing an input the game did not know about
+  assert.strictEqual(gm.greymarchChatTyping, true);
+  assert.strictEqual(log.focused.pop(), true);
+});
+
+test("an idle chat is not holding the keyboard while the staff panel, the X menu or the select screen has it", () => {
+  for (const flag of ["greymarchAdminOn", "greymarchMenuOn", "greymarchScreenUp"]) {
+    const { gm, log } = make();
+    gm.greymarchChatShow();
+    gm[flag] = true;
+    log.focused.length = 0;
+    sync(gm, false);
+    assert.deepStrictEqual(log.focused, [], flag + ": their focus is left alone");
+  }
+});

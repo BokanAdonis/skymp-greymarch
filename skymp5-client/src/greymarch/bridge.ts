@@ -144,7 +144,7 @@ export class GreymarchBridge {
         this.greymarchChatPending();
         this.greymarchChatWatch(Date.now());
         this.greymarchWorldViewGuard(Date.now()); // other players are drawn only while SkyMP's world view is on: see greymarchWorldViewGuard
-        if (this.greymarchChatOn && Date.now() >= (this.greymarchChatNext || 0)) { this.greymarchChatNext = Date.now() + 5000; this.greymarchChatToPage("show", true); }
+        if (this.greymarchChatOn && Date.now() >= (this.greymarchChatNext || 0)) { this.greymarchChatNext = Date.now() + 2000; this.greymarchChatToPage("show", true); }
         if (this.greymarchMenuEscAt && Date.now() - this.greymarchMenuEscAt > 700) { this.greymarchMenuEscAt = 0; this.greymarchMenuHide(); } // Esc, and the menu page did not close itself
         this.greymarchToastTick(Date.now());
         this.greymarchEffects(); // staff effects: noclip, speed, frozen, ghosts (cheap: does real work every 400 ms)
@@ -267,6 +267,7 @@ export class GreymarchBridge {
         if (data && data.type === "admin-close") { this.greymarchAdminHide(); return; }
         if (data && data.type === "chat") { this.greymarchChatSend(data); return; } // the chatbox sends a line, or asks what this player may use (the SERVER decides)
         if (data && data.type === "chat-focus") { this.greymarchChatFocus(data.on); return; }
+        if (data && data.type === "chat-sync") { this.greymarchChatSync(!!data.typing); return; }
         if (data && data.type === "menu") { this.greymarchMenuSend(data); return; } // the X menu asks the server for something (the SERVER decides)
         if (data && data.type === "menu-close") { this.greymarchMenuHide(); return; }
         if (!data || (data.type !== "play" && data.type !== "create" && data.type !== "delete")) return;
@@ -656,7 +657,7 @@ export class GreymarchBridge {
         this.greymarchChatOn = true;
         try { this.sp.browser.setVisible(true); } catch (e) { /* the page layer is not available */ }
         this.greymarchChatToPage("show", true);
-        this.greymarchChatNext = Date.now() + 5000;
+        this.greymarchChatNext = Date.now() + 2000;
     }
     greymarchChatHide(): any {
         if (!this.greymarchChatOn && !this.greymarchChatTyping) return;
@@ -670,6 +671,19 @@ export class GreymarchBridge {
         var menus = ["Console", "Console Native UI Menu", "InventoryMenu", "MagicMenu", "FavoritesMenu", "MapMenu", "Journal Menu", "StatsMenu", "TweenMenu", "ContainerMenu", "BarterMenu", "GiftMenu", "Dialogue Menu", "MessageBoxMenu", "Crafting Menu", "Lockpicking Menu", "Sleep/Wait Menu", "Book Menu", "Training Menu", "LevelUp Menu", "RaceSex Menu", "MainMenu", "Loading Menu", "Cursor Menu", "Custom Menu", "TutorialMenu", "MistMenu"];
         for (var i = 0; i < menus.length; i++) { try { if (ui.isMenuOpen(menus[i])) return true; } catch (e) { /* a menu this game does not know */ } }
         return false;
+    }
+    // The chat page answers every "show" (a few seconds apart) with whether it is really typing. If the game thinks otherwise, the game gives way: a keyboard that the page is not using is released,
+    // so movement can never stay locked behind a chat that is not open. (An input opened less than a second ago is left alone: the answer may have been sent before it.)
+    greymarchChatSync(pageTyping: boolean): any {
+        if (this.greymarchChatTyping && !pageTyping) {
+            if (Date.now() - (this.greymarchChatOpenedAt || 0) < 1000) return;
+            this.greymarchLog("chat: the game thought it was typing and the page was not; released the keyboard");
+            this.greymarchChatFocus(false);
+        } else if (!this.greymarchChatTyping && pageTyping) {
+            this.greymarchChatFocus(true); // the page is showing its input: it gets the keyboard
+        } else if (!pageTyping && !this.greymarchScreenUp && !this.greymarchAdminOn && !this.greymarchMenuOn) {
+            try { this.sp.browser.setFocused(false); } catch (e) { /* nothing to release */ } // neither is typing: nothing may hold the keyboard
+        }
     }
     // While the chat says it is typing, the page must really have the keyboard. If it does not for a moment (a menu or the console took it, the layer was rebuilt), the input is closed so nothing is
     // left half open; the page, not the game, gets the keys while it is focused, so this never fires while someone is typing.
@@ -697,6 +711,7 @@ export class GreymarchBridge {
     greymarchChatOpen(): any {
         if (!this.greymarchChatOn || this.greymarchChatTyping || this.greymarchScreenUp || this.greymarchAdminOn || this.greymarchMenuOn) return;
         this.greymarchChatTyping = true;
+        this.greymarchChatOpenedAt = Date.now();
         this.sp.browser.setVisible(true);
         this.sp.browser.setFocused(true);
         this.greymarchChatToPage("open", {});
