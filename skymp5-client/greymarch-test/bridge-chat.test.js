@@ -209,6 +209,17 @@ test("an idle chat is not holding the keyboard while the staff panel, the X menu
     assert.deepStrictEqual(log.focused, [], flag + ": their focus is left alone");
   }
 });
+test("the game's 'Cursor Menu' is open all the time in the world: it never stops Enter from opening the chat, a real menu still does", () => {
+  const { gm, menus } = make();
+  gm.greymarchChatShow();
+  menus.add("Cursor Menu");
+  enter(gm);
+  assert.strictEqual(gm.greymarchChatTyping, true, "opens although Cursor Menu is reported open");
+  gm.greymarchChatClose(); gm.greymarchChatFocus(false); gm.greymarchChatClosedAt = 0;
+  menus.add("InventoryMenu");
+  enter(gm);
+  assert.strictEqual(gm.greymarchChatTyping, false, "a real menu blocks it");
+});
 test("HARD RULES: the Enter that sends a line and a held Enter never open the input again; a real press a moment later does", () => {
   const { gm } = make();
   gm.greymarchChatShow();
