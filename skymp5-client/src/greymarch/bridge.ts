@@ -44,7 +44,7 @@ export class GreymarchBridge {
         if (type === "greymarchKill") { this.greymarchKillMe(); return; }
         if (type === "greymarchKnown") { this.greymarchKnown = msg.names && typeof msg.names === "object" ? msg.names : {}; this.greymarchNamesNext = 0; return; }
         if (type === "greymarchMenuReply") { this.greymarchMenuToPage("reply", msg); return; }
-        if (type === "greymarchMenuEvent") { if (msg.type === "trade_invite" && !this.greymarchMenuOn) this.greymarchMenuShow(); this.greymarchMenuToPage("event", msg); return; }
+        if (type === "greymarchMenuEvent") { if ((msg.type === "trade_invite" || msg.type === "trade") && !this.greymarchMenuOn) this.greymarchMenuShow({ mode: "invite", looking: 0 }); this.greymarchMenuToPage("event", msg); return; }
         if (type === "greymarchFx") { this.greymarchFxWant = { noclip: !!msg.noclip, speed: Number(msg.speed) || 100, frozen: !!msg.frozen, god: !!msg.god }; if (msg.me) this.greymarchMeActor = msg.me; return; }
         if (type === "greymarchGhosts") { this.greymarchGhostList = Array.isArray(msg.ghosts) ? msg.ghosts : []; if (msg.me) this.greymarchMeActor = msg.me; this.greymarchOthers = Array.isArray(msg.others) ? msg.others : []; if (msg.stats !== undefined) this.greymarchStatsWant = msg.stats && typeof msg.stats === "object" ? msg.stats : null; var inv = Array.isArray(msg.invisible) ? msg.invisible : []; this.greymarchInvisList = inv; var invMap = {}; for (var q = 0; q < inv.length; q++) if (inv[q] !== msg.me) invMap[inv[q]] = true; try { Function("return this")().__gmInvisible = invMap; } catch (gErr) { /* names stay visible */ } return; }
         this.sp.printConsole("[greymarch] got " + type + (msg.characters ? " with " + msg.characters.length + " character(s)" : ""));
@@ -133,6 +133,7 @@ export class GreymarchBridge {
     // Runs every frame in the UPDATE phase (registered in the constructor): that is the only place Skyrim functions such as Game.getFormEx may be called. Cheap when there is nothing to do. Any error lifts the veil instead of trapping the player.
     greymarchTick(): any {
         this.greymarchWorldViewGuard(Date.now()); // other players are drawn only while SkyMP's world view is on: see greymarchWorldViewGuard
+        if (this.greymarchMenuEscAt && Date.now() - this.greymarchMenuEscAt > 700) { this.greymarchMenuEscAt = 0; this.greymarchMenuHide(); } // Esc, and the menu page did not close itself
         this.greymarchToastTick(Date.now());
         this.greymarchEffects(); // staff effects: noclip, speed, frozen, ghosts (cheap: does real work every 400 ms)
         var beat = this.greymarchBeat;
@@ -294,9 +295,10 @@ export class GreymarchBridge {
         if (e.isUp === true) down = false;
         var was = this["greymarchKey" + e.code];
         this["greymarchKey" + e.code] = down;
+        if (e.code === 45 && !down && was) { this.greymarchMenuRelease(); return; } // X let go
         if (!down || was) return;
-        if (e.code === 45 && !this.greymarchMenuOn && !this.greymarchAdminOn) this.greymarchMenuShow(); // X
-        else if (e.code === 1 && this.greymarchMenuOn) this.greymarchMenuHide();
+        if (e.code === 45 && !this.greymarchMenuOn && !this.greymarchAdminOn) this.greymarchMenuHold(); // X held while looking at a player
+        else if (e.code === 1 && this.greymarchMenuOn) this.greymarchMenuEscape();
         else if (e.code === 65 && !this.greymarchAdminOn && !this.greymarchMenuOn) this.greymarchAdminShow();
         else if (e.code === 1 && this.greymarchAdminOn) this.greymarchAdminHide();
     }
@@ -544,19 +546,39 @@ export class GreymarchBridge {
             this.sp.printConsole("[greymarch] could not reach the X menu: " + err);
         }
     }
-    greymarchMenuShow(): any {
+    greymarchMenuShow(arg: any): any {
         if (this.greymarchScreenUp || this.greymarchAdminOn || this.greymarchMenuOn) return; // not over the select screen, the staff panel, or itself
         this.greymarchMenuOn = true;
         this.sp.browser.setVisible(true);
         this.sp.browser.setFocused(true);
-        var looking = 0; // who is under the crosshair (a remote player's actor id), so the menu can have them selected
+        this.greymarchMenuToPage("show", { mode: (arg && arg.mode) || "hold", looking: (arg && arg.looking) || 0 }); // looking = the remote actor id of the player the menu is about
+    }
+    // HOLD X: look at a player and hold X, and the menu for THAT player appears; let go of X over an option to pick it (the page does the picking: it gets "release").
+    // Not looking at a player: nothing opens (a short hint says why). The page is shown and focused while it is up, so the mouse is a cursor.
+    greymarchMenuHold(): any {
+        if (this.greymarchScreenUp || this.greymarchAdminOn || this.greymarchMenuOn) return;
+        var looking = 0;
         try { var ref = this.sp.Game.getCurrentCrosshairRef(); if (ref) looking = misc.localIdToRemoteId(ref.getFormID()) || 0; } catch (e) { looking = 0; }
-        this.greymarchMenuToPage("show", { looking: looking });
+        var others = this.greymarchOthers || [];
+        if (!looking || others.indexOf(looking) < 0) {
+            try { this.sp.Debug.notification("Look at a player and hold X"); } catch (e2) { /* a hint is a nicety */ }
+            return;
+        }
+        this.greymarchMenuShow({ mode: "hold", looking: looking });
+    }
+    greymarchMenuRelease(): any {
+        if (this.greymarchMenuOn) this.greymarchMenuToPage("release", true);
+    }
+    // Esc: the page cancels a trade and closes itself; if it does not answer within a moment the menu is hidden anyway
+    greymarchMenuEscape(): any {
+        this.greymarchMenuToPage("escape", true);
+        this.greymarchMenuEscAt = Date.now();
     }
     greymarchMenuHide(): any {
         if (!this.greymarchMenuOn) return;
         this.greymarchMenuOn = false;
         this.greymarchMenuToPage("hide", true);
+        this.greymarchMenuEscAt = 0;
         if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchHudOn || !!this.greymarchAdminOn); }
     }
     greymarchMenuSend(data: any): any {

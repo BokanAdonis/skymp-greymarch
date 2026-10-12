@@ -12,7 +12,7 @@ const js = ts.transpileModule(src, { compilerOptions: { module: ts.ModuleKind.Co
 const BIT = 0xff000000;
 
 function make() {
-  const log = { js: [], visible: [], focused: [], sent: [], lines: [], names: new Map(), blocked: [], blockArgs: [] };
+  const log = { js: [], visible: [], focused: [], sent: [], lines: [], names: new Map(), blocked: [], blockArgs: [], notes: [] };
   const misc = { remoteIdToLocalId: (id) => (id === 0xdead ? 0 : id - BIT + 0x100), localIdToRemoteId: (id) => (id >= 0x100 ? id - 0x100 + BIT : 0), getViewFromStorage: () => null };
   const mods = { "../messages": { MsgType: { CustomPacket: 77 } }, "../view/worldViewMisc": misc, "../sync/appearance": {}, "../services/services/remoteServer": { RemoteServer: {} }, "../services/services/singlePlayerService": { SinglePlayerService: {} } };
   const mod = { exports: {} };
@@ -31,6 +31,7 @@ function make() {
     Game: { getPlayer: () => ({ id: 0x14 }), getFormEx: (id) => (id === 0x999 ? null : actorFor(id)), getCurrentCrosshairRef: () => crosshair },
     Actor: { from: (f) => f },
     browser: { executeJavaScript: (j) => log.js.push(j), setVisible: (v) => log.visible.push(v), setFocused: (v) => log.focused.push(v) },
+    Debug: { notification: (t) => log.notes.push(t) },
     on() {},
   };
   const controller = { on() {}, emitter: { on() {}, emit: (n, p) => log.sent.push([n, p]) } };
@@ -39,43 +40,60 @@ function make() {
   return { gm, log, actors, actorFor, toPage, setCrosshair: (r) => { crosshair = r; } };
 }
 
-test("X opens the menu once, tells it who is under the crosshair, and Escape closes it", () => {
+test("hold X while looking at a player opens the menu for THAT player; letting go tells the page; Esc asks the page to close", () => {
   const { gm, log, toPage, setCrosshair } = make();
+  gm.greymarchOthers = [BIT + 5];
   setCrosshair({ getFormID: () => 0x105 }); // local id 0x105 = remote ff000005
   gm.greymarchKey({ code: 45, isDown: true });
   assert.strictEqual(gm.greymarchMenuOn, true);
   assert.deepStrictEqual(log.visible, [true]);
   assert.deepStrictEqual(log.focused, [true]);
-  assert.deepStrictEqual(toPage()[0], { fn: "show", arg: { looking: BIT + 5 } });
-  gm.greymarchKey({ code: 45, isDown: false });
-  gm.greymarchKey({ code: 45, isDown: true });
-  assert.strictEqual(toPage().length, 1, "pressing it again while open does nothing");
+  assert.deepStrictEqual(toPage()[0], { fn: "show", arg: { mode: "hold", looking: BIT + 5 } });
+  gm.greymarchKey({ code: 45, isDown: true }); // key repeat while held
+  assert.strictEqual(toPage().length, 1);
+  gm.greymarchKey({ code: 45, isDown: false }); // let go
+  assert.deepStrictEqual(toPage().pop(), { fn: "release", arg: true });
+  assert.strictEqual(gm.greymarchMenuOn, true, "the page decides whether to close (it may keep a quick tap open)");
   gm.greymarchKey({ code: 1, isDown: false });
   gm.greymarchKey({ code: 1, isDown: true });
-  assert.strictEqual(gm.greymarchMenuOn, false);
-  assert.deepStrictEqual(toPage().pop(), { fn: "hide", arg: true });
+  assert.deepStrictEqual(toPage().pop(), { fn: "escape", arg: true });
+  assert.strictEqual(gm.greymarchMenuOn, true);
+  gm.greymarchMenuEscAt = Date.now() - 1000; // the page never answered
+  gm.greymarchTick();
+  assert.strictEqual(gm.greymarchMenuOn, false, "hidden anyway after a moment");
   assert.deepStrictEqual(log.visible.pop(), false);
 });
 
-test("the menu does not open over the select screen or the staff panel, and F7 does not open the panel over the menu", () => {
+test("nothing opens when you are not looking at a player (a hint is shown), over the select screen, or over the staff panel; F7 does not open the panel over the menu", () => {
   const a = make();
-  a.gm.greymarchScreenUp = true;
-  a.gm.greymarchKey({ code: 45, isDown: true });
+  a.gm.greymarchOthers = [BIT + 5];
+  a.gm.greymarchKey({ code: 45, isDown: true }); // no crosshair target
   assert.ok(!a.gm.greymarchMenuOn);
+  assert.deepStrictEqual(a.log.notes, ["Look at a player and hold X"]);
+  const a2 = make();
+  a2.gm.greymarchOthers = [BIT + 5];
+  a2.setCrosshair({ getFormID: () => 0x777 }); // something that is not a player
+  a2.gm.greymarchKey({ code: 45, isDown: true });
+  assert.ok(!a2.gm.greymarchMenuOn);
   const b = make();
-  b.gm.greymarchAdminOn = true;
+  b.gm.greymarchOthers = [BIT + 5]; b.setCrosshair({ getFormID: () => 0x105 }); b.gm.greymarchScreenUp = true;
   b.gm.greymarchKey({ code: 45, isDown: true });
   assert.ok(!b.gm.greymarchMenuOn);
   const c = make();
+  c.gm.greymarchOthers = [BIT + 5]; c.setCrosshair({ getFormID: () => 0x105 }); c.gm.greymarchAdminOn = true;
   c.gm.greymarchKey({ code: 45, isDown: true });
-  c.gm.greymarchKey({ code: 65, isDown: false });
-  c.gm.greymarchKey({ code: 65, isDown: true });
-  assert.ok(!c.gm.greymarchAdminOn);
+  assert.ok(!c.gm.greymarchMenuOn);
+  const d = make();
+  d.gm.greymarchOthers = [BIT + 5]; d.setCrosshair({ getFormID: () => 0x105 });
+  d.gm.greymarchKey({ code: 45, isDown: true });
+  d.gm.greymarchKey({ code: 65, isDown: false });
+  d.gm.greymarchKey({ code: 65, isDown: true });
+  assert.ok(!d.gm.greymarchAdminOn);
 });
 
 test("the page's requests become packets to the server; its close button closes it; server replies and events go to the page", () => {
   const { gm, log, toPage } = make();
-  gm.greymarchKey({ code: 45, isDown: true });
+  gm.greymarchMenuShow({ mode: "hold", looking: BIT + 5 });
   gm.greymarchBrowserMessage({ arguments: ["greymarch", JSON.stringify({ type: "menu", rid: 7, op: "introduce", args: { target: "#BBBB" } })] });
   const [name, payload] = log.sent.pop();
   assert.strictEqual(name, "sendMessage");
@@ -87,13 +105,17 @@ test("the page's requests become packets to the server; its close button closes 
   assert.strictEqual(gm.greymarchMenuOn, false);
 });
 
-test("a trade invitation opens the menu by itself, but does not reopen one that is already open", () => {
+test("a trade invitation (or a trade starting) opens the menu by itself in invite mode, but does not reopen one that is already open", () => {
   const { gm, toPage } = make();
   gm.greymarchPacket({ customPacketType: "greymarchMenuEvent", type: "trade_invite", id: 1, from: "Stranger" });
   assert.strictEqual(gm.greymarchMenuOn, true);
   assert.deepStrictEqual(toPage().map((m) => m.fn), ["show", "event"]);
+  assert.deepStrictEqual(toPage()[0].arg, { mode: "invite", looking: 0 });
   gm.greymarchPacket({ customPacketType: "greymarchMenuEvent", type: "trade_invite", id: 2, from: "Stranger" });
   assert.deepStrictEqual(toPage().map((m) => m.fn), ["show", "event", "event"]);
+  const other = make();
+  other.gm.greymarchPacket({ customPacketType: "greymarchMenuEvent", type: "trade", phase: "open" });
+  assert.strictEqual(other.gm.greymarchMenuOn, true);
 });
 
 test("names: everyone else is a Stranger unless the server says this player knows them; activation is blocked on them", () => {
@@ -137,7 +159,7 @@ test("names: an actor this game has not made yet is skipped, and nothing breaks 
 
 test("a menu that is open keeps the browser layer visible when the loading veil lifts or the staff panel closes", () => {
   const { gm, log } = make();
-  gm.greymarchKey({ code: 45, isDown: true });
+  gm.greymarchMenuShow({ mode: "hold", looking: BIT + 5 });
   log.visible.length = 0;
   gm.greymarchReveal = { at: 0 };
   gm.greymarchLift("test");
