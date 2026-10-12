@@ -141,6 +141,7 @@ export class GreymarchBridge {
     greymarchTick(): any {
         this.greymarchDoorNamesApply(Date.now());
         this.greymarchDoorPrompt(Date.now());
+        this.greymarchChatPending();
         this.greymarchWorldViewGuard(Date.now()); // other players are drawn only while SkyMP's world view is on: see greymarchWorldViewGuard
         if (this.greymarchChatOn && Date.now() >= (this.greymarchChatNext || 0)) { this.greymarchChatNext = Date.now() + 5000; this.greymarchChatToPage("show", true); }
         if (this.greymarchMenuEscAt && Date.now() - this.greymarchMenuEscAt > 700) { this.greymarchMenuEscAt = 0; this.greymarchMenuHide(); } // Esc, and the menu page did not close itself
@@ -302,14 +303,14 @@ export class GreymarchBridge {
     }
     // F7 opens the panel (the page itself closes it with F7 or Escape). Escape also closes it from here, because the game un-focuses the browser on Escape.
     greymarchKey(e: any): any {
-        if (e.code !== 65 && e.code !== 1 && e.code !== 45 && e.code !== 28) return;
+        if (e.code !== 65 && e.code !== 1 && e.code !== 45 && e.code !== 21) return;
         var down = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true);
         if (e.isUp === true) down = false;
+        if (e.code === 21) { if (down) this.greymarchChatWanted = Date.now(); return; } // Y: the chat is opened from the update phase (greymarchChatPending), where the game's menus can be asked about; a missed key-up can never swallow the next press
         var was = this["greymarchKey" + e.code];
         this["greymarchKey" + e.code] = down;
         if (e.code === 45 && !down && was) { this.greymarchMenuRelease(); return; } // X let go
         if (!down || was) return;
-        if (e.code === 28) { this.greymarchChatOpen(); return; } // Enter
         if (e.code === 1 && this.greymarchChatTyping) { this.greymarchChatClose(); return; }
         if (e.code === 45 && !this.greymarchMenuOn && !this.greymarchAdminOn && !this.greymarchChatTyping) this.greymarchMenuHold(); // X held while looking at a player
         else if (e.code === 1 && this.greymarchMenuOn) this.greymarchMenuEscape();
@@ -661,10 +662,26 @@ export class GreymarchBridge {
         this.greymarchChatTyping = false;
         this.greymarchChatToPage("hide", true);
     }
-    // Enter: start typing. Not over the select screen, the staff panel or the X menu.
+    // The game's menus and the console: Y does nothing while any of them is up (typing a "y" in the console must not open the chat).
+    greymarchInMenu(): any {
+        var ui = this.sp.Ui;
+        var menus = ["Console", "Console Native UI Menu", "InventoryMenu", "MagicMenu", "FavoritesMenu", "MapMenu", "Journal Menu", "StatsMenu", "TweenMenu", "ContainerMenu", "BarterMenu", "GiftMenu", "Dialogue Menu", "MessageBoxMenu", "Crafting Menu", "Lockpicking Menu", "Sleep/Wait Menu", "Book Menu", "Training Menu", "LevelUp Menu", "RaceSex Menu", "MainMenu", "Loading Menu", "Cursor Menu", "Custom Menu", "TutorialMenu", "MistMenu"];
+        for (var i = 0; i < menus.length; i++) { try { if (ui.isMenuOpen(menus[i])) return true; } catch (e) { /* a menu this game does not know */ } }
+        return false;
+    }
+    // Y, handled every frame: opens the chat unless a menu or the console is up.
+    greymarchChatPending(): any {
+        var at = this.greymarchChatWanted || 0;
+        if (!at) return;
+        this.greymarchChatWanted = 0;
+        if (Date.now() - at > 1000) return; // a press from long ago
+        if (this.greymarchChatTyping) { this.greymarchChatTyping = false; } // the game got a Y while the chat says it is typing: the page does not have the keyboard, so that state is stale; start again
+        if (this.greymarchInMenu()) return;
+        this.greymarchChatOpen();
+    }
+    // Start typing. Not over the select screen, the staff panel or the X menu.
     greymarchChatOpen(): any {
         if (!this.greymarchChatOn || this.greymarchChatTyping || this.greymarchScreenUp || this.greymarchAdminOn || this.greymarchMenuOn) return;
-        if (Date.now() - (this.greymarchChatClosedAt || 0) < 400) return; // the Enter that just SENT a line must not open the input again
         this.greymarchChatTyping = true;
         this.sp.browser.setVisible(true);
         this.sp.browser.setFocused(true);
