@@ -697,7 +697,6 @@ export class GreymarchBridge {
         var want = this.greymarchDoorNames || {};
         var done = this.greymarchDoorNamesDone || (this.greymarchDoorNamesDone = {});
         var orig = this.greymarchDoorOrig || (this.greymarchDoorOrig = {}); // the game's own name of each door we have renamed
-        var NL = String.fromCharCode(10);
         var sp = this.sp;
         for (var id in want) {
             var w = want[id];
@@ -711,7 +710,7 @@ export class GreymarchBridge {
             try {
                 if (orig[id] === undefined) { var own = String(o.getDisplayName() || ""); orig[id] = own.length ? own : "Door"; } // the game's own name; never empty (an empty display name can crash the game)
                 var base = label || orig[id];
-                var text = owner ? base + NL + "Owned by: " + owner : base;
+                var text = owner ? base + " - Owned by: " + owner : base; // one line: a line break in a display name is not reliably drawn by the game's prompt
                 if (text.length && String(o.getDisplayName()) !== text) o.setDisplayName(text, true);
                 done[id] = text;
             } catch (e1) { if (!this.greymarchDoorErr) { this.greymarchDoorErr = true; this.greymarchLog("props: could not name door " + id + " (" + e1 + ")"); } }

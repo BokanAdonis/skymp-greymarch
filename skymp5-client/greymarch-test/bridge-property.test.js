@@ -94,14 +94,14 @@ test("a door this game has not loaded, or cannot rename, never breaks the game a
   gm.greymarchDoorNamesApply(20000);
 });
 
-const NL = String.fromCharCode(10);
 
-test("an owned door shows its name with 'Owned by: ...' on a second line; a door with no name of its own keeps the game's name above it", () => {
+
+test("an owned door shows its name with 'Owned by: ...' on the same line; a door with no name of its own keeps the game's name above it", () => {
   const { gm, objectFor } = make();
   gm.greymarchPacket({ customPacketType: "greymarchProps", doors: { 512: { label: "Breezehome", owner: "Alda Ring" }, 513: { label: "", owner: "Bram Hale" } } });
   gm.greymarchDoorNamesApply(10000);
-  assert.strictEqual(objectFor(0x1200).name, "Breezehome" + NL + "Owned by: Alda Ring");
-  assert.strictEqual(objectFor(0x1201).name, "Door 1201" + NL + "Owned by: Bram Hale", "the base game's own name stays on top");
+  assert.strictEqual(objectFor(0x1200).name, "Breezehome - Owned by: Alda Ring");
+  assert.strictEqual(objectFor(0x1201).name, "Door 1201" + " - Owned by: Bram Hale", "the base game's own name stays on top");
 });
 
 test("a redesignation, a new owner and a removed owner all change what the door says within a few seconds", () => {
@@ -110,10 +110,10 @@ test("a redesignation, a new owner and a removed owner all change what the door 
   gm.greymarchDoorNamesApply(10000);
   gm.greymarchPacket({ customPacketType: "greymarchProps", doors: { 512: { label: "Breezehome Manor", owner: "Alda Ring" } } }); // staff redesignate it
   gm.greymarchDoorNamesApply(10001);
-  assert.strictEqual(objectFor(0x1200).name, "Breezehome Manor" + NL + "Owned by: Alda Ring");
+  assert.strictEqual(objectFor(0x1200).name, "Breezehome Manor" + " - Owned by: Alda Ring");
   gm.greymarchPacket({ customPacketType: "greymarchProps", doors: { 512: { label: "Breezehome Manor", owner: "Bram Hale" } } }); // a new owner
   gm.greymarchDoorNamesApply(10002);
-  assert.strictEqual(objectFor(0x1200).name, "Breezehome Manor" + NL + "Owned by: Bram Hale");
+  assert.strictEqual(objectFor(0x1200).name, "Breezehome Manor" + " - Owned by: Bram Hale");
   gm.greymarchPacket({ customPacketType: "greymarchProps", doors: { 512: { label: "Breezehome Manor", owner: "" } } }); // the owner is removed
   gm.greymarchDoorNamesApply(10003);
   assert.strictEqual(objectFor(0x1200).name, "Breezehome Manor");
