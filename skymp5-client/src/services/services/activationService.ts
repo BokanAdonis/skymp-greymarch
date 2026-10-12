@@ -20,8 +20,6 @@ export class ActivationService extends ClientListener {
         lastInvService.lastInv = getInventory(this.sp.Game.getPlayer() as Actor);
 
         let caster = e.caster ? e.caster.getFormID() : 0;
-        // GREYMARCH diagnostics: which door the player used and where they stood (door travel is decided by the server)
-        try { const gmBase = e.target ? e.target.getBaseObject() : null; if (gmBase && gmBase.getType() === 29) { const gmP = this.sp.Game.getPlayer()!; const gmW = gmP.getWorldSpace() || gmP.getParentCell(); (this.controller.emitter as any).emit("greymarchStage", "door: I used door " + e.target.getFormID().toString(16) + " (base " + gmBase.getFormID().toString(16) + ") standing in " + (gmW ? gmW.getFormID().toString(16) : "?") + " at " + Math.round(gmP.getPositionX()) + "," + Math.round(gmP.getPositionY()) + "," + Math.round(gmP.getPositionZ())); } } catch (gmErr) { /* diagnostics only */ }
         let target = e.target ? e.target.getFormID() : 0;
 
         if (!target || !caster) {
@@ -46,6 +44,8 @@ export class ActivationService extends ClientListener {
         }
 
         const openState = e.target.getOpenState();
+        // GREYMARCH diagnostics: which door the PLAYER used (NPC door use is filtered out above) and where they stood (door travel is decided by the server)
+        try { const gmBase = e.target ? e.target.getBaseObject() : null; if (gmBase && gmBase.getType() === 29) { const gmP = this.sp.Game.getPlayer()!; const gmW = gmP.getWorldSpace() || gmP.getParentCell(); (this.controller.emitter as any).emit("greymarchStage", "door: I used door " + e.target.getFormID().toString(16) + " (base " + gmBase.getFormID().toString(16) + ") standing in " + (gmW ? gmW.getFormID().toString(16) : "?") + " at " + Math.round(gmP.getPositionX()) + "," + Math.round(gmP.getPositionY()) + "," + Math.round(gmP.getPositionZ())); } } catch (gmErr) { /* diagnostics only */ }
 
         // TODO: add this to skyrimPlatform.ts
         const enum OpenState {
