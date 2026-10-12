@@ -16,20 +16,21 @@ function make() {
   const mod = { exports: {} };
   new Function("require", "exports", "module", js)((p) => mods[p], mod.exports, mod);
   const menus = new Set();
+  const focus = { on: true };
   const sp = {
     Ui: { isMenuOpen: (n) => menus.has(n) },
     printConsole() {}, writeLogs: (n, l) => log.lines.push(l),
     Game: { getPlayer: () => ({ id: 0x14 }), getFormEx: () => null, getCurrentCrosshairRef: () => null },
     Actor: { from: (f) => f },
     Debug: { notification() {} },
-    browser: { executeJavaScript: (j) => log.js.push(j), setVisible: (v) => log.visible.push(v), setFocused: (v) => log.focused.push(v) },
+    browser: { isFocused: () => focus.on, executeJavaScript: (j) => log.js.push(j), setVisible: (v) => log.visible.push(v), setFocused: (v) => log.focused.push(v) },
     on() {},
   };
   const controller = { on() {}, emitter: { on() {}, emit: (n, p) => log.sent.push([n, p]) } };
   const gm = new mod.exports.GreymarchBridge(sp, controller);
   const toPage = () => log.js.filter((x) => x.includes("__gmChatSend(")).map((x) => JSON.parse(x.slice(x.lastIndexOf("__gmChatSend(") + 13).replace(/\);$/, "")));
   const sentPackets = () => log.sent.map(([, p]) => JSON.parse(p.message.contentJsonDump));
-  return { gm, log, toPage, sentPackets, menus };
+  return { gm, log, toPage, sentPackets, menus, focus };
 }
 const enter = (gm) => { gm.greymarchKey({ code: 21, isDown: false }); gm.greymarchKey({ code: 21, isDown: true }); gm.greymarchChatPending(); }; // Y, as the update phase handles it
 
@@ -148,4 +149,32 @@ test("a /gm request from the server goes to the chat page as a pop-up", () => {
   const last = toPage().pop();
   assert.strictEqual(last.fn, "alert");
   assert.deepStrictEqual([last.arg.from, last.arg.text], ["Alda Ring #AAAA", "stuck in the wall"]);
+});
+
+test("Esc closes the chat input whenever it is open, even if no key-up was ever seen; with the chat closed Esc does nothing to it", () => {
+  const { gm, toPage } = make();
+  gm.greymarchChatShow();
+  gm.greymarchKey({ code: 1, isDown: true }); // chat not open: nothing happens
+  assert.ok(!toPage().some((m) => m.fn === "close"));
+  enter(gm);
+  assert.strictEqual(gm.greymarchChatTyping, true);
+  gm.greymarchKey({ code: 1, isDown: true }); // no key-up before it
+  assert.strictEqual(gm.greymarchChatTyping, false);
+  assert.deepStrictEqual(toPage().pop(), { fn: "close", arg: true });
+  enter(gm);
+  assert.strictEqual(gm.greymarchChatTyping, true, "and Y opens it again straight away");
+});
+
+test("an input the page no longer has the keyboard for is closed after a moment, never while the page is focused", () => {
+  const { gm, focus } = make();
+  gm.greymarchChatShow();
+  enter(gm);
+  const t0 = Date.now();
+  gm.greymarchChatWatch(t0 + 500); gm.greymarchChatWatch(t0 + 5000); // focused: left alone
+  assert.strictEqual(gm.greymarchChatTyping, true);
+  focus.on = false;
+  gm.greymarchChatWatchNext = 0; gm.greymarchChatWatch(t0 + 6000); // first time it is noticed
+  assert.strictEqual(gm.greymarchChatTyping, true, "one look is not enough");
+  gm.greymarchChatWatch(t0 + 6300); gm.greymarchChatWatch(t0 + 8000);
+  assert.strictEqual(gm.greymarchChatTyping, false);
 });

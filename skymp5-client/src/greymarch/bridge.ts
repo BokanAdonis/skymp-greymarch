@@ -142,6 +142,7 @@ export class GreymarchBridge {
         this.greymarchDoorNamesApply(Date.now());
         this.greymarchDoorPrompt(Date.now());
         this.greymarchChatPending();
+        this.greymarchChatWatch(Date.now());
         this.greymarchWorldViewGuard(Date.now()); // other players are drawn only while SkyMP's world view is on: see greymarchWorldViewGuard
         if (this.greymarchChatOn && Date.now() >= (this.greymarchChatNext || 0)) { this.greymarchChatNext = Date.now() + 5000; this.greymarchChatToPage("show", true); }
         if (this.greymarchMenuEscAt && Date.now() - this.greymarchMenuEscAt > 700) { this.greymarchMenuEscAt = 0; this.greymarchMenuHide(); } // Esc, and the menu page did not close itself
@@ -306,12 +307,12 @@ export class GreymarchBridge {
         if (e.code !== 65 && e.code !== 1 && e.code !== 45 && e.code !== 21) return;
         var down = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true);
         if (e.isUp === true) down = false;
+        if (e.code === 1 && down && this.greymarchChatTyping) { this.greymarchChatClose(); return; } // Esc closes the chat input whenever it is open, whatever the key-up history says
         if (e.code === 21) { if (down) this.greymarchChatWanted = Date.now(); return; } // Y: the chat is opened from the update phase (greymarchChatPending), where the game's menus can be asked about; a missed key-up can never swallow the next press
         var was = this["greymarchKey" + e.code];
         this["greymarchKey" + e.code] = down;
         if (e.code === 45 && !down && was) { this.greymarchMenuRelease(); return; } // X let go
         if (!down || was) return;
-        if (e.code === 1 && this.greymarchChatTyping) { this.greymarchChatClose(); return; }
         if (e.code === 45 && !this.greymarchMenuOn && !this.greymarchAdminOn && !this.greymarchChatTyping) this.greymarchMenuHold(); // X held while looking at a player
         else if (e.code === 1 && this.greymarchMenuOn) this.greymarchMenuEscape();
         else if (e.code === 65 && !this.greymarchAdminOn && !this.greymarchMenuOn) this.greymarchAdminShow();
@@ -668,6 +669,18 @@ export class GreymarchBridge {
         var menus = ["Console", "Console Native UI Menu", "InventoryMenu", "MagicMenu", "FavoritesMenu", "MapMenu", "Journal Menu", "StatsMenu", "TweenMenu", "ContainerMenu", "BarterMenu", "GiftMenu", "Dialogue Menu", "MessageBoxMenu", "Crafting Menu", "Lockpicking Menu", "Sleep/Wait Menu", "Book Menu", "Training Menu", "LevelUp Menu", "RaceSex Menu", "MainMenu", "Loading Menu", "Cursor Menu", "Custom Menu", "TutorialMenu", "MistMenu"];
         for (var i = 0; i < menus.length; i++) { try { if (ui.isMenuOpen(menus[i])) return true; } catch (e) { /* a menu this game does not know */ } }
         return false;
+    }
+    // While the chat says it is typing, the page must really have the keyboard. If it does not for a moment (a menu or the console took it, the layer was rebuilt), the input is closed so nothing is
+    // left half open; the page, not the game, gets the keys while it is focused, so this never fires while someone is typing.
+    greymarchChatWatch(now: any): any {
+        if (!this.greymarchChatTyping) { this.greymarchChatLost = 0; return; }
+        if (now < (this.greymarchChatWatchNext || 0)) return;
+        this.greymarchChatWatchNext = now + 250;
+        var focused = true;
+        try { focused = !!this.sp.browser.isFocused(); } catch (e) { focused = true; } // cannot tell: assume it is fine
+        if (focused) { this.greymarchChatLost = 0; return; }
+        if (!this.greymarchChatLost) { this.greymarchChatLost = now; return; }
+        if (now - this.greymarchChatLost > 1500) { this.greymarchChatLost = 0; this.greymarchChatClose(); }
     }
     // Y, handled every frame: opens the chat unless a menu or the console is up.
     greymarchChatPending(): any {
