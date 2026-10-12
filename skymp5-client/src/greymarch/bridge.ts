@@ -305,12 +305,11 @@ export class GreymarchBridge {
     }
     // F7 opens the panel (the page itself closes it with F7 or Escape). Escape also closes it from here, because the game un-focuses the browser on Escape.
     greymarchKey(e: any): any {
-        if (e.code !== 65 && e.code !== 1 && e.code !== 45 && e.code !== 21) return;
+        if (e.code !== 65 && e.code !== 1 && e.code !== 45 && e.code !== 28) return;
         var down = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true);
         if (e.isUp === true) down = false;
-        if (e.code === 1 && down && this.greymarchChatTyping) { this.greymarchChatClose(true); return; } // Esc closes the chat completely whenever the input is open, whatever the key-up history says
-        if (e.code === 1 && down && this.greymarchChatOn) this.greymarchChatToPage("conceal", true); // Esc with the input closed hides the idle chat too (the key still does its normal job: the menus below, or the game's own)
-        if (e.code === 21) { if (down) this.greymarchChatWanted = Date.now(); return; } // Y: the chat is opened from the update phase (greymarchChatPending), where the game's menus can be asked about; a missed key-up can never swallow the next press
+        if (e.code === 1 && down && this.greymarchChatTyping) { this.greymarchChatClose(); return; } // Esc cancels whenever the input is open (the messages stay on screen), whatever the key-up history says
+        if (e.code === 28) { if (down && e.isRepeating !== true) this.greymarchChatWanted = Date.now(); return; } // Enter: the chat is opened from the update phase (greymarchChatPending), where the game's menus can be asked about; a held key does not repeat it and a missed key-up can never swallow the next press
         var was = this["greymarchKey" + e.code];
         this["greymarchKey" + e.code] = down;
         if (e.code === 45 && !down && was) { this.greymarchMenuRelease(); return; } // X let go
@@ -688,22 +687,30 @@ export class GreymarchBridge {
     // While the chat says it is typing, the page must really have the keyboard. If it does not for a moment (a menu or the console took it, the layer was rebuilt), the input is closed so nothing is
     // left half open; the page, not the game, gets the keys while it is focused, so this never fires while someone is typing.
     greymarchChatWatch(now: any): any {
-        if (!this.greymarchChatTyping) { this.greymarchChatLost = 0; return; }
         if (now < (this.greymarchChatWatchNext || 0)) return;
         this.greymarchChatWatchNext = now + 250;
+        if (!this.greymarchChatTyping) {
+            this.greymarchChatLost = 0;
+            // HARD RULE: after a close the keyboard is released again a few times, so movement cannot stay locked whatever the page did
+            if (now < (this.greymarchChatReleaseUntil || 0) && !this.greymarchScreenUp && !this.greymarchAdminOn && !this.greymarchMenuOn) { try { this.sp.browser.setFocused(false); } catch (e0) { /* nothing to release */ } }
+            return;
+        }
+        // HARD RULES while the input is open: a menu or the console opening closes it; and it never stays open longer than two minutes
+        if (this.greymarchInMenu()) { this.greymarchLog("chat: closed because a menu or the console opened"); this.greymarchChatClose(); return; }
+        if (now - (this.greymarchChatOpenedAt || now) > 120000) { this.greymarchLog("chat: closed after two minutes open"); this.greymarchChatClose(); return; }
         var focused = true;
         try { focused = !!this.sp.browser.isFocused(); } catch (e) { focused = true; } // cannot tell: assume it is fine
         if (focused) { this.greymarchChatLost = 0; return; }
         if (!this.greymarchChatLost) { this.greymarchChatLost = now; return; }
         if (now - this.greymarchChatLost > 1500) { this.greymarchChatLost = 0; this.greymarchChatClose(); }
-    }
-    // Y, handled every frame: opens the chat unless a menu or the console is up.
+    }    // Enter, handled every frame: opens the chat unless a menu or the console is up.
     greymarchChatPending(): any {
         var at = this.greymarchChatWanted || 0;
         if (!at) return;
         this.greymarchChatWanted = 0;
         if (Date.now() - at > 1000) return; // a press from long ago
-        if (this.greymarchChatTyping) return; // already typing: a Y is just a letter and must never close or restart the input
+        if (this.greymarchChatTyping) return; // already typing: a key reaching the game now must never close or restart the input
+        if (Date.now() - (this.greymarchChatClosedAt || 0) < 400) return; // the Enter that just SENT a line, or a held key, must not open the input again
         if (this.greymarchInMenu()) return;
         this.greymarchChatOpen();
     }
@@ -716,15 +723,15 @@ export class GreymarchBridge {
         this.sp.browser.setFocused(true);
         this.greymarchChatToPage("open", {});
     }
-    greymarchChatClose(hide?: any): any {
+    greymarchChatClose(): any {
         if (!this.greymarchChatTyping) return;
-        this.greymarchChatToPage("close", hide ? { hide: true } : true); // hide: Esc, the page also conceals the lines until a new message arrives or Y is pressed
+        this.greymarchChatToPage("close", true);
         this.greymarchChatFocus(false);
     }
     // the page tells us when it has the keyboard (typing) and when it lets go
     greymarchChatFocus(on: any): any {
         this.greymarchChatTyping = !!on;
-        if (!on) this.greymarchChatClosedAt = Date.now();
+        if (!on) { this.greymarchChatClosedAt = Date.now(); this.greymarchChatReleaseUntil = Date.now() + 1000; }
         if (on) { this.sp.browser.setVisible(true); this.sp.browser.setFocused(true); return; }
         if (!this.greymarchScreenUp && !this.greymarchAdminOn && !this.greymarchMenuOn) this.sp.browser.setFocused(false);
         this.greymarchChatToPage("close", true); // the page layer lets the mouse through again

@@ -32,7 +32,7 @@ function make() {
   const sentPackets = () => log.sent.map(([, p]) => JSON.parse(p.message.contentJsonDump));
   return { gm, log, toPage, sentPackets, menus, focus };
 }
-const enter = (gm) => { gm.greymarchKey({ code: 21, isDown: false }); gm.greymarchKey({ code: 21, isDown: true }); gm.greymarchChatPending(); }; // Y, as the update phase handles it
+const enter = (gm, immediately) => { if (!immediately) gm.greymarchChatClosedAt = 0; gm.greymarchKey({ code: 28, isDown: false }); gm.greymarchKey({ code: 28, isDown: true }); gm.greymarchChatPending(); }; // Enter, as the update phase handles it (a real press, not the very same Enter that just closed it)
 
 test("the chat appears when the loading veil lifts, keeps the browser layer on, and goes away on the character select screen", () => {
   const { gm, log, toPage } = make();
@@ -46,7 +46,7 @@ test("the chat appears when the loading veil lifts, keeps the browser layer on, 
   assert.deepStrictEqual(toPage().pop(), { fn: "hide", arg: true });
 });
 
-test("Y opens the input; Esc cancels; the page letting go gives the keyboard back; a Y typed while the input is open changes nothing (it never closes or restarts it)", () => {
+test("Enter opens the input; Esc cancels; the page letting go gives the keyboard back; an Enter that reaches the game while the input is open changes nothing (it never closes or restarts it)", () => {
   const { gm, log, toPage } = make();
   gm.greymarchChatShow();
   log.visible.length = 0;
@@ -55,7 +55,7 @@ test("Y opens the input; Esc cancels; the page letting go gives the keyboard bac
   assert.deepStrictEqual(log.focused, [true]);
   assert.deepStrictEqual(toPage().pop(), { fn: "open", arg: {} });
   assert.strictEqual(toPage().filter((m) => m.fn === "open").length, 1);
-  enter(gm); enter(gm); // a Y typed as a letter
+  enter(gm); enter(gm); // Enter reaching the game while typing
   assert.strictEqual(gm.greymarchChatTyping, true, "still typing");
   assert.strictEqual(toPage().filter((m) => m.fn === "open").length, 1, "the input was not reopened");
   assert.ok(!toPage().some((m) => m.fn === "close"), "and not closed");
@@ -65,17 +65,17 @@ test("Y opens the input; Esc cancels; the page letting go gives the keyboard bac
   assert.strictEqual(log.focused.pop(), false);
 });
 
-test("a Y whose key-up was never seen still opens the chat the next time (a missed release cannot swallow a press)", () => {
+test("an Enter whose key-up was never seen still opens the chat the next time (a missed release cannot swallow a press)", () => {
   const { gm } = make();
   gm.greymarchChatShow();
-  gm.greymarchKey({ code: 21, isDown: true }); gm.greymarchChatPending();
+  gm.greymarchChatClosedAt = 0; gm.greymarchKey({ code: 28, isDown: true }); gm.greymarchChatPending();
   assert.strictEqual(gm.greymarchChatTyping, true);
   gm.greymarchBrowserMessage({ arguments: ["greymarch", JSON.stringify({ type: "chat-focus", on: false })] });
-  gm.greymarchKey({ code: 21, isDown: true }); gm.greymarchChatPending(); // no key-up in between
+  gm.greymarchChatClosedAt = 0; gm.greymarchKey({ code: 28, isDown: true }); gm.greymarchChatPending(); // no key-up in between
   assert.strictEqual(gm.greymarchChatTyping, true);
 });
 
-test("Y does nothing while the console or any game menu is open, and Enter no longer opens the chat", () => {
+test("Enter does nothing while the console or any game menu is open", () => {
   for (const menu of ["Console", "InventoryMenu", "MapMenu", "Dialogue Menu", "MessageBoxMenu"]) {
     const { gm, menus } = make();
     gm.greymarchChatShow();
@@ -86,10 +86,7 @@ test("Y does nothing while the console or any game menu is open, and Enter no lo
     enter(gm);
     assert.strictEqual(gm.greymarchChatTyping, true, "and works again once " + menu + " is closed");
   }
-  const { gm } = make();
-  gm.greymarchChatShow();
-  gm.greymarchKey({ code: 28, isDown: true }); gm.greymarchChatPending();
-  assert.ok(!gm.greymarchChatTyping, "Enter");
+
 });
 
 test("nothing opens over the select screen, the staff panel or the X menu, or before you are in the world", () => {
@@ -151,19 +148,19 @@ test("a /gm request from the server goes to the chat page as a pop-up", () => {
   assert.deepStrictEqual([last.arg.from, last.arg.text], ["Alda Ring #AAAA", "stuck in the wall"]);
 });
 
-test("Esc closes the chat input whenever it is open, even if no key-up was ever seen; with the chat closed Esc does nothing to it", () => {
+test("Esc cancels the input whenever it is open, even if no key-up was ever seen; with the input closed Esc does nothing to the chat (the messages stay)", () => {
   const { gm, toPage } = make();
   gm.greymarchChatShow();
-  gm.greymarchKey({ code: 1, isDown: true }); // input not open: no close, but the idle chat is hidden
-  assert.ok(!toPage().some((m) => m.fn === "close"));
-  assert.ok(toPage().some((m) => m.fn === "conceal"), "Esc hides the idle chat");
+  gm.greymarchKey({ code: 1, isDown: true }); // input not open: nothing at all happens to the chat
+  assert.ok(!toPage().some((m) => m.fn === "close" || m.fn === "conceal"));
   enter(gm);
   assert.strictEqual(gm.greymarchChatTyping, true);
   gm.greymarchKey({ code: 1, isDown: true }); // no key-up before it
   assert.strictEqual(gm.greymarchChatTyping, false);
-  assert.ok(toPage().some((m) => m.fn === "close" && m.arg && m.arg.hide === true), "Esc tells the page to hide the chat completely");
+  assert.deepStrictEqual(toPage().pop(), { fn: "close", arg: true });
+  assert.ok(!toPage().some((m) => m.fn === "conceal" || (m.arg && m.arg.hide)), "nothing is ever hidden: the messages stay on screen");
   enter(gm);
-  assert.strictEqual(gm.greymarchChatTyping, true, "and Y opens it again straight away");
+  assert.strictEqual(gm.greymarchChatTyping, true, "and Enter opens it again straight away");
 });
 
 test("an input the page no longer has the keyboard for is closed after a moment, never while the page is focused", () => {
@@ -178,7 +175,7 @@ test("an input the page no longer has the keyboard for is closed after a moment,
   assert.strictEqual(gm.greymarchChatTyping, true, "one look is not enough");
   gm.greymarchChatWatch(t0 + 6300); gm.greymarchChatWatch(t0 + 8000);
   assert.strictEqual(gm.greymarchChatTyping, false);
-  assert.ok(!toPage().some((m) => m.fn === "close" && m.arg && m.arg.hide), "a lost keyboard closes the input but does not hide the chat");
+  assert.ok(!toPage().some((m) => m.arg && m.arg.hide), "nothing is ever hidden");
 });
 const sync = (gm, typing) => gm.greymarchBrowserMessage({ arguments: ["greymarch", JSON.stringify({ type: "chat-sync", typing })] });
 
@@ -211,4 +208,60 @@ test("an idle chat is not holding the keyboard while the staff panel, the X menu
     sync(gm, false);
     assert.deepStrictEqual(log.focused, [], flag + ": their focus is left alone");
   }
+});
+test("HARD RULES: the Enter that sends a line and a held Enter never open the input again; a real press a moment later does", () => {
+  const { gm } = make();
+  gm.greymarchChatShow();
+  enter(gm);
+  gm.greymarchBrowserMessage({ arguments: ["greymarch", JSON.stringify({ type: "chat-focus", on: false })] }); // the page sent the line and closed
+  assert.strictEqual(gm.greymarchChatTyping, false);
+  enter(gm, true); // the game's own copy of that Enter arrives right after
+  assert.strictEqual(gm.greymarchChatTyping, false, "not reopened");
+  gm.greymarchChatClosedAt = Date.now() - 1000;
+  gm.greymarchKey({ code: 28, isDown: true, isRepeating: true }); gm.greymarchChatPending();
+  assert.strictEqual(gm.greymarchChatTyping, false, "a held key does not repeat it");
+  gm.greymarchChatClosedAt = 0; gm.greymarchKey({ code: 28, isDown: true }); gm.greymarchChatPending();
+  assert.strictEqual(gm.greymarchChatTyping, true, "a real press a moment later opens it");
+});
+
+test("HARD RULES: a menu or the console opening closes the input; it never stays open past two minutes; the keyboard is released again after a close", () => {
+  const { gm, menus, log } = make();
+  gm.greymarchChatShow();
+  enter(gm);
+  assert.strictEqual(gm.greymarchChatTyping, true);
+  menus.add("Console");
+  gm.greymarchChatWatchNext = 0; gm.greymarchChatWatch(Date.now());
+  assert.strictEqual(gm.greymarchChatTyping, false, "the console took over: the chat gives way");
+  menus.clear();
+  enter(gm);
+  gm.greymarchChatOpenedAt = Date.now() - 121000;
+  gm.greymarchChatWatchNext = 0; gm.greymarchChatWatch(Date.now());
+  assert.strictEqual(gm.greymarchChatTyping, false, "closed after two minutes open");
+  log.focused.length = 0;
+  gm.greymarchChatWatchNext = 0; gm.greymarchChatWatch(Date.now());
+  assert.deepStrictEqual(log.focused, [false], "the keyboard is released once more a moment after the close");
+  gm.greymarchChatReleaseUntil = Date.now() - 1; log.focused.length = 0;
+  gm.greymarchChatWatchNext = 0; gm.greymarchChatWatch(Date.now());
+  assert.deepStrictEqual(log.focused, [], "and then it is left alone");
+});
+
+test("HARD RULES: a menu or the console opening closes the input; it never stays open past two minutes; the keyboard is released again after a close", () => {
+  const { gm, menus, log } = make();
+  gm.greymarchChatShow();
+  enter(gm);
+  assert.strictEqual(gm.greymarchChatTyping, true);
+  menus.add("Console");
+  gm.greymarchChatWatchNext = 0; gm.greymarchChatWatch(Date.now());
+  assert.strictEqual(gm.greymarchChatTyping, false, "the console took over: the chat gives way");
+  menus.clear();
+  enter(gm);
+  gm.greymarchChatOpenedAt = Date.now() - 121000;
+  gm.greymarchChatWatchNext = 0; gm.greymarchChatWatch(Date.now());
+  assert.strictEqual(gm.greymarchChatTyping, false, "closed after two minutes open");
+  log.focused.length = 0;
+  gm.greymarchChatWatchNext = 0; gm.greymarchChatWatch(Date.now());
+  assert.deepStrictEqual(log.focused, [false], "the keyboard is released once more a moment after the close");
+  gm.greymarchChatReleaseUntil = Date.now() - 1; log.focused.length = 0;
+  gm.greymarchChatWatchNext = 0; gm.greymarchChatWatch(Date.now());
+  assert.deepStrictEqual(log.focused, [], "and then it is left alone");
 });
