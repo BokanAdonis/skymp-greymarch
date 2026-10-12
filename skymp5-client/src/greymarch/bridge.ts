@@ -46,6 +46,7 @@ export class GreymarchBridge {
         if (type === "greymarchKnown") { this.greymarchKnown = msg.names && typeof msg.names === "object" ? msg.names : {}; this.greymarchNamesNext = 0; return; }
         if (type === "greymarchChatLine") { this.greymarchChatToPage("line", msg); return; }
         if (type === "greymarchChatInfo") { this.greymarchChatToPage("info", msg); return; }
+        if (type === "greymarchProps") { this.greymarchDoorNames = msg.doors && typeof msg.doors === "object" ? msg.doors : {}; this.greymarchDoorNamesNext = 0; return; }
         if (type === "greymarchGmAlert") { this.greymarchChatToPage("alert", msg); return; } // a player typed /gm (the server only sends it to Trial GM and up)
         if (type === "greymarchMenuReply") { this.greymarchMenuToPage("reply", msg); return; }
         if (type === "greymarchMenuEvent") { if ((msg.type === "trade_invite" || msg.type === "trade") && !this.greymarchMenuOn) this.greymarchMenuShow({ mode: "invite", looking: 0 }); this.greymarchMenuToPage("event", msg); return; }
@@ -138,6 +139,7 @@ export class GreymarchBridge {
     }
     // Runs every frame in the UPDATE phase (registered in the constructor): that is the only place Skyrim functions such as Game.getFormEx may be called. Cheap when there is nothing to do. Any error lifts the veil instead of trapping the player.
     greymarchTick(): any {
+        this.greymarchDoorNamesApply(Date.now());
         this.greymarchWorldViewGuard(Date.now()); // other players are drawn only while SkyMP's world view is on: see greymarchWorldViewGuard
         if (this.greymarchChatOn && Date.now() >= (this.greymarchChatNext || 0)) { this.greymarchChatNext = Date.now() + 5000; this.greymarchChatToPage("show", true); }
         if (this.greymarchMenuEscAt && Date.now() - this.greymarchMenuEscAt > 700) { this.greymarchMenuEscAt = 0; this.greymarchMenuHide(); } // Esc, and the menu page did not close itself
@@ -562,20 +564,30 @@ export class GreymarchBridge {
         this.greymarchMenuOn = true;
         this.sp.browser.setVisible(true);
         this.sp.browser.setFocused(true);
-        this.greymarchMenuToPage("show", { mode: (arg && arg.mode) || "hold", looking: (arg && arg.looking) || 0 }); // looking = the remote actor id of the player the menu is about
+        this.greymarchMenuToPage("show", { mode: (arg && arg.mode) || "hold", looking: (arg && arg.looking) || 0, object: !!(arg && arg.object) }); // looking = the remote actor id of the player the menu is about
     }
     // HOLD X: look at a player and hold X, and the menu for THAT player appears; let go of X over an option to pick it (the page does the picking: it gets "release").
     // Not looking at a player: nothing opens (a short hint says why). The page is shown and focused while it is up, so the mouse is a cursor.
     greymarchMenuHold(): any {
         if (this.greymarchScreenUp || this.greymarchAdminOn || this.greymarchMenuOn) return;
-        var looking = 0;
-        try { var ref = this.sp.Game.getCurrentCrosshairRef(); if (ref) looking = misc.localIdToRemoteId(ref.getFormID()) || 0; } catch (e) { looking = 0; }
-        var others = this.greymarchOthers || [];
-        if (!looking || others.indexOf(looking) < 0) {
-            try { this.sp.Debug.notification("Look at a player and hold X"); } catch (e2) { /* a hint is a nicety */ }
+        var looking = 0, isObject = false;
+        try {
+            var ref = this.sp.Game.getCurrentCrosshairRef();
+            if (ref) {
+                looking = misc.localIdToRemoteId(ref.getFormID()) || 0;
+                if (looking && (this.greymarchOthers || []).indexOf(looking) < 0) {
+                    // not a player: a door (form type 29) or a storage (28) can be managed from the same menu (the SERVER checks what it really is)
+                    var kind = 0;
+                    try { var base = ref.getBaseObject(); kind = base ? base.getType() : 0; } catch (e1) { kind = 0; }
+                    if (kind === 29 || kind === 28) isObject = true; else looking = 0;
+                }
+            }
+        } catch (e) { looking = 0; isObject = false; }
+        if (!looking) {
+            try { this.sp.Debug.notification("Look at a player, a door or a chest and hold X"); } catch (e2) { /* a hint is a nicety */ }
             return;
         }
-        this.greymarchMenuShow({ mode: "hold", looking: looking });
+        this.greymarchMenuShow({ mode: "hold", looking: looking, object: isObject });
     }
     greymarchMenuRelease(): any {
         if (this.greymarchMenuOn) this.greymarchMenuToPage("release", true);
@@ -675,5 +687,30 @@ export class GreymarchBridge {
         if (body.op === "send") { body.text = String(data.text || "").slice(0, 300); body.tab = data.tab === "staff" ? "staff" : "local"; }
         var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify(body) };
         this.controller.emitter.emit("sendMessage", { message: message, reliability: "reliable" });
+    }
+    // HOUSES AND STORAGE: the names staff gave doors ("Breezehome") are shown by every game instead of the base game's. The server sends { reference id: name } and a door that loses its name goes back to the game's own.
+    greymarchDoorNamesApply(now: any): any {
+        if (now < (this.greymarchDoorNamesNext || 0)) return;
+        this.greymarchDoorNamesNext = now + 3000;
+        var want = this.greymarchDoorNames || {};
+        var done = this.greymarchDoorNamesDone || (this.greymarchDoorNamesDone = {});
+        var sp = this.sp;
+        for (var id in want) {
+            var local = misc.remoteIdToLocalId(Number(id));
+            if (!local) continue;
+            var o: any = null;
+            try { o = sp.ObjectReference.from(sp.Game.getFormEx(local)); } catch (e0) { o = null; }
+            if (!o) continue;
+            try {
+                if (String(o.getDisplayName()) !== want[id]) o.setDisplayName(want[id], true);
+                done[id] = want[id];
+            } catch (e1) { if (!this.greymarchDoorErr) { this.greymarchDoorErr = true; this.greymarchLog("props: could not name door " + id + " (" + e1 + ")"); } }
+        }
+        for (var id2 in done) {
+            if (want[id2] !== undefined) continue;
+            var l2 = misc.remoteIdToLocalId(Number(id2));
+            try { var o2 = l2 ? sp.ObjectReference.from(sp.Game.getFormEx(l2)) : null; if (o2) o2.setDisplayName("", true); } catch (e2) { /* the door is not loaded: it keeps its name until it is */ }
+            delete done[id2];
+        }
     }
 }

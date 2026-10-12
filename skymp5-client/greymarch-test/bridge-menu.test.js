@@ -48,7 +48,7 @@ test("hold X while looking at a player opens the menu for THAT player; letting g
   assert.strictEqual(gm.greymarchMenuOn, true);
   assert.deepStrictEqual(log.visible, [true]);
   assert.deepStrictEqual(log.focused, [true]);
-  assert.deepStrictEqual(toPage()[0], { fn: "show", arg: { mode: "hold", looking: BIT + 5 } });
+  assert.deepStrictEqual(toPage()[0], { fn: "show", arg: { mode: "hold", looking: BIT + 5, object: false } });
   gm.greymarchKey({ code: 45, isDown: true }); // key repeat while held
   assert.strictEqual(toPage().length, 1);
   gm.greymarchKey({ code: 45, isDown: false }); // let go
@@ -69,7 +69,7 @@ test("nothing opens when you are not looking at a player (a hint is shown), over
   a.gm.greymarchOthers = [BIT + 5];
   a.gm.greymarchKey({ code: 45, isDown: true }); // no crosshair target
   assert.ok(!a.gm.greymarchMenuOn);
-  assert.deepStrictEqual(a.log.notes, ["Look at a player and hold X"]);
+  assert.deepStrictEqual(a.log.notes, ["Look at a player, a door or a chest and hold X"]);
   const a2 = make();
   a2.gm.greymarchOthers = [BIT + 5];
   a2.setCrosshair({ getFormID: () => 0x777 }); // something that is not a player
@@ -110,7 +110,7 @@ test("a trade invitation (or a trade starting) opens the menu by itself in invit
   gm.greymarchPacket({ customPacketType: "greymarchMenuEvent", type: "trade_invite", id: 1, from: "Stranger" });
   assert.strictEqual(gm.greymarchMenuOn, true);
   assert.deepStrictEqual(toPage().map((m) => m.fn), ["show", "event"]);
-  assert.deepStrictEqual(toPage()[0].arg, { mode: "invite", looking: 0 });
+  assert.deepStrictEqual(toPage()[0].arg, { mode: "invite", looking: 0, object: false });
   gm.greymarchPacket({ customPacketType: "greymarchMenuEvent", type: "trade_invite", id: 2, from: "Stranger" });
   assert.deepStrictEqual(toPage().map((m) => m.fn), ["show", "event", "event"]);
   const other = make();
