@@ -712,13 +712,30 @@ export class GreymarchBridge {
                 }
             } catch (e) { text = ""; if (!this.greymarchDoorPromptErr) { this.greymarchDoorPromptErr = true; this.greymarchLog("props: door prompt failed (" + e + ")"); } }
         }
+        this.greymarchDoorIcon(!!text);
         var draw = forced ? "" : text; // our own drawing is only needed while the game's text could not be overwritten
         if (draw !== (this.greymarchDoorPromptText || "")) {
             this.greymarchDoorPromptText = draw;
             this.greymarchChatToPage("door", draw);
         }
     }
-    // Overwrite the HUD's rollover (activate) text with the door's text. The log of a real door showed where it lives: RolloverNameInstance.text holds the verb and where the door leads ("Open", a line
+    // The "E" key icon of the prompt is hidden while the door in the crosshair is a named one, and shown again the moment it is not. Which HUD clip is the icon is not known for certain, so the likely
+    // ones are all tried (a path that does not exist is ignored by the game) and the log says which of them were visible, once.
+    greymarchDoorIcon(hide: boolean): any {
+        if (hide === !!this.greymarchDoorIconHidden) return;
+        var ui = this.sp.Ui;
+        var names = ["RolloverButton_mc", "RolloverButton_tf", "RolloverButtonInstance", "RolloverButton", "ActivateButton", "RolloverInstance.Button", "RolloverNameInstance.Button"];
+        var seen: string[] = [];
+        for (var i = 0; i < names.length; i++) {
+            var target = "_root.HUDMovieBaseInstance." + names[i] + "._visible";
+            try {
+                if (hide && ui.getBool("HUD Menu", target)) seen.push(names[i]);
+                ui.setBool("HUD Menu", target, !hide);
+            } catch (e) { /* not in this HUD */ }
+        }
+        this.greymarchDoorIconHidden = hide;
+        if (hide && !this.greymarchDoorIconLogged) { this.greymarchDoorIconLogged = true; this.greymarchLog("props: E icon hidden; HUD clips that were visible: " + (seen.length ? seen.join(", ") : "none of the guesses")); }
+    }    // Overwrite the HUD's rollover (activate) text with the door's text. The log of a real door showed where it lives: RolloverNameInstance.text holds the verb and where the door leads ("Open", a line
     // break, "Whiterun"); the door's own display name sits in RolloverText.text. So the line after the verb is replaced by ours and the verb stays. Returns true when the game's own text now reads ours.
     greymarchDoorForce(remote: any, text: string): any {
         var ui = this.sp.Ui;
