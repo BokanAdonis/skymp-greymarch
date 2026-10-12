@@ -24,19 +24,23 @@ jobs:
         run: |
           set -euo pipefail
           mkdir art
-          gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" -n ubuntu-vcpkg-deps_dist.tar.gz -D art
-          find art -type f | head
-          # the artifact is either the tarball itself or a zip that holds it
-          F="$(find art -name '*.tar.gz' | head -1)"
-          if [ -z "$F" ]; then
-            Z="$(find art -name '*.zip' | head -1)"
-            [ -n "$Z" ] && unzip -o "$Z" -d art
-            F="$(find art -name '*.tar.gz' | head -1)"
+          ID="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/artifacts" --jq '.artifacts[] | select(.name=="ubuntu-vcpkg-deps_dist.tar.gz") | .id' | head -1)"
+          test -n "$ID"
+          echo "artifact id $ID"
+          gh api "repos/$GITHUB_REPOSITORY/actions/artifacts/$ID/zip" > art/download.bin
+          ls -l art/download.bin
+          # the artifact is stored either as the tarball itself or as a zip that holds it: tell them apart by the first two bytes
+          MAGIC="$(head -c2 art/download.bin | od -An -tx1 | tr -d ' \n')"
+          echo "first bytes: $MAGIC"
+          if [ "$MAGIC" = "1f8b" ]; then
+            cp art/download.bin server-dist.tar.gz
+          else
+            unzip -o art/download.bin -d art/unzipped
+            F="$(find art/unzipped -name '*.tar.gz' | head -1)"
+            test -n "$F"
+            cp "$F" server-dist.tar.gz
           fi
-          test -n "$F"
-          cp "$F" server-dist.tar.gz
-          ls -l server-dist.tar.gz
-      - name: Check what is inside
+          ls -l server-dist.tar.gz      - name: Check what is inside
         run: |
           set -euo pipefail
           tar -tzf server-dist.tar.gz | head -40
