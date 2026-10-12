@@ -121,3 +121,12 @@ test("the voice display switching on or off cannot take the keyboard away from s
   gm.greymarchVoiceMessage({ hud: false, speaking: [] });
   assert.ok(!log.focused.includes(false), "still focused");
 });
+
+test("a /gm request from the server goes to the chat page as a pop-up", () => {
+  const { gm, toPage } = make();
+  gm.greymarchChatShow();
+  gm.greymarchPacket({ customPacketType: "greymarchGmAlert", from: "Alda Ring #AAAA", text: "stuck in the wall", at: 1 });
+  const last = toPage().pop();
+  assert.strictEqual(last.fn, "alert");
+  assert.deepStrictEqual([last.arg.from, last.arg.text], ["Alda Ring #AAAA", "stuck in the wall"]);
+});
