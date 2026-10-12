@@ -706,12 +706,19 @@ export class GreymarchBridge {
             if (!local) continue;
             var o: any = null;
             try { o = sp.ObjectReference.from(sp.Game.getFormEx(local)); } catch (e0) { o = null; }
-            if (!o) continue;
+            if (!o) {
+                if (!this.greymarchDoorMiss) this.greymarchDoorMiss = {};
+                if (!this.greymarchDoorMiss[id]) { this.greymarchDoorMiss[id] = 1; this.greymarchLog("props: door " + Number(id).toString(16) + " is not loaded here (local " + local.toString(16) + ")"); }
+                continue;
+            }
             try {
                 if (orig[id] === undefined) { var own = String(o.getDisplayName() || ""); orig[id] = own.length ? own : "Door"; } // the game's own name; never empty (an empty display name can crash the game)
                 var base = label || orig[id];
                 var text = owner ? base + " - Owned by: " + owner : base; // one line: a line break in a display name is not reliably drawn by the game's prompt
-                if (text.length && String(o.getDisplayName()) !== text) o.setDisplayName(text, true);
+                if (text.length && String(o.getDisplayName()) !== text) {
+                    o.setDisplayName(text, true);
+                    if (done[id] !== text) this.greymarchLog("props: door " + Number(id).toString(16) + " (local " + local.toString(16) + ") named '" + text + "', reads back '" + String(o.getDisplayName()) + "'"); // once per change, so the server log shows whether the game kept the name
+                }
                 done[id] = text;
             } catch (e1) { if (!this.greymarchDoorErr) { this.greymarchDoorErr = true; this.greymarchLog("props: could not name door " + id + " (" + e1 + ")"); } }
         }
