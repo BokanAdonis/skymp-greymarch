@@ -307,7 +307,8 @@ export class GreymarchBridge {
         if (e.code !== 65 && e.code !== 1 && e.code !== 45 && e.code !== 21) return;
         var down = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true);
         if (e.isUp === true) down = false;
-        if (e.code === 1 && down && this.greymarchChatTyping) { this.greymarchChatClose(); return; } // Esc closes the chat input whenever it is open, whatever the key-up history says
+        if (e.code === 1 && down && this.greymarchChatTyping) { this.greymarchChatClose(true); return; } // Esc closes the chat completely whenever the input is open, whatever the key-up history says
+        if (e.code === 1 && down && this.greymarchChatOn) this.greymarchChatToPage("conceal", true); // Esc with the input closed hides the idle chat too (the key still does its normal job: the menus below, or the game's own)
         if (e.code === 21) { if (down) this.greymarchChatWanted = Date.now(); return; } // Y: the chat is opened from the update phase (greymarchChatPending), where the game's menus can be asked about; a missed key-up can never swallow the next press
         var was = this["greymarchKey" + e.code];
         this["greymarchKey" + e.code] = down;
@@ -700,9 +701,9 @@ export class GreymarchBridge {
         this.sp.browser.setFocused(true);
         this.greymarchChatToPage("open", {});
     }
-    greymarchChatClose(): any {
+    greymarchChatClose(hide?: any): any {
         if (!this.greymarchChatTyping) return;
-        this.greymarchChatToPage("close", true);
+        this.greymarchChatToPage("close", hide ? { hide: true } : true); // hide: Esc, the page also conceals the lines until a new message arrives or Y is pressed
         this.greymarchChatFocus(false);
     }
     // the page tells us when it has the keyboard (typing) and when it lets go

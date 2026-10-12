@@ -154,19 +154,20 @@ test("a /gm request from the server goes to the chat page as a pop-up", () => {
 test("Esc closes the chat input whenever it is open, even if no key-up was ever seen; with the chat closed Esc does nothing to it", () => {
   const { gm, toPage } = make();
   gm.greymarchChatShow();
-  gm.greymarchKey({ code: 1, isDown: true }); // chat not open: nothing happens
+  gm.greymarchKey({ code: 1, isDown: true }); // input not open: no close, but the idle chat is hidden
   assert.ok(!toPage().some((m) => m.fn === "close"));
+  assert.ok(toPage().some((m) => m.fn === "conceal"), "Esc hides the idle chat");
   enter(gm);
   assert.strictEqual(gm.greymarchChatTyping, true);
   gm.greymarchKey({ code: 1, isDown: true }); // no key-up before it
   assert.strictEqual(gm.greymarchChatTyping, false);
-  assert.deepStrictEqual(toPage().pop(), { fn: "close", arg: true });
+  assert.ok(toPage().some((m) => m.fn === "close" && m.arg && m.arg.hide === true), "Esc tells the page to hide the chat completely");
   enter(gm);
   assert.strictEqual(gm.greymarchChatTyping, true, "and Y opens it again straight away");
 });
 
 test("an input the page no longer has the keyboard for is closed after a moment, never while the page is focused", () => {
-  const { gm, focus } = make();
+  const { gm, focus, toPage } = make();
   gm.greymarchChatShow();
   enter(gm);
   const t0 = Date.now();
@@ -177,4 +178,5 @@ test("an input the page no longer has the keyboard for is closed after a moment,
   assert.strictEqual(gm.greymarchChatTyping, true, "one look is not enough");
   gm.greymarchChatWatch(t0 + 6300); gm.greymarchChatWatch(t0 + 8000);
   assert.strictEqual(gm.greymarchChatTyping, false);
+  assert.ok(!toPage().some((m) => m.fn === "close" && m.arg && m.arg.hide), "a lost keyboard closes the input but does not hide the chat");
 });
