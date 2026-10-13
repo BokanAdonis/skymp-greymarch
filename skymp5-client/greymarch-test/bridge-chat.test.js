@@ -276,3 +276,25 @@ test("HARD RULES: a menu or the console opening closes the input; it never stays
   gm.greymarchChatWatchNext = 0; gm.greymarchChatWatch(Date.now());
   assert.deepStrictEqual(log.focused, [], "and then it is left alone");
 });
+test("the load order the game really uses is written to the server log once per session (full plugins, then light ones), in short lines", () => {
+  const { gm, log, sentPackets } = make();
+  const full = ["Skyrim.esm", "Update.esm", "Mod A.esp"]; const light = ["Light One.esp", "Light Two.esl"];
+  gm.sp.Game.getModCount = () => full.length; gm.sp.Game.getModName = (i) => full[i];
+  gm.sp.Game.getLightModCount = () => light.length; gm.sp.Game.getLightModName = (i) => light[i];
+  gm.greymarchReportLoadOrder();
+  gm.greymarchReportLoadOrder(); // a second call does nothing
+  const lines = sentPackets().filter((p) => p.customPacketType === "greymarchLog").map((p) => p.text);
+  assert.strictEqual(lines.length, 1);
+  assert.strictEqual(lines[0], "loadorder 1/1: full 3: Skyrim.esm | Update.esm | Mod A.esp || light 2: Light One.esp | Light Two.esl");
+  // a long list is cut into several lines that each fit
+  const many = Array.from({ length: 120 }, (_, i) => "Some Long Plugin Name " + i + ".esp");
+  const t = make();
+  t.gm.sp.Game.getModCount = () => many.length; t.gm.sp.Game.getModName = (i) => many[i]; t.gm.sp.Game.getLightModCount = () => 0;
+  t.gm.greymarchReportLoadOrder();
+  const parts = t.sentPackets().filter((p) => p.customPacketType === "greymarchLog").map((p) => p.text);
+  assert.ok(parts.length > 1 && parts.every((x) => x.length < 740), parts.map((x) => x.length).join(","));
+  assert.strictEqual(parts.map((x) => x.replace(/^loadorder \d+\/\d+: /, "")).join(""), "full 120: " + many.join(" | ") + " || light 0: ");
+  // a game that cannot answer does not break anything
+  const u = make(); u.gm.greymarchReportLoadOrder();
+  assert.ok(u.sentPackets().some((p) => /could not be read/.test(p.text)));
+});

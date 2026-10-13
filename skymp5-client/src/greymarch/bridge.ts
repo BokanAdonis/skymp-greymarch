@@ -125,6 +125,21 @@ export class GreymarchBridge {
         eq.resets++;
         this.greymarchLog("reset #" + eq.resets + " (" + why + "): unequipped everything, emptied the inventory, added " + eq.kit.length + " kit item(s)");
     }
+    // The load order the GAME really uses (full plugins by position, light ones by their own position), written to the server log once per session: the server's item and place IDs are numbered
+    // by ITS load order, so this is the proof that both agree (compare it with the server's list). Names only, in chunks short enough for one log line each.
+    greymarchReportLoadOrder(): any {
+        if (this.greymarchLoadOrderReported) return;
+        this.greymarchLoadOrderReported = true;
+        try {
+            var G = this.sp.Game, full: string[] = [], light: string[] = [];
+            for (var i = 0; i < G.getModCount(); i++) full.push(String(G.getModName(i)));
+            var nl = 0; try { nl = G.getLightModCount(); } catch (e0) { nl = 0; }
+            for (var j = 0; j < nl; j++) light.push(String(G.getLightModName(j)));
+            var text = "full " + full.length + ": " + full.join(" | ") + " || light " + light.length + ": " + light.join(" | ");
+            var parts = Math.ceil(text.length / 700);
+            for (var k = 0; k < parts; k++) this.greymarchLog("loadorder " + (k + 1) + "/" + parts + ": " + text.substr(k * 700, 700));
+        } catch (e) { this.greymarchLog("loadorder: could not be read (" + e + ")"); }
+    }
     greymarchLift(why: any): any {
         var job = this.greymarchReveal;
         this.greymarchReveal = null;
@@ -134,6 +149,7 @@ export class GreymarchBridge {
         this.sp.browser.setVisible(!!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn); // stays visible (but never focused) while the voice display is on; the staff panel keeps it up and focused
         if (this.greymarchAdminOn) this.sp.browser.setFocused(true);
         this.greymarchChatShow();
+        this.greymarchReportLoadOrder();
         this.greymarchLog("veil lifted (" + why + ") after " + (job ? Date.now() - job.at : "?") + " ms");
         this.sp.printConsole("[greymarch] veil lifted (" + why + ")");
     }
