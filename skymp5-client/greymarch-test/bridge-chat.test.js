@@ -185,6 +185,8 @@ test("the server's damage multiplier (a weapon above your rank hits weaker) is s
   assert.deepStrictEqual(set, [["AttackDamageMult", 0.64]], "set once");
   gm.greymarchPacket({ customPacketType: "greymarchCombatMod", mult: 1 });
   gm.greymarchCombatApply(player); assert.deepStrictEqual(set.pop(), ["AttackDamageMult", 1]);
+  gm.greymarchPacket({ customPacketType: "greymarchCombatMod", mult: 1.24 });
+  gm.greymarchCombatApply(player); assert.deepStrictEqual(set.pop(), ["AttackDamageMult", 1.24], "a Brawler's fist bonus is above 1");
   for (const bad of [0, -3, 5, "x", null, NaN]) { gm.greymarchPacket({ customPacketType: "greymarchCombatMod", mult: bad }); assert.strictEqual(gm.greymarchCombatWant, 1, String(bad)); }
   gm.greymarchPacket({ customPacketType: "greymarchCombatMod", mult: 0.5 });
   assert.doesNotThrow(() => gm.greymarchCombatApply({ setActorValue() { throw new Error("no such value"); } }), "a failing game call never breaks the update");
