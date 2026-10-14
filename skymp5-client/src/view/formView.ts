@@ -1,4 +1,4 @@
-import { Actor, ActorBase, createText, destroyText, Form, FormType, Game, Keyword, NetImmerse, ObjectReference, once, printConsole, setTextPos, setTextSize, setTextString, storage, TESModPlatform, Utility, worldPointToScreenPoint } from "skyrimPlatform";
+import { Actor, ActorBase, createText, destroyText, Form, FormType, Game, Keyword, NetImmerse, ObjectReference, once, printConsole, setTextColor, setTextPos, setTextSize, setTextString, storage, TESModPlatform, Utility, worldPointToScreenPoint } from "skyrimPlatform";
 import { setDefaultAnimsDisabled, applyAnimation } from "../sync/animation";
 import { Appearance, applyAppearance } from "../sync/appearance";
 import { isBadMenuShown, applyEquipment } from "../sync/equipment";
@@ -567,17 +567,22 @@ export class FormView {
         // GREYMARCH: a character who introduced themselves to this player shows their NAME (large) with their ID UNDER it (smaller); everyone else shows the ID alone
         let gmName: string = "";
         try { const gmG: any = Function("return this")(); const gmN = gmG.__gmKnown && gmG.__gmKnown[this.getRemoteRefrId()]; if (gmN) gmName = String(gmN); } catch (gmErr) { /* the ID stays */ }
-        const gmMain: string = gmName || model.appearance.name;
+        const gmBase: string = gmName || model.appearance.name;
+        // GREYMARCH: while this character is talking, a mark and a green tint are part of the name text itself: drawn in the same frame as the name, so nothing lags behind the head
+        let gmTalking: boolean = false;
+        try { const gmT: any = Function("return this")(); gmTalking = !!(gmT.__gmSpeaking && gmT.__gmSpeaking[model.appearance.name]); } catch (gmErr) { /* not marked */ }
+        const gmMain: string = gmTalking ? gmBase + "  )))" : gmBase;
+        const gmNameColor: number[] = gmTalking ? [0.55, 0.95, 0.55, 0.95] : [1, 1, 1, 0.8];
         const gmMainSize: number = gmName ? 0.503 : 0.4375; // 0.4375 is the size of a lone ID; a name is 15% bigger than that
         const gmIdSize: number = 0.372; // 15% smaller than a lone ID
         const gmIdY: number = textYPos + Math.round(resolution.height * 0.024);
-        if (this.textNameId && this.textNameShown !== gmMain) { setTextString(this.textNameId, gmMain); setTextSize(this.textNameId, gmMainSize); this.textNameShown = gmMain; }
+        if (this.textNameId && this.textNameShown !== gmMain) { setTextString(this.textNameId, gmMain); setTextSize(this.textNameId, gmMainSize); setTextColor(this.textNameId, gmNameColor); this.textNameShown = gmMain; }
         if (gmName && !this.textIdId && this.textNameId) { this.textIdId = createText(textXPos, gmIdY, model.appearance.name, [1, 1, 1, 0.8]); setTextSize(this.textIdId, gmIdSize); }
         if (!gmName && this.textIdId) { destroyText(this.textIdId); this.textIdId = undefined; }
 
         if (!this.textNameId && headScreenPos[2] > 0) {
           this.textNameShown = gmMain;
-          this.textNameId = createText(textXPos, textYPos, gmMain, [1, 1, 1, 0.8]); // GREYMARCH: the floating name is the character ID; the game's own display name is "Stranger" or the name you were introduced to
+          this.textNameId = createText(textXPos, textYPos, gmMain, gmNameColor); // GREYMARCH: the floating name is the character ID; the game's own display name is "Stranger" or the name you were introduced to
           setTextSize(this.textNameId, gmMainSize);
           SpApiInteractor.getControllerInstance().emitter.emit("nicknameCreate", {
             remoteRefrId: this.getRemoteRefrId(),

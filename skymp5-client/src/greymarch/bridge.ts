@@ -176,21 +176,7 @@ export class GreymarchBridge {
                 this.greymarchLog("alive #" + beat.n + where);
             }
         }
-        // The voice display: while someone is talking, tell it where their head is on screen (10 times a second) so the microphone follows them.
-        var vo = this.greymarchVoice;
-        if (vo && vo.hud) {
-            var hNow = Date.now();
-            if (!this.greymarchHeadNext || hNow >= this.greymarchHeadNext) {
-                this.greymarchHeadNext = hNow + 100;
-                var hs = this.greymarchHeads || {}, list = [];
-                for (var hi = 0; hi < vo.speaking.length; hi++) { var hd = hs[vo.speaking[hi]]; if (hd && hNow - hd.at < 400) list.push({ id: vo.speaking[hi], x: hd.x, y: hd.y }); }
-                if (list.length || this.greymarchHeadsShown) {
-                    this.greymarchHeadsShown = list.length > 0;
-                    var res = this.greymarchRes || { w: 0, h: 0 };
-                    this.greymarchHudToPage("heads", { list: list, w: res.w, h: res.h });
-                }
-            }
-        }
+        // (The talking mark over a head is part of the floating name now, see formView.ts: no positions are sent to the page any more.)
         var veil = this.greymarchReveal;
         var eq = this.greymarchEquip;
         var tr = this.greymarchTrace;
@@ -269,6 +255,8 @@ export class GreymarchBridge {
         var hud = data.hud === true;
         var changed = hud !== !!this.greymarchHudOn;
         this.greymarchVoice = { hud: hud, speaking: ids };
+        // the floating names mark whoever is talking (formView.ts draws the mark as part of the name, so it moves with it and cannot lag)
+        try { var talking = {}; if (hud) for (var ti = 0; ti < ids.length; ti++) talking[ids[ti]] = 1; (Function("return this")() as any).__gmSpeaking = talking; } catch (e) { /* the names stay unmarked */ }
         this.greymarchHudOn = hud;
         // the page is shown (never focused) while the display is on, hidden when it is off; the select screen and the veil decide for themselves while they are up
         if (changed && !this.greymarchScreenUp) { try { this.sp.browser.setVisible(hud || !!this.greymarchChatOn); if (!this.greymarchChatTyping) this.sp.browser.setFocused(false); } catch (err) { /* nothing to do */ } }

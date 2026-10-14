@@ -139,6 +139,20 @@ test("the voice display switching on or off cannot take the keyboard away from s
   assert.ok(!log.focused.includes(false), "still focused");
 });
 
+test("the floating names are told who is talking (only real character IDs, nobody when the voice display is off) and no positions go to the page any more", () => {
+  const { gm, log } = make();
+  const g = Function("return this")();
+  gm.greymarchVoiceMessage({ hud: true, speaking: ["#ABCD", "#AB1D", "not an id", "#9XYZ"] });
+  assert.deepStrictEqual(Object.keys(g.__gmSpeaking).sort(), ["#9XYZ", "#ABCD"].sort(), "I and 1 are not in the ID alphabet; junk is ignored");
+  gm.greymarchVoiceMessage({ hud: false, speaking: ["#ABCD"] });
+  assert.deepStrictEqual(g.__gmSpeaking, {}, "display off: nobody is marked");
+  gm.greymarchVoiceMessage({ hud: true, speaking: ["#ABCD"] });
+  gm.greymarchHeads = { "#ABCD": { x: 10, y: 20, at: Date.now() } };
+  log.js.length = 0;
+  gm.greymarchTick();
+  assert.ok(!log.js.some((j) => j.includes('"heads"')), "the browser microphone is not fed head positions");
+});
+
 test("a /gm request from the server goes to the chat page as a pop-up", () => {
   const { gm, toPage } = make();
   gm.greymarchChatShow();
