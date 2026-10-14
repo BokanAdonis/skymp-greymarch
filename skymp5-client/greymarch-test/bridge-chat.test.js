@@ -153,6 +153,38 @@ test("the floating names are told who is talking (only real character IDs, nobod
   assert.ok(!log.js.some((j) => j.includes('"heads"')), "the browser microphone is not fed head positions");
 });
 
+test("K opens the professions window, the page's questions go to the server as greymarchProf packets, answers go back to the page, Esc or the page closes it", () => {
+  const { gm, log, sentPackets } = make();
+  const profPage = () => log.js.filter((x) => x.includes("__gmProfSend(")).map((x) => JSON.parse(x.slice(x.lastIndexOf("__gmProfSend(") + 13).replace(/\);$/, "")));
+  gm.greymarchKey({ code: 37, isDown: true });
+  assert.strictEqual(gm.greymarchProfOn, true);
+  assert.deepStrictEqual(profPage().pop(), { fn: "show", arg: true });
+  assert.ok(log.js.some((j) => j.includes("greymarch-prof.html")), "the page script loads the professions page");
+  gm.greymarchBrowserMessage({ arguments: ["greymarch", JSON.stringify({ type: "prof", rid: 5, op: "pick", args: { combat: "bowman", trades: ["miner"] } })] });
+  assert.deepStrictEqual(sentPackets().pop(), { customPacketType: "greymarchProf", rid: 5, op: "pick", args: { combat: "bowman", trades: ["miner"] } });
+  gm.greymarchPacket({ customPacketType: "greymarchProfReply", rid: 5, ok: true, locked: true });
+  assert.deepStrictEqual(profPage().pop(), { fn: "reply", arg: { customPacketType: "greymarchProfReply", rid: 5, ok: true, locked: true } });
+  gm.greymarchKey({ code: 37, isDown: false }); gm.greymarchKey({ code: 37, isDown: true });
+  assert.strictEqual(gm.greymarchProfOn, true, "K from the game never closes it (the page does, so the key cannot reopen it)");
+  gm.greymarchBrowserMessage({ arguments: ["greymarch", JSON.stringify({ type: "prof-close" })] });
+  assert.strictEqual(gm.greymarchProfOn, false);
+  assert.deepStrictEqual(profPage().pop(), { fn: "hide", arg: true });
+  gm.greymarchKey({ code: 37, isDown: false }); gm.greymarchKey({ code: 37, isDown: true });
+  assert.strictEqual(gm.greymarchProfOn, true);
+  gm.greymarchKey({ code: 1, isDown: false }); gm.greymarchKey({ code: 1, isDown: true });
+  assert.strictEqual(gm.greymarchProfOn, false, "Esc closes it");
+});
+
+test("K does nothing while typing in the chat, over the character select screen, or over another panel", () => {
+  const { gm } = make();
+  gm.greymarchChatTyping = true; gm.greymarchKey({ code: 37, isDown: true });
+  assert.ok(!gm.greymarchProfOn, "typing"); gm.greymarchChatTyping = false; gm.greymarchKey({ code: 37, isDown: false });
+  gm.greymarchScreenUp = true; gm.greymarchKey({ code: 37, isDown: true });
+  assert.ok(!gm.greymarchProfOn, "select screen"); gm.greymarchScreenUp = false; gm.greymarchKey({ code: 37, isDown: false });
+  gm.greymarchMenuOn = true; gm.greymarchKey({ code: 37, isDown: true });
+  assert.ok(!gm.greymarchProfOn, "the X menu is up");
+});
+
 test("a /gm request from the server goes to the chat page as a pop-up", () => {
   const { gm, toPage } = make();
   gm.greymarchChatShow();
