@@ -175,6 +175,21 @@ test("K opens the professions window, the page's questions go to the server as g
   assert.strictEqual(gm.greymarchProfOn, false, "Esc closes it");
 });
 
+test("the server's damage multiplier (a weapon above your rank hits weaker) is set as the game's attack damage multiplier, once per change; nonsense is read as 1", () => {
+  const { gm } = make();
+  const set = [];
+  const player = { setActorValue: (n, v) => set.push([n, v]) };
+  gm.greymarchCombatApply(player); assert.deepStrictEqual(set, [], "nothing to apply before the server says something");
+  gm.greymarchPacket({ customPacketType: "greymarchCombatMod", mult: 0.64 });
+  gm.greymarchCombatApply(player); gm.greymarchCombatApply(player);
+  assert.deepStrictEqual(set, [["AttackDamageMult", 0.64]], "set once");
+  gm.greymarchPacket({ customPacketType: "greymarchCombatMod", mult: 1 });
+  gm.greymarchCombatApply(player); assert.deepStrictEqual(set.pop(), ["AttackDamageMult", 1]);
+  for (const bad of [0, -3, 5, "x", null, NaN]) { gm.greymarchPacket({ customPacketType: "greymarchCombatMod", mult: bad }); assert.strictEqual(gm.greymarchCombatWant, 1, String(bad)); }
+  gm.greymarchPacket({ customPacketType: "greymarchCombatMod", mult: 0.5 });
+  assert.doesNotThrow(() => gm.greymarchCombatApply({ setActorValue() { throw new Error("no such value"); } }), "a failing game call never breaks the update");
+});
+
 test("K does nothing while typing in the chat, over the character select screen, or over another panel", () => {
   const { gm } = make();
   gm.greymarchChatTyping = true; gm.greymarchKey({ code: 37, isDown: true });
