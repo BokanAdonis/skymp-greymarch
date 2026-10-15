@@ -16,6 +16,8 @@ const CHAT_SCRIPT = "(function(){if(window.__gmChatSend)return;var f=document.cr
 const MENU_SCRIPT = "(function(){if(window.__gmMenuSend)return;var f=document.createElement('iframe');f.id='greymarch-menu-frame';f.src='greymarch-menu.html';f.style.cssText='position:fixed;left:0;top:0;width:100%;height:100%;border:0;z-index:2147483210;background:transparent;display:block;pointer-events:none';f.setAttribute('allowtransparency','true');var ready=false,queue=[];window.addEventListener('message',function(e){if(e.source!==f.contentWindow)return;var d=e.data;if(!d)return;if(d.greymarchReady){ready=true;queue.forEach(function(q){f.contentWindow.postMessage({greymarchIn:q},'*')});queue=[]}else if(d.greymarchOut&&window.skyrimPlatform){window.skyrimPlatform.sendMessage('greymarch',JSON.stringify(d.greymarchOut))}});window.__gmMenuSend=function(m){if(m.fn==='show'){f.style.pointerEvents='auto';try{f.focus()}catch(x){}}else if(m.fn==='hide')f.style.pointerEvents='none';if(ready)f.contentWindow.postMessage({greymarchIn:m},'*');else queue.push(m)};document.body.appendChild(f);document.addEventListener('keyup',function(e){if(e.key==='x'||e.key==='X'){try{f.contentWindow.postMessage({greymarchIn:{fn:'release'}},'*')}catch(x){}}});document.addEventListener('keydown',function(e){if(e.key==='Escape'){try{f.contentWindow.postMessage({greymarchIn:{fn:'escape'}},'*')}catch(x){}}})})();";
 const PROF_SCRIPT = "(function(){if(window.__gmProfSend)return;var f=document.createElement('iframe');f.id='greymarch-prof-frame';f.src='greymarch-prof.html';f.style.cssText='position:fixed;left:0;top:0;width:100%;height:100%;border:0;z-index:2147483220;background:transparent;display:block;pointer-events:none';f.setAttribute('allowtransparency','true');var ready=false,queue=[];window.addEventListener('message',function(e){if(e.source!==f.contentWindow)return;var d=e.data;if(!d)return;if(d.greymarchReady){ready=true;queue.forEach(function(q){f.contentWindow.postMessage({greymarchIn:q},'*')});queue=[]}else if(d.greymarchOut&&window.skyrimPlatform){window.skyrimPlatform.sendMessage('greymarch',JSON.stringify(d.greymarchOut))}});window.__gmProfSend=function(m){if(m.fn==='show'){f.style.pointerEvents='auto';try{f.focus()}catch(x){}}else if(m.fn==='hide')f.style.pointerEvents='none';if(ready)f.contentWindow.postMessage({greymarchIn:m},'*');else queue.push(m)};document.body.appendChild(f);document.addEventListener('keyup',function(e){if(e.key==='x'||e.key==='X'){try{f.contentWindow.postMessage({greymarchIn:{fn:'release'}},'*')}catch(x){}}});document.addEventListener('keydown',function(e){if(e.key==='Escape'){try{f.contentWindow.postMessage({greymarchIn:{fn:'escape'}},'*')}catch(x){}}})})();";
 const WOLF_MORPH_MS = 4300; // the werewolf transformation: the race changes at the animation's "SetRace" cue, or after this long if the cue is not seen (the cue is about 4.0 s in, animationdatasinglefile.txt)
+const SHAPE_REST_MS = 800, SHAPE_POWER_REST_MS = 1600; // a creature's attacks: the rest after a normal and after a power attack (the server allows the same pace)
+const SHAPE_LAND_MS = 450; // a creature's swing is reported this long after it starts (about when it lands)
 const SHAPE_SILENCE_MS = 20000; // a creature form: with no word from the server for this long the player changes back by themselves (the server repeats "on" every 5 seconds)
 const WOLF_BACK_GRACE_MS = 2000; // Z changes back, but not in the first 2 seconds after the body changed
 const WOLF_ROAR_MS = 4000;  // R: one roar every this long (the howl animation lasts about 2.8 s)
@@ -334,6 +336,7 @@ export class GreymarchBridge {
     greymarchKey(e: any): any {
         if (e.code === 19) { var rDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (e.isUp === true) rDown = false; if (rDown && !this.greymarchKey19 && this.greymarchWolfOn && !this.greymarchChatTyping) this.greymarchWolfRoarAt = Date.now(); this.greymarchKey19 = rDown; return; } // R: the werewolf roars (greymarchWolfTick; only while changed)
         if (e.code === 44) { var zDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (e.isUp === true) zDown = false; if (zDown && !this.greymarchKey44 && this.greymarchWolfOn && !this.greymarchChatTyping) this.greymarchWolfBackAt = Date.now(); this.greymarchKey44 = zDown; return; } // Z while changed: ask the server to change back (greymarchWolfTick)
+        if (e.code === 256 || e.code === 257) { var mDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (e.isUp === true) mDown = false; if (mDown && !this["greymarchKey" + e.code]) this.greymarchShapeButton(e.code === 257); this["greymarchKey" + e.code] = mDown; return; } // mouse buttons: a creature's attacks (greymarchShapeTick)
         if (e.code !== 65 && e.code !== 1 && e.code !== 45 && e.code !== 28 && e.code !== 37) return;
         var down = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true);
         if (e.isUp === true) down = false;
@@ -578,7 +581,9 @@ export class GreymarchBridge {
             if (!race) return;
             var was = this.greymarchShapeWant;
             if (!was || was.race !== race) this.greymarchLog("shape: the server says " + (msg.name || "a creature") + " (race " + race.toString(16) + ")");
-            this.greymarchShapeWant = { race: race, back: Number(msg.back) >>> 0, name: String(msg.name || "") };
+            var at = msg.attacks && typeof msg.attacks === "object" ? msg.attacks : {};
+            var names = function (l: any) { return Array.isArray(l) ? l.filter(function (x: any) { return typeof x === "string" && x.length > 0 && x.length < 64; }) : []; };
+            this.greymarchShapeWant = { race: race, back: Number(msg.back) >>> 0, name: String(msg.name || ""), normal: names(at.normal), power: names(at.power) };
             this.greymarchShapeWordAt = Date.now();
         } else {
             if (this.greymarchShapeWant || this.greymarchShapeOn) this.greymarchLog("shape: the server says change back");
@@ -587,9 +592,14 @@ export class GreymarchBridge {
             this.greymarchShapeWear = Array.isArray(msg.wear) ? msg.wear.map(function (x: any) { return Number(x) >>> 0; }).filter(function (x: number) { return x > 0; }) : [];
         }
     }
+    // A mouse button while a creature (greymarchKey): left = a normal attack, right = a power attack. Played in greymarchShapeTick (Skyrim calls only work in the update phase).
+    greymarchShapeButton(power: boolean): any {
+        if (!this.greymarchShapeOn || this.greymarchChatTyping || this.greymarchAdminOn || this.greymarchMenuOn) return;
+        this.greymarchShapeSwing = { power: power, at: Date.now() };
+    }
     greymarchShapeTick(): any {
         var now = Date.now();
-        if (now < (this.greymarchShapeNext || 0)) return;
+        if (now < (this.greymarchShapeNext || 0) && !this.greymarchShapeSwing && !this.greymarchShapeReport) return;
         this.greymarchShapeNext = now + 250;
         try {
             var sp = this.sp;
@@ -609,7 +619,8 @@ export class GreymarchBridge {
                     var r = sp.Race.from(sp.Game.getFormEx(want.race));
                     if (r) { player.setRace(r); this.greymarchLog("shape: the race was not the creature's any more: set again"); }
                 }
-            } else if (this.greymarchShapeOn) this.greymarchShapeUnbecome(player);
+                this.greymarchShapeAttackTick(player, want, now);
+            } else if (this.greymarchShapeOn) this.greymarchShapeUnbecome(player, raceId);
             var wearAt = this.greymarchShapeWearAt;
             if (wearAt && now >= wearAt) { // the gear goes back on a moment after the body is back (the new skeleton must be in place first)
                 this.greymarchShapeWearAt = 0;
@@ -625,40 +636,113 @@ export class GreymarchBridge {
             if (!this.greymarchShapeErrLogged) { this.greymarchShapeErrLogged = true; this.greymarchLog("shape: " + shErr); }
         }
     }
+    // ATTACKS. The player's own click would send a person's "attackStart", which no creature body answers, so a click plays one of the creature's OWN attack events (the server
+    // sends the list: the events of that creature's animation project) on the player, at the creature's pace. SkyMP sends the animation to everyone, so others see the swing.
+    // About when it lands, the swing is reported; the SERVER decides who is hit and how hard (shapeshift.js). The game's own hits are not reported while a creature (hitService.ts).
+    greymarchShapeAttackTick(player: any, want: any, now: number): any {
+        var sp = this.sp;
+        var swing = this.greymarchShapeSwing;
+        if (swing) {
+            this.greymarchShapeSwing = null;
+            var power = swing.power && want.power.length > 0;
+            var pool = power ? want.power : want.normal;
+            var last = this.greymarchShapeLastSwing;
+            var inMenu = false; try { inMenu = !!sp.Utility.isInMenuMode(); } catch (mErr) { inMenu = false; }
+            if (!pool.length) {
+                if (now - (this.greymarchShapeNoAttackSaid || 0) > 5000) { this.greymarchShapeNoAttackSaid = now; try { sp.Debug.notification("A " + (want.name || "creature") + " cannot attack."); } catch (nErr) { /* a nicety */ } }
+            } else if (!inMenu && now - swing.at < 1000 && !(last && now - last.at < (last.power ? SHAPE_POWER_REST_MS : SHAPE_REST_MS))) {
+                var ev = pool[Math.floor(Math.random() * pool.length)];
+                sp.Debug.sendAnimationEvent(player, ev);
+                this.greymarchShapeLastSwing = { at: now, power: power };
+                this.greymarchShapeReport = { at: now + SHAPE_LAND_MS, power: power };
+                if (!this.greymarchShapeSwingLogged) { this.greymarchShapeSwingLogged = true; this.greymarchLog("shape: first attack (" + ev + ")"); }
+            }
+        }
+        var rep = this.greymarchShapeReport;
+        if (rep && now >= rep.at) {
+            this.greymarchShapeReport = null;
+            var target = 0;
+            try { var ref = sp.Game.getCurrentCrosshairRef(); var id = ref ? ref.getFormID() : 0; if (id >= 0xff000000) target = misc.localIdToRemoteId(id); } catch (cErr) { target = 0; } // the one under the crosshair, if any (the server checks reach and facing)
+            var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchShapeAttack", power: rep.power, target: target }) };
+            this.controller.emitter.emit("sendMessage", { message: message, reliability: "reliable" });
+        }
+    }
+    // The body. Before the race changes: the character's own head (hair, face, brows) is taken off the character record, or it is drawn stretched over the creature's skeleton
+    // (black spikes where the head should be), and the record is made male (several creature races give the female slot another creature's animations). Both are put back on
+    // the way back. The race is then changed for real: SkyMP may already have written the creature race into the record (the server changes the appearance), and a SetRace to
+    // the race the record already has does nothing, which leaves the creature's skeleton with the person's animations (a T-pose). So it goes through the old race first.
     greymarchShapeBecome(player: any, want: any, raceId: number): any {
         var sp = this.sp;
         var step = "start";
         try {
+            step = "race"; var r = sp.Race.from(sp.Game.getFormEx(want.race)); if (!r) throw new Error("the race " + want.race.toString(16) + " is not in this game");
             if (!this.greymarchShapeOn) { // from their own body (not from one creature to another): remember the race to go back to
                 this.greymarchShapeBackRace = want.back || raceId;
                 step = "beast form"; sp.Game.setBeastForm(true); // no inventory, magic or favourites menus: a creature cannot put on armor or cast the character's spells
                 step = "fast travel"; sp.Game.enableFastTravel(false);
-                step = "controls"; sp.Game.disablePlayerControls(false, false, true, false, false, false, false, false, 1); // only the camera switch: they still walk, fight, sneak and talk
+                step = "controls"; sp.Game.disablePlayerControls(false, false, true, false, false, false, false, false, 1); // only the camera switch: they still walk, sneak and talk
                 step = "camera"; sp.Game.forceThirdPerson();
                 step = "unequip"; player.unequipAll();
+                step = "head"; this.greymarchShapeStripHead(player);
+                try { (sp.storage as any)["greymarchShapeOn"] = true; } catch (stErr) { /* hitService then reports the game's own hits too */ }
             }
-            step = "race"; var r = sp.Race.from(sp.Game.getFormEx(want.race)); if (!r) throw new Error("the race " + want.race.toString(16) + " is not in this game");
+            step = "race";
+            if (raceId === want.race) { var via = sp.Race.from(sp.Game.getFormEx(this.greymarchShapeBackRace || 0x13746)); if (via) player.setRace(via); } // the record already says the creature: through the old race, or nothing changes
             player.setRace(r);
+            step = "animation"; sp.Debug.sendAnimationEvent(player, "IdleForceDefaultState"); // start the new animation set from its idle
             this.greymarchShapeOn = want.race;
             var got = player.getRace();
-            this.greymarchLog("shape: became " + (want.name || "a creature") + " (race now " + (got ? got.getFormID().toString(16) : "none") + ", will change back to " + (this.greymarchShapeBackRace || 0).toString(16) + ")");
+            this.greymarchLog("shape: became " + (want.name || "a creature") + " (race now " + (got ? got.getFormID().toString(16) : "none") + ", will change back to " + (this.greymarchShapeBackRace || 0).toString(16) + ", " + want.normal.length + " attacks, " + want.power.length + " power attacks)");
         } catch (bErr) {
             this.greymarchShapeOn = want.race; // not tried again every quarter second: the race check above sets it again every 3 seconds
             this.greymarchLog("shape: the change failed at step '" + step + "': " + bErr);
         }
     }
-    greymarchShapeUnbecome(player: any): any {
+    greymarchShapeStripHead(player: any): any {
+        var sp = this.sp;
+        var base = sp.ActorBase.from(player.getBaseObject());
+        if (!base) return;
+        var parts: any[] = [];
+        var n = base.getNumHeadParts();
+        for (var i = 0; i < n; i++) { var hp = base.getNthHeadPart(i); if (hp) parts.push(hp.getFormID()); }
+        if (!this.greymarchShapeHead) this.greymarchShapeHead = { parts: parts, sex: base.getSex() }; // kept from the first change only: a later one would save the creature's empty head
+        sp.TESModPlatform.resizeHeadpartsArray(base, 0);
+        sp.TESModPlatform.setNpcSex(base, 0);
+    }
+    greymarchShapeRestoreHead(player: any): any {
+        var sp = this.sp;
+        var saved = this.greymarchShapeHead;
+        this.greymarchShapeHead = null;
+        if (!saved) return;
+        var base = sp.ActorBase.from(player.getBaseObject());
+        if (!base) return;
+        sp.TESModPlatform.setNpcSex(base, saved.sex === 1 ? 1 : 0);
+        if (base.getNumHeadParts() > 0) return; // SkyMP already put the character's own look back (the server's appearance arrived first)
+        var parts = saved.parts.map(function (id: number) { return sp.HeadPart.from(sp.Game.getFormEx(id)); }).filter(function (x: any) { return !!x; });
+        sp.TESModPlatform.resizeHeadpartsArray(base, parts.length);
+        parts.forEach(function (hp: any, i: number) { base.setNthHeadPart(hp, i); });
+    }
+    greymarchShapeUnbecome(player: any, raceId: number): any {
         var sp = this.sp;
         var step = "start";
+        var creature = this.greymarchShapeOn;
         this.greymarchShapeOn = 0;
+        this.greymarchShapeSwing = null; this.greymarchShapeReport = null;
+        try { (sp.storage as any)["greymarchShapeOn"] = false; } catch (stErr) { /* nothing was set */ }
         try {
+            step = "head"; this.greymarchShapeRestoreHead(player);
             step = "race";
             var back = this.greymarchShapeBackRace ? sp.Race.from(sp.Game.getFormEx(this.greymarchShapeBackRace)) : null;
             if (!back) { try { var base = sp.ActorBase.from(player.getBaseObject()); back = base ? base.getRace() : null; } catch (baseErr) { back = null; } }
-            if (back) player.setRace(back); else this.greymarchLog("shape: no race known to change back to");
+            if (back) {
+                if (raceId === back.getFormID() && creature) { var via = sp.Race.from(sp.Game.getFormEx(creature)); if (via) player.setRace(via); } // the record already says their own race: through the creature's, or the body stays a creature
+                player.setRace(back);
+            } else this.greymarchLog("shape: no race known to change back to");
+            step = "animation"; sp.Debug.sendAnimationEvent(player, "IdleForceDefaultState");
             step = "controls"; sp.Game.enablePlayerControls(false, false, true, false, false, false, false, false, 1);
             step = "beast form"; sp.Game.setBeastForm(false);
             step = "fast travel"; sp.Game.enableFastTravel(true);
+            step = "redraw"; player.queueNiNodeUpdate(); // the head is drawn again
             this.greymarchShapeWearAt = Date.now() + 1000;
             var r = player.getRace();
             this.greymarchLog("shape: changed back (race now " + (r ? r.getFormID().toString(16) : "none") + ")");

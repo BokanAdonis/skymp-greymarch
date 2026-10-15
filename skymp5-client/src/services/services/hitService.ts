@@ -17,6 +17,7 @@ export class HitService extends ClientListener {
         // TODO: allow non-weapon sources
         const aggressor = e.aggressor.getFormID();
         if (aggressor < 0xff000000 && aggressor !== 0x14) return; // all skymp npcs are FF+
+        if (aggressor === 0x14 && storage["greymarchShapeOn"] === true) return; // GREYMARCH: a creature form (staff); the server decides its hits (gamemode shapeshift.js), so the game's own are not reported
 
         if (aggressor >= 0xff000000) {
             // TODO: make host service

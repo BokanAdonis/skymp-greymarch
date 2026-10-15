@@ -1,5 +1,6 @@
 "use strict";
-// Creature forms, the game's half (src/greymarch/bridge.ts): the server says which creature, the body changes; the server says back, the body and the gear come back.
+// Creature forms, the game's half (src/greymarch/bridge.ts): the server says which creature, the body changes; the server says back, the body, the head and the gear come back.
+// Clicks play the creature's own attack animations and report the swing to the server.
 const test = require("node:test");
 const assert = require("node:assert");
 const fs = require("node:fs");
@@ -10,94 +11,156 @@ const src = fs.readFileSync(path.join(__dirname, "..", "src", "greymarch", "brid
 const js = ts.transpileModule(src, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2019 } }).outputText;
 
 const NORD = 0x13746, GOAT = 0x131fa, GIANT = 0x131f9;
+const ATTACKS = { normal: ["attackStart_ClubAttack1", "attackStart_ClubAttack2"], power: ["attackPowerStart_Stomp"] };
 function make(opts = {}) {
-  const log = { lines: [], races: [], calls: [], equipped: [] };
-  const mods = { "../messages": { MsgType: { CustomPacket: 77 } }, "../view/worldViewMisc": { remoteIdToLocalId: () => 0 }, "../sync/appearance": {}, "../services/services/remoteServer": { RemoteServer: {} }, "../services/services/singlePlayerService": { SinglePlayerService: {} } };
+  const log = { lines: [], races: [], calls: [], equipped: [], events: [], sent: [], notes: [] };
+  const mods = { "../messages": { MsgType: { CustomPacket: 77 } }, "../view/worldViewMisc": { remoteIdToLocalId: () => 0, localIdToRemoteId: (id) => id - 0xff000000 + 0x10000 }, "../sync/appearance": {}, "../services/services/remoteServer": { RemoteServer: {} }, "../services/services/singlePlayerService": { SinglePlayerService: {} } };
   const mod = { exports: {} };
   new Function("require", "exports", "module", js)((p) => mods[p], mod.exports, mod);
   const race = (id) => ({ id, getFormID: () => id });
-  let current = NORD;
+  let current = NORD, menu = false, crosshair = null;
   const items = { 0x12eb7: 1, 0x13911: 1 };
+  const base = { parts: [0xe1, 0xe2, 0xe3], sex: opts.female ? 1 : 0, getNumHeadParts: () => base.parts.length, getNthHeadPart: (i) => ({ getFormID: () => base.parts[i] }), getSex: () => base.sex, setNthHeadPart: (hp, i) => { base.parts[i] = hp.id; }, getRace: () => race(current) };
   const player = {
     getRace: () => race(current), setRace: (r) => { current = r.id; log.races.push(r.id); },
-    unequipAll: () => log.calls.push("unequipAll"), getBaseObject: () => null,
+    unequipAll: () => log.calls.push("unequipAll"), getBaseObject: () => base, queueNiNodeUpdate: () => log.calls.push("redraw"),
     getItemCount: (f) => items[f.id] || 0, equipItem: (f) => log.equipped.push(f.id),
     hasSpell: () => false, hasMagicEffect: () => false,
   };
   const call = (name) => (...a) => log.calls.push(name + (a.length ? ":" + a[0] : ""));
+  const storage = {};
   const sp = {
-    printConsole() {}, writeLogs: (n, l) => log.lines.push(l),
-    Game: { getPlayer: () => player, getFormEx: (id) => (opts.noRace && id === opts.noRace ? null : { id }), getFormFromFile: () => null, setBeastForm: call("beastForm"), enableFastTravel: call("fastTravel"), disablePlayerControls: call("controlsOff"), enablePlayerControls: call("controlsOn"), forceThirdPerson: call("thirdPerson"), showFirstPersonGeometry() {} },
-    Race: { from: (f) => (f ? race(f.id) : null) }, ActorBase: { from: () => null }, Spell: { from: () => null }, MagicEffect: { from: () => null },
-    Debug: { sendAnimationEvent() {}, notification() {} }, Utility: { isInMenuMode: () => false }, on() {},
+    printConsole() {}, writeLogs: (n, l) => log.lines.push(l), storage,
+    Game: { getPlayer: () => player, getFormEx: (id) => (opts.noRace && id === opts.noRace ? null : { id }), getFormFromFile: () => null, setBeastForm: call("beastForm"), enableFastTravel: call("fastTravel"), disablePlayerControls: call("controlsOff"), enablePlayerControls: call("controlsOn"), forceThirdPerson: call("thirdPerson"), showFirstPersonGeometry() {}, getCurrentCrosshairRef: () => crosshair },
+    Race: { from: (f) => (f ? race(f.id) : null) }, ActorBase: { from: (b) => b }, HeadPart: { from: (f) => f }, Spell: { from: () => null }, MagicEffect: { from: () => null },
+    TESModPlatform: { resizeHeadpartsArray: (b, n) => { b.parts.length = n; }, setNpcSex: (b, s) => { b.sex = s; } },
+    Debug: { sendAnimationEvent: (ref, name) => log.events.push(name), notification: (t) => log.notes.push(t) }, Utility: { isInMenuMode: () => menu }, on() {},
   };
-  const controller = { on() {}, emitter: { on() {}, emit() {} } };
+  const controller = { on() {}, emitter: { on() {}, emit: (n, m) => { if (n !== "sendMessage") return; const j = JSON.parse(m.message.contentJsonDump); if (j.customPacketType === "greymarchShapeAttack") log.sent.push(j); } } };
   const gm = new mod.exports.GreymarchBridge(sp, controller);
   let t = 1_000_000;
   const realNow = Date.now;
   const at = (fn) => { Date.now = () => t; try { return fn(); } finally { Date.now = realNow; } };
   const tick = (ms = 300) => { t += ms; at(() => gm.greymarchShapeTick()); };
   const say = (msg) => at(() => gm.greymarchPacket({ customPacketType: "greymarchShape", ...msg }));
-  return { gm, log, tick, say, race: () => current, setRace: (id) => { current = id; } };
+  const click = (code = 256) => at(() => { gm.greymarchKey({ code, isDown: true }); gm.greymarchKey({ code, isUp: true }); });
+  return { gm, log, tick, say, click, base, storage, race: () => current, setRace: (id) => { current = id; }, setMenu: (v) => { menu = v; }, aim: (id) => { crosshair = id ? { getFormID: () => id } : null; } };
 }
+const giant = { on: true, race: GIANT, back: NORD, name: "Giant", attacks: ATTACKS };
 
-test("the server says goat: menus and fast travel off, third person, gear off, then the goat's race", () => {
-  const s = make();
-  s.say({ on: true, race: GOAT, back: NORD, name: "Goat" });
+test("the server says goat: menus and fast travel off, third person, gear off, the head taken off the record and male, then the goat's race", () => {
+  const s = make({ female: true });
+  s.say({ on: true, race: GOAT, back: NORD, name: "Goat", attacks: { normal: ["attackStart_Attack1"], power: [] } });
   s.tick();
   assert.strictEqual(s.race(), GOAT);
   assert.deepStrictEqual(s.log.calls, ["beastForm:true", "fastTravel:false", "controlsOff:false", "thirdPerson", "unequipAll"]);
-  assert.ok(s.log.lines.some((l) => /became Goat \(race now 131fa, will change back to 13746\)/.test(l)));
+  assert.deepStrictEqual(s.base.parts, [], "no human head on the goat");
+  assert.strictEqual(s.base.sex, 0, "the male animation set");
+  assert.strictEqual(s.storage.greymarchShapeOn, true, "the game's own hits are not reported");
+  assert.ok(s.log.events.includes("IdleForceDefaultState"));
+  assert.ok(s.log.lines.some((l) => /became Goat \(race now 131fa, will change back to 13746, 1 attacks, 0 power attacks\)/.test(l)));
   s.tick(); s.tick();
   assert.deepStrictEqual(s.log.races, [GOAT], "changed once, not every tick");
 });
 
-test("the server says back: their own race, controls and menus back, and the gear they wore goes back on a moment later", () => {
+test("SkyMP already wrote the creature into the record: the race goes through the old one, so the body really changes (no T-pose)", () => {
   const s = make();
-  s.say({ on: true, race: GOAT, back: NORD, name: "Goat" }); s.tick();
-  s.log.calls.length = 0;
+  s.setRace(GIANT); // the appearance arrived first
+  s.say(giant); s.tick();
+  assert.deepStrictEqual(s.log.races, [NORD, GIANT]);
+});
+
+test("the server says back: head, sex and race back (through the creature if the record already says their own), controls, and the gear a moment later", () => {
+  const s = make({ female: true });
+  s.say(giant); s.tick();
+  s.log.calls.length = 0; s.log.races.length = 0;
+  s.setRace(NORD); // SkyMP put their own appearance back first
   s.say({ on: false, back: NORD, wear: [0x12eb7, 0x13911, 0x99999] });
   s.tick();
+  assert.deepStrictEqual(s.log.races, [GIANT, NORD]);
   assert.strictEqual(s.race(), NORD);
-  assert.deepStrictEqual(s.log.calls, ["controlsOn:false", "beastForm:false", "fastTravel:true"]);
+  assert.deepStrictEqual(s.base.parts, [0xe1, 0xe2, 0xe3], "her own head");
+  assert.strictEqual(s.base.sex, 1);
+  assert.strictEqual(s.storage.greymarchShapeOn, false);
+  assert.deepStrictEqual(s.log.calls, ["controlsOn:false", "beastForm:false", "fastTravel:true", "redraw"]);
   assert.deepStrictEqual(s.log.equipped, [], "not at once");
   s.tick(1100);
   assert.deepStrictEqual(s.log.equipped, [0x12eb7, 0x13911], "what they still carry is put on; what they do not have is skipped");
-  assert.ok(s.log.lines.some((l) => /put 2 of 3 worn items back on/.test(l)));
 });
 
-test("one creature to another changes only the race; the way back is still their own race", () => {
-  const s = make();
-  s.say({ on: true, race: GOAT, back: NORD, name: "Goat" }); s.tick();
-  s.say({ on: true, race: GIANT, back: NORD, name: "Giant" }); s.tick();
+test("one creature to another changes only the race; the head and sex kept are still the character's own", () => {
+  const s = make({ female: true });
+  s.say({ on: true, race: GOAT, back: NORD, name: "Goat", attacks: ATTACKS }); s.tick();
+  s.say(giant); s.tick();
   assert.strictEqual(s.race(), GIANT);
-  assert.strictEqual(s.log.calls.filter((c) => c === "unequipAll").length, 1, "the menus and gear steps happen once");
+  assert.strictEqual(s.log.calls.filter((c) => c === "unequipAll").length, 1);
   s.say({ on: false, back: NORD, wear: [] }); s.tick();
   assert.strictEqual(s.race(), NORD);
+  assert.deepStrictEqual(s.base.parts, [0xe1, 0xe2, 0xe3]);
+  assert.strictEqual(s.base.sex, 1);
+});
+
+test("a click plays one of the creature's own attacks and reports the swing about when it lands, with the actor under the crosshair", () => {
+  const s = make();
+  s.say(giant); s.tick();
+  s.aim(0xff000005);
+  s.click(); s.tick(10);
+  assert.ok(ATTACKS.normal.includes(s.log.events[s.log.events.length - 1]), "a club attack");
+  assert.deepStrictEqual(s.log.sent, [], "not reported yet");
+  s.tick(500);
+  assert.deepStrictEqual(s.log.sent, [{ customPacketType: "greymarchShapeAttack", power: false, target: 0x10005 }]);
+});
+
+test("right click is a power attack; the creature's pace is kept; a menu or the chat stops the click", () => {
+  const s = make();
+  s.say(giant); s.tick();
+  s.click(257); s.tick(10);
+  assert.strictEqual(s.log.events[s.log.events.length - 1], "attackPowerStart_Stomp");
+  const n = s.log.events.length;
+  s.click(); s.tick(600);
+  assert.strictEqual(s.log.events.length, n, "too soon after a power attack");
+  s.tick(1100); s.click(); s.tick(10);
+  assert.strictEqual(s.log.events.length, n + 1, "rested");
+  s.tick(2000); s.setMenu(true); s.click(); s.tick(10);
+  assert.strictEqual(s.log.events.length, n + 1, "not in a menu");
+  s.setMenu(false); s.gm.greymarchChatTyping = true; s.click(); s.tick(10);
+  assert.strictEqual(s.log.events.length, n + 1, "not while typing");
+});
+
+test("a creature with no attacks says so (not every click); a person's click is not touched", () => {
+  const s = make();
+  s.click(); s.tick(10);
+  assert.deepStrictEqual(s.log.events, [], "no form: the game's own attack");
+  s.say({ on: true, race: 0xa919d, back: NORD, name: "Chicken", attacks: { normal: [], power: [] } }); s.tick();
+  s.click(); s.tick(10); s.click(); s.tick(10);
+  assert.deepStrictEqual(s.log.notes, ["A Chicken cannot attack."]);
+  s.tick(600);
+  assert.deepStrictEqual(s.log.sent, []);
 });
 
 test("a race the game put back is set again (every 3 seconds at most)", () => {
   const s = make();
-  s.say({ on: true, race: GOAT, back: NORD, name: "Goat" }); s.tick();
+  s.say(giant); s.tick();
   s.setRace(NORD);
   s.tick(3500);
-  assert.strictEqual(s.race(), GOAT);
+  assert.strictEqual(s.race(), GIANT);
   assert.ok(s.log.lines.some((l) => /set again/.test(l)));
 });
 
 test("no word from the server for 20 seconds: they change back by themselves; the repeats keep the form", () => {
   const s = make();
-  s.say({ on: true, race: GOAT, back: NORD, name: "Goat" }); s.tick();
-  for (let i = 0; i < 6; i++) { s.tick(5000); s.say({ on: true, race: GOAT, back: NORD, name: "Goat" }); }
-  assert.strictEqual(s.race(), GOAT, "said every 5 seconds: still a goat after 30 seconds");
+  s.say(giant); s.tick();
+  for (let i = 0; i < 6; i++) { s.tick(5000); s.say(giant); }
+  assert.strictEqual(s.race(), GIANT, "said every 5 seconds: still a giant after 30 seconds");
   s.tick(21000);
   assert.strictEqual(s.race(), NORD);
+  assert.deepStrictEqual(s.base.parts, [0xe1, 0xe2, 0xe3], "their head back even without the server");
   assert.ok(s.log.lines.some((l) => /no word from the server/.test(l)));
 });
 
 test("a race this game does not have is logged, not retried every quarter second, and nothing breaks", () => {
   const s = make({ noRace: 0x4014495 });
-  s.say({ on: true, race: 0x4014495, back: NORD, name: "Lurker" }); s.tick(); s.tick(); s.tick();
+  s.say({ on: true, race: 0x4014495, back: NORD, name: "Lurker", attacks: ATTACKS }); s.tick(); s.tick(); s.tick();
   assert.strictEqual(s.race(), NORD);
   assert.strictEqual(s.log.lines.filter((l) => /change failed at step 'race'/.test(l)).length, 1);
   s.say({ on: false, back: NORD, wear: [] }); s.tick();
