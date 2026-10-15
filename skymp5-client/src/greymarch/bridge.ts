@@ -50,7 +50,7 @@ export class GreymarchBridge {
         if (type === "greymarchProps") { this.greymarchDoorNames = msg.doors && typeof msg.doors === "object" ? msg.doors : {}; this.greymarchDoorNamesNext = 0; return; }
         if (type === "greymarchGmAlert") { this.greymarchChatToPage("alert", msg); return; } // a player typed /gm (the server only sends it to Trial GM and up)
         if (type === "greymarchMenuReply") { this.greymarchMenuToPage("reply", msg); return; }
-        if (type === "greymarchWolfForm") { this.greymarchWolfWant = !!msg.on; this.greymarchWolfTries = 0; this.greymarchWolfCastAt = 0; this.greymarchLog("wolf: the server says " + (msg.on ? "change" : "change back")); return; } // the werewolf form (greymarchWolfTick)
+        if (type === "greymarchWolfForm") { if (this.greymarchWolfWant !== !!msg.on) this.greymarchLog("wolf: the server says " + (msg.on ? "changed (hold it)" : "no (shift back)")); this.greymarchWolfWant = !!msg.on; return; } // (logged only when it changes: the server repeats it every 5 seconds) // the werewolf form (greymarchWolfTick)
         if (type === "greymarchProfReply") { this.greymarchLog("prof: the server's answer arrived (rid " + msg.rid + ", ok " + msg.ok + ")"); this.greymarchProfToPage("reply", msg); return; } // the professions window (K)
         if (type === "greymarchCombatMod") { var cm = Number(msg.mult); this.greymarchCombatWant = cm >= 0.1 && cm <= 3 ? cm : 1; return; } // the damage multiplier for what is in hand (professions: a weapon above your rank hits weaker, a Brawler's fists hit harder)
         if (type === "greymarchMenuEvent") { if ((msg.type === "trade_invite" || msg.type === "trade") && !this.greymarchMenuOn) this.greymarchMenuShow({ mode: "invite", looking: 0 }); this.greymarchMenuToPage("event", msg); return; }
@@ -329,19 +329,18 @@ export class GreymarchBridge {
         else if (e.code === 1 && this.greymarchMenuOn) this.greymarchMenuEscape();
         else if (e.code === 65 && !this.greymarchAdminOn && !this.greymarchMenuOn) this.greymarchAdminShow();
         else if (e.code === 37 && !this.greymarchChatTyping && !this.greymarchProfOn) this.greymarchProfShow(); // K opens the professions window (the page itself closes it with K or Esc, like the staff panel with F7)
-        else if (e.code === 35 && !this.greymarchChatTyping && !this.greymarchScreenUp && !this.greymarchAdminOn && !this.greymarchMenuOn && !this.greymarchProfOn) this.greymarchWolfSend(); // H: the werewolf change. The SERVER decides (only a character staff gave the Beast Blood can change); the answer comes as a notice
         else if (e.code === 1 && this.greymarchProfOn) this.greymarchProfHide();
         else if (e.code === 1 && this.greymarchAdminOn) this.greymarchAdminHide();
     }
-    // ---- THE WEREWOLF FORM: the game's OWN transformation (the power "Beast Form"), with the SERVER deciding.
-    // Two ways in, one rule. The server's word is { customPacketType: "greymarchWolfForm", on: true | false } (greymarchWolfWant: true / false / undefined = nothing said yet).
-    //   - The player uses the game's own power (equips Beast Form in the power menu and presses Z): the game transforms them by itself. This tick sees the player become the beast
-    //     (the race is WerewolfBeastRace) while the server has not said yes, and REPORTS it ({ customPacketType: "greymarchWolf", op: "game", beast: true }, again every 3 seconds
-    //     until the server answers). The server says on: true (a character with the Beast Blood) or on: false (anyone else, or too soon): then this tick shifts the player back.
-    //   - The server starts it (the H key or /wolf): on: true arrives first and this tick casts the game's own spell WerewolfChange (Skyrim.esm 0x092C48), at most 3 tries.
-    // While the server says yes the game's own timer (the global PlayerWerewolfShiftBackTime, 0x02BA19) is kept a game day ahead, so the form lasts as long as the SERVER says. To shift
-    // back the global is set to 0: the game's own update then shifts the player back with its own animation. If the player shifts back by themselves (holds the game's revert) while the
-    // server still says yes, that is REPORTED ({ ..., beast: false }) and the server ends the form.
+    // ---- THE WEREWOLF FORM: the game's OWN power "Beast Form" (the spell WerewolfChange, Skyrim.esm 0x092C48), with the SERVER deciding.
+    // The server gives a character with the Beast Blood that power; the player equips it in the power menu and presses the power key (Z). THE GAME does the transformation: its effect
+    // script starts the quest PlayerWerewolfQuest (Skyrim.esm 0x02BA16), and a few seconds later the race becomes WerewolfBeastRace (0x0CDD84). This tick notices either (the quest is
+    // running, or the race changed) while the server has not said yes and REPORTS it ({ customPacketType: "greymarchWolf", op: "game", beast: true }, again every 3 seconds until the
+    // server answers). The server's word is { customPacketType: "greymarchWolfForm", on: true | false } (greymarchWolfWant: true / false / undefined = nothing said yet):
+    //   on: true   the form stands: the game's own timer (the global PlayerWerewolfShiftBackTime, 0x02BA19) is kept a game day ahead, so it lasts as long as the SERVER says;
+    //   on: false  no (not allowed, too soon, or the server ended it: hunger, death): the global is set to 0 and the game's own update shifts the player back with its own animation.
+    // If the player shifts back by themselves (the game's own revert) while the server still says yes, that is REPORTED ({ ..., beast: false }) and the server ends the form.
+    // Nothing here casts anything: the only way in is the game's own power. Cheap: a race and a quest check twice a second.
     greymarchWolfTick(): any {
         var now = Date.now();
         if (now < (this.greymarchWolfNext || 0)) return;
@@ -351,13 +350,20 @@ export class GreymarchBridge {
             var player = sp.Game.getPlayer();
             if (!player) return;
             var race = player.getRace();
-            var isBeast = !!race && race.getFormID() === 0xcdd84; // WerewolfBeastRace
+            var raceBeast = !!race && race.getFormID() === 0xcdd84; // WerewolfBeastRace
+            var quest = sp.Quest.from(sp.Game.getFormEx(0x2ba16));  // PlayerWerewolfQuest
+            var questOn = !!quest && quest.isRunning();
+            var beast = raceBeast || questOn;
             var want = this.greymarchWolfWant; // true | false | undefined
-            if (isBeast !== !!this.greymarchWolfWasBeast) { this.greymarchWolfWasBeast = isBeast; this.greymarchLog("wolf: the game says the player is " + (isBeast ? "the beast now" : "human again")); }
-            if (!isBeast && !this.greymarchWolfSeen && want === undefined) return; // an ordinary player: nothing to do
+            if (beast !== !!this.greymarchWolfWasBeast) { this.greymarchWolfWasBeast = beast; this.greymarchLog("wolf: the game says the player is " + (beast ? "changing or changed (race beast " + raceBeast + ", werewolf quest running " + questOn + ")" : "human again")); }
+            if (now >= (this.greymarchWolfPowerNext || 0)) { // what the game knows of the power, for the log: is Beast Form in the player's spell list?
+                this.greymarchWolfPowerNext = now + 5000;
+                try { var pw = sp.Spell.from(sp.Game.getFormEx(0x92c48)); var has = !!pw && player.hasSpell(pw); if (has !== this.greymarchWolfHadPower) { this.greymarchWolfHadPower = has; this.greymarchLog("wolf: the Beast Form power is " + (has ? "in" : "NOT in") + " the player's spell list"); } } catch (pErr) { /* not important */ }
+            }
+            if (!beast && !this.greymarchWolfSeen && want === undefined) return; // an ordinary player: nothing to do
             var shiftBack = sp.GlobalVariable.from(sp.Game.getFormEx(0x2ba19)); // PlayerWerewolfShiftBackTime
             var days = sp.GlobalVariable.from(sp.Game.getFormEx(0x39));          // GameDaysPassed
-            if (isBeast) {
+            if (beast) {
                 if (want === true) {
                     this.greymarchWolfSeen = true;
                     if (shiftBack && days) shiftBack.setValue(days.getValue() + 1.0);  // the server says changed: the game's own timer must not end it
@@ -372,19 +378,15 @@ export class GreymarchBridge {
             // not the beast
             if (want === true) {
                 if (this.greymarchWolfSeen) {
-                    // they were the beast and are not any more while the server still says yes: the player (or the game) shifted back: tell the server
-                    this.greymarchWolfSeen = false; this.greymarchWolfWant = undefined;
+                    this.greymarchWolfSeen = false; this.greymarchWolfWant = undefined; // they were the beast and are not any more: the player (or the game) shifted back
                     this.greymarchWolfReport(false);
-                } else if (now - (this.greymarchWolfCastAt || 0) >= 15000 && (this.greymarchWolfTries || 0) < 3) {
-                    // the server started it (H or /wolf): cast the game's own transformation
-                    this.greymarchWolfCastAt = now; this.greymarchWolfTries = (this.greymarchWolfTries || 0) + 1;
-                    var spell = sp.Spell.from(sp.Game.getFormEx(0x92c48));             // WerewolfChange
-                    if (spell && !player.isDead()) { spell.cast(player, player); this.greymarchLog("wolf: cast the game's WerewolfChange (try " + this.greymarchWolfTries + ")"); }
-                    else this.greymarchLog("wolf: could not cast WerewolfChange (spell " + (spell ? "found" : "missing") + ", dead " + player.isDead() + ")");
+                } else if (now - (this.greymarchWolfStaleAt || (this.greymarchWolfStaleAt = now)) >= 30000) {
+                    this.greymarchWolfStaleAt = 0; this.greymarchWolfWant = undefined;  // the server says changed but the game never was (30 seconds): let the server know
+                    this.greymarchWolfReport(false);
                 }
-            } else if (want === false) {
-                this.greymarchWolfWant = undefined; this.greymarchWolfSeen = false;   // human again after a "no": the next use of the power is reported afresh
             } else {
+                this.greymarchWolfStaleAt = 0;
+                if (want === false) this.greymarchWolfWant = undefined;               // human again after a "no": the next use of the power is reported afresh
                 this.greymarchWolfSeen = false;
             }
         } catch (wolfErr) {
@@ -713,10 +715,6 @@ export class GreymarchBridge {
         this.greymarchProfOn = false;
         this.greymarchProfToPage("hide", true);
         if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchProfOn); }
-    }
-    greymarchWolfSend(): any {
-        var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchWolf", op: "toggle" }) };
-        this.controller.emitter.emit("sendMessage", { message: message, reliability: "reliable" });
     }
     greymarchProfSend(data: any): any {
         this.greymarchLog("prof: window asks the server (rid " + data.rid + ", " + data.op + ")");
