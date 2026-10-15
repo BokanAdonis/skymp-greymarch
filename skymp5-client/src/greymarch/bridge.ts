@@ -16,6 +16,7 @@ const CHAT_SCRIPT = "(function(){if(window.__gmChatSend)return;var f=document.cr
 const MENU_SCRIPT = "(function(){if(window.__gmMenuSend)return;var f=document.createElement('iframe');f.id='greymarch-menu-frame';f.src='greymarch-menu.html';f.style.cssText='position:fixed;left:0;top:0;width:100%;height:100%;border:0;z-index:2147483210;background:transparent;display:block;pointer-events:none';f.setAttribute('allowtransparency','true');var ready=false,queue=[];window.addEventListener('message',function(e){if(e.source!==f.contentWindow)return;var d=e.data;if(!d)return;if(d.greymarchReady){ready=true;queue.forEach(function(q){f.contentWindow.postMessage({greymarchIn:q},'*')});queue=[]}else if(d.greymarchOut&&window.skyrimPlatform){window.skyrimPlatform.sendMessage('greymarch',JSON.stringify(d.greymarchOut))}});window.__gmMenuSend=function(m){if(m.fn==='show'){f.style.pointerEvents='auto';try{f.focus()}catch(x){}}else if(m.fn==='hide')f.style.pointerEvents='none';if(ready)f.contentWindow.postMessage({greymarchIn:m},'*');else queue.push(m)};document.body.appendChild(f);document.addEventListener('keyup',function(e){if(e.key==='x'||e.key==='X'){try{f.contentWindow.postMessage({greymarchIn:{fn:'release'}},'*')}catch(x){}}});document.addEventListener('keydown',function(e){if(e.key==='Escape'){try{f.contentWindow.postMessage({greymarchIn:{fn:'escape'}},'*')}catch(x){}}})})();";
 const PROF_SCRIPT = "(function(){if(window.__gmProfSend)return;var f=document.createElement('iframe');f.id='greymarch-prof-frame';f.src='greymarch-prof.html';f.style.cssText='position:fixed;left:0;top:0;width:100%;height:100%;border:0;z-index:2147483220;background:transparent;display:block;pointer-events:none';f.setAttribute('allowtransparency','true');var ready=false,queue=[];window.addEventListener('message',function(e){if(e.source!==f.contentWindow)return;var d=e.data;if(!d)return;if(d.greymarchReady){ready=true;queue.forEach(function(q){f.contentWindow.postMessage({greymarchIn:q},'*')});queue=[]}else if(d.greymarchOut&&window.skyrimPlatform){window.skyrimPlatform.sendMessage('greymarch',JSON.stringify(d.greymarchOut))}});window.__gmProfSend=function(m){if(m.fn==='show'){f.style.pointerEvents='auto';try{f.focus()}catch(x){}}else if(m.fn==='hide')f.style.pointerEvents='none';if(ready)f.contentWindow.postMessage({greymarchIn:m},'*');else queue.push(m)};document.body.appendChild(f);document.addEventListener('keyup',function(e){if(e.key==='x'||e.key==='X'){try{f.contentWindow.postMessage({greymarchIn:{fn:'release'}},'*')}catch(x){}}});document.addEventListener('keydown',function(e){if(e.key==='Escape'){try{f.contentWindow.postMessage({greymarchIn:{fn:'escape'}},'*')}catch(x){}}})})();";
 const WOLF_MORPH_MS = 4300; // the werewolf transformation: the race changes at the animation's "SetRace" cue, or after this long if the cue is not seen (the cue is about 4.0 s in, animationdatasinglefile.txt)
+const SHAPE_SILENCE_MS = 20000; // a creature form: with no word from the server for this long the player changes back by themselves (the server repeats "on" every 5 seconds)
 const WOLF_BACK_GRACE_MS = 2000; // Z changes back, but not in the first 2 seconds after the body changed
 const WOLF_ROAR_MS = 4000;  // R: one roar every this long (the howl animation lasts about 2.8 s)
 const CHANCERY_SCRIPT =PROF_SCRIPT.split("__gmProfSend").join("__gmChanceryRun").split("greymarch-prof").join("greymarch-chancery").split("2147483220").join("2147483221"); // the chancery window (/chancery): the same loader, another page
@@ -57,6 +58,7 @@ export class GreymarchBridge {
         if (type === "greymarchProps") { this.greymarchDoorNames = msg.doors && typeof msg.doors === "object" ? msg.doors : {}; this.greymarchDoorNamesNext = 0; return; }
         if (type === "greymarchGmAlert") { this.greymarchChatToPage("alert", msg); return; } // a player typed /gm (the server only sends it to Trial GM and up)
         if (type === "greymarchMenuReply") { this.greymarchMenuToPage("reply", msg); return; }
+        if (type === "greymarchShape") { this.greymarchShapeMsg(msg); return; } // a creature form (staff): greymarchShapeTick changes the body
         if (type === "greymarchWolfForm") { if (this.greymarchWolfWant !== !!msg.on) this.greymarchLog("wolf: the server says " + (msg.on ? "changed" : "no (change back)")); this.greymarchWolfWant = !!msg.on; if (msg.on) { this.greymarchWolfWordAt = Date.now(); this.greymarchWolfAlpha = !!msg.alpha; } return; } // (logged only when it changes: the server repeats it every 5 seconds) // the werewolf form (greymarchWolfTick)
         if (type === "greymarchWolfAlphas") { this.greymarchWolfAlphaList = Array.isArray(msg.actors) ? msg.actors : []; return; } // the other players in the Alpha form: drawn white (greymarchWolfAlphaOthers)
         if (type === "greymarchWolfFeed") { this.greymarchWolfFeedAt = Date.now(); return; } // the wolf fed (a kill or a corpse): the feeding animation (greymarchWolfTick)
@@ -179,6 +181,7 @@ export class GreymarchBridge {
         if (this.greymarchMenuEscAt && Date.now() - this.greymarchMenuEscAt > 700) { this.greymarchMenuEscAt = 0; this.greymarchMenuHide(); } // Esc, and the menu page did not close itself
         this.greymarchToastTick(Date.now());
         this.greymarchEffects(); // staff effects: noclip, speed, frozen, ghosts (cheap: does real work every 400 ms)
+        this.greymarchShapeTick(); // a creature form staff put the player in (a goat, a giant ...): the server decides, the body is changed here
         this.greymarchWolfTick(); // the werewolf form: the game's Beast Form power is the trigger, the server decides, the change is done here
         var beat = this.greymarchBeat;
         if (beat) {
@@ -563,6 +566,105 @@ export class GreymarchBridge {
         this.greymarchLog("wolf: telling the server the player " + (beast ? "became the beast (the power was used)" : "is human again"));
         var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchWolf", op: "game", beast: beast }) };
         this.controller.emitter.emit("sendMessage", { message: message, reliability: "reliable" });
+    }
+    // CREATURE FORMS. Staff turn a player into a creature (the server's shapeshift.js); the server says { customPacketType: "greymarchShape", on: true, race, back, name } and repeats it
+    // every 5 seconds, then { on: false, back, wear } to change back. Other players see the creature because the server changes the character's appearance (SkyMP redraws it);
+    // THIS game changes the player's own body: Beast Form mode (no inventory or magic menus, as the werewolf), no fast travel, no first person (creature bodies have none), gear
+    // off, and SetRace to the creature's race. The way back: the race the server names (the character's own), controls back, and the gear they wore put on again.
+    // With no word from the server for SHAPE_SILENCE_MS (it restarted without the form, or the stream broke) the player changes back by themselves.
+    greymarchShapeMsg(msg: any): any {
+        if (msg.on) {
+            var race = Number(msg.race) >>> 0;
+            if (!race) return;
+            var was = this.greymarchShapeWant;
+            if (!was || was.race !== race) this.greymarchLog("shape: the server says " + (msg.name || "a creature") + " (race " + race.toString(16) + ")");
+            this.greymarchShapeWant = { race: race, back: Number(msg.back) >>> 0, name: String(msg.name || "") };
+            this.greymarchShapeWordAt = Date.now();
+        } else {
+            if (this.greymarchShapeWant || this.greymarchShapeOn) this.greymarchLog("shape: the server says change back");
+            this.greymarchShapeWant = null;
+            if (Number(msg.back) > 0) this.greymarchShapeBackRace = Number(msg.back) >>> 0;
+            this.greymarchShapeWear = Array.isArray(msg.wear) ? msg.wear.map(function (x: any) { return Number(x) >>> 0; }).filter(function (x: number) { return x > 0; }) : [];
+        }
+    }
+    greymarchShapeTick(): any {
+        var now = Date.now();
+        if (now < (this.greymarchShapeNext || 0)) return;
+        this.greymarchShapeNext = now + 250;
+        try {
+            var sp = this.sp;
+            var player = sp.Game.getPlayer();
+            if (!player) return;
+            var race = player.getRace();
+            var raceId = race ? race.getFormID() : 0;
+            var want = this.greymarchShapeWant;
+            if (want && now - (this.greymarchShapeWordAt || 0) > SHAPE_SILENCE_MS) {
+                this.greymarchLog("shape: no word from the server for " + SHAPE_SILENCE_MS / 1000 + " seconds: changing back");
+                this.greymarchShapeWant = want = null;
+            }
+            if (want) {
+                if (this.greymarchShapeOn !== want.race) this.greymarchShapeBecome(player, want, raceId);
+                else if (raceId !== want.race && now - (this.greymarchShapeFixAt || 0) > 3000) { // something put another race back (a respawn, the game itself)
+                    this.greymarchShapeFixAt = now;
+                    var r = sp.Race.from(sp.Game.getFormEx(want.race));
+                    if (r) { player.setRace(r); this.greymarchLog("shape: the race was not the creature's any more: set again"); }
+                }
+            } else if (this.greymarchShapeOn) this.greymarchShapeUnbecome(player);
+            var wearAt = this.greymarchShapeWearAt;
+            if (wearAt && now >= wearAt) { // the gear goes back on a moment after the body is back (the new skeleton must be in place first)
+                this.greymarchShapeWearAt = 0;
+                var list = this.greymarchShapeWear || [];
+                this.greymarchShapeWear = [];
+                var put = 0;
+                for (var i = 0; i < list.length; i++) {
+                    try { var f = sp.Game.getFormEx(list[i]); if (f && player.getItemCount(f) > 0) { player.equipItem(f, false, true); put++; } } catch (eErr) { /* that one stays in the inventory */ }
+                }
+                if (list.length) this.greymarchLog("shape: put " + put + " of " + list.length + " worn items back on");
+            }
+        } catch (shErr) {
+            if (!this.greymarchShapeErrLogged) { this.greymarchShapeErrLogged = true; this.greymarchLog("shape: " + shErr); }
+        }
+    }
+    greymarchShapeBecome(player: any, want: any, raceId: number): any {
+        var sp = this.sp;
+        var step = "start";
+        try {
+            if (!this.greymarchShapeOn) { // from their own body (not from one creature to another): remember the race to go back to
+                this.greymarchShapeBackRace = want.back || raceId;
+                step = "beast form"; sp.Game.setBeastForm(true); // no inventory, magic or favourites menus: a creature cannot put on armor or cast the character's spells
+                step = "fast travel"; sp.Game.enableFastTravel(false);
+                step = "controls"; sp.Game.disablePlayerControls(false, false, true, false, false, false, false, false, 1); // only the camera switch: they still walk, fight, sneak and talk
+                step = "camera"; sp.Game.forceThirdPerson();
+                step = "unequip"; player.unequipAll();
+            }
+            step = "race"; var r = sp.Race.from(sp.Game.getFormEx(want.race)); if (!r) throw new Error("the race " + want.race.toString(16) + " is not in this game");
+            player.setRace(r);
+            this.greymarchShapeOn = want.race;
+            var got = player.getRace();
+            this.greymarchLog("shape: became " + (want.name || "a creature") + " (race now " + (got ? got.getFormID().toString(16) : "none") + ", will change back to " + (this.greymarchShapeBackRace || 0).toString(16) + ")");
+        } catch (bErr) {
+            this.greymarchShapeOn = want.race; // not tried again every quarter second: the race check above sets it again every 3 seconds
+            this.greymarchLog("shape: the change failed at step '" + step + "': " + bErr);
+        }
+    }
+    greymarchShapeUnbecome(player: any): any {
+        var sp = this.sp;
+        var step = "start";
+        this.greymarchShapeOn = 0;
+        try {
+            step = "race";
+            var back = this.greymarchShapeBackRace ? sp.Race.from(sp.Game.getFormEx(this.greymarchShapeBackRace)) : null;
+            if (!back) { try { var base = sp.ActorBase.from(player.getBaseObject()); back = base ? base.getRace() : null; } catch (baseErr) { back = null; } }
+            if (back) player.setRace(back); else this.greymarchLog("shape: no race known to change back to");
+            step = "controls"; sp.Game.enablePlayerControls(false, false, true, false, false, false, false, false, 1);
+            step = "beast form"; sp.Game.setBeastForm(false);
+            step = "fast travel"; sp.Game.enableFastTravel(true);
+            this.greymarchShapeWearAt = Date.now() + 1000;
+            var r = player.getRace();
+            this.greymarchLog("shape: changed back (race now " + (r ? r.getFormID().toString(16) : "none") + ")");
+        } catch (uErr) {
+            this.greymarchLog("shape: changing back failed at step '" + step + "': " + uErr);
+        }
     }
     // Staff effects, applied in the update phase. Each is switched on or off only when it CHANGES, so the game is never fought with.
     greymarchEffects(): any {
