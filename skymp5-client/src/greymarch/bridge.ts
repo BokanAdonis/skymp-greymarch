@@ -50,6 +50,7 @@ export class GreymarchBridge {
         if (type === "greymarchProps") { this.greymarchDoorNames = msg.doors && typeof msg.doors === "object" ? msg.doors : {}; this.greymarchDoorNamesNext = 0; return; }
         if (type === "greymarchGmAlert") { this.greymarchChatToPage("alert", msg); return; } // a player typed /gm (the server only sends it to Trial GM and up)
         if (type === "greymarchMenuReply") { this.greymarchMenuToPage("reply", msg); return; }
+        if (type === "greymarchWolfForm") { this.greymarchWolfWant = !!msg.on; this.greymarchWolfTries = 0; this.greymarchWolfCastAt = 0; this.greymarchLog("wolf: the server says " + (msg.on ? "change" : "change back")); return; } // the werewolf form (greymarchWolfTick)
         if (type === "greymarchProfReply") { this.greymarchLog("prof: the server's answer arrived (rid " + msg.rid + ", ok " + msg.ok + ")"); this.greymarchProfToPage("reply", msg); return; } // the professions window (K)
         if (type === "greymarchCombatMod") { var cm = Number(msg.mult); this.greymarchCombatWant = cm >= 0.1 && cm <= 3 ? cm : 1; return; } // the damage multiplier for what is in hand (professions: a weapon above your rank hits weaker, a Brawler's fists hit harder)
         if (type === "greymarchMenuEvent") { if ((msg.type === "trade_invite" || msg.type === "trade") && !this.greymarchMenuOn) this.greymarchMenuShow({ mode: "invite", looking: 0 }); this.greymarchMenuToPage("event", msg); return; }
@@ -167,6 +168,7 @@ export class GreymarchBridge {
         if (this.greymarchMenuEscAt && Date.now() - this.greymarchMenuEscAt > 700) { this.greymarchMenuEscAt = 0; this.greymarchMenuHide(); } // Esc, and the menu page did not close itself
         this.greymarchToastTick(Date.now());
         this.greymarchEffects(); // staff effects: noclip, speed, frozen, ghosts (cheap: does real work every 400 ms)
+        this.greymarchWolfTick(); // the werewolf form (the game's own), only while the server says the character is changed
         var beat = this.greymarchBeat;
         if (beat) {
             var bNow = Date.now();
@@ -330,6 +332,50 @@ export class GreymarchBridge {
         else if (e.code === 35 && !this.greymarchChatTyping && !this.greymarchScreenUp && !this.greymarchAdminOn && !this.greymarchMenuOn && !this.greymarchProfOn) this.greymarchWolfSend(); // H: the werewolf change. The SERVER decides (only a character staff gave the Beast Blood can change); the answer comes as a notice
         else if (e.code === 1 && this.greymarchProfOn) this.greymarchProfHide();
         else if (e.code === 1 && this.greymarchAdminOn) this.greymarchAdminHide();
+    }
+    // ---- THE WEREWOLF FORM: the game's OWN transformation (the Beast Form power), started and stopped on the SERVER's word.
+    // The server (gamemode werewolf.js) decides when a character is changed and sends { customPacketType: "greymarchWolfForm", on: true | false }. Here:
+    //   on   the game's own spell WerewolfChange (Skyrim.esm 0x092C48) is cast on the player; its script starts the quest PlayerWerewolfQuest, which does the whole change (the
+    //        beast form flag, the animation, the camera, the race). The game would shift back by itself when the game clock passes the global PlayerWerewolfShiftBackTime (0x02BA19),
+    //        so while the server says "changed" that global is kept a game day ahead.
+    //   off  the global is set to 0 (in the past): the game's own update then shifts the player back with its own animation. Repeated until the player is human again.
+    // Only done for a player the server told to change; every other player never gets past the first line.
+    greymarchWolfTick(): any {
+        var now = Date.now();
+        if (now < (this.greymarchWolfNext || 0)) return;
+        this.greymarchWolfNext = now + 500;
+        var want = !!this.greymarchWolfWant;
+        if (!want && !this.greymarchWolfActive) return;
+        try {
+            var sp = this.sp;
+            var player = sp.Game.getPlayer();
+            if (!player) return;
+            var race = player.getRace();
+            var isBeast = !!race && race.getFormID() === 0xcdd84; // WerewolfBeastRace
+            if (isBeast !== !!this.greymarchWolfWasBeast) { this.greymarchWolfWasBeast = isBeast; this.greymarchLog("wolf: the game says the player is " + (isBeast ? "the beast now" : "human again")); }
+            var shiftBack = sp.GlobalVariable.from(sp.Game.getFormEx(0x2ba19));   // PlayerWerewolfShiftBackTime
+            var days = sp.GlobalVariable.from(sp.Game.getFormEx(0x39));            // GameDaysPassed
+            if (want) {
+                this.greymarchWolfActive = true;
+                if (!isBeast) {
+                    // not changed yet: cast the game's own transformation, at most 3 tries 15 seconds apart (the change itself takes a few seconds)
+                    if (now - (this.greymarchWolfCastAt || 0) >= 15000 && (this.greymarchWolfTries || 0) < 3) {
+                        this.greymarchWolfCastAt = now; this.greymarchWolfTries = (this.greymarchWolfTries || 0) + 1;
+                        var spell = sp.Spell.from(sp.Game.getFormEx(0x92c48));       // WerewolfChange
+                        if (spell && !player.isDead()) { spell.cast(player, player); this.greymarchLog("wolf: cast the game's WerewolfChange (try " + this.greymarchWolfTries + ")"); }
+                        else this.greymarchLog("wolf: could not cast WerewolfChange (spell " + (spell ? "found" : "missing") + ", dead " + player.isDead() + ")");
+                    }
+                } else if (shiftBack && days) {
+                    shiftBack.setValue(days.getValue() + 1.0); // keep the game's own timer from ending the form
+                }
+            } else if (isBeast) {
+                if (shiftBack) shiftBack.setValue(0); // the game's own update now shifts the player back (animation and all)
+            } else {
+                this.greymarchWolfActive = false;     // human again: nothing more to do
+            }
+        } catch (wolfErr) {
+            if (!this.greymarchWolfErrLogged) { this.greymarchWolfErrLogged = true; this.greymarchLog("wolf: " + wolfErr); }
+        }
     }
     // Staff effects, applied in the update phase. Each is switched on or off only when it CHANGES, so the game is never fought with.
     greymarchEffects(): any {
