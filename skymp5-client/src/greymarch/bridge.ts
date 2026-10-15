@@ -624,6 +624,8 @@ export class GreymarchBridge {
             var wearAt = this.greymarchShapeWearAt;
             if (wearAt && now >= wearAt) { // the gear goes back on a moment after the body is back (the new skeleton must be in place first)
                 this.greymarchShapeWearAt = 0;
+                var kept = null; try { kept = (sp.storage as any)["greymarchPendingAppearance"]; (sp.storage as any)["greymarchPendingAppearance"] = null; } catch (kErr) { kept = null; }
+                if (kept && !this.greymarchShapeOn) { try { appearanceMod.applyAppearanceToPlayer(kept); this.greymarchLog("shape: the character's own look put back"); } catch (aErr) { this.greymarchLog("shape: the own look could not be put back: " + aErr); } }
                 var list = this.greymarchShapeWear || [];
                 this.greymarchShapeWear = [];
                 var put = 0;
@@ -669,8 +671,8 @@ export class GreymarchBridge {
     }
     // The body. Before the race changes: the character's own head (hair, face, brows) is taken off the character record, or it is drawn stretched over the creature's skeleton
     // (black spikes where the head should be), and the record is made male (several creature races give the female slot another creature's animations). Both are put back on
-    // the way back. The race is then changed for real: SkyMP may already have written the creature race into the record (the server changes the appearance), and a SetRace to
-    // the race the record already has does nothing, which leaves the creature's skeleton with the person's animations (a T-pose). So it goes through the old race first.
+    // the way back. Then ONE SetRace: remoteServer.ts no longer writes a creature race into the character (a SetRace to the race the game already "has" does nothing, and two in
+    // one frame keep the first body with the second race: a headless person, or a creature's skeleton with a person's animations).
     greymarchShapeBecome(player: any, want: any, raceId: number): any {
         var sp = this.sp;
         var step = "start";
@@ -686,9 +688,7 @@ export class GreymarchBridge {
                 step = "head"; this.greymarchShapeStripHead(player);
                 try { (sp.storage as any)["greymarchShapeOn"] = true; } catch (stErr) { /* hitService then reports the game's own hits too */ }
             }
-            step = "race";
-            if (raceId === want.race) { var via = sp.Race.from(sp.Game.getFormEx(this.greymarchShapeBackRace || 0x13746)); if (via) player.setRace(via); } // the record already says the creature: through the old race, or nothing changes
-            player.setRace(r);
+            step = "race"; player.setRace(r); // ONE real race change (remoteServer.ts no longer writes a creature race into the character first)
             step = "animation"; sp.Debug.sendAnimationEvent(player, "IdleForceDefaultState"); // start the new animation set from its idle
             this.greymarchShapeOn = want.race;
             var got = player.getRace();
@@ -725,7 +725,6 @@ export class GreymarchBridge {
     greymarchShapeUnbecome(player: any, raceId: number): any {
         var sp = this.sp;
         var step = "start";
-        var creature = this.greymarchShapeOn;
         this.greymarchShapeOn = 0;
         this.greymarchShapeSwing = null; this.greymarchShapeReport = null;
         try { (sp.storage as any)["greymarchShapeOn"] = false; } catch (stErr) { /* nothing was set */ }
@@ -734,16 +733,13 @@ export class GreymarchBridge {
             step = "race";
             var back = this.greymarchShapeBackRace ? sp.Race.from(sp.Game.getFormEx(this.greymarchShapeBackRace)) : null;
             if (!back) { try { var base = sp.ActorBase.from(player.getBaseObject()); back = base ? base.getRace() : null; } catch (baseErr) { back = null; } }
-            if (back) {
-                if (raceId === back.getFormID() && creature) { var via = sp.Race.from(sp.Game.getFormEx(creature)); if (via) player.setRace(via); } // the record already says their own race: through the creature's, or the body stays a creature
-                player.setRace(back);
-            } else this.greymarchLog("shape: no race known to change back to");
+            if (back) player.setRace(back); else this.greymarchLog("shape: no race known to change back to");
             step = "animation"; sp.Debug.sendAnimationEvent(player, "IdleForceDefaultState");
             step = "controls"; sp.Game.enablePlayerControls(false, false, true, false, false, false, false, false, 1);
             step = "beast form"; sp.Game.setBeastForm(false);
             step = "fast travel"; sp.Game.enableFastTravel(true);
             step = "redraw"; player.queueNiNodeUpdate(); // the head is drawn again
-            this.greymarchShapeWearAt = Date.now() + 1000;
+            this.greymarchShapeWearAt = Date.now() + 1000; // the gear, and the character's exact look that SkyMP kept aside (remoteServer.ts), a moment later
             var r = player.getRace();
             this.greymarchLog("shape: changed back (race now " + (r ? r.getFormID().toString(16) : "none") + ")");
         } catch (uErr) {

@@ -705,6 +705,16 @@ export class RemoteServer extends ClientListener {
     const newAppearance = msg.data;
 
     if (i === this.getMyActorIndex() && newAppearance) {
+      // GREYMARCH: a creature form (or the werewolf's look) is drawn on the player's own body by the bridge with ONE real SetRace. Writing the creature race into the character
+      // here first made that SetRace change nothing (the game already "had" the race): a person's body with a creature's race, or a creature's skeleton with a person's
+      // animations. So a look with no head parts (only creature looks are like that) is not applied to the player, and while a form is on, their own look is kept for the
+      // bridge, which puts it back after it has changed the body back (greymarchShapeUnbecome).
+      const noHead = !(Array.isArray(newAppearance.headpartIds) && newAppearance.headpartIds.length > 0);
+      if (noHead || storage["greymarchShapeOn"] === true) {
+        storage["greymarchPendingAppearance"] = noHead ? null : newAppearance;
+        logTrace(this, "Appearance for the player kept for the creature form");
+        return;
+      }
       this.controller.once("update", () => {
         applyAppearanceToPlayer(newAppearance);
         logTrace(this, "Applied appearance to the player");

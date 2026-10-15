@@ -13,8 +13,8 @@ const js = ts.transpileModule(src, { compilerOptions: { module: ts.ModuleKind.Co
 const NORD = 0x13746, GOAT = 0x131fa, GIANT = 0x131f9;
 const ATTACKS = { normal: ["attackStart_ClubAttack1", "attackStart_ClubAttack2"], power: ["attackPowerStart_Stomp"] };
 function make(opts = {}) {
-  const log = { lines: [], races: [], calls: [], equipped: [], events: [], sent: [], notes: [] };
-  const mods = { "../messages": { MsgType: { CustomPacket: 77 } }, "../view/worldViewMisc": { remoteIdToLocalId: () => 0, localIdToRemoteId: (id) => id - 0xff000000 + 0x10000 }, "../sync/appearance": {}, "../services/services/remoteServer": { RemoteServer: {} }, "../services/services/singlePlayerService": { SinglePlayerService: {} } };
+  const log = { lines: [], races: [], calls: [], equipped: [], events: [], sent: [], notes: [], applied: [] };
+  const mods = { "../messages": { MsgType: { CustomPacket: 77 } }, "../view/worldViewMisc": { remoteIdToLocalId: () => 0, localIdToRemoteId: (id) => id - 0xff000000 + 0x10000 }, "../sync/appearance": { applyAppearanceToPlayer: (a) => log.applied.push(a) }, "../services/services/remoteServer": { RemoteServer: {} }, "../services/services/singlePlayerService": { SinglePlayerService: {} } };
   const mod = { exports: {} };
   new Function("require", "exports", "module", js)((p) => mods[p], mod.exports, mod);
   const race = (id) => ({ id, getFormID: () => id });
@@ -63,21 +63,39 @@ test("the server says goat: menus and fast travel off, third person, gear off, t
   assert.deepStrictEqual(s.log.races, [GOAT], "changed once, not every tick");
 });
 
-test("SkyMP already wrote the creature into the record: the race goes through the old one, so the body really changes (no T-pose)", () => {
+test("ONE race change each way (two in one frame left a headless person with a creature's race)", () => {
   const s = make();
-  s.setRace(GIANT); // the appearance arrived first
   s.say(giant); s.tick();
-  assert.deepStrictEqual(s.log.races, [NORD, GIANT]);
+  assert.deepStrictEqual(s.log.races, [GIANT]);
+  s.say({ on: false, back: NORD, wear: [] }); s.tick();
+  assert.deepStrictEqual(s.log.races, [GIANT, NORD]);
 });
 
-test("the server says back: head, sex and race back (through the creature if the record already says their own), controls, and the gear a moment later", () => {
+test("the character's own look that SkyMP kept aside during the form is put back a moment after the body is back", () => {
+  const s = make();
+  s.say(giant); s.tick();
+  const own = { raceId: NORD, headpartIds: [0xe1], name: "Alda" };
+  s.storage.greymarchPendingAppearance = own; // remoteServer.ts kept it (the form was on)
+  s.say({ on: false, back: NORD, wear: [] }); s.tick();
+  assert.deepStrictEqual(s.log.applied, [], "not at once");
+  s.tick(1100);
+  assert.deepStrictEqual(s.log.applied, [own]);
+  assert.strictEqual(s.storage.greymarchPendingAppearance, null);
+});
+
+test("remoteServer.ts keeps a look with no head parts (a creature's) and any look during a form away from the player's own body", () => {
+  const rs = fs.readFileSync(path.join(__dirname, "..", "src", "services", "services", "remoteServer.ts"), "utf8");
+  assert.ok(rs.includes("if (noHead || storage[\"greymarchShapeOn\"] === true) {"));
+  assert.ok(rs.includes("storage[\"greymarchPendingAppearance\"] = noHead ? null : newAppearance;"));
+});
+
+test("the server says back: head, sex and race back, controls, and the gear a moment later", () => {
   const s = make({ female: true });
   s.say(giant); s.tick();
   s.log.calls.length = 0; s.log.races.length = 0;
-  s.setRace(NORD); // SkyMP put their own appearance back first
   s.say({ on: false, back: NORD, wear: [0x12eb7, 0x13911, 0x99999] });
   s.tick();
-  assert.deepStrictEqual(s.log.races, [GIANT, NORD]);
+  assert.deepStrictEqual(s.log.races, [NORD]);
   assert.strictEqual(s.race(), NORD);
   assert.deepStrictEqual(s.base.parts, [0xe1, 0xe2, 0xe3], "her own head");
   assert.strictEqual(s.base.sex, 1);
