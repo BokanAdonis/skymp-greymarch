@@ -15,7 +15,9 @@ const ADMIN_SCRIPT = "(function(){if(window.__gmAdminSend)return;var f=document.
 const CHAT_SCRIPT = "(function(){if(window.__gmChatSend)return;var f=document.createElement('iframe');f.id='greymarch-chat-frame';f.src='greymarch-chat.html';f.style.cssText='position:fixed;left:0;top:0;width:100%;height:100%;border:0;z-index:2147483100;background:transparent;display:block;pointer-events:none';f.setAttribute('allowtransparency','true');var ready=false,queue=[];window.addEventListener('message',function(e){if(e.source!==f.contentWindow)return;var d=e.data;if(!d)return;if(d.greymarchReady){ready=true;queue.forEach(function(q){f.contentWindow.postMessage({greymarchIn:q},'*')});queue=[]}else if(d.greymarchOut&&window.skyrimPlatform){window.skyrimPlatform.sendMessage('greymarch',JSON.stringify(d.greymarchOut))}});window.__gmChatSend=function(m){if(m.fn==='open'){f.style.pointerEvents='auto';try{f.focus()}catch(x){}}else if(m.fn==='close'||m.fn==='hide')f.style.pointerEvents='none';if(ready)f.contentWindow.postMessage({greymarchIn:m},'*');else queue.push(m)};document.body.appendChild(f)})();";
 const MENU_SCRIPT = "(function(){if(window.__gmMenuSend)return;var f=document.createElement('iframe');f.id='greymarch-menu-frame';f.src='greymarch-menu.html';f.style.cssText='position:fixed;left:0;top:0;width:100%;height:100%;border:0;z-index:2147483210;background:transparent;display:block;pointer-events:none';f.setAttribute('allowtransparency','true');var ready=false,queue=[];window.addEventListener('message',function(e){if(e.source!==f.contentWindow)return;var d=e.data;if(!d)return;if(d.greymarchReady){ready=true;queue.forEach(function(q){f.contentWindow.postMessage({greymarchIn:q},'*')});queue=[]}else if(d.greymarchOut&&window.skyrimPlatform){window.skyrimPlatform.sendMessage('greymarch',JSON.stringify(d.greymarchOut))}});window.__gmMenuSend=function(m){if(m.fn==='show'){f.style.pointerEvents='auto';try{f.focus()}catch(x){}}else if(m.fn==='hide')f.style.pointerEvents='none';if(ready)f.contentWindow.postMessage({greymarchIn:m},'*');else queue.push(m)};document.body.appendChild(f);document.addEventListener('keyup',function(e){if(e.key==='x'||e.key==='X'){try{f.contentWindow.postMessage({greymarchIn:{fn:'release'}},'*')}catch(x){}}});document.addEventListener('keydown',function(e){if(e.key==='Escape'){try{f.contentWindow.postMessage({greymarchIn:{fn:'escape'}},'*')}catch(x){}}})})();";
 const PROF_SCRIPT = "(function(){if(window.__gmProfSend)return;var f=document.createElement('iframe');f.id='greymarch-prof-frame';f.src='greymarch-prof.html';f.style.cssText='position:fixed;left:0;top:0;width:100%;height:100%;border:0;z-index:2147483220;background:transparent;display:block;pointer-events:none';f.setAttribute('allowtransparency','true');var ready=false,queue=[];window.addEventListener('message',function(e){if(e.source!==f.contentWindow)return;var d=e.data;if(!d)return;if(d.greymarchReady){ready=true;queue.forEach(function(q){f.contentWindow.postMessage({greymarchIn:q},'*')});queue=[]}else if(d.greymarchOut&&window.skyrimPlatform){window.skyrimPlatform.sendMessage('greymarch',JSON.stringify(d.greymarchOut))}});window.__gmProfSend=function(m){if(m.fn==='show'){f.style.pointerEvents='auto';try{f.focus()}catch(x){}}else if(m.fn==='hide')f.style.pointerEvents='none';if(ready)f.contentWindow.postMessage({greymarchIn:m},'*');else queue.push(m)};document.body.appendChild(f);document.addEventListener('keyup',function(e){if(e.key==='x'||e.key==='X'){try{f.contentWindow.postMessage({greymarchIn:{fn:'release'}},'*')}catch(x){}}});document.addEventListener('keydown',function(e){if(e.key==='Escape'){try{f.contentWindow.postMessage({greymarchIn:{fn:'escape'}},'*')}catch(x){}}})})();";
-const CHANCERY_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmChanceryRun").split("greymarch-prof").join("greymarch-chancery").split("2147483220").join("2147483221"); // the chancery window (/chancery): the same loader, another page
+const WOLF_MORPH_MS = 4300; // the werewolf transformation: the race changes at the animation's "SetRace" cue, or after this long if the cue is not seen (the cue is about 4.0 s in, animationdatasinglefile.txt)
+const WOLF_ROAR_MS = 4000;  // R: one roar every this long (the howl animation lasts about 2.8 s)
+const CHANCERY_SCRIPT =PROF_SCRIPT.split("__gmProfSend").join("__gmChanceryRun").split("greymarch-prof").join("greymarch-chancery").split("2147483220").join("2147483221"); // the chancery window (/chancery): the same loader, another page
 
 export class GreymarchBridge {
     [key: string]: any;
@@ -55,6 +57,7 @@ export class GreymarchBridge {
         if (type === "greymarchGmAlert") { this.greymarchChatToPage("alert", msg); return; } // a player typed /gm (the server only sends it to Trial GM and up)
         if (type === "greymarchMenuReply") { this.greymarchMenuToPage("reply", msg); return; }
         if (type === "greymarchWolfForm") { if (this.greymarchWolfWant !== !!msg.on) this.greymarchLog("wolf: the server says " + (msg.on ? "changed" : "no (change back)")); this.greymarchWolfWant = !!msg.on; if (msg.on) this.greymarchWolfWordAt = Date.now(); return; } // (logged only when it changes: the server repeats it every 5 seconds) // the werewolf form (greymarchWolfTick)
+        if (type === "greymarchWolfFeed") { this.greymarchWolfFeedAt = Date.now(); return; } // the wolf fed (a kill or a corpse): the feeding animation (greymarchWolfTick)
         if (type === "greymarchChanceryReply") { this.greymarchChanceryToPage("reply", msg); return; } // the chancery window (/chancery)
         if (type === "greymarchChanceryOpen") { this.greymarchChanceryShow(); return; }
         if (type === "greymarchProfReply") { this.greymarchLog("prof: the server's answer arrived (rid " + msg.rid + ", ok " + msg.ok + ")"); this.greymarchProfToPage("reply", msg); return; } // the professions window (K)
@@ -324,6 +327,7 @@ export class GreymarchBridge {
     }
     // F7 opens the panel (the page itself closes it with F7 or Escape). Escape also closes it from here, because the game un-focuses the browser on Escape.
     greymarchKey(e: any): any {
+        if (e.code === 19) { var rDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (e.isUp === true) rDown = false; if (rDown && !this.greymarchKey19 && this.greymarchWolfOn && !this.greymarchChatTyping) this.greymarchWolfRoarAt = Date.now(); this.greymarchKey19 = rDown; return; } // R: the werewolf roars (greymarchWolfTick; only while changed)
         if (e.code !== 65 && e.code !== 1 && e.code !== 45 && e.code !== 28 && e.code !== 37) return;
         var down = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true);
         if (e.isUp === true) down = false;
@@ -348,7 +352,8 @@ export class GreymarchBridge {
     // quest script PlayerWerewolfChangeScript does it (PrepShift, InitialShift, StartTracking, and ActuallyShiftBackIfNecessary for the way back).
     //   1. The power is used: the game's own events say so (spellCast of WerewolfChange, effectStart / magicEffectApply of its effect WerewolfChangeEffect 0x092C45, or the effect seen
     //      on the player). Those are game events, not Papyrus events, so they are not blocked. This is REPORTED ({ customPacketType: "greymarchWolf", op: "game", beast: true }).
-    //   2. The server answers { customPacketType: "greymarchWolfForm", on: true | false } (greymarchWolfWant). true: the change is done here (greymarchWolfBecome). The server repeats it
+    //   2. The server answers { customPacketType: "greymarchWolfForm", on: true | false } (greymarchWolfWant). true: the transformation animation plays (greymarchWolfBecome), then the
+    //      change is done here (greymarchWolfChange). While changed, R roars and { customPacketType: "greymarchWolfFeed" } plays the feeding animation. The server repeats it
     //      every 5 seconds while the form lasts; with no word for 20 seconds (the server restarted) the player is changed back.
     //   3. on: false (refused, hunger, death, the server ended it): changed back here (greymarchWolfUnbecome) and the next use of the power is reported afresh.
     greymarchWolfSignal(why: string): any { // called from game event handlers: only remembers it (Skyrim functions are used in the update phase)
@@ -389,7 +394,11 @@ export class GreymarchBridge {
                 this.greymarchWolfWant = want = undefined;
             }
             if (want === true) {
+                var morph = this.greymarchWolfMorph;
                 if (!this.greymarchWolfOn) this.greymarchWolfBecome(player);
+                else if (morph) { // the transformation animation is playing: the body changes on its "SetRace" cue (or after WOLF_MORPH_MS if the cue is never seen)
+                    if (morph.cue || now - morph.at >= WOLF_MORPH_MS) { this.greymarchWolfMorph = null; this.greymarchLog("wolf: the transformation reached the race change (" + (morph.cue ? "the animation's SetRace cue" : "timer") + ", " + (now - morph.at) + " ms)"); this.greymarchWolfChange(player); }
+                }
                 else if (raceId !== 0xcdd84 && now - (this.greymarchWolfRaceFixAt || 0) > 3000) { // something put the human race back while the server says changed
                     this.greymarchWolfRaceFixAt = now;
                     var wr = sp.Race.from(sp.Game.getFormEx(0xcdd84));
@@ -399,14 +408,50 @@ export class GreymarchBridge {
                 if (this.greymarchWolfOn) this.greymarchWolfUnbecome(player);
                 if (want === false) this.greymarchWolfWant = undefined; // handled: the next use of the power is reported afresh
             }
+            // R: the roar (the vanilla howl animation of the beast body, with its own sound). Only while changed, not mid-transformation, not in a menu, once every WOLF_ROAR_MS.
+            var roarAt = this.greymarchWolfRoarAt;
+            if (roarAt) {
+                this.greymarchWolfRoarAt = 0;
+                var inMenu = false; try { inMenu = !!sp.Utility.isInMenuMode(); } catch (mErr) { inMenu = false; }
+                if (this.greymarchWolfOn && !this.greymarchWolfMorph && raceId === 0xcdd84 && !inMenu && now - roarAt < 1000 && now >= (this.greymarchWolfRoarNext || 0)) {
+                    this.greymarchWolfRoarNext = now + WOLF_ROAR_MS;
+                    sp.Debug.sendAnimationEvent(player, "HowlStart");
+                    this.greymarchWolfRoarRelease = now + 200; // released at once: a short howl, as a quick tap of the shout key does it
+                    this.greymarchLog("wolf: roar");
+                }
+            }
+            if (this.greymarchWolfRoarRelease && now >= this.greymarchWolfRoarRelease) { this.greymarchWolfRoarRelease = 0; if (this.greymarchWolfOn) sp.Debug.sendAnimationEvent(player, "HowlRelease"); }
+            // the server says the wolf fed (a kill or a corpse): the vanilla feeding animation (PlayerWerewolfChangeScript.Feed plays the idle SpecialFeeding)
+            var feedAt = this.greymarchWolfFeedAt;
+            if (feedAt && this.greymarchWolfOn && !this.greymarchWolfMorph && raceId === 0xcdd84) {
+                this.greymarchWolfFeedAt = 0;
+                var feedIdle = sp.Idle.from(sp.Game.getFormEx(0xd23b7));
+                var fed = !!feedIdle && player.playIdle(feedIdle);
+                this.greymarchLog("wolf: feeding animation " + (fed ? "played" : "refused by the game"));
+            } else if (feedAt && now - feedAt > 8000) this.greymarchWolfFeedAt = 0; // still changing (or changed back): too late for it
         } catch (wolfErr) {
             if (!this.greymarchWolfErrLogged) { this.greymarchWolfErrLogged = true; this.greymarchLog("wolf: " + wolfErr); }
         }
     }
-    // The change, as the vanilla PrepShift / InitialShift / StartTracking do it (the howl, the level abilities, factions and crime are left out: the server owns the form's rules).
+    // The transformation animation first, as the vanilla WerewolfTransformVisual does it for every werewolf: the human body plays IdleWerewolfTransformation (Skyrim.esm 0x02A59D,
+    // the WW_Stage1..9 clips of 0_Master.hkx) and the race is switched on the animation's own "SetRace" cue (about 4 seconds in). The cue is awaited with the latent
+    // waitForAnimationEvent (not a Papyrus event, so SkyMP does not block it); WOLF_MORPH_MS is the fallback if it never comes. greymarchWolfTick then calls greymarchWolfChange.
+    // SkyMP sends the player's animation events to the other games, so other players see the transformation too.
     greymarchWolfBecome(player: any): any {
         var sp = this.sp;
         this.greymarchWolfOn = true;
+        var morph = { at: Date.now(), cue: false };
+        var played = false;
+        try { sp.Game.forceThirdPerson(); } catch (cErr) { /* the change sets the camera anyway */ } // the animation is seen from outside
+        try { var idle = sp.Idle.from(sp.Game.getFormEx(0x2a59d)); played = !!idle && player.playIdle(idle); } catch (iErr) { played = false; }
+        if (!played) { this.greymarchLog("wolf: the game refused the transformation animation (swimming, mid-air, in a scene?): changing at once"); this.greymarchWolfChange(player); return; }
+        this.greymarchWolfMorph = morph;
+        this.greymarchLog("wolf: the transformation animation started");
+        try { player.waitForAnimationEvent("SetRace").then(function (ok: boolean) { if (ok) morph.cue = true; }, function () { /* the timer changes them */ }); } catch (wErr) { /* the timer changes them */ }
+    }
+    // The change, as the vanilla PrepShift / InitialShift / StartTracking do it (the howl, the level abilities, factions and crime are left out: the server owns the form's rules).
+    greymarchWolfChange(player: any): any {
+        var sp = this.sp;
         var step = "start";
         try {
             step = "beast form"; sp.Game.setBeastForm(true);
@@ -428,6 +473,13 @@ export class GreymarchBridge {
     greymarchWolfUnbecome(player: any): any {
         var sp = this.sp;
         this.greymarchWolfOn = false;
+        this.greymarchWolfRoarRelease = 0;
+        if (this.greymarchWolfMorph) { // still in the transformation animation: nothing was changed yet, only the animation is stopped
+            this.greymarchWolfMorph = null;
+            try { sp.Debug.sendAnimationEvent(player, "IdleForceDefaultState"); } catch (sErr) { /* it ends by itself */ }
+            this.greymarchLog("wolf: the transformation was stopped before the body changed");
+            return;
+        }
         var step = "start";
         try {
             step = "image"; try { var im = sp.ImageSpaceModifier.from(sp.Game.getFormEx(0x48428)); if (im) im.apply(1); var snd = sp.Sound.from(sp.Game.getFormEx(0x10fccd)); if (snd) snd.play(player); } catch (imErr) { /* a nicety */ }
