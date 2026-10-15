@@ -25,6 +25,16 @@ export class LoadOrderVerificationService extends ClientListener {
     const settingsService = this.controller.lookupListener(SettingsService);
 
     this.resetText();
+    // GREYMARCH: SkyrimPlatform's getFileInfo only accepts letters, digits, '.', '-' and '_' (Validators.cpp ValidateFilename), and its error for any other
+    // name escapes getFileInfoSafe's try, aborting this check with an [Exception] in the console. Our load order has such names (spaces), so the check
+    // never ran for us; it is skipped quietly instead. The launcher already enforces the server's load order (docs/LAUNCHER-SETUP.md).
+    for (let i = 0; i < Game.getModCount(); ++i) {
+      const name = Game.getModName(i);
+      if (!/^[A-Za-z0-9._-]+$/.test(name)) {
+        logTrace(this, `Load order check skipped: getFileInfo cannot read`, name);
+        return;
+      }
+    }
     const clientMods = this.getClientMods();
     this.printModOrder('Client load order:', clientMods);
     return settingsService.getServerMods()
