@@ -327,6 +327,7 @@ export class GreymarchBridge {
         else if (e.code === 1 && this.greymarchMenuOn) this.greymarchMenuEscape();
         else if (e.code === 65 && !this.greymarchAdminOn && !this.greymarchMenuOn) this.greymarchAdminShow();
         else if (e.code === 37 && !this.greymarchChatTyping && !this.greymarchProfOn) this.greymarchProfShow(); // K opens the professions window (the page itself closes it with K or Esc, like the staff panel with F7)
+        else if (e.code === 35 && !this.greymarchChatTyping && !this.greymarchScreenUp && !this.greymarchAdminOn && !this.greymarchMenuOn && !this.greymarchProfOn) this.greymarchWolfSend(); // H: the werewolf change. The SERVER decides (only a character staff gave the Beast Blood can change); the answer comes as a notice
         else if (e.code === 1 && this.greymarchProfOn) this.greymarchProfHide();
         else if (e.code === 1 && this.greymarchAdminOn) this.greymarchAdminHide();
     }
@@ -647,6 +648,10 @@ export class GreymarchBridge {
         this.greymarchProfOn = false;
         this.greymarchProfToPage("hide", true);
         if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchProfOn); }
+    }
+    greymarchWolfSend(): any {
+        var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchWolf", op: "toggle" }) };
+        this.controller.emitter.emit("sendMessage", { message: message, reliability: "reliable" });
     }
     greymarchProfSend(data: any): any {
         this.greymarchLog("prof: window asks the server (rid " + data.rid + ", " + data.op + ")");
