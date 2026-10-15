@@ -333,49 +333,68 @@ export class GreymarchBridge {
         else if (e.code === 1 && this.greymarchProfOn) this.greymarchProfHide();
         else if (e.code === 1 && this.greymarchAdminOn) this.greymarchAdminHide();
     }
-    // ---- THE WEREWOLF FORM: the game's OWN transformation (the Beast Form power), started and stopped on the SERVER's word.
-    // The server (gamemode werewolf.js) decides when a character is changed and sends { customPacketType: "greymarchWolfForm", on: true | false }. Here:
-    //   on   the game's own spell WerewolfChange (Skyrim.esm 0x092C48) is cast on the player; its script starts the quest PlayerWerewolfQuest, which does the whole change (the
-    //        beast form flag, the animation, the camera, the race). The game would shift back by itself when the game clock passes the global PlayerWerewolfShiftBackTime (0x02BA19),
-    //        so while the server says "changed" that global is kept a game day ahead.
-    //   off  the global is set to 0 (in the past): the game's own update then shifts the player back with its own animation. Repeated until the player is human again.
-    // Only done for a player the server told to change; every other player never gets past the first line.
+    // ---- THE WEREWOLF FORM: the game's OWN transformation (the power "Beast Form"), with the SERVER deciding.
+    // Two ways in, one rule. The server's word is { customPacketType: "greymarchWolfForm", on: true | false } (greymarchWolfWant: true / false / undefined = nothing said yet).
+    //   - The player uses the game's own power (equips Beast Form in the power menu and presses Z): the game transforms them by itself. This tick sees the player become the beast
+    //     (the race is WerewolfBeastRace) while the server has not said yes, and REPORTS it ({ customPacketType: "greymarchWolf", op: "game", beast: true }, again every 3 seconds
+    //     until the server answers). The server says on: true (a character with the Beast Blood) or on: false (anyone else, or too soon): then this tick shifts the player back.
+    //   - The server starts it (the H key or /wolf): on: true arrives first and this tick casts the game's own spell WerewolfChange (Skyrim.esm 0x092C48), at most 3 tries.
+    // While the server says yes the game's own timer (the global PlayerWerewolfShiftBackTime, 0x02BA19) is kept a game day ahead, so the form lasts as long as the SERVER says. To shift
+    // back the global is set to 0: the game's own update then shifts the player back with its own animation. If the player shifts back by themselves (holds the game's revert) while the
+    // server still says yes, that is REPORTED ({ ..., beast: false }) and the server ends the form.
     greymarchWolfTick(): any {
         var now = Date.now();
         if (now < (this.greymarchWolfNext || 0)) return;
         this.greymarchWolfNext = now + 500;
-        var want = !!this.greymarchWolfWant;
-        if (!want && !this.greymarchWolfActive) return;
         try {
             var sp = this.sp;
             var player = sp.Game.getPlayer();
             if (!player) return;
             var race = player.getRace();
             var isBeast = !!race && race.getFormID() === 0xcdd84; // WerewolfBeastRace
+            var want = this.greymarchWolfWant; // true | false | undefined
             if (isBeast !== !!this.greymarchWolfWasBeast) { this.greymarchWolfWasBeast = isBeast; this.greymarchLog("wolf: the game says the player is " + (isBeast ? "the beast now" : "human again")); }
-            var shiftBack = sp.GlobalVariable.from(sp.Game.getFormEx(0x2ba19));   // PlayerWerewolfShiftBackTime
-            var days = sp.GlobalVariable.from(sp.Game.getFormEx(0x39));            // GameDaysPassed
-            if (want) {
-                this.greymarchWolfActive = true;
-                if (!isBeast) {
-                    // not changed yet: cast the game's own transformation, at most 3 tries 15 seconds apart (the change itself takes a few seconds)
-                    if (now - (this.greymarchWolfCastAt || 0) >= 15000 && (this.greymarchWolfTries || 0) < 3) {
-                        this.greymarchWolfCastAt = now; this.greymarchWolfTries = (this.greymarchWolfTries || 0) + 1;
-                        var spell = sp.Spell.from(sp.Game.getFormEx(0x92c48));       // WerewolfChange
-                        if (spell && !player.isDead()) { spell.cast(player, player); this.greymarchLog("wolf: cast the game's WerewolfChange (try " + this.greymarchWolfTries + ")"); }
-                        else this.greymarchLog("wolf: could not cast WerewolfChange (spell " + (spell ? "found" : "missing") + ", dead " + player.isDead() + ")");
-                    }
-                } else if (shiftBack && days) {
-                    shiftBack.setValue(days.getValue() + 1.0); // keep the game's own timer from ending the form
+            if (!isBeast && !this.greymarchWolfSeen && want === undefined) return; // an ordinary player: nothing to do
+            var shiftBack = sp.GlobalVariable.from(sp.Game.getFormEx(0x2ba19)); // PlayerWerewolfShiftBackTime
+            var days = sp.GlobalVariable.from(sp.Game.getFormEx(0x39));          // GameDaysPassed
+            if (isBeast) {
+                if (want === true) {
+                    this.greymarchWolfSeen = true;
+                    if (shiftBack && days) shiftBack.setValue(days.getValue() + 1.0);  // the server says changed: the game's own timer must not end it
+                } else if (want === false) {
+                    if (shiftBack) shiftBack.setValue(0);                              // the server says no: the game shifts the player back (animation and all)
+                } else if (now - (this.greymarchWolfReportAt || 0) >= 3000) {
+                    this.greymarchWolfReportAt = now;                                  // the beast, and the server has not said yes: tell it (the power was used)
+                    this.greymarchWolfReport(true);
                 }
-            } else if (isBeast) {
-                if (shiftBack) shiftBack.setValue(0); // the game's own update now shifts the player back (animation and all)
+                return;
+            }
+            // not the beast
+            if (want === true) {
+                if (this.greymarchWolfSeen) {
+                    // they were the beast and are not any more while the server still says yes: the player (or the game) shifted back: tell the server
+                    this.greymarchWolfSeen = false; this.greymarchWolfWant = undefined;
+                    this.greymarchWolfReport(false);
+                } else if (now - (this.greymarchWolfCastAt || 0) >= 15000 && (this.greymarchWolfTries || 0) < 3) {
+                    // the server started it (H or /wolf): cast the game's own transformation
+                    this.greymarchWolfCastAt = now; this.greymarchWolfTries = (this.greymarchWolfTries || 0) + 1;
+                    var spell = sp.Spell.from(sp.Game.getFormEx(0x92c48));             // WerewolfChange
+                    if (spell && !player.isDead()) { spell.cast(player, player); this.greymarchLog("wolf: cast the game's WerewolfChange (try " + this.greymarchWolfTries + ")"); }
+                    else this.greymarchLog("wolf: could not cast WerewolfChange (spell " + (spell ? "found" : "missing") + ", dead " + player.isDead() + ")");
+                }
+            } else if (want === false) {
+                this.greymarchWolfWant = undefined; this.greymarchWolfSeen = false;   // human again after a "no": the next use of the power is reported afresh
             } else {
-                this.greymarchWolfActive = false;     // human again: nothing more to do
+                this.greymarchWolfSeen = false;
             }
         } catch (wolfErr) {
             if (!this.greymarchWolfErrLogged) { this.greymarchWolfErrLogged = true; this.greymarchLog("wolf: " + wolfErr); }
         }
+    }
+    greymarchWolfReport(beast: boolean): any {
+        this.greymarchLog("wolf: telling the server the player " + (beast ? "became the beast (the power was used)" : "is human again"));
+        var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchWolf", op: "game", beast: beast }) };
+        this.controller.emitter.emit("sendMessage", { message: message, reliability: "reliable" });
     }
     // Staff effects, applied in the update phase. Each is switched on or off only when it CHANGES, so the game is never fought with.
     greymarchEffects(): any {
