@@ -514,8 +514,8 @@ export class GreymarchBridge {
             this.greymarchLog("wolf: changing back failed at step '" + step + "': " + uErr);
         }
     }
-    // THE ALPHA FORM (the server says alpha: true): a white/grey werewolf, 0.9 times the size, the race GM_AlphaWerewolfBeastRace in GreymarchCore.esp (0x804; a copy of
-    // WerewolfBeastRace with its own skin, the vanilla body with the white textures, and 0.9 times its height). GreymarchCore.esp is not on the server's plugin list, so the
+    // THE ALPHA FORM (the server says alpha: true): a white/grey werewolf, 1.3 times the size, the race GM_AlphaWerewolfBeastRace in GreymarchCore.esp (0x804; a copy of
+    // WerewolfBeastRace with its own skin, the vanilla body with the white textures, and 1.3 times its height). GreymarchCore.esp is not on the server's plugin list, so the
     // server cannot name the race by number: it says alpha and this code finds the race in the file. If it is missing, the normal werewolf race is used.
     greymarchWolfAlphaRaceId(): number {
         if (this.greymarchWolfAlphaId === undefined) {
