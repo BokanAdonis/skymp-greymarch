@@ -361,3 +361,40 @@ test("the load order the game really uses is written to the server log once per 
   const u = make(); u.gm.greymarchReportLoadOrder();
   assert.ok(u.sentPackets().some((p) => /could not be read/.test(p.text)));
 });
+
+test("HARD RULES: an Enter that reaches the game while a window is marked open but the browser does NOT have the keyboard clears the stale mark and opens the chat", () => {
+  for (const flag of ["greymarchAdminOn", "greymarchMenuOn", "greymarchProfOn", "greymarchChanceryOn"]) {
+    const { gm, focus, log } = make();
+    gm.greymarchChatShow();
+    gm[flag] = true;
+    focus.on = false; // the window lost the keyboard (or closed without saying so): the game got the Enter
+    enter(gm);
+    assert.strictEqual(gm[flag], false, flag + " is cleared");
+    assert.strictEqual(gm.greymarchChatTyping, true, "and the chat opened over " + flag);
+    assert.ok(log.lines.some((l) => /marked open without the keyboard/.test(l)), "the server log says why");
+  }
+  // the window really has the keyboard: Enter belongs to it and the chat stays shut
+  const { gm, focus } = make();
+  gm.greymarchChatShow();
+  gm.greymarchAdminOn = true; focus.on = true;
+  enter(gm);
+  assert.strictEqual(gm.greymarchAdminOn, true);
+  assert.ok(!gm.greymarchChatTyping);
+});
+
+test("HARD RULES: sending a line closes the input on the game side too, even if the page's own let-go never arrives", () => {
+  const { gm, log, toPage, sentPackets } = make();
+  gm.greymarchChatShow();
+  enter(gm);
+  assert.strictEqual(gm.greymarchChatTyping, true);
+  gm.greymarchBrowserMessage({ arguments: ["greymarch", JSON.stringify({ type: "chat", op: "send", text: "hello", tab: "local" })] });
+  assert.strictEqual(sentPackets().pop().text, "hello", "the line went to the server");
+  assert.strictEqual(gm.greymarchChatTyping, false, "and the input closed");
+  assert.strictEqual(log.focused.pop(), false, "the keyboard is given back");
+  assert.deepStrictEqual(toPage().pop(), { fn: "close", arg: true });
+  // the same Enter cannot open it again, a real press a moment later does
+  gm.greymarchKey({ code: 28, isDown: true }); gm.greymarchChatPending();
+  assert.strictEqual(gm.greymarchChatTyping, false);
+  enter(gm);
+  assert.strictEqual(gm.greymarchChatTyping, true);
+});

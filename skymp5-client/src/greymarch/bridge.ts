@@ -1018,8 +1018,23 @@ export class GreymarchBridge {
         if (this.greymarchChatTyping) return; // already typing: a key reaching the game now must never close or restart the input
         if (Date.now() - (this.greymarchChatClosedAt || 0) < 400) return; // the Enter that just SENT a line, or a held key, must not open the input again
         if (this.greymarchInMenu()) { this.greymarchChatWhy("Enter ignored: the game says '" + this.greymarchMenuName + "' is open"); return; }
+        this.greymarchChatStaleWindows();
         this.greymarchChatOpen();
         if (!this.greymarchChatTyping) this.greymarchChatWhy("Enter did not open the input (chat on: " + !!this.greymarchChatOn + ", select screen: " + !!this.greymarchScreenUp + ", staff panel: " + !!this.greymarchAdminOn + ", X menu: " + !!this.greymarchMenuOn + ")");
+    }
+    // HARD RULE: Enter opens the chat. The staff panel, the X menu, the K window and the chancery hold the keyboard while they are open, so an Enter that reaches the GAME while one of
+    // them is still marked open means the mark is stale (the window closed without saying so, or lost the keyboard): the mark is cleared and that window hidden, so the chat opens.
+    // While the browser really has the keyboard, the window is open for real and Enter belongs to it.
+    greymarchChatStaleWindows(): any {
+        if (!this.greymarchAdminOn && !this.greymarchMenuOn && !this.greymarchProfOn && !this.greymarchChanceryOn) return;
+        var focused = true;
+        try { focused = !!this.sp.browser.isFocused(); } catch (e) { focused = true; } // cannot tell: leave the window alone
+        if (focused) return;
+        this.greymarchLog("chat: Enter reached the game while " + [this.greymarchAdminOn ? "the staff panel" : "", this.greymarchMenuOn ? "the X menu" : "", this.greymarchProfOn ? "the K window" : "", this.greymarchChanceryOn ? "the chancery" : ""].filter(Boolean).join(", ") + " was marked open without the keyboard; closed it so the chat opens");
+        if (this.greymarchAdminOn) { try { this.greymarchAdminHide(); } catch (e1) { this.greymarchAdminOn = false; } }
+        if (this.greymarchMenuOn) { try { this.greymarchMenuHide(); } catch (e2) { this.greymarchMenuOn = false; } }
+        if (this.greymarchProfOn) { try { this.greymarchProfHide(); } catch (e3) { this.greymarchProfOn = false; } }
+        if (this.greymarchChanceryOn) { try { this.greymarchChanceryHide(); } catch (e4) { this.greymarchChanceryOn = false; } }
     }
     // Why a key press did nothing, to the server log (at most once every 5 seconds, so a held key cannot flood it)
     greymarchChatWhy(text: string): any {
@@ -1055,6 +1070,8 @@ export class GreymarchBridge {
         if (body.op === "send") { body.text = String(data.text || "").slice(0, 300); body.tab = data.tab === "staff" ? "staff" : "local"; }
         var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify(body) };
         this.controller.emitter.emit("sendMessage", { message: message, reliability: "reliable" });
+        // HARD RULE: sending a line closes the input. The page closes itself too; this makes sure the game lets go of the keyboard even if the page's own "let go" never arrives.
+        if (body.op === "send" && this.greymarchChatTyping) this.greymarchChatFocus(false);
     }
     // HOUSES AND STORAGE: the names staff gave doors ("Breezehome") are shown by every game instead of the base game's, and an owned door says who owns it on a second line
     // ("Owned by: Alda Ring"). The server sends { reference id: { label, owner } }; a door with no label of its own keeps the game's name above the owner line; a door that loses
