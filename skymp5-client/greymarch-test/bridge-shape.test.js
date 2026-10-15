@@ -166,3 +166,11 @@ test("a race this game does not have is logged, not retried every quarter second
   s.say({ on: false, back: NORD, wear: [] }); s.tick();
   assert.strictEqual(s.race(), NORD);
 });
+
+test("every packet the bridge handles is let through to it by authService.ts (a packet missing there never arrives: creature forms did nothing in game because of that)", () => {
+  const auth = fs.readFileSync(path.join(__dirname, "..", "src", "services", "services", "authService.ts"), "utf8");
+  const allowed = new Set([...auth.matchAll(/case '(greymarch[A-Za-z]+)':/g)].map((m) => m[1]));
+  const handled = [...new Set([...src.matchAll(/type === "(greymarch[A-Za-z]+)"/g)].map((m) => m[1]))];
+  assert.ok(handled.includes("greymarchShape"));
+  for (const t of handled) assert.ok(allowed.has(t), t + " is handled by the bridge but authService.ts drops it");
+});
