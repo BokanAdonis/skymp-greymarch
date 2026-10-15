@@ -11,7 +11,7 @@ const js = ts.transpileModule(src, { compilerOptions: { module: ts.ModuleKind.Co
 
 const BEAST = 0xcdd84, NORD = 0x13746, ALPHA = 0xfe000804;
 function make(opts = {}) {
-  const log = { lines: [], idles: [], events: [], races: [], waits: [] };
+  const log = { lines: [], idles: [], events: [], races: [], waits: [], sent: [] };
   const mods = { "../messages": { MsgType: { CustomPacket: 77 } }, "../view/worldViewMisc": { remoteIdToLocalId: (id) => (opts.others || {})[id] || 0 }, "../sync/appearance": {}, "../services/services/remoteServer": { RemoteServer: {} }, "../services/services/singlePlayerService": { SinglePlayerService: {} } };
   const mod = { exports: {} };
   new Function("require", "exports", "module", js)((p) => mods[p], mod.exports, mod);
@@ -32,7 +32,7 @@ function make(opts = {}) {
     Utility: { isInMenuMode: () => menu },
     on() {},
   };
-  const controller = { on() {}, emitter: { on() {}, emit() {} } };
+  const controller = { on() {}, emitter: { on() {}, emit: (n, m) => { if (n === "sendMessage") log.sent.push(JSON.parse(m.message.contentJsonDump)); } } };
   const gm = new mod.exports.GreymarchBridge(sp, controller);
   let t = 1_000_000;
   const realNow = Date.now;
@@ -161,4 +161,38 @@ test("other players in the Alpha form: one drawn as the normal werewolf gets the
   s.say({ customPacketType: "greymarchWolfAlphas", actors: [] });
   s.tick(1100);
   assert.strictEqual(races[0xff000a01], BEAST, "no longer listed: the normal werewolf again");
+});
+
+test("Z while changed asks the server to change back (the server decides); not mid-transformation, not right after the change, not in a menu or the chat, and not as a human", () => {
+  const s = make({ refuseIdle: true });
+  const backs = () => s.log.sent.filter((m) => m.customPacketType === "greymarchWolf" && m.beast === false).length;
+  s.key(44, true); s.key(44, false); s.tick();
+  assert.strictEqual(backs(), 0, "human: Z is the game's own key");
+  s.say({ customPacketType: "greymarchWolfForm", on: true });
+  s.tick();
+  assert.strictEqual(s.race(), BEAST);
+  s.key(44, true); s.key(44, false); s.tick();
+  assert.strictEqual(backs(), 0, "not in the first seconds after the change");
+  s.tick(2500);
+  s.setMenu(true); s.key(44, true); s.key(44, false); s.tick();
+  assert.strictEqual(backs(), 0, "not in a menu");
+  s.setMenu(false);
+  s.gm.greymarchChatTyping = true; s.key(44, true); s.key(44, false); s.tick();
+  assert.strictEqual(backs(), 0, "not while typing in the chat");
+  s.gm.greymarchChatTyping = false;
+  s.key(44, true); s.tick();
+  assert.strictEqual(backs(), 1, "Z asks the server");
+  assert.strictEqual(s.race(), BEAST, "nothing is changed before the server answers");
+  s.tick(); assert.strictEqual(backs(), 1, "one press, one request (holding it does not repeat)");
+  s.say({ customPacketType: "greymarchWolfForm", on: false }); s.tick();
+  assert.strictEqual(s.race(), NORD, "the server's no changes them back");
+});
+
+test("Z during the transformation animation does nothing", () => {
+  const s = make();
+  s.say({ customPacketType: "greymarchWolfForm", on: true });
+  s.tick();
+  s.tick(2500);
+  s.key(44, true); s.key(44, false); s.tick();
+  assert.strictEqual(s.log.sent.filter((m) => m.beast === false).length, 0);
 });
