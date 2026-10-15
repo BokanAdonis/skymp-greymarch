@@ -20,6 +20,22 @@ export class BrowserService extends ClientListener {
     this.controller.on("browserMessage", (e) => this.onBrowserMessage(e));
     this.controller.on("menuOpen", (e) => this.onMenuOpen(e));
     this.controller.on("menuClose", (e) => this.onMenuClose(e));
+    this.controller.on("update", () => this.askFrontLoaded());
+  }
+
+  // GREYMARCH: the page says "front-loaded" only once, when it starts. On a fast PC it can start before this script listens, the word is lost and
+  // the login never starts (the player waits at the vanilla main menu, seen 2026-10-15). So until it is heard, the page is asked to say it again
+  // once a second (only a page that has really started answers: scrollToLastMessage is set by the front's index.js). Repeats are ignored below.
+  private frontLoaded = false;
+  private frontAskedAt = 0;
+  private frontAsks = 0;
+  private askFrontLoaded() {
+    if (this.frontLoaded || this.frontAsks >= 120) return;
+    const now = Date.now();
+    if (now - this.frontAskedAt < 1000) return;
+    this.frontAskedAt = now;
+    this.frontAsks++;
+    this.sp.browser.executeJavaScript("if (typeof window.scrollToLastMessage === 'function' && window.skyrimPlatform && window.skyrimPlatform.sendMessage) window.skyrimPlatform.sendMessage('front-loaded');");
   }
 
   // TODO: keycodes should be configurable
@@ -59,6 +75,8 @@ export class BrowserService extends ClientListener {
     const onFrontLoadedEventKey = "front-loaded";
 
     if (e.arguments[0] === onFrontLoadedEventKey) {
+      if (this.frontLoaded) return; // GREYMARCH: an answer to askFrontLoaded after the page's own word: the login starts once
+      this.frontLoaded = true;
       this.controller.emitter.emit("browserWindowLoaded", {});
     }
   }
