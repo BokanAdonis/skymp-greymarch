@@ -627,6 +627,10 @@ export class RemoteServer extends ClientListener {
     const msg = event.message;
 
     const i = this.getIdManager().getId(msg.idx);
+    // GREYMARCH: a removal for something this game never got (getId says -1) is ignored. SkyMP compared that -1 with "my own body", which is ALSO -1
+    // until the game knows its body, so a removal of any unknown object (common right after connecting) counted as "my own body is gone" and
+    // SkyMP quit to the main menu: the "kicked to the main menu" of 2026-10-15/16.
+    if (i < 0) return;
     this.worldModel.forms[i] = undefined;
     getViewFromStorage()?.syncFormArray(this.worldModel);
 
