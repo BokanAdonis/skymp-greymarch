@@ -252,8 +252,11 @@ export class GreymarchBridge {
             var raceMenuOpen = this.sp.Ui.isMenuOpen("RaceSex Menu");
             if (eq) {
                 var age = now - eq.at;
-                if (!player || age > 30000) {
-                    if (age > 30000) this.greymarchLog("gave up on the starting clothes (" + eq.ids.length + " left)");
+                // 30 seconds to reach the race menu; once it is open the watch stays until it has closed and the clean-ups after it ran (players take minutes to
+                // build a face, and closing the menu is exactly when the game's default gear, the iron armor, comes back). 30 minutes at most.
+                var limit = eq.menuOpened ? 30 * 60 * 1000 : 30000;
+                if (!player || age > limit) {
+                    if (age > limit) this.greymarchLog("gave up on the starting clothes (" + eq.ids.length + " left)");
                     this.greymarchEquip = null;
                 } else {
                     // scheduled full resets: 0.5s after entering, and again 0.6s and 3s after the race menu closes (closing it rebuilds the character, which can bring the game's default gear back)
@@ -271,8 +274,9 @@ export class GreymarchBridge {
                         }
                     }
                     // the race menu has just opened: the default armor can come back with it, so take it off again and re-dress
-                    if (raceMenuOpen && !eq.menuOpened) { eq.menuOpened = true; player.unequipAll(); eq.ids = eq.all.slice(); this.greymarchLog("race menu opened: took everything off again"); }
-                    if (!raceMenuOpen && eq.menuOpened && !eq.menuClosed) { eq.menuClosed = true; eq.pending.push(now + 600, now + 3000); this.greymarchLog("race menu closed: clean-ups scheduled"); }
+                    // the race menu has just opened: the game's default gear (iron armor) can come with it, so it is REMOVED (the full reset: only the starting kit stays), before the player builds the character
+                    if (raceMenuOpen && !eq.menuOpened) { eq.menuOpened = true; this.greymarchReset(eq, player, "race menu opened"); }
+                    if (!raceMenuOpen && eq.menuOpened && !eq.menuClosed) { eq.menuClosed = true; eq.pending.push(now + 600, now + 3000, now + 8000); this.greymarchLog("race menu closed: clean-ups scheduled"); }
                     if (eq.menuClosed && eq.pending.length === 0 && eq.ids.length === 0) this.greymarchEquip = null;
                 }
             }
