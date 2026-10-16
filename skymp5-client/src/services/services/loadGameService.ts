@@ -46,6 +46,13 @@ export class LoadGameService extends ClientListener {
         });
     }
 
+    // GREYMARCH: true while a world load SkyMP asked for has not been reported by the game yet (at most 60 seconds). A second load started then is never
+    // finished by the game (the player clicked Play on the select screen 3 seconds after logging in, before the first load was done: stuck, 2026-10-16),
+    // so the select screen holds the choice until this is false (bridge.ts greymarchChoiceTick).
+    public greymarchLoadPending(): boolean {
+        return !this._greymarchAnswered && Date.now() - this._greymarchLoadAt < 60000;
+    }
+
     private _isCausedBySkyrimPlatform = false;
     private _greymarchLoadAt = 0; // GREYMARCH
     // GREYMARCH: true while the world the game shows is one SkyMP did not load (New Game / Continue: the player's own single-player game,

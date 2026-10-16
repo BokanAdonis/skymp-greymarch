@@ -7,6 +7,7 @@ import * as misc from "../view/worldViewMisc";
 import * as appearanceMod from "../sync/appearance";
 import { RemoteServer } from "../services/services/remoteServer";
 import { SinglePlayerService } from "../services/services/singlePlayerService";
+import { LoadGameService } from "../services/services/loadGameService";
 
 // Runs inside SkyMP's browser page (once). Each shows a page from Platform/UI in an iframe and relays its messages.
 const PAGE_SCRIPT = "(function(){if(window.__gmSend)return;var f=document.createElement('iframe');f.id='greymarch-frame';f.src='greymarch-select.html';f.style.cssText='position:fixed;left:0;top:0;width:100%;height:100%;border:0;z-index:2147483647;background:#05080d;display:none';var ready=false,queue=[];window.addEventListener('message',function(e){if(e.source!==f.contentWindow)return;var d=e.data;if(!d)return;if(d.greymarchReady){ready=true;queue.forEach(function(q){f.contentWindow.postMessage({greymarchIn:q},'*')});queue=[]}else if(d.greymarchOut&&window.skyrimPlatform){window.skyrimPlatform.sendMessage('greymarch',JSON.stringify(d.greymarchOut))}});window.__gmSend=function(m){f.style.display=m.fn==='hide'?'none':'block';if(ready)f.contentWindow.postMessage({greymarchIn:m},'*');else queue.push(m)};document.body.appendChild(f)})();";
@@ -39,7 +40,8 @@ export class GreymarchBridge {
         this.controller.on("buttonEvent", (e: any) => this.greymarchKey(e)); // F7 opens the staff panel
         try { this.sp.on("hit", (e: any) => this.greymarchHit(e)); } catch (hitErr) { /* no hit events: the combat history stays empty */ }
         this.controller.on("update", () => this.greymarchTick()); // Skyrim functions only work in the update phase, never in tick
-        this.controller.on("tick", () => this.greymarchConnectCover(Date.now())); // the connecting screen: "tick", because "update" does not run at the main menu (it only uses the browser)
+        this.controller.on("tick", () => this.greymarchConnectCover(Date.now()));
+        this.controller.on("tick", () => this.greymarchChoiceTick(Date.now())); // a held Play / Create goes out once the world has loaded (greymarchChoiceTick) // the connecting screen: "tick", because "update" does not run at the main menu (it only uses the browser)
         try { this.controller.on("spellCast", (e: any) => { try { if (e && e.spell && e.spell.getFormID() === 0x92c48 && e.caster && e.caster.getFormID() === 0x14) this.greymarchWolfSignal("spellCast"); } catch (x) { /* not ours */ } }); } catch (scErr) { /* the effect checks still see it */ } // the werewolf power (greymarchWolfTick)
         try { this.controller.on("effectStart", (e: any) => { try { if (e && e.effect && e.effect.getFormID() === 0x92c45 && e.target && e.target.getFormID() === 0x14) this.greymarchWolfSignal("effectStart"); } catch (x) { /* not ours */ } }); } catch (esErr) { /* the other signals still see it */ }
         try { this.controller.on("magicEffectApply", (e: any) => { try { if (e && e.effect && e.effect.getFormID() === 0x92c45 && e.target && e.target.getFormID() === 0x14) this.greymarchWolfSignal("magicEffectApply"); } catch (x) { /* not ours */ } }); } catch (maErr) { /* the other signals still see it */ }
@@ -348,12 +350,35 @@ export class GreymarchBridge {
         if (data && data.type === "chancery") { this.greymarchChanceryAsk(data); return; } // the chancery window asks the server (the SERVER decides)
         if (data && data.type === "chancery-close") { this.greymarchChanceryHide(); return; }
         if (!data || (data.type !== "play" && data.type !== "create" && data.type !== "delete")) return;
+        // Play and Create make SkyMP load the world. If the world from logging in is still loading, a second load on top of it never finishes (stuck),
+        // so the choice is held until the game reports that load (greymarchChoiceTick); the screen shows the player it is working.
+        if ((data.type === "play" || data.type === "create") && this.greymarchLoadPending()) {
+            this.greymarchHeldChoice = { data: data, at: Date.now() };
+            this.greymarchLog("stage: " + data.type + " chosen while the world is still loading: held until it has loaded");
+            this.greymarchToPage("busy", { on: true, text: "Loading the world", veil: false });
+            return;
+        }
+        this.greymarchSendChoice(data);
+    }
+    greymarchSendChoice(data: any): any {
         this.sp.printConsole("[greymarch] sending choice: " + data.type);
         var message = {
             t: MsgType.CustomPacket,
             contentJsonDump: JSON.stringify({ customPacketType: "greymarchChoice", type: data.type, id: data.id, name: data.name }),
         };
         this.controller.emitter.emit("sendMessage", { message: message, reliability: "reliable" });
+    }
+    greymarchLoadPending(): boolean {
+        try { var lg = this.controller.lookupListener ? this.controller.lookupListener(LoadGameService) : null; return !!(lg && lg.greymarchLoadPending()); } catch (e) { return false; }
+    }
+    // A held Play / Create (see greymarchBrowserMessage) goes to the server once the game has reported the world load (or after 60 s at most).
+    greymarchChoiceTick(now: number): any {
+        var held = this.greymarchHeldChoice;
+        if (!held) return;
+        if (this.greymarchLoadPending() && now - held.at < 60000) return;
+        this.greymarchHeldChoice = null;
+        this.greymarchLog("stage: the world has loaded: sending the held " + held.data.type);
+        this.greymarchSendChoice(held.data);
     }
     // GREYMARCH: the staff panel (F7). The page is Platform/UI/greymarch-admin.html; the server decides what each person may do.
     greymarchAdminToPage(fn: any, arg: any): any {
