@@ -355,12 +355,12 @@ export class GreymarchBridge {
             this.sp.printConsole("[greymarch] could not reach the staff panel: " + err);
         }
     }
-    greymarchAdminShow(): any {
+    greymarchAdminShow(mode?: any): any {
         if (this.greymarchScreenUp) return; // not while the select screen or the loading veil is up
         this.greymarchAdminOn = true;
         this.sp.browser.setVisible(true);
         this.sp.browser.setFocused(true);
-        this.greymarchAdminToPage("show", true);
+        this.greymarchAdminToPage("show", mode === "tester" ? "tester" : true);
     }
     greymarchAdminHide(): any {
         this.greymarchAdminOn = false;
@@ -376,7 +376,7 @@ export class GreymarchBridge {
         if (e.code === 19) { var rDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (e.isUp === true) rDown = false; if (rDown && !this.greymarchKey19 && this.greymarchWolfOn && !this.greymarchChatTyping) this.greymarchWolfRoarAt = Date.now(); this.greymarchKey19 = rDown; return; } // R: the werewolf roars (greymarchWolfTick; only while changed)
         if (e.code === 44) { var zDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (e.isUp === true) zDown = false; if (zDown && !this.greymarchKey44 && this.greymarchWolfOn && !this.greymarchChatTyping) this.greymarchWolfBackAt = Date.now(); this.greymarchKey44 = zDown; return; } // Z while changed: ask the server to change back (greymarchWolfTick)
         if (e.code === 256 || e.code === 257) { var mDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (e.isUp === true) mDown = false; if (mDown && !this["greymarchKey" + e.code]) this.greymarchShapeButton(e.code === 257); this["greymarchKey" + e.code] = mDown; return; } // mouse buttons: a creature's attacks (greymarchShapeTick)
-        if (e.code !== 65 && e.code !== 1 && e.code !== 45 && e.code !== 28 && e.code !== 37) return;
+        if (e.code !== 65 && e.code !== 66 && e.code !== 1 && e.code !== 45 && e.code !== 28 && e.code !== 37) return;
         var down = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true);
         if (e.isUp === true) down = false;
         if (e.code === 1 && down && this.greymarchChatTyping) { this.greymarchChatClose(); return; } // Esc cancels whenever the input is open (the messages stay on screen), whatever the key-up history says
@@ -388,6 +388,7 @@ export class GreymarchBridge {
         if (e.code === 45 && !this.greymarchMenuOn && !this.greymarchAdminOn && !this.greymarchChatTyping) this.greymarchMenuHold(); // X held while looking at a player
         else if (e.code === 1 && this.greymarchMenuOn) this.greymarchMenuEscape();
         else if (e.code === 65 && !this.greymarchAdminOn && !this.greymarchMenuOn) this.greymarchAdminShow();
+        else if (e.code === 66 && !this.greymarchAdminOn && !this.greymarchMenuOn && !this.greymarchChatTyping) this.greymarchAdminShow("tester"); // F8: the same panel as the tester menu (teleports, items, NPCs; the server gives testers those commands on the test server only)
         else if (e.code === 37 && !this.greymarchChatTyping && !(this.greymarchProfOn || this.greymarchChanceryOn)) this.greymarchProfShow(); // K opens the professions window (the page itself closes it with K or Esc, like the staff panel with F7)
         else if (e.code === 1 && this.greymarchProfOn) this.greymarchProfHide();
         else if (e.code === 1 && this.greymarchChanceryOn) this.greymarchChanceryHide();
