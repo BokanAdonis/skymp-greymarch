@@ -22,6 +22,8 @@ const SHAPE_LAND_MS = 450; // a creature's swing is reported this long after it 
 const SHAPE_SILENCE_MS = 20000; // a creature form: with no word from the server for this long the player changes back by themselves (the server repeats "on" every 5 seconds)
 const WOLF_BACK_GRACE_MS = 2000; // Z changes back, but not in the first 2 seconds after the body changed
 const WOLF_ROAR_MS = 4000;  // R: one roar every this long (the howl animation lasts about 2.8 s)
+// vampires (gamemode vampire.js): the game's own records, inside Dawnguard.esm (read from the game files); the real IDs are looked up with Game.getFormFromFile
+const VAMP_FORMS = { mist: 0x38ba, lord: 0x283b, potionFx: 0x18ef4, feedIdle: 0xe6a8 }; // DLC1VampireMistform, DLC1VampireChange, DLC1BloodPotionEffect, IdleVampireStandingFeedFront_Loose
 const CHANCERY_SCRIPT =PROF_SCRIPT.split("__gmProfSend").join("__gmChanceryRun").split("greymarch-prof").join("greymarch-chancery").split("2147483220").join("2147483221"); // the chancery window (/chancery): the same loader, another page
 
 export class GreymarchBridge {
@@ -36,6 +38,8 @@ export class GreymarchBridge {
         try { this.controller.on("spellCast", (e: any) => { try { if (e && e.spell && e.spell.getFormID() === 0x92c48 && e.caster && e.caster.getFormID() === 0x14) this.greymarchWolfSignal("spellCast"); } catch (x) { /* not ours */ } }); } catch (scErr) { /* the effect checks still see it */ } // the werewolf power (greymarchWolfTick)
         try { this.controller.on("effectStart", (e: any) => { try { if (e && e.effect && e.effect.getFormID() === 0x92c45 && e.target && e.target.getFormID() === 0x14) this.greymarchWolfSignal("effectStart"); } catch (x) { /* not ours */ } }); } catch (esErr) { /* the other signals still see it */ }
         try { this.controller.on("magicEffectApply", (e: any) => { try { if (e && e.effect && e.effect.getFormID() === 0x92c45 && e.target && e.target.getFormID() === 0x14) this.greymarchWolfSignal("magicEffectApply"); } catch (x) { /* not ours */ } }); } catch (maErr) { /* the other signals still see it */ }
+        try { this.controller.on("spellCast", (e: any) => { try { if (e && e.spell && e.caster && e.caster.getFormID() === 0x14) this.greymarchVampSignal("cast", e.spell.getFormID()); } catch (x) { /* not ours */ } }); } catch (vcErr) { /* no cast events: the powers are not reported */ } // a vampire's Mist Form or Vampire Lord (greymarchVampTick)
+        try { this.controller.on("magicEffectApply", (e: any) => { try { if (e && e.effect && e.target && e.target.getFormID() === 0x14) this.greymarchVampSignal("effect", e.effect.getFormID()); } catch (x) { /* not ours */ } }); } catch (veErr) { /* no effect events: a Potion of Blood is not reported */ } // a Potion of Blood drunk
         this.controller.emitter.on("greymarchStage", (text: string) => this.greymarchLog(text)); // other services report where the game is, for the server log
         this.controller.emitter.on("greymarchHead", (e: any) => { const m = this.greymarchHeads || (this.greymarchHeads = {}); m[e.name] = { x: e.x, y: e.y, at: Date.now() }; this.greymarchRes = { w: e.rw, h: e.rh }; }); // where each named player's head is on screen (for the microphone icon)
     }
@@ -91,6 +95,11 @@ export class GreymarchBridge {
         if (type === "greymarchShape") { this.greymarchShapeMsg(msg); return; } // a creature form (staff): greymarchShapeTick changes the body
         if (type === "greymarchWolfForm") { if (this.greymarchWolfWant !== !!msg.on) this.greymarchLog("wolf: the server says " + (msg.on ? "changed" : "no (change back)")); this.greymarchWolfWant = !!msg.on; if (msg.on) { this.greymarchWolfWordAt = Date.now(); this.greymarchWolfAlpha = !!msg.alpha; } return; } // (logged only when it changes: the server repeats it every 5 seconds) // the werewolf form (greymarchWolfTick)
         if (type === "greymarchWolfAlphas") { this.greymarchWolfAlphaList = Array.isArray(msg.actors) ? msg.actors : []; return; } // the other players in the Alpha form: drawn white (greymarchWolfAlphaOthers)
+        if (type === "greymarchVampire") { this.greymarchVampWant = msg.on ? msg : null; this.greymarchHudToPage("blood", { on: !!msg.on, blood: msg.blood, empty: !!msg.empty }); return; } // a vampire's state: the blood drop and what the game applies (greymarchVampTick)
+        if (type === "greymarchVampLooks") { this.greymarchVampLookList = Array.isArray(msg.vampires) ? msg.vampires : []; return; } // how every vampire in the world looks (eyes and fangs)
+        if (type === "greymarchVampFeed") { this.greymarchVampFeedWant = msg.on ? { role: msg.role, partner: msg.partner, at: Date.now(), done: false } : { off: true }; return; } // the feeding scene
+        if (type === "greymarchVampMist") { if (!msg.on) this.greymarchVampMistEnd = true; return; } // Mist Form refused or over: the game's own mist is ended
+        if (type === "greymarchVampLord") { if (this.greymarchVampLordWas !== !!msg.on) { this.greymarchVampLordWas = !!msg.on; this.greymarchLog("vampire: the server says the Lord's shape is " + (msg.on ? "on" : "off")); } return; } // the body itself is the creature form (greymarchShape)
         if (type === "greymarchWolfFeed") { this.greymarchWolfFeedAt = Date.now(); return; } // the wolf fed (a kill or a corpse): the feeding animation (greymarchWolfTick)
         if (type === "greymarchChanceryReply") { this.greymarchChanceryToPage("reply", msg); return; } // the chancery window (/chancery)
         if (type === "greymarchChanceryOpen") { this.greymarchChanceryShow(); return; }
@@ -214,6 +223,7 @@ export class GreymarchBridge {
         this.greymarchEffects(); // staff effects: noclip, speed, frozen, ghosts (cheap: does real work every 400 ms)
         this.greymarchShapeTick(); // a creature form staff put the player in (a goat, a giant ...): the server decides, the body is changed here
         this.greymarchWolfTick(); // the werewolf form: the game's Beast Form power is the trigger, the server decides, the change is done here
+        this.greymarchVampTick(); // a vampire: powers and potions reported, the abilities the server names, no Restoration, the feeding scene
         var beat = this.greymarchBeat;
         if (beat) {
             var bNow = Date.now();
@@ -593,6 +603,99 @@ export class GreymarchBridge {
             delete drawn[k];
             try { var a2 = sp.Actor.from(sp.Game.getFormEx(Number(k))); var r2 = a2 ? a2.getRace() : null; if (r2 && r2.getFormID() === alphaId) a2.setRace(sp.Race.from(sp.Game.getFormEx(0xcdd84))); } catch (bErr) { /* gone */ }
         }
+    }
+    // ---- VAMPIRES (gamemode vampire.js decides everything; this only reports what the game did and shows what the server says)
+    greymarchVampForm(key: string): number { // the real ID of one of VAMP_FORMS in this game's load order (0 while unknown)
+        var ids = this.greymarchVampIds || (this.greymarchVampIds = {});
+        if (ids[key] === undefined) { try { var fm = this.sp.Game.getFormFromFile((VAMP_FORMS as any)[key], "Dawnguard.esm"); ids[key] = fm ? fm.getFormID() : 0; } catch (e) { ids[key] = 0; } }
+        return ids[key];
+    }
+    greymarchVampSignal(kind: string, id: number): any { // called from game event handlers: only remembered (the update phase looks the IDs up and reports)
+        var q = this.greymarchVampSignals || (this.greymarchVampSignals = []);
+        if (q.length < 8) q.push({ kind: kind, id: id });
+    }
+    greymarchVampSend(msg: any): any {
+        var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify(Object.assign({ customPacketType: "greymarchVamp" }, msg)) };
+        this.controller.emitter.emit("sendMessage", { message: message, reliability: "reliable" });
+    }
+    greymarchVampTick(): any {
+        var sp = this.sp, now = Date.now();
+        var want = this.greymarchVampWant;
+        // the game's own powers and the Potion of Blood: reported; the server says yes or no
+        var q = this.greymarchVampSignals;
+        if (q && q.length) {
+            this.greymarchVampSignals = [];
+            for (var i = 0; i < q.length; i++) {
+                var s = q[i];
+                if (s.kind === "cast" && s.id && s.id === this.greymarchVampForm("mist")) { this.greymarchLog("vampire: Mist Form used"); this.greymarchVampSend({ op: "game", power: "mist", on: true }); }
+                else if (s.kind === "cast" && s.id && s.id === this.greymarchVampForm("lord")) { this.greymarchLog("vampire: the Vampire Lord power used"); this.greymarchVampSend({ op: "game", power: "lord", on: true }); }
+                else if (s.kind === "effect" && s.id && s.id === this.greymarchVampForm("potionFx") && now - (this.greymarchVampDrankAt || 0) > 1000) { this.greymarchVampDrankAt = now; this.greymarchVampSend({ op: "drank" }); }
+            }
+        }
+        var player: any = null;
+        try { player = sp.Game.getPlayer(); } catch (e) { player = null; }
+        if (!player) return;
+        // the abilities the server names (water walking, poison and disease resistance, magicka regeneration): set when they change, put back when vampirism goes
+        var key = want ? [want.waterWalk ? 1 : 0, want.poisonResist || 0, want.diseaseResist || 0, want.magickaRegen || 0].join(",") : "";
+        if (key !== (this.greymarchVampAvKey || "")) {
+            var orig = this.greymarchVampAvOrig;
+            try {
+                if (want && !orig) { orig = this.greymarchVampAvOrig = { WaterWalking: player.getBaseActorValue("WaterWalking"), PoisonResist: player.getBaseActorValue("PoisonResist"), DiseaseResist: player.getBaseActorValue("DiseaseResist"), MagickaRateMult: player.getBaseActorValue("MagickaRateMult") }; }
+                if (want) {
+                    player.setActorValue("WaterWalking", want.waterWalk ? 1 : orig.WaterWalking);
+                    player.setActorValue("PoisonResist", orig.PoisonResist + (want.poisonResist || 0));
+                    player.setActorValue("DiseaseResist", orig.DiseaseResist + (want.diseaseResist || 0));
+                    player.setActorValue("MagickaRateMult", orig.MagickaRateMult + (want.magickaRegen || 0));
+                } else if (orig) {
+                    for (var av in orig) player.setActorValue(av, orig[av]);
+                    this.greymarchVampAvOrig = null;
+                }
+                this.greymarchVampAvKey = key;
+                this.greymarchLog("vampire: abilities " + (want ? "set (" + key + ")" : "taken away"));
+            } catch (avErr) { this.greymarchVampAvKey = key; this.greymarchLog("vampire: the abilities could not be set: " + avErr); }
+        }
+        // no Restoration magic: a Restoration spell put in a hand is taken out of it again
+        if (want && want.noRestoration && now >= (this.greymarchVampRestoNext || 0)) {
+            this.greymarchVampRestoNext = now + 500;
+            for (var slot = 0; slot <= 1; slot++) {
+                try {
+                    var spell = player.getEquippedSpell(slot);
+                    var fx = spell ? spell.getNthEffectMagicEffect(0) : null;
+                    if (fx && fx.getAssociatedSkill() === "Restoration") {
+                        player.unequipSpell(spell, slot);
+                        if (now - (this.greymarchVampRestoToldAt || 0) > 10000) { this.greymarchVampRestoToldAt = now; sp.Debug.notification("Restoration magic will not answer the dead in your veins."); }
+                    }
+                } catch (rErr) { /* the next look */ }
+            }
+        }
+        // Mist Form refused or over: the game's own mist ends
+        if (this.greymarchVampMistEnd) {
+            this.greymarchVampMistEnd = false;
+            try { var ms = sp.Spell.from(sp.Game.getFormEx(this.greymarchVampForm("mist"))); if (ms) player.dispelSpell(ms); } catch (mErr) { /* it ends by itself */ }
+        }
+        // the feeding scene: the vampire's body plays the vanilla standing feed with the victim (on both players' games); off puts both back to their idle
+        var fd = this.greymarchVampFeedWant;
+        if (fd && !fd.done) {
+            fd.done = true;
+            var other: any = null;
+            try { var lid = misc.remoteIdToLocalId(fd.partner); other = lid ? sp.Actor.from(sp.Game.getFormEx(lid)) : null; } catch (oErr) { other = null; }
+            if (fd.off) {
+                this.greymarchVampFeedWant = null;
+                try { sp.Debug.sendAnimationEvent(player, "IdleForceDefaultState"); } catch (e1) { /* it ends by itself */ }
+                var was = this.greymarchVampFeedOther; this.greymarchVampFeedOther = null;
+                if (was) { try { sp.Debug.sendAnimationEvent(was, "IdleForceDefaultState"); } catch (e2) { /* gone */ } }
+            } else if (!other) this.greymarchLog("vampire: the feeding partner is not loaded here");
+            else {
+                this.greymarchVampFeedOther = other;
+                var biter = fd.role === "vampire" ? player : other, bitten = fd.role === "vampire" ? other : player;
+                var played = false;
+                try { var idle = sp.Idle.from(sp.Game.getFormEx(this.greymarchVampForm("feedIdle"))); played = !!idle && !!biter.playIdleWithTarget(idle, bitten); } catch (pErr) { played = false; }
+                this.greymarchLog("vampire: feeding (" + fd.role + "), the animation " + (played ? "plays" : "was refused by the game"));
+            }
+        }
+        // how other vampires look: the server's list is kept; the blue eyes (glow 1..6) and the fangs need the Greymarch eye and fang parts, which are not in the game files yet
+        var looks = this.greymarchVampLookList;
+        if (looks && looks.length && !this.greymarchVampLooksNoted) { this.greymarchVampLooksNoted = true; this.greymarchLog("vampire: " + looks.length + " vampire look(s) received (eyes and fangs are not drawn until their parts ship)"); }
     }
     greymarchWolfReport(beast: boolean): any {
         this.greymarchLog("wolf: telling the server the player " + (beast ? "became the beast (the power was used)" : "is human again"));
