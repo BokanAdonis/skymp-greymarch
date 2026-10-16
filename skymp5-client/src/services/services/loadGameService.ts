@@ -33,6 +33,7 @@ export class LoadGameService extends ClientListener {
                 isCausedBySkyrimPlatform: this._isCausedBySkyrimPlatform || (!!this._greymarchLoadAt && Date.now() - this._greymarchLoadAt < 8000 && !this._greymarchAnswered)
             };
             if (gameLoadEvent.isCausedBySkyrimPlatform) this._greymarchAnswered = true; // GREYMARCH
+            this.greymarchForeignWorld = !gameLoadEvent.isCausedBySkyrimPlatform; // GREYMARCH: see greymarchForeignWorld
             this.controller.emitter.emit("gameLoad", gameLoadEvent);
         } catch (e) {
             this.controller.once("tick", () => {
@@ -47,5 +48,8 @@ export class LoadGameService extends ClientListener {
 
     private _isCausedBySkyrimPlatform = false;
     private _greymarchLoadAt = 0; // GREYMARCH
+    // GREYMARCH: true while the world the game shows is one SkyMP did not load (New Game / Continue: the player's own single-player game,
+    // e.g. the Helgen cart with bound hands and first person). Then SkyMP's spawn must LOAD the server's world (remoteServer.ts), not just move the player.
+    public greymarchForeignWorld = false;
     private _greymarchAnswered = true; // GREYMARCH: the latest request already had its load (true before any request)
 }

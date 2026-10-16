@@ -36,7 +36,14 @@ export class SinglePlayerService extends ClientListener {
     private greymarchAskReload(): boolean {
         let connected = false;
         try { connected = this.controller.lookupListener(NetworkingService).isConnected(); } catch (e) { connected = false; }
-        if (!connected) return false;
+        if (!connected) {
+            // started by the launcher and not connected YET: the login is on its way, and when it connects the server's world is loaded over this
+            // one (loadGameService greymarchForeignWorld). No single-player switch, no "switching to the single-player mode" box.
+            let autoplay = false;
+            try { autoplay = !!((this.sp as any).settings["skymp5-client"] || {})["greymarch-autoplay"]; } catch (e) { autoplay = false; }
+            if (autoplay) { try { (this.controller.emitter as any).emit("greymarchStage", "stage: a game load before connecting (New Game / Continue?): the server's world will be loaded when connected"); } catch (e) { /* diagnostics only */ } }
+            return autoplay;
+        }
         const now = Date.now();
         if (now - this._greymarchReloadAt < RELOAD_GAP_MS) return true; // asked a moment ago (pressed twice): the server's load is on its way
         this._greymarchReloadAt = now;

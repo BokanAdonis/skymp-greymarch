@@ -486,10 +486,13 @@ export class RemoteServer extends ClientListener {
 
     if (msg.isMe) {
       const spawnTask = { running: false };
+      // GREYMARCH: in a world SkyMP did not load (the player pressed New Game / Continue before connecting), moving the player would keep that
+      // single-player game (the Helgen intro: bound hands, first person, its items): the world is loaded from the server instead (the tick path below).
+      const inForeignWorld = !!this.controller.lookupListener(LoadGameService).greymarchForeignWorld;
       once('update', () => {
         // Use MoveRefrToPosition to spawn if possible (not in main menu)
         // In case of connection lost this is essential
-        if (!spawnTask.running) {
+        if (!spawnTask.running && !inForeignWorld) {
           spawnTask.running = true;
           logTrace(this, 'Using moveRefrToPosition to spawn player');
           (async () => {
