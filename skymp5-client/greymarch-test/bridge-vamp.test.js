@@ -105,3 +105,11 @@ test("Mist Form refused or over: the game's own mist is ended", () => {
   s.tick();
   assert.deepStrictEqual(s.log.dispelled, [DG + 0x38ba]);
 });
+
+test("a vampire's request to feed opens the victim's X menu by itself (it was only sent to a closed menu)", () => {
+  const s = make();
+  const shown = [];
+  s.gm.greymarchMenuShow = (arg) => { shown.push(arg); };
+  s.say({ customPacketType: "greymarchMenuEvent", type: "feed_invite", from: "Stranger" });
+  assert.deepStrictEqual(shown, [{ mode: "invite", looking: 0 }]);
+});
