@@ -80,7 +80,8 @@ export class MagicSyncService extends ClientListener {
             open.repeats++;
             return;
         }
-        this.activeCasts.set(key, { msg, startedAt: Date.now(), repeats: 0, varsSeen: {}, events: [] });
+        // the caster's id in THIS game (the player is 0x14 here; their server id does not map back to it)
+        this.activeCasts.set(key, { msg, casterLocalId: event.caster.getFormID(), startedAt: Date.now(), repeats: 0, varsSeen: {}, events: [] });
         this.diag(`magic: cast ${msg.spell.toString(16)} hand ${msg.castingSource}${msg.isDualCasting ? " dual" : ""} by ${msg.caster.toString(16)}`);
     }
 
@@ -124,7 +125,7 @@ export class MagicSyncService extends ClientListener {
         const now = Date.now();
 
         for (const [key, cast] of Array.from(this.activeCasts.entries())) {
-            const ac = Actor.from(Game.getFormEx(remoteIdToLocalId(cast.msg.caster)));
+            const ac = Actor.from(Game.getFormEx(cast.casterLocalId));
             if (!ac) {
                 this.sendInterrupt(key, "caster gone");
                 continue;
@@ -158,7 +159,7 @@ export class MagicSyncService extends ClientListener {
 
         const msg: SpellCastMsgData = { ...cast.msg, interruptCast: true };
         try {
-            msg.actorAnimationVariables = this.getAnimationVariablesFromActorConverted(remoteIdToLocalId(cast.msg.caster));
+            msg.actorAnimationVariables = this.getAnimationVariablesFromActorConverted(cast.casterLocalId);
         } catch (e) {
             // the caster is gone: the last known variables go with the end of the cast
         }
@@ -270,7 +271,7 @@ export class MagicSyncService extends ClientListener {
 
     private playerId = 0x14;
     private sendUpdateAnimationVariablesRateMs = 500;
-    private activeCasts = new Map<string, { msg: SpellCastMsgData, startedAt: number, repeats: number, varsSeen: Record<string, { on: number, off: number, was: boolean }>, events: string[] }>();
+    private activeCasts = new Map<string, { msg: SpellCastMsgData, casterLocalId: number, startedAt: number, repeats: number, varsSeen: Record<string, { on: number, off: number, was: boolean }>, events: string[] }>();
     private readonly castVars = ["IsCastingRight", "IsCastingLeft", "IsCastingDual", "bWantCastRight", "bWantCastLeft"];
     private diagLeft = 40;
     private lastSendUpdateAnimationVariables: number = 0;

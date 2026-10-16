@@ -48,7 +48,7 @@ function make() {
     "./clientListener": { ClientListener: class {} },
     "../../logging": { logTrace() {} },
     "../../messages": { MsgType: { SpellCast: 23, UpdateAnimVariables: 24 } },
-    "../../view/worldViewMisc": { localIdToRemoteId: (id) => (id === 0x14 ? PLAYER_REMOTE : id), remoteIdToLocalId: (id) => (id === PLAYER_REMOTE ? 0x14 : id) },
+    "../../view/worldViewMisc": { localIdToRemoteId: (id) => (id === 0x14 ? PLAYER_REMOTE : id), remoteIdToLocalId: (id) => (id === PLAYER_REMOTE ? 0 : id) }, // as in the game: the player's own server id does not map back to 0x14
   };
   const realNow = Date.now;
   Date.now = () => now;
