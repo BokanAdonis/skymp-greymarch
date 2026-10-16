@@ -192,3 +192,15 @@ test("every packet the bridge handles is let through to it by authService.ts (a 
   assert.ok(handled.includes("greymarchShape"));
   for (const t of handled) assert.ok(allowed.has(t), t + " is handled by the bridge but authService.ts drops it");
 });
+
+test("F8 opens the staff panel page as the tester menu; F7 as the staff panel", () => {
+  const s = make();
+  const shown = [];
+  s.gm.greymarchAdminToPage = (fn, arg) => shown.push([fn, arg]);
+  s.gm.sp.browser = { setVisible() {}, setFocused() {} };
+  s.gm.greymarchKey({ code: 66, isDown: true }); s.gm.greymarchKey({ code: 66, isUp: true });
+  assert.deepStrictEqual(shown.pop(), ["show", "tester"]);
+  s.gm.greymarchAdminOn = false;
+  s.gm.greymarchKey({ code: 65, isDown: true }); s.gm.greymarchKey({ code: 65, isUp: true });
+  assert.deepStrictEqual(shown.pop(), ["show", true]);
+});
