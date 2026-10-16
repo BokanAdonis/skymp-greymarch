@@ -113,3 +113,35 @@ test("a vampire's request to feed opens the victim's X menu by itself (it was on
   s.say({ customPacketType: "greymarchMenuEvent", type: "feed_invite", from: "Stranger" });
   assert.deepStrictEqual(shown, [{ mode: "invite", looking: 0 }]);
 });
+
+test("blue eyes: every listed vampire of a human, elf or orc race gets the eye part for their glow; their own eyes come back when they are no longer listed", () => {
+  const s = make({ others: { 0xff000002: 0x5000 } });
+  const sp = s.gm.sp;
+  const part = (id, type = 2) => ({ getFormID: () => id, getType: () => type });
+  const parts = new Map(); // actor name -> eye part id
+  const body = (name, race, sex) => ({ name, getRace: () => ({ getFormID: () => race }), getBaseObject: () => ({ name, sex }), changeHeadPart: (hp) => parts.set(name, hp.getFormID()) });
+  const me = Object.assign(sp.Game.getPlayer(), body("me", 0x13746, 1));
+  const them = body("them", 0x13745, 0); // a Khajiit: not made yet
+  parts.set("me", 0x111); parts.set("them", 0x222);
+  sp.Game.getFormEx = (id) => (id === 0x5000 ? them : { id });
+  sp.Actor.from = (f) => f;
+  sp.Game.getFormFromFile = (id, file) => (file === "GreymarchCore.esp" ? { id: 0x0a000000 + id } : file === "Dawnguard.esm" ? { getFormID: () => DG + id } : null);
+  sp.HeadPart = { from: (f) => (f ? part(f.id) : null) };
+  sp.ActorBase = { from: (b) => (b ? { getSex: () => b.sex, getNumHeadParts: () => 1, getNthHeadPart: () => part(parts.get(b.name)) } : null) };
+  let t = 5_000_000; const realNow = Date.now; Date.now = () => t;
+  try {
+    s.say({ customPacketType: "greymarchGhosts", ghosts: [], me: 0xff000001 });
+    s.say({ customPacketType: "greymarchVampLooks", vampires: [{ actor: 0xff000001, glow: 3, fangs: true }, { actor: 0xff000002, glow: 2, fangs: true }] });
+    s.tick();
+    assert.strictEqual(parts.get("me"), 0x0a000000 + 0x815 + 3, "a woman at glow 3: GM_VampEyesFemaleBlue3");
+    assert.strictEqual(parts.get("them"), 0x222, "a Khajiit keeps their eyes (no khajiit eyes yet)");
+    t += 2500;
+    s.say({ customPacketType: "greymarchVampLooks", vampires: [{ actor: 0xff000001, glow: 0, fangs: false }] });
+    s.tick();
+    assert.strictEqual(parts.get("me"), 0x0a000000 + 0x815, "/eyes off: blue, no glow");
+    t += 2500;
+    s.say({ customPacketType: "greymarchVampLooks", vampires: [] });
+    s.tick();
+    assert.strictEqual(parts.get("me"), 0x111, "no longer a vampire: their own eyes");
+  } finally { Date.now = realNow; }
+});

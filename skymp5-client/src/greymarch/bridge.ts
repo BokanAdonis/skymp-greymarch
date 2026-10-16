@@ -24,6 +24,9 @@ const WOLF_BACK_GRACE_MS = 2000; // Z changes back, but not in the first 2 secon
 const WOLF_ROAR_MS = 4000;  // R: one roar every this long (the howl animation lasts about 2.8 s)
 // vampires (gamemode vampire.js): the game's own records, inside Dawnguard.esm (read from the game files); the real IDs are looked up with Game.getFormFromFile
 const VAMP_FORMS = { mist: 0x38ba, lord: 0x283b, potionFx: 0x18ef4, feedIdle: 0xe6a8 }; // DLC1VampireMistform, DLC1VampireChange, DLC1BloodPotionEffect, IdleVampireStandingFeedFront_Loose
+// a vampire's blue eyes (GreymarchCore.esp, made by tools/vampire-eyes.js in the launcher repo): GM_VampEyesMaleBlue0..6 and GM_VampEyesFemaleBlue0..6, glow 0 (none) to 6 (a Lord)
+const VAMP_EYES = { male: 0x80e, female: 0x815 };
+const VAMP_EYE_RACES = [0x13746, 0x13744, 0x13741, 0x13748, 0x13743, 0x13749, 0x13742, 0x13747]; // Nord, Imperial, Breton, Redguard, High Elf, Wood Elf, Dark Elf, Orc (the human eye shape; khajiit and argonian eyes are not made yet)
 const CHANCERY_SCRIPT =PROF_SCRIPT.split("__gmProfSend").join("__gmChanceryRun").split("greymarch-prof").join("greymarch-chancery").split("2147483220").join("2147483221"); // the chancery window (/chancery): the same loader, another page
 
 export class GreymarchBridge {
@@ -706,9 +709,56 @@ export class GreymarchBridge {
                 this.greymarchLog("vampire: feeding (" + fd.role + "), the animation " + (played ? "plays" : "was refused by the game"));
             }
         }
-        // how other vampires look: the server's list is kept; the blue eyes (glow 1..6) and the fangs need the Greymarch eye and fang parts, which are not in the game files yet
-        var looks = this.greymarchVampLookList;
-        if (looks && looks.length && !this.greymarchVampLooksNoted) { this.greymarchVampLooksNoted = true; this.greymarchLog("vampire: " + looks.length + " vampire look(s) received (eyes and fangs are not drawn until their parts ship)"); }
+        this.greymarchVampEyes(now); // every vampire's blue eyes, on this screen (the fangs are not made yet)
+    }
+    // Every vampire in the world (the player included) gets the blue eye part for their glow, by the server's list (greymarchVampLooks). Only the eye part changes:
+    // the character is not redrawn. The eyes they had are kept and put back when they are no longer a vampire. Checked again every 2 seconds, because SkyMP
+    // puts a character's saved look back now and then (a load, a redraw).
+    greymarchVampEyes(now: number): any {
+        if (now < (this.greymarchVampEyesNext || 0)) return;
+        this.greymarchVampEyesNext = now + 2000;
+        var sp = this.sp, list = this.greymarchVampLookList || [];
+        var done = this.greymarchVampEyesDone || (this.greymarchVampEyesDone = {}); // localId -> { orig: eye head part id, glow }
+        var seen: any = {};
+        for (var i = 0; i < list.length; i++) {
+            var v = list[i];
+            var localId = this.greymarchMeActor && v.actor === this.greymarchMeActor ? 0x14 : misc.remoteIdToLocalId(v.actor);
+            if (!localId) continue;
+            seen[localId] = true;
+            try {
+                var actor = localId === 0x14 ? sp.Game.getPlayer() : sp.Actor.from(sp.Game.getFormEx(localId));
+                if (!actor) continue;
+                var race = actor.getRace();
+                if (!race || VAMP_EYE_RACES.indexOf(race.getFormID()) < 0) continue; // a beast race, or in a creature's or the Lord's shape
+                var base = sp.ActorBase.from(actor.getBaseObject());
+                if (!base) continue;
+                var female = base.getSex() === 1;
+                var glow = Math.max(0, Math.min(6, Number(v.glow) || 0));
+                var hp = sp.HeadPart.from(sp.Game.getFormFromFile((female ? VAMP_EYES.female : VAMP_EYES.male) + glow, "GreymarchCore.esp"));
+                if (!hp) { if (!this.greymarchVampEyesMissing) { this.greymarchVampEyesMissing = true; this.greymarchLog("vampire: the blue eye parts are not in GreymarchCore.esp (old game files?)"); } return; }
+                var cur = this.greymarchVampEyePart(base);
+                var rec = done[localId];
+                if (!rec) { if (cur && cur.getFormID() === hp.getFormID()) continue; rec = done[localId] = { orig: cur ? cur.getFormID() : 0, glow: -1 }; }
+                if (rec.glow === glow && cur && cur.getFormID() === hp.getFormID()) continue;
+                actor.changeHeadPart(hp);
+                if (rec.glow !== glow) this.greymarchLog("vampire: " + localId.toString(16) + " has blue eyes, glow " + glow);
+                rec.glow = glow;
+            } catch (eErr) { /* not loaded here: the next look */ }
+        }
+        for (var k in done) {
+            if (seen[k]) continue;
+            var back = done[k]; delete done[k];
+            try {
+                var a2 = Number(k) === 0x14 ? sp.Game.getPlayer() : sp.Actor.from(sp.Game.getFormEx(Number(k)));
+                var orig = back.orig ? sp.HeadPart.from(sp.Game.getFormEx(back.orig)) : null;
+                if (a2 && orig) { a2.changeHeadPart(orig); this.greymarchLog("vampire: " + Number(k).toString(16) + " has their own eyes back"); }
+            } catch (bErr) { /* gone */ }
+        }
+    }
+    greymarchVampEyePart(base: any): any { // the eye head part a character's base wears now (type 2: eyes)
+        var n = base.getNumHeadParts();
+        for (var i = 0; i < n; i++) { var hp = base.getNthHeadPart(i); if (hp && hp.getType() === 2) return hp; }
+        return null;
     }
     greymarchWolfReport(beast: boolean): any {
         this.greymarchLog("wolf: telling the server the player " + (beast ? "became the beast (the power was used)" : "is human again"));
