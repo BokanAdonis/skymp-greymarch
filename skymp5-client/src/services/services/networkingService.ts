@@ -7,6 +7,7 @@ import { AnyMessage } from "../messages/anyMessage";
 import { ClientListener, CombinedController, Sp } from "./clientListener";
 import { RemoteServer } from "./remoteServer";
 import { SendRawMessageEvent } from "../events/sendRawMessageEvent";
+import { bodyHold } from "../../greymarch/bodyHold";
 
 export class NetworkingService extends ClientListener {
   constructor(private sp: Sp, private controller: CombinedController) {
@@ -147,6 +148,11 @@ export class NetworkingService extends ClientListener {
             this.controller.emitter.emit("anyMessage", event);
           } else if (msgAny.t === MsgType.CreateActor) {
             const event = { message: msgAny };
+            // GREYMARCH: while the character select screen is coming or up, our own body is kept (no world load) until a character is chosen (greymarch/bodyHold.ts)
+            if (msgAny.isMe && bodyHold.keep(event)) {
+              if (bodyHold.count <= 3) { try { (this.controller.emitter as any).emit("greymarchStage", "stage: my body arrived while the character select is up: held, the world loads once a character is chosen (" + bodyHold.count + ")"); } catch (e) { /* diagnostics only */ } }
+              return;
+            }
             this.controller.emitter.emit("createActorMessage", event);
             this.controller.emitter.emit("anyMessage", event);
           } else if (msgAny.t === MsgType.CustomPacket) {

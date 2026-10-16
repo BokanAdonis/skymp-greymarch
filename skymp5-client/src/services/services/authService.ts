@@ -190,6 +190,7 @@ export class AuthService extends ClientListener {
 
     switch (msgContent["customPacketType"]) {
       // GREYMARCH: character select and staff packets from the server
+      case 'greymarchHold':
       case 'greymarchSelect':
       case 'greymarchEntered':
       case 'greymarchError':

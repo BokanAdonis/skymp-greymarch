@@ -8,6 +8,7 @@ import * as appearanceMod from "../sync/appearance";
 import { RemoteServer } from "../services/services/remoteServer";
 import { SinglePlayerService } from "../services/services/singlePlayerService";
 import { LoadGameService } from "../services/services/loadGameService";
+import * as holdMod from "./bodyHold";
 
 // Runs inside SkyMP's browser page (once). Each shows a page from Platform/UI in an iframe and relays its messages.
 const PAGE_SCRIPT = "(function(){if(window.__gmSend)return;var f=document.createElement('iframe');f.id='greymarch-frame';f.src='greymarch-select.html';f.style.cssText='position:fixed;left:0;top:0;width:100%;height:100%;border:0;z-index:2147483647;background:#05080d;display:none';var ready=false,queue=[];window.addEventListener('message',function(e){if(e.source!==f.contentWindow)return;var d=e.data;if(!d)return;if(d.greymarchReady){ready=true;queue.forEach(function(q){f.contentWindow.postMessage({greymarchIn:q},'*')});queue=[]}else if(d.greymarchOut&&window.skyrimPlatform){window.skyrimPlatform.sendMessage('greymarch',JSON.stringify(d.greymarchOut))}});window.__gmSend=function(m){f.style.display=m.fn==='hide'?'none':'block';if(ready)f.contentWindow.postMessage({greymarchIn:m},'*');else queue.push(m)};document.body.appendChild(f)})();";
@@ -41,7 +42,8 @@ export class GreymarchBridge {
         try { this.sp.on("hit", (e: any) => this.greymarchHit(e)); } catch (hitErr) { /* no hit events: the combat history stays empty */ }
         this.controller.on("update", () => this.greymarchTick()); // Skyrim functions only work in the update phase, never in tick
         this.controller.on("tick", () => this.greymarchConnectCover(Date.now()));
-        this.controller.on("tick", () => this.greymarchChoiceTick(Date.now())); // a held Play / Create goes out once the world has loaded (greymarchChoiceTick) // the connecting screen: "tick", because "update" does not run at the main menu (it only uses the browser)
+        this.controller.on("tick", () => this.greymarchChoiceTick(Date.now()));
+        this.controller.on("tick", () => this.greymarchBodyTick(Date.now())); // select before the world: the held body is let go once a character is chosen ("tick": "update" does not run at the main menu) // a held Play / Create goes out once the world has loaded (greymarchChoiceTick) // the connecting screen: "tick", because "update" does not run at the main menu (it only uses the browser)
         try { this.controller.on("spellCast", (e: any) => { try { if (e && e.spell && e.spell.getFormID() === 0x92c48 && e.caster && e.caster.getFormID() === 0x14) this.greymarchWolfSignal("spellCast"); } catch (x) { /* not ours */ } }); } catch (scErr) { /* the effect checks still see it */ } // the werewolf power (greymarchWolfTick)
         try { this.controller.on("effectStart", (e: any) => { try { if (e && e.effect && e.effect.getFormID() === 0x92c45 && e.target && e.target.getFormID() === 0x14) this.greymarchWolfSignal("effectStart"); } catch (x) { /* not ours */ } }); } catch (esErr) { /* the other signals still see it */ }
         try { this.controller.on("magicEffectApply", (e: any) => { try { if (e && e.effect && e.effect.getFormID() === 0x92c45 && e.target && e.target.getFormID() === 0x14) this.greymarchWolfSignal("magicEffectApply"); } catch (x) { /* not ours */ } }); } catch (maErr) { /* the other signals still see it */ }
@@ -116,6 +118,17 @@ export class GreymarchBridge {
         if (type === "greymarchFx") { this.greymarchFxWant = { noclip: !!msg.noclip, speed: Number(msg.speed) || 100, frozen: !!msg.frozen, god: !!msg.god }; if (msg.me) this.greymarchMeActor = msg.me; return; }
         if (type === "greymarchGhosts") { this.greymarchGhostList = Array.isArray(msg.ghosts) ? msg.ghosts : []; if (msg.me) this.greymarchMeActor = msg.me; this.greymarchOthers = Array.isArray(msg.others) ? msg.others : []; if (msg.stats !== undefined) this.greymarchStatsWant = msg.stats && typeof msg.stats === "object" ? msg.stats : null; var inv = Array.isArray(msg.invisible) ? msg.invisible : []; this.greymarchInvisList = inv; var invMap = {}; for (var q = 0; q < inv.length; q++) if (inv[q] !== msg.me) invMap[inv[q]] = true; try { Function("return this")().__gmInvisible = invMap; } catch (gErr) { /* names stay visible */ } return; }
         this.sp.printConsole("[greymarch] got " + type + (msg.characters ? " with " + msg.characters.length + " character(s)" : ""));
+        if (type === "greymarchHold") {
+            // Select before the world (bodyHold.ts): keep our body until a character is chosen, and tell the server, so it binds the chosen body even when it is the one we stand in
+            var hold = this.greymarchBodyHold();
+            if (!hold) return;
+            hold.arm(Date.now());
+            this.greymarchLog("stage: the server shows the character select before the world: my body is held until a character is chosen");
+            this.controller.emitter.emit("sendMessage", { message: { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchHolding" }) }, reliability: "reliable" });
+            return;
+        }
+        if (type === "greymarchSelect" && this.greymarchBodyHold()) this.greymarchBodyHold().sawSelect(Date.now());
+        if (type === "greymarchEntered" && this.greymarchBodyHold()) this.greymarchBodyHold().entered(Date.now());
         if (type === "greymarchSelect" || type === "greymarchEntered") this.greymarchConnect = { done: true }; // the connecting screen's job is over
         if (type === "greymarchSelect") {
             // From here on the game reports "alive" to the server every 3 seconds (greymarchTick). If the game dies, the LAST alive line in the server log tells
@@ -235,6 +248,7 @@ export class GreymarchBridge {
         } catch (e) { /* the next tick tries again */ }
     }
     greymarchTick(): any {
+        this.greymarchRebaseAfterLoad(Date.now()); // "update" runs only once the world is loaded
         this.greymarchSelectFocusGuard(Date.now());
         this.greymarchDoorNamesApply(Date.now());
         this.greymarchDoorPrompt(Date.now());
@@ -384,6 +398,33 @@ export class GreymarchBridge {
             contentJsonDump: JSON.stringify({ customPacketType: "greymarchChoice", type: data.type, id: data.id, name: data.name }),
         };
         this.controller.emitter.emit("sendMessage", { message: message, reliability: "reliable" });
+    }
+    // Select before the world: once a character is chosen the held body goes to SkyMP as if it had just arrived, and the world loads once, there.
+    // The veil's and the starting clothes' timers started at "entered"; they are moved to the moment the world has loaded (greymarchTick), so a long
+    // load does not use them up.
+    greymarchBodyHold(): any { return (holdMod && (holdMod as any).bodyHold) || null; }
+    greymarchBodyTick(now: number): any {
+        var hold = this.greymarchBodyHold();
+        if (!hold) return;
+        var out = hold.due(now);
+        if (!out) return;
+        this.greymarchLog("stage: the held body is let go (" + out.reason + ")" + (out.event ? ": the world loads now" : ": none had arrived"));
+        if (!out.event) return;
+        this.greymarchHeldLoadAt = now;
+        this.controller.emitter.emit("createActorMessage", out.event);
+        this.controller.emitter.emit("anyMessage", out.event);
+    }
+    greymarchRebaseAfterLoad(now: number): any {
+        var from = this.greymarchHeldLoadAt;
+        if (!from) return;
+        this.greymarchHeldLoadAt = 0;
+        var d = now - from;
+        if (d <= 0) return;
+        if (this.greymarchReveal) this.greymarchReveal.at += d;
+        if (this.greymarchTrace) this.greymarchTrace.at += d;
+        var eq = this.greymarchEquip;
+        if (eq) { eq.at += d; eq.pending = eq.pending.map(function (t: number) { return t + d; }); }
+        this.greymarchLog("stage: the world has loaded " + Math.round(d / 100) / 10 + " s after the held body was let go");
     }
     greymarchLoadPending(): boolean {
         try { var lg = this.controller.lookupListener ? this.controller.lookupListener(LoadGameService) : null; return !!(lg && lg.greymarchLoadPending()); } catch (e) { return false; }
