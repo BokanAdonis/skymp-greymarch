@@ -1,6 +1,7 @@
 "use strict";
-// The end of a spell cast reaches everyone else: magicSyncService.ts sends it once the caster's own "is casting" animation variable for that
-// hand is off, also when the game never sends the "equipped" animation event (letting go of Flames), so the fire stops in other games.
+// The end of a spell cast (magicSyncService.ts): sent on the "equipped" animation event or when the hand holds another spell, never just
+// because an "is casting" animation variable went off (that version stopped every cast in other players' games at once). The variables and
+// the animation events a cast goes through are reported to the server log with the end.
 const test = require("node:test");
 const assert = require("node:assert");
 const fs = require("node:fs");
@@ -18,7 +19,7 @@ function load(file, mods) {
 const FLAMES = 0x12fcd, FIREBOLT = 0x12fd0, PLAYER_REMOTE = 0xff000013;
 
 function make() {
-  const handlers = {}, onceUpdate = [], sent = [];
+  const handlers = {}, onceUpdate = [], sent = [], logs = [];
   let animHook = null, now = 1000;
   const player = {
     vars: { IsCastingLeft: false, IsCastingRight: false, IsCastingDual: false },
@@ -39,7 +40,7 @@ function make() {
   const controller = {
     on: (n, f) => { handlers[n] = f; },
     once: (n, f) => { if (n === "update") onceUpdate.push(f); },
-    emitter: { emit: (n, e) => { if (n === "sendMessage" && e.message.t === 23) sent.push(e.message.data); } },
+    emitter: { emit: (n, e) => { if (n === "sendMessage" && e.message.t === 23) sent.push(e.message.data); if (n === "greymarchStage") logs.push(e); } },
   };
   const sp = { hooks: { sendAnimationEvent: { add: (h) => { animHook = h; } } } };
   const mods = {
@@ -56,73 +57,69 @@ function make() {
   const frame = (ms = 16) => { now += ms; handlers.update(); onceUpdate.splice(0).forEach((f) => f()); };
   const cast = (spell, castingSource = 1) => handlers.spellCast({ caster: player, target: null, spell: { getFormID: () => spell }, castingSource, isDualCasting: false, aimAngle: 0, aimHeading: 0 });
   const animEvent = (animEventName) => animHook.leave({ animEventName, animationSucceeded: true });
-  return { player, sent, frame, cast, animEvent, done: () => { Date.now = realNow; } };
+  return { player, sent, logs, frame, cast, animEvent, done: () => { Date.now = realNow; } };
 }
 
-test("Flames: the end is sent when the caster lets go, without the equipped animation event", () => {
+test("Flames: the cast keeps going while the casting variables flicker; the equipped animation event ends it once", () => {
   const g = make();
   g.player.vars.IsCastingRight = true;
   g.cast(FLAMES);
-  for (let i = 0; i < 120; i++) g.frame(); // two seconds of fire
+  g.animEvent("MRh_SpellAimedConcentrationStart");
+  for (let i = 0; i < 30; i++) g.frame();
+  g.player.vars.IsCastingRight = false; // a variable going off is NOT the end
+  for (let i = 0; i < 120; i++) g.frame(); // two more seconds of fire
   assert.deepStrictEqual(g.sent.map((m) => m.interruptCast), [false]);
-  g.player.vars.IsCastingRight = false; // lets go
+  g.animEvent("MRh_Equipped_Event");
   g.frame();
   assert.deepStrictEqual(g.sent.map((m) => m.interruptCast), [false, true]);
   assert.strictEqual(g.sent[1].spell, FLAMES);
-  assert.strictEqual(g.sent[1].castingSource, 1);
   assert.strictEqual(g.sent[0].interruptCast, false, "the cast message itself is not changed");
-  for (let i = 0; i < 30; i++) g.frame();
   g.animEvent("MRh_Equipped_Event");
   for (let i = 0; i < 3; i++) g.frame();
   assert.strictEqual(g.sent.length, 2, "the end goes out once");
+  assert.match(g.logs[0], /^magic: cast 12fcd hand 1 by ff000013$/);
+  assert.match(g.logs[1], /^magic: end 12fcd hand 1 after \d+ ms \(MRh_Equipped_Event\); repeats 0; IsCastingRight on@16 off@496/);
+  assert.match(g.logs[1], /events MRh_SpellAimedConcentrationStart@0 MRh_Equipped_Event@/);
   g.done();
 });
 
-test("a cast whose casting variable is never seen on (a fire-and-forget bolt) is ended after 400 ms", () => {
+test("the same spell reported again from that hand is sent again without an end in between", () => {
   const g = make();
-  g.player.hands[1] = FIREBOLT;
-  g.cast(FIREBOLT);
-  for (let i = 0; i < 20; i++) g.frame(); // 320 ms
-  assert.strictEqual(g.sent.length, 1);
-  for (let i = 0; i < 10; i++) g.frame();
-  assert.deepStrictEqual(g.sent.map((m) => m.interruptCast), [false, true]);
+  g.cast(FLAMES);
+  g.frame();
+  g.cast(FLAMES);
+  g.frame();
+  assert.deepStrictEqual(g.sent.map((m) => m.interruptCast), [false, false]);
   g.done();
 });
 
 test("another spell in that hand ends the cast", () => {
   const g = make();
-  g.player.vars.IsCastingRight = true;
   g.cast(FLAMES);
   g.frame();
-  g.player.hands[1] = FIREBOLT; // swapped while the casting variable still reads on
+  g.player.hands[1] = FIREBOLT;
   g.frame();
   assert.deepStrictEqual(g.sent.map((m) => m.interruptCast), [false, true]);
   g.done();
 });
 
-test("a new cast from the same hand ends the one before it first; the other hand is separate", () => {
+test("a cast of another spell from the same hand ends the one before it first; the other hand is separate", () => {
   const g = make();
   g.player.hands[0] = FLAMES;
-  g.player.vars.IsCastingRight = true;
-  g.player.vars.IsCastingLeft = true;
   g.cast(FLAMES, 1);
   g.cast(FLAMES, 0);
-  g.cast(FLAMES, 1);
-  assert.deepStrictEqual(g.sent.map((m) => [m.castingSource, m.interruptCast]), [[1, false], [0, false], [1, true], [1, false]]);
+  g.player.hands[1] = FIREBOLT;
+  g.cast(FIREBOLT, 1);
+  assert.deepStrictEqual(g.sent.map((m) => [m.castingSource, m.spell, m.interruptCast]), [[1, FLAMES, false], [0, FLAMES, false], [1, FLAMES, true], [1, FIREBOLT, false]]);
   g.frame();
-  g.player.vars.IsCastingLeft = false;
-  g.frame();
-  assert.deepStrictEqual(g.sent.slice(4).map((m) => [m.castingSource, m.interruptCast]), [[0, true]]);
+  assert.strictEqual(g.sent.length, 4, "the left hand's Flames is still open");
   g.done();
 });
 
-test("the equipped animation event still ends every open cast", () => {
+test("the server log gets at most 40 lines from this service per session", () => {
   const g = make();
-  g.player.vars.IsCastingRight = true;
-  g.cast(FLAMES);
-  g.frame();
-  g.animEvent("MRh_Equipped_Event");
-  g.frame();
-  assert.deepStrictEqual(g.sent.map((m) => m.interruptCast), [false, true]);
+  for (let i = 0; i < 60; i++) { g.cast(FLAMES); g.animEvent("MRh_Equipped_Event"); g.frame(); }
+  assert.strictEqual(g.sent.length, 120);
+  assert.strictEqual(g.logs.length, 40);
   g.done();
 });

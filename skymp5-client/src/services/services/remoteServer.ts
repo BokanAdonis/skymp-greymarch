@@ -968,22 +968,51 @@ export class RemoteServer extends ClientListener {
         integers: new Uint8Array(msg.data.actorAnimationVariables.integers)
       };
 
+      const castKey = `${msg.data.caster}:${msg.data.castingSource}`;
+
       if (msg.data.interruptCast) {
         interruptCast(ac.getFormID(), msg.data.castingSource, actorAnimationVariables);
+        this.greymarchMagicDiag(`magic: saw ${msg.data.caster.toString(16)} end ${msg.data.spell.toString(16)} hand ${msg.data.castingSource}`);
         // GREYMARCH: the call above does nothing when the caster's animation variables cannot be applied, and a concentration spell
-        // (Flames) then kept burning in this game for good. The game's own InterruptCast stops it either way.
-        try { ac.interruptCast(); } catch (e) { /* not loaded */ }
+        // (Flames) then kept burning in this game for good. So the game's own InterruptCast follows a moment later, unless the same
+        // caster has started a new cast from that hand since (it must never cut a fresh cast short).
+        const endedAt = Date.now();
+        const casterId = ac.getFormID();
+        const later = () => {
+          if ((this.greymarchLastCastAt.get(castKey) || 0) > endedAt) {
+            return;
+          }
+          if (Date.now() - endedAt < 300) {
+            once('update', later);
+            return;
+          }
+          try { const again = Actor.from(Game.getFormEx(casterId)); if (again) again.interruptCast(); } catch (e) { /* not loaded */ }
+        };
+        once('update', later);
         return;
       }
 
+      this.greymarchLastCastAt.set(castKey, Date.now());
+
       // GREYMARCH: the spell the caster named, when this game's copy of them does not hold it (their equipment arrived late or not at all)
-      const spell = ac.getEquippedSpell(msg.data.castingSource) || Spell.from(Game.getFormEx(msg.data.spell));
+      const held = ac.getEquippedSpell(msg.data.castingSource);
+      const spell = held || Spell.from(Game.getFormEx(msg.data.spell));
+      this.greymarchMagicDiag(`magic: saw ${msg.data.caster.toString(16)} cast ${msg.data.spell.toString(16)} hand ${msg.data.castingSource} (their copy holds ${held ? held.getFormID().toString(16) : "nothing"}, casting ${spell ? spell.getFormID().toString(16) : "nothing"})`);
       if (spell) {
         castSpellImmediate(ac.getFormID(), msg.data.castingSource, spell.getFormID(), remoteIdToLocalId(msg.data.target),
           msg.data.aimAngle, msg.data.aimHeading, actorAnimationVariables);
       }
     });
   }
+
+  // GREYMARCH: what this game does with other players' spell casts, a few lines per session to the server log
+  private greymarchMagicDiag(text: string): void {
+    if (this.greymarchMagicDiagLeft <= 0) return;
+    this.greymarchMagicDiagLeft--;
+    try { (this.controller.emitter as any).emit("greymarchStage", text); } catch (e) { /* diagnostics only */ }
+  }
+  private greymarchMagicDiagLeft = 40;
+  private greymarchLastCastAt = new Map<string, number>();
 
   private onUpdateAnimVariablesMessage(event: ConnectionMessage<UpdateAnimVariablesMessage>): void {
     const msg = event.message;
