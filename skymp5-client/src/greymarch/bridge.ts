@@ -93,8 +93,8 @@ export class GreymarchBridge {
         if (type === "greymarchGmAlert") { this.greymarchChatToPage("alert", msg); return; } // a player typed /gm (the server only sends it to Trial GM and up)
         if (type === "greymarchMenuReply") { this.greymarchMenuToPage("reply", msg); return; }
         if (type === "greymarchShape") { this.greymarchShapeMsg(msg); return; } // a creature form (staff): greymarchShapeTick changes the body
-        if (type === "greymarchWolfForm") { if (this.greymarchWolfWant !== !!msg.on) this.greymarchLog("wolf: the server says " + (msg.on ? "changed" : "no (change back)")); this.greymarchWolfWant = !!msg.on; if (msg.on) { this.greymarchWolfWordAt = Date.now(); this.greymarchWolfAlpha = !!msg.alpha; } return; } // (logged only when it changes: the server repeats it every 5 seconds) // the werewolf form (greymarchWolfTick)
-        if (type === "greymarchWolfAlphas") { this.greymarchWolfAlphaList = Array.isArray(msg.actors) ? msg.actors : []; return; } // the other players in the Alpha form: drawn white (greymarchWolfAlphaOthers)
+        if (type === "greymarchWolfForm") { if (this.greymarchWolfWant !== !!msg.on) this.greymarchLog("wolf: the server says " + (msg.on ? "changed" : "no (change back)")); this.greymarchWolfWant = !!msg.on; if (msg.on) { this.greymarchWolfWordAt = Date.now(); this.greymarchWolfAlpha = !!msg.alpha; this.greymarchWolfPup = !msg.alpha && !!msg.pup; } return; } // (logged only when it changes: the server repeats it every 5 seconds) // the werewolf form (greymarchWolfTick)
+        if (type === "greymarchWolfAlphas") { this.greymarchWolfAlphaList = Array.isArray(msg.actors) ? msg.actors : []; this.greymarchWolfPupList = Array.isArray(msg.pups) ? msg.pups : []; return; } // the other players in the Alpha form: drawn white (greymarchWolfAlphaOthers)
         if (type === "greymarchVampire") { this.greymarchVampWant = msg.on ? msg : null; this.greymarchHudToPage("blood", { on: !!msg.on, blood: msg.blood, empty: !!msg.empty }); return; } // a vampire's state: the blood drop and what the game applies (greymarchVampTick)
         if (type === "greymarchVampLooks") { this.greymarchVampLookList = Array.isArray(msg.vampires) ? msg.vampires : []; return; } // how every vampire in the world looks (eyes and fangs)
         if (type === "greymarchVampFeed") { this.greymarchVampFeedWant = msg.on ? { role: msg.role, partner: msg.partner, at: Date.now(), done: false } : { off: true }; return; } // the feeding scene
@@ -525,7 +525,7 @@ export class GreymarchBridge {
             step = "race"; var wr = this.greymarchWolfRace(); if (!wr) throw new Error("the werewolf race was not found");
             player.setRace(wr);
             step = "check"; var r = player.getRace();
-            this.greymarchLog("wolf: changed into the " + (this.greymarchWolfAlpha ? "Alpha " : "") + "beast (race now " + (r ? r.getFormID().toString(16) : "none") + ", will change back to " + (this.greymarchWolfHumanRace || 0).toString(16) + ")");
+            this.greymarchLog("wolf: changed into the " + (this.greymarchWolfAlpha ? "Alpha " : this.greymarchWolfPup ? "pup " : "") + "beast (race now " + (r ? r.getFormID().toString(16) : "none") + ", will change back to " + (this.greymarchWolfHumanRace || 0).toString(16) + ")");
         } catch (bErr) {
             this.greymarchLog("wolf: the change failed at step '" + step + "': " + bErr);
         }
@@ -562,46 +562,58 @@ export class GreymarchBridge {
     // THE ALPHA FORM (the server says alpha: true): a white/grey werewolf, 1.3 times the size, the race GM_AlphaWerewolfBeastRace in GreymarchCore.esp (0x804; a copy of
     // WerewolfBeastRace with its own skin, the vanilla body with the white textures, and 1.3 times its height). GreymarchCore.esp is not on the server's plugin list, so the
     // server cannot name the race by number: it says alpha and this code finds the race in the file. If it is missing, the normal werewolf race is used.
-    greymarchWolfAlphaRaceId(): number {
-        if (this.greymarchWolfAlphaId === undefined) {
-            var id = 0;
-            try { var f = this.sp.Game.getFormFromFile(0x804, "GreymarchCore.esp"); id = f ? f.getFormID() : 0; } catch (e) { id = 0; }
-            this.greymarchWolfAlphaId = id;
-            this.greymarchLog(id ? "wolf: the Alpha race is " + id.toString(16) : "wolf: the Alpha race is not in GreymarchCore.esp; the Alpha form uses the normal werewolf");
+    // THE PUP (the server says pup: true): a smaller brown werewolf, 0.75 times the size, GM_PupWerewolfBeastRace (0x80A in GreymarchCore.esp), found the same way.
+    greymarchWolfKindRaceId(kind: string): number {
+        var cache = this.greymarchWolfKindIds || (this.greymarchWolfKindIds = {});
+        if (cache[kind] === undefined) {
+            var id = 0, local = kind === "pup" ? 0x80a : 0x804, name = kind === "pup" ? "pup" : "Alpha";
+            try { var f = this.sp.Game.getFormFromFile(local, "GreymarchCore.esp"); id = f ? f.getFormID() : 0; } catch (e) { id = 0; }
+            cache[kind] = id;
+            this.greymarchLog(id ? "wolf: the " + name + " race is " + id.toString(16) : "wolf: the " + name + " race is not in GreymarchCore.esp; the " + name + " form uses the normal werewolf");
         }
-        return this.greymarchWolfAlphaId;
+        return cache[kind];
     }
-    greymarchWolfIsBeast(raceId: number): boolean { return raceId === 0xcdd84 || (!!raceId && raceId === this.greymarchWolfAlphaRaceId()); }
-    greymarchWolfRaceId(): number { return (this.greymarchWolfAlpha && this.greymarchWolfAlphaRaceId()) || 0xcdd84; }
+    greymarchWolfAlphaRaceId(): number { return this.greymarchWolfKindRaceId("alpha"); }
+    greymarchWolfPupRaceId(): number { return this.greymarchWolfKindRaceId("pup"); }
+    greymarchWolfIsBeast(raceId: number): boolean { return raceId === 0xcdd84 || (!!raceId && (raceId === this.greymarchWolfAlphaRaceId() || raceId === this.greymarchWolfPupRaceId())); }
+    greymarchWolfRaceId(): number { return (this.greymarchWolfAlpha && this.greymarchWolfAlphaRaceId()) || (this.greymarchWolfPup && this.greymarchWolfPupRaceId()) || 0xcdd84; }
     greymarchWolfRace(): any { return this.sp.Race.from(this.sp.Game.getFormEx(this.greymarchWolfRaceId())); }
-    // Other players in the Alpha form: SkyMP draws them with the race of their appearance, which the server can only set to the normal werewolf (with "Wolf look" on).
-    // Every second, a listed player drawn as the normal werewolf is given the Alpha race on this screen; one that is not listed any more goes back to the normal werewolf.
+    // Other players who are Alphas or pups: SkyMP draws them with the race of their appearance, which the server can only set to the normal werewolf.
+    // Every second, a listed player drawn as the normal werewolf (or as the other variant) is given their variant's race on this screen; one that is not listed any more
+    // goes back to the normal werewolf.
     greymarchWolfAlphaOthers(now: number): any {
         if (now < (this.greymarchWolfAlphaNext || 0)) return;
         this.greymarchWolfAlphaNext = now + 1000;
-        var list = this.greymarchWolfAlphaList || [];
+        var alphas = this.greymarchWolfAlphaList || [], pups = this.greymarchWolfPupList || [];
         var drawn = this.greymarchWolfAlphaDrawn || (this.greymarchWolfAlphaDrawn = {});
-        if (!list.length && !Object.keys(drawn).length) return;
-        var alphaId = this.greymarchWolfAlphaRaceId();
-        if (!alphaId) return;
+        if (!alphas.length && !pups.length && !Object.keys(drawn).length) return;
         var sp = this.sp;
+        var alphaId = alphas.length ? this.greymarchWolfAlphaRaceId() : 0, pupId = pups.length ? this.greymarchWolfPupRaceId() : 0;
         var want: any = {};
-        for (var i = 0; i < list.length; i++) {
-            if (list[i] === this.greymarchMeActor) continue; // my own body is changed by greymarchWolfTick
-            var localId = misc.remoteIdToLocalId(list[i]);
-            if (!localId) continue;
-            want[localId] = true;
-            try {
-                var actor = sp.Actor.from(sp.Game.getFormEx(localId));
-                var r = actor ? actor.getRace() : null;
-                if (r && r.getFormID() === 0xcdd84) { actor.setRace(sp.Race.from(sp.Game.getFormEx(alphaId))); drawn[localId] = true; this.greymarchLog("wolf: " + localId.toString(16) + " drawn as the Alpha"); }
-                else if (r && r.getFormID() === alphaId) drawn[localId] = true;
-            } catch (aErr) { /* not loaded here: the next second */ }
-        }
+        var self = this;
+        var mark = function (list: any[], raceId: number, name: string) {
+            if (!raceId) return;
+            for (var i = 0; i < list.length; i++) {
+                if (list[i] === self.greymarchMeActor) continue; // my own body is changed by greymarchWolfTick
+                var localId = misc.remoteIdToLocalId(list[i]);
+                if (!localId) continue;
+                want[localId] = raceId;
+                try {
+                    var actor = sp.Actor.from(sp.Game.getFormEx(localId));
+                    var r = actor ? actor.getRace() : null;
+                    var cur = r ? r.getFormID() : 0;
+                    if (cur === raceId) drawn[localId] = raceId;
+                    else if (cur && self.greymarchWolfIsBeast(cur)) { actor.setRace(sp.Race.from(sp.Game.getFormEx(raceId))); drawn[localId] = raceId; self.greymarchLog("wolf: " + localId.toString(16) + " drawn as the " + name); }
+                } catch (aErr) { /* not loaded here: the next second */ }
+            }
+        };
+        mark(alphas, alphaId, "Alpha");
+        mark(pups, pupId, "pup");
         for (var k in drawn) {
             if (want[k]) continue;
+            var was = drawn[k];
             delete drawn[k];
-            try { var a2 = sp.Actor.from(sp.Game.getFormEx(Number(k))); var r2 = a2 ? a2.getRace() : null; if (r2 && r2.getFormID() === alphaId) a2.setRace(sp.Race.from(sp.Game.getFormEx(0xcdd84))); } catch (bErr) { /* gone */ }
+            try { var a2 = sp.Actor.from(sp.Game.getFormEx(Number(k))); var r2 = a2 ? a2.getRace() : null; if (r2 && r2.getFormID() === was) a2.setRace(sp.Race.from(sp.Game.getFormEx(0xcdd84))); } catch (bErr) { /* gone */ }
         }
     }
     // ---- VAMPIRES (gamemode vampire.js decides everything; this only reports what the game did and shows what the server says)

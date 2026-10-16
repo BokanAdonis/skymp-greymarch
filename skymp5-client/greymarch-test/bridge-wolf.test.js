@@ -9,7 +9,7 @@ const ts = require("typescript");
 const src = fs.readFileSync(path.join(__dirname, "..", "src", "greymarch", "bridge.ts"), "utf8");
 const js = ts.transpileModule(src, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2019 } }).outputText;
 
-const BEAST = 0xcdd84, NORD = 0x13746, ALPHA = 0xfe000804;
+const BEAST = 0xcdd84, NORD = 0x13746, ALPHA = 0xfe000804, PUP = 0xfe00080a;
 function make(opts = {}) {
   const log = { lines: [], idles: [], events: [], races: [], waits: [], sent: [] };
   const mods = { "../messages": { MsgType: { CustomPacket: 77 } }, "../view/worldViewMisc": { remoteIdToLocalId: (id) => (opts.others || {})[id] || 0 }, "../sync/appearance": {}, "../services/services/remoteServer": { RemoteServer: {} }, "../services/services/singlePlayerService": { SinglePlayerService: {} } };
@@ -26,7 +26,7 @@ function make(opts = {}) {
   const pass = (f) => (f ? f : null);
   const sp = {
     printConsole() {}, writeLogs: (n, l) => log.lines.push(l),
-    Game: { getPlayer: () => player, getFormEx: (id) => ({ id }), getFormFromFile: (id, file) => (opts.noAlpha || id !== 0x804 || file !== "GreymarchCore.esp" ? null : { getFormID: () => ALPHA }), setBeastForm() {}, enableFastTravel() {}, disablePlayerControls() {}, enablePlayerControls() {}, forceThirdPerson() {}, showFirstPersonGeometry() {} },
+    Game: { getPlayer: () => player, getFormEx: (id) => ({ id }), getFormFromFile: (id, file) => (opts.noAlpha || file !== "GreymarchCore.esp" ? null : id === 0x804 ? { getFormID: () => ALPHA } : id === 0x80a ? { getFormID: () => PUP } : null), setBeastForm() {}, enableFastTravel() {}, disablePlayerControls() {}, enablePlayerControls() {}, forceThirdPerson() {}, showFirstPersonGeometry() {} },
     Spell: { from: pass }, MagicEffect: { from: pass }, Race: { from: (f) => race(f.id) }, Actor: { from: (f) => (f && opts.actors && opts.actors[f.id]) || null }, Idle: { from: pass }, FormList: { from: () => null }, ImageSpaceModifier: { from: () => null }, Sound: { from: () => null }, ActorBase: { from: () => null },
     Debug: { sendAnimationEvent: (ref, name) => log.events.push(name), notification() {} },
     Utility: { isInMenuMode: () => menu },
@@ -195,4 +195,32 @@ test("Z during the transformation animation does nothing", () => {
   s.tick(2500);
   s.key(44, true); s.key(44, false); s.tick();
   assert.strictEqual(s.log.sent.filter((m) => m.beast === false).length, 0);
+});
+
+test("the pup: the server says pup, the body becomes the pup race from GreymarchCore.esp; staff switching it to the Alpha mid-form changes the body; back to the human race at the end", () => {
+  const s = make({ refuseIdle: true });
+  s.say({ customPacketType: "greymarchWolfForm", on: true, alpha: false, pup: true });
+  s.tick();
+  assert.strictEqual(s.race(), PUP);
+  assert.ok(s.log.lines.some((l) => /changed into the pup beast/.test(l)));
+  s.say({ customPacketType: "greymarchWolfForm", on: true, alpha: true, pup: false });
+  s.tick(3100);
+  assert.strictEqual(s.race(), ALPHA, "switched to the Alpha");
+  s.say({ customPacketType: "greymarchWolfForm", on: false }); s.tick();
+  assert.strictEqual(s.race(), NORD);
+});
+
+test("other players who are pups are drawn as the pup here, Alphas as the Alpha; one taken off the lists goes back to the normal werewolf", () => {
+  const races = { 0xff000a01: BEAST, 0xff000a02: BEAST, 0xff000a03: NORD };
+  const other = (id) => ({ getRace: () => ({ getFormID: () => races[id] }), setRace: (r) => { races[id] = r.id; } });
+  const s = make({ others: { 501: 0xff000a01, 502: 0xff000a02, 503: 0xff000a03 }, actors: { 0xff000a01: other(0xff000a01), 0xff000a02: other(0xff000a02), 0xff000a03: other(0xff000a03) } });
+  s.say({ customPacketType: "greymarchWolfAlphas", actors: [501], pups: [502, 503] });
+  s.tick(1100);
+  assert.strictEqual(races[0xff000a01], ALPHA);
+  assert.strictEqual(races[0xff000a02], PUP);
+  assert.strictEqual(races[0xff000a03], NORD, "a human is left alone");
+  s.say({ customPacketType: "greymarchWolfAlphas", actors: [502], pups: [] });
+  s.tick(1100);
+  assert.strictEqual(races[0xff000a02], ALPHA, "a pup made an Alpha is redrawn");
+  assert.strictEqual(races[0xff000a01], BEAST, "no longer listed: the normal werewolf");
 });
