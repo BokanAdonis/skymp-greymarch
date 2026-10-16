@@ -114,34 +114,35 @@ test("a vampire's request to feed opens the victim's X menu by itself (it was on
   assert.deepStrictEqual(shown, [{ mode: "invite", looking: 0 }]);
 });
 
-test("blue eyes: every listed vampire of a human, elf or orc race gets the eye part for their glow; their own eyes come back when they are no longer listed", () => {
+test("blue eyes and fangs: every listed vampire gets the eye part for their glow and the fanged teeth while the fangs show; their own come back", () => {
   const s = make({ others: { 0xff000002: 0x5000 } });
   const sp = s.gm.sp;
-  const part = (id, type = 2) => ({ getFormID: () => id, getType: () => type });
-  const parts = new Map(); // actor name -> eye part id
-  const body = (name, race, sex) => ({ name, getRace: () => ({ getFormID: () => race }), getBaseObject: () => ({ name, sex }), changeHeadPart: (hp) => parts.set(name, hp.getFormID()) });
-  const me = Object.assign(sp.Game.getPlayer(), body("me", 0x13746, 1));
+  const GM = 0x0a000000, FANG_M = GM + 0x81c, FANG_F = GM + 0x81d;
+  const typeOf = (id) => (id === FANG_M || id === FANG_F || id === 0x333 || id === 0x444 ? 0 : 2);
+  const part = (id) => ({ getFormID: () => id, getType: () => typeOf(id) });
+  const worn = { me: { 2: 0x111, 0: 0x333 }, them: { 2: 0x222, 0: 0x444 } }; // name -> type -> head part id
+  const body = (name, race, sex) => ({ name, getRace: () => ({ getFormID: () => race }), getBaseObject: () => ({ name, sex }), changeHeadPart: (hp) => { worn[name][hp.getType()] = hp.getFormID(); } });
+  Object.assign(sp.Game.getPlayer(), body("me", 0x13746, 1));
   const them = body("them", 0x13745, 0); // a Khajiit: not made yet
-  parts.set("me", 0x111); parts.set("them", 0x222);
   sp.Game.getFormEx = (id) => (id === 0x5000 ? them : { id });
   sp.Actor.from = (f) => f;
-  sp.Game.getFormFromFile = (id, file) => (file === "GreymarchCore.esp" ? { id: 0x0a000000 + id } : file === "Dawnguard.esm" ? { getFormID: () => DG + id } : null);
+  sp.Game.getFormFromFile = (id, file) => (file === "GreymarchCore.esp" ? { id: GM + id } : file === "Dawnguard.esm" ? { getFormID: () => DG + id } : null);
   sp.HeadPart = { from: (f) => (f ? part(f.id) : null) };
-  sp.ActorBase = { from: (b) => (b ? { getSex: () => b.sex, getNumHeadParts: () => 1, getNthHeadPart: () => part(parts.get(b.name)) } : null) };
+  sp.ActorBase = { from: (b) => (b ? { getSex: () => b.sex, getNumHeadParts: () => 2, getNthHeadPart: (i) => part(worn[b.name][i === 0 ? 2 : 0]) } : null) };
   let t = 5_000_000; const realNow = Date.now; Date.now = () => t;
+  const look = (list) => { s.say({ customPacketType: "greymarchVampLooks", vampires: list }); s.tick(); t += 2500; };
   try {
     s.say({ customPacketType: "greymarchGhosts", ghosts: [], me: 0xff000001 });
-    s.say({ customPacketType: "greymarchVampLooks", vampires: [{ actor: 0xff000001, glow: 3, fangs: true }, { actor: 0xff000002, glow: 2, fangs: true }] });
-    s.tick();
-    assert.strictEqual(parts.get("me"), 0x0a000000 + 0x815 + 3, "a woman at glow 3: GM_VampEyesFemaleBlue3");
-    assert.strictEqual(parts.get("them"), 0x222, "a Khajiit keeps their eyes (no khajiit eyes yet)");
-    t += 2500;
-    s.say({ customPacketType: "greymarchVampLooks", vampires: [{ actor: 0xff000001, glow: 0, fangs: false }] });
-    s.tick();
-    assert.strictEqual(parts.get("me"), 0x0a000000 + 0x815, "/eyes off: blue, no glow");
-    t += 2500;
-    s.say({ customPacketType: "greymarchVampLooks", vampires: [] });
-    s.tick();
-    assert.strictEqual(parts.get("me"), 0x111, "no longer a vampire: their own eyes");
+    look([{ actor: 0xff000001, glow: 3, fangs: true }, { actor: 0xff000002, glow: 2, fangs: true }]);
+    assert.strictEqual(worn.me[2], GM + 0x815 + 3, "a woman at glow 3: GM_VampEyesFemaleBlue3");
+    assert.strictEqual(worn.me[0], FANG_F, "fangs");
+    assert.deepStrictEqual(worn.them, { 2: 0x222, 0: 0x444 }, "a Khajiit keeps their eyes and teeth (not made yet)");
+    look([{ actor: 0xff000001, glow: 0, fangs: false }]);
+    assert.strictEqual(worn.me[2], GM + 0x815, "/eyes off: blue, no glow");
+    assert.strictEqual(worn.me[0], 0x333, "/fangs off: their own teeth");
+    look([{ actor: 0xff000001, glow: 2, fangs: true }]);
+    assert.strictEqual(worn.me[0], FANG_F);
+    look([]);
+    assert.deepStrictEqual(worn.me, { 2: 0x111, 0: 0x333 }, "no longer a vampire: their own eyes and teeth");
   } finally { Date.now = realNow; }
 });
