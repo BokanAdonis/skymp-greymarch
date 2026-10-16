@@ -32,6 +32,7 @@ export class GreymarchBridge {
         this.controller.on("buttonEvent", (e: any) => this.greymarchKey(e)); // F7 opens the staff panel
         try { this.sp.on("hit", (e: any) => this.greymarchHit(e)); } catch (hitErr) { /* no hit events: the combat history stays empty */ }
         this.controller.on("update", () => this.greymarchTick()); // Skyrim functions only work in the update phase, never in tick
+        this.controller.on("tick", () => this.greymarchConnectCover(Date.now())); // the connecting screen: "tick", because "update" does not run at the main menu (it only uses the browser)
         try { this.controller.on("spellCast", (e: any) => { try { if (e && e.spell && e.spell.getFormID() === 0x92c48 && e.caster && e.caster.getFormID() === 0x14) this.greymarchWolfSignal("spellCast"); } catch (x) { /* not ours */ } }); } catch (scErr) { /* the effect checks still see it */ } // the werewolf power (greymarchWolfTick)
         try { this.controller.on("effectStart", (e: any) => { try { if (e && e.effect && e.effect.getFormID() === 0x92c45 && e.target && e.target.getFormID() === 0x14) this.greymarchWolfSignal("effectStart"); } catch (x) { /* not ours */ } }); } catch (esErr) { /* the other signals still see it */ }
         try { this.controller.on("magicEffectApply", (e: any) => { try { if (e && e.effect && e.effect.getFormID() === 0x92c45 && e.target && e.target.getFormID() === 0x14) this.greymarchWolfSignal("magicEffectApply"); } catch (x) { /* not ours */ } }); } catch (maErr) { /* the other signals still see it */ }
@@ -202,7 +203,6 @@ export class GreymarchBridge {
     }
     // Runs every frame in the UPDATE phase (registered in the constructor): that is the only place Skyrim functions such as Game.getFormEx may be called. Cheap when there is nothing to do. Any error lifts the veil instead of trapping the player.
     greymarchTick(): any {
-        this.greymarchConnectCover(Date.now()); // straight into the server: the main menu is never usable (see greymarchConnectCover)
         this.greymarchDoorNamesApply(Date.now());
         this.greymarchDoorPrompt(Date.now());
         this.greymarchChatPending();

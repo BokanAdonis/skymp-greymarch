@@ -20,7 +20,7 @@ export class BrowserService extends ClientListener {
     this.controller.on("browserMessage", (e) => this.onBrowserMessage(e));
     this.controller.on("menuOpen", (e) => this.onMenuOpen(e));
     this.controller.on("menuClose", (e) => this.onMenuClose(e));
-    this.controller.on("update", () => this.askFrontLoaded());
+    this.controller.on("tick", () => this.askFrontLoaded()); // GREYMARCH: "tick", not "update": update does not run at the main menu, where this is needed
   }
 
   // GREYMARCH: the page says "front-loaded" only once, when it starts. On a fast PC it can start before this script listens, the word is lost and
