@@ -13,11 +13,37 @@ export class HitService extends ClientListener {
     }
 
     private onHit(e: HitEvent) {
-        // TODO: add more logging in case of 'return'
-        // TODO: allow non-weapon sources
+        const why = this.onHitInner(e);
+        this.diag(e, why);
+    }
+
+    // GREYMARCH: the first hits this game sees that involve the player go to the server log ("[client N] hit: ..."): who hit what with
+    // which source and projectile, and whether it was sent to the server or why not. Hits ON the player by another player's copy are
+    // logged too (with the player's health), to see whether that copy's spell also hurts here on top of the server's damage.
+    private diag(e: HitEvent, why: string) {
+        try {
+            const aggressor = e.aggressor ? e.aggressor.getFormID() : 0;
+            const target = e.target ? e.target.getFormID() : 0;
+            if (aggressor !== 0x14 && target !== 0x14) return;
+            if (this.diagLeft <= 0 || why.indexOf("within 100 ms") >= 0) return; // a held spell repeats its hit many times a second
+            this.diagLeft--;
+            const hex = (n: number) => (n >>> 0).toString(16);
+            let health = "";
+            if (target === 0x14) {
+                const pl = this.sp.Game.getPlayer();
+                if (pl) health = ` (my health ${Math.round(pl.getActorValue("Health"))})`;
+            }
+            const text = `hit: ${hex(aggressor)} -> ${hex(target)} source ${e.source ? hex(e.source.getFormID()) : "none"} projectile ${e.projectile ? hex(e.projectile.getFormID()) : "none"}: ${why}${health}`;
+            (this.controller.emitter as any).emit("greymarchStage", text);
+        } catch (err) { /* diagnostics never break the game */ }
+    }
+
+    private diagLeft = 60;
+
+    private onHitInner(e: HitEvent): string {
         const aggressor = e.aggressor.getFormID();
-        if (aggressor < 0xff000000 && aggressor !== 0x14) return; // all skymp npcs are FF+
-        if (aggressor === 0x14 && storage["greymarchShapeOn"] === true) return; // GREYMARCH: a creature form (staff); the server decides its hits (gamemode shapeshift.js), so the game's own are not reported
+        if (aggressor < 0xff000000 && aggressor !== 0x14) return "skipped: the attacker is not a player or a SkyMP actor"; // all skymp npcs are FF+
+        if (aggressor === 0x14 && storage["greymarchShapeOn"] === true) return "skipped: creature form"; // GREYMARCH: a creature form (staff); the server decides its hits (gamemode shapeshift.js), so the game's own are not reported
 
         if (aggressor >= 0xff000000) {
             // TODO: make host service
@@ -31,7 +57,7 @@ export class HitService extends ClientListener {
             }
 
             if (!alreadyHosted) {
-              return;
+              return "skipped: another player's copy (their own game reports it)";
             }
         }
 
@@ -39,7 +65,7 @@ export class HitService extends ClientListener {
         const type = base?.getType();
 
         if (type === FormType.Static || type === FormType.MovableStatic) {
-            return;
+            return "skipped: the target is a static";
         }
 
         const isWeapon = this.sp.Weapon.from(e.source);
@@ -47,7 +73,7 @@ export class HitService extends ClientListener {
         const isScroll = !isWeapon && !isSpell && this.sp.Scroll.from(e.source);
 
         if (!isWeapon && !isSpell && !isScroll) {
-            return;
+            return "skipped: the source is not a weapon, spell or scroll";
         }
 
         // prevent double hit that happens for some reason with magic projectiles
@@ -57,7 +83,7 @@ export class HitService extends ClientListener {
 
             const lastHitTime = this.recentMagicHits.get(aggressorId);
             if (lastHitTime && now - lastHitTime < 100) {
-                return;
+                return "skipped: within 100 ms of this attacker's last magic hit";
             }
 
             this.recentMagicHits.set(aggressorId, now);
@@ -67,6 +93,7 @@ export class HitService extends ClientListener {
             message: { t: MsgType.OnHit, data: this.getHitData(e) },
             reliability: "reliable"
         });
+        return "sent to the server";
     }
 
     private getHitData(e: HitEvent): Hit {

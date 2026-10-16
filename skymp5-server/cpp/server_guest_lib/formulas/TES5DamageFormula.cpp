@@ -211,6 +211,16 @@ float TES5SpellDamageFormulaImpl::GetBaseSpellDamage() const
     auto magicEffect =
       espm::GetData<espm::MGEF>(effect.effectFormId, espmProvider);
 
+    // GREYMARCH: a hidden effect with conditions is a perk's extra (the
+    // server cannot check its conditions). The vanilla Disintegrate perk
+    // effect (200 Health, only with the perk on a nearly dead target) made
+    // Sparks, Lightning Storm and Chain Lightning hit for 200 more every hit.
+    // Visible damage effects with a condition (Mysticism's frost) still count.
+    if (magicEffect.hasConditions &&
+        magicEffect.data.IsFlagSet(espm::MGEF::Flags::HideInUI)) {
+      continue;
+    }
+
     const bool needAddDamage =
       magicEffect.data.IsFlagSet(espm::MGEF::Flags::Hostile) ||
       magicEffect.data.IsFlagSet(espm::MGEF::Flags::Detrimental);

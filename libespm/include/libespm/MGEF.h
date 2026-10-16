@@ -101,6 +101,9 @@ public:
   struct Data
   {
     DATA data;
+    // GREYMARCH: the effect has conditions (CTDA), for example a perk's
+    // hidden extra effect that only applies with the perk
+    bool hasConditions = false;
   };
 
   Data GetData(CompressedFieldsCache& compressedFieldsCache) const noexcept;

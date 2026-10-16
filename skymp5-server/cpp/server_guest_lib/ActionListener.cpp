@@ -236,6 +236,13 @@ void ActionListener::OnUpdateEquipment(const RawMessageData& rawMsgData,
     return;
   }
 
+  // GREYMARCH: a spell the server does not know the player has learned (a
+  // power a mod's script gave in the player's own game, Beast Form before the
+  // server taught it) is left out of the equipment and taken from the player,
+  // as before, but the rest of the update is kept. It used to refuse the
+  // whole update: the server and every other player then kept an old copy of
+  // what this player holds (often an empty hand), and their spells could not
+  // be seen or hit anyone.
   bool isAllowed = true;
   const auto actorFormId = actor->GetFormId();
   const Equipment& data = msg.data;
@@ -258,34 +265,30 @@ void ActionListener::OnUpdateEquipment(const RawMessageData& rawMsgData,
     spellIdsToRemove = {};
 
   if (leftSpell > 0 && !actor->IsSpellLearned(leftSpell)) {
-    spdlog::warn("ActionListener::OnUpdateEquipment {:x} - rejected equipment "
-                 "update: spell {:x} is not learned",
+    spdlog::warn("ActionListener::OnUpdateEquipment {:x} - spell {:x} is "
+                 "not learned: left out of the equipment",
                  actorFormId, leftSpell);
-    isAllowed = false;
     spellIdsToRemove[static_cast<size_t>(SpellSlotId::Left)] = leftSpell;
   }
 
   if (rightSpell > 0 && !actor->IsSpellLearned(rightSpell)) {
-    spdlog::warn("ActionListener::OnUpdateEquipment {:x} - rejected equipment "
-                 "update: spell {:x} is not learned",
+    spdlog::warn("ActionListener::OnUpdateEquipment {:x} - spell {:x} is "
+                 "not learned: left out of the equipment",
                  actorFormId, rightSpell);
-    isAllowed = false;
     spellIdsToRemove[static_cast<size_t>(SpellSlotId::Right)] = rightSpell;
   }
 
   if (voiceSpell > 0 && !actor->IsSpellLearned(voiceSpell)) {
-    spdlog::warn("ActionListener::OnUpdateEquipment {:x} - rejected equipment "
-                 "update: spell {:x} is not learned",
+    spdlog::warn("ActionListener::OnUpdateEquipment {:x} - spell {:x} is "
+                 "not learned: left out of the equipment",
                  actorFormId, voiceSpell);
-    isAllowed = false;
     spellIdsToRemove[static_cast<size_t>(SpellSlotId::Voice)] = voiceSpell;
   }
 
   if (instantSpell > 0 && !actor->IsSpellLearned(instantSpell)) {
-    spdlog::warn("ActionListener::OnUpdateEquipment {:x} - rejected equipment "
-                 "update: spell {:x} is not learned",
+    spdlog::warn("ActionListener::OnUpdateEquipment {:x} - spell {:x} is "
+                 "not learned: left out of the equipment",
                  actorFormId, instantSpell);
-    isAllowed = false;
     spellIdsToRemove[static_cast<size_t>(SpellSlotId::Instant)] = instantSpell;
   }
 
@@ -371,12 +374,7 @@ void ActionListener::OnUpdateEquipment(const RawMessageData& rawMsgData,
     }
   }
 
-  if (isAllowed) {
-    SendToNeighbours(msg.idx, rawMsgData, true);
-    actor->SetEquipment(data);
-  } else {
-    actor->SendInventoryUpdate();
-
+  auto removeUnlearnedSpells = [&] {
     for (uint32_t spellId : spellIdsToRemove) {
       if (spellId == 0) {
         continue;
@@ -391,6 +389,29 @@ void ActionListener::OnUpdateEquipment(const RawMessageData& rawMsgData,
       SpSnippet("Actor", "RemoveSpell", args, actor->GetFormId())
         .Execute(actor, SpSnippetMode::kNoReturnResult);
     }
+  };
+
+  if (isAllowed) {
+    Equipment accepted = data;
+    if (spellIdsToRemove[static_cast<size_t>(SpellSlotId::Left)]) {
+      accepted.leftSpell.reset();
+    }
+    if (spellIdsToRemove[static_cast<size_t>(SpellSlotId::Right)]) {
+      accepted.rightSpell.reset();
+    }
+    if (spellIdsToRemove[static_cast<size_t>(SpellSlotId::Voice)]) {
+      accepted.voiceSpell.reset();
+    }
+    if (spellIdsToRemove[static_cast<size_t>(SpellSlotId::Instant)]) {
+      accepted.instantSpell.reset();
+    }
+    SendToNeighbours(msg.idx, rawMsgData, true);
+    actor->SetEquipment(accepted);
+    removeUnlearnedSpells();
+  } else {
+    actor->SendInventoryUpdate();
+
+    removeUnlearnedSpells();
 
     // Calculate diff between current (server) equipment and new (rejected)
     // equipment. Items worn in the new set but not in the current set need
@@ -1109,6 +1130,13 @@ void ActionListener::OnHit(const RawMessageData& rawMsgData,
       (equipment.IsSpellEquipped(hitData.source) ||
        aggressor->IsSpellLearned(hitData.source))) {
     OnSpellHit(aggressor, targetRef, hitData);
+    return;
+  }
+
+  if (isSourceSpell) {
+    spdlog::info("ActionListener::OnHit - spell hit refused: {:x} neither "
+                 "holds nor has learned spell {:x}",
+                 aggressor->GetFormId(), hitData.source);
     return;
   }
 
