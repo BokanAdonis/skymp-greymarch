@@ -646,8 +646,11 @@ export class RemoteServer extends ClientListener {
       this.worldModel.playerCharacterFormIdx = -1;
       this.worldModel.playerCharacterRefrId = 0;
 
-      // TODO: move to a separate module
-      once('update', () => Game.quitToMainMenu());
+      // GREYMARCH: SkyMP sent the player back to the main menu here. Greymarch never wants that: the character select hides the player's own body
+      // while they choose (select.js setEnabled false), and on the server that also removes it from its owner's view. On a fast PC that message arrives
+      // after the game already knows the body is its own, so the world loaded and then the game quit to the main menu (2026-10-16). Switching and
+      // deleting characters are the server's job (select.js); the next createActor for this player brings the body back. So: noted, not quit.
+      try { (this.controller.emitter as any).emit("greymarchStage", "stage: the server removed my own body from view (character select hides it): staying in the game"); } catch (e) { /* diagnostics only */ }
     }
 
     this.getIdManager().freeIdFor(msg.idx);
