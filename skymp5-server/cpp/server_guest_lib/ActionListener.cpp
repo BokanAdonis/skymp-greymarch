@@ -20,6 +20,7 @@
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 #include <spdlog/spdlog.h>
+#include <algorithm>
 #include <unordered_set>
 
 #include "CustomPacketMessage.h"
@@ -1100,7 +1101,13 @@ void ActionListener::OnHit(const RawMessageData& rawMsgData,
 
   const auto equipment = aggressor->GetEquipment();
 
-  if (isSourceSpell && equipment.IsSpellEquipped(hitData.source)) {
+  // GREYMARCH: a spell the caster has learned also counts. The server's copy
+  // of the equipment goes stale whenever one equipment update is refused
+  // (for example an item the server does not know of in the other hand), and
+  // then every spell hit was dropped: Flames did no damage.
+  if (isSourceSpell &&
+      (equipment.IsSpellEquipped(hitData.source) ||
+       aggressor->IsSpellLearned(hitData.source))) {
     OnSpellHit(aggressor, targetRef, hitData);
     return;
   }
@@ -1167,6 +1174,15 @@ void ActionListener::OnSpellCast(const RawMessageData& rawMsgData,
     spellCastData.target = myActor->GetFormId();
   }
 
+  // GREYMARCH: the end of a cast is always passed on, reliably. It used to
+  // need the spell in the server's (possibly stale) copy of the equipment and
+  // went out unreliable, so a lost or refused "stop" left the caster shooting
+  // fire forever in everyone else's game, burning whoever stood in it.
+  if (spellCastData.interruptCast) {
+    SendToNeighbours(myActor->idx, rawMsgData, true);
+    return;
+  }
+
   if (caster->IsDead()) {
     spdlog::info(fmt::format("{:x} actor is dead and can't spell cast. "
                              "requesting respawn in order to fix death state",
@@ -1177,18 +1193,17 @@ void ActionListener::OnSpellCast(const RawMessageData& rawMsgData,
 
   const auto equipment = caster->GetEquipment();
 
-  if (equipment.IsSpellEquipped(spellCastData.spell) == false) {
+  // GREYMARCH: a learned spell also counts (see OnHit: the server's copy of
+  // the equipment can be stale)
+  if (equipment.IsSpellEquipped(spellCastData.spell) == false &&
+      caster->IsSpellLearned(spellCastData.spell) == false) {
     spdlog::info("ActionListener::OnSpellCast - spell {0:x} not "
                  "found in equipment",
                  spellCastData.spell);
     return;
   }
 
-  SendToNeighbours(myActor->idx, rawMsgData);
-
-  if (spellCastData.interruptCast) {
-    return;
-  }
+  SendToNeighbours(myActor->idx, rawMsgData, true);
 
   auto& browser = partOne.worldState.GetEspm().GetBrowser();
 
@@ -1242,6 +1257,16 @@ void ActionListener::OnSpellHit(MpActor* aggressor,
     partOne.CalculateDamage(*aggressor, *targetActorPtr, spellCastData);
   damage = damage <= 0.f ? 0.f : damage;
 
+  // GREYMARCH: a concentration spell's magnitude is per second of contact
+  const auto spellData =
+    espm::GetData<espm::SPEL>(hitData.source, &partOne.worldState);
+  if (spellData.spellItem &&
+      spellData.spellItem->castType == espm::SPEL::CastType::Concentration) {
+    damage *= ConcentrationHitSeconds(aggressor->GetFormId(),
+                                      targetActorPtr->GetFormId(),
+                                      hitData.source);
+  }
+
   targetActorValues.healthPercentage = CalculateCurrentHealthPercentage(
     *targetActorPtr, damage, targetActorValues.healthPercentage, nullptr);
 
@@ -1255,6 +1280,41 @@ void ActionListener::OnSpellHit(MpActor* aggressor,
                "damage. By caster: {3:x})",
                spellCastData.target, spellCastData.spell, damage,
                spellCastData.caster);
+}
+
+float ActionListener::ConcentrationHitSeconds(uint32_t aggressorId,
+                                             uint32_t targetId,
+                                             uint32_t spellId)
+{
+  // The game reports these hits at its own pace (the client lets one through
+  // per 100 ms), so each hit stands for the time since the last one, at most
+  // a second. The first hit of a stream counts a quarter of a second.
+  constexpr float kFirstHitSeconds = 0.25f;
+  constexpr float kMaxHitSeconds = 1.f;
+  constexpr float kStreamGapSeconds = 1.5f;
+
+  const auto now = std::chrono::steady_clock::now();
+
+  if (lastConcentrationHit.size() > 1024) {
+    for (auto it = lastConcentrationHit.begin();
+         it != lastConcentrationHit.end();) {
+      const std::chrono::duration<float> age = now - it->second;
+      it = age.count() > kStreamGapSeconds ? lastConcentrationHit.erase(it)
+                                           : std::next(it);
+    }
+  }
+
+  const auto key = std::make_tuple(aggressorId, targetId, spellId);
+  float seconds = kFirstHitSeconds;
+  if (auto it = lastConcentrationHit.find(key);
+      it != lastConcentrationHit.end()) {
+    const std::chrono::duration<float> gap = now - it->second;
+    if (gap.count() <= kStreamGapSeconds) {
+      seconds = std::min(gap.count(), kMaxHitSeconds);
+    }
+  }
+  lastConcentrationHit[key] = now;
+  return seconds;
 }
 
 void ActionListener::OnWeaponHit(MpActor* aggressor,

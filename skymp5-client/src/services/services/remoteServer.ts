@@ -1,5 +1,5 @@
 // @ts-expect-error (TODO: Remove in 2.10.0)
-import { Actor, Form, FormType, Menu, interruptCast, castSpellImmediate, printConsole, applyAnimationVariablesToActor, ActorAnimationVariables } from 'skyrimPlatform';
+import { Actor, Form, FormType, Menu, Spell, interruptCast, castSpellImmediate, printConsole, applyAnimationVariablesToActor, ActorAnimationVariables } from 'skyrimPlatform';
 import {
   Armor,
   Cell,
@@ -967,10 +967,14 @@ export class RemoteServer extends ClientListener {
 
       if (msg.data.interruptCast) {
         interruptCast(ac.getFormID(), msg.data.castingSource, actorAnimationVariables);
+        // GREYMARCH: the call above does nothing when the caster's animation variables cannot be applied, and a concentration spell
+        // (Flames) then kept burning in this game for good. The game's own InterruptCast stops it either way.
+        try { ac.interruptCast(); } catch (e) { /* not loaded */ }
         return;
       }
 
-      const spell = ac.getEquippedSpell(msg.data.castingSource);
+      // GREYMARCH: the spell the caster named, when this game's copy of them does not hold it (their equipment arrived late or not at all)
+      const spell = ac.getEquippedSpell(msg.data.castingSource) || Spell.from(Game.getFormEx(msg.data.spell));
       if (spell) {
         castSpellImmediate(ac.getFormID(), msg.data.castingSource, spell.getFormID(), remoteIdToLocalId(msg.data.target),
           msg.data.aimAngle, msg.data.aimHeading, actorAnimationVariables);

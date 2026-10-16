@@ -28,6 +28,8 @@ export class MagicSyncService extends ClientListener {
     }
 
     private onUpdate() {
+        this.checkActiveCasts();
+
         if (this.isAnyMagicStuffEquiped() === false) {
             return;
         }
@@ -60,35 +62,110 @@ export class MagicSyncService extends ClientListener {
 
         const msg: SpellCastMsgData = this.getSpellCastEventData(event, isInterruptCast);
 
+        // GREYMARCH: a new cast from the same hand ends the one before it in everyone else's game
+        const key = this.castKey(msg);
+        if (this.activeCasts.has(key)) {
+            this.sendInterrupt(key);
+        }
+
         this.controller.emitter.emit("sendMessage", {
             message: { t: MsgType.SpellCast, data: msg },
             reliability: "reliable"
         });
 
-        this.lastSpellCastEventMsg = msg;
+        this.activeCasts.set(key, { msg, startedAt: Date.now(), sawCasting: false });
     }
 
     private onSendAnimationEventLeave(ctx: { animEventName: string, animationSucceeded: boolean }) {
 
-        if (!this.lastSpellCastEventMsg || !this.isInteraptSpellCastAnim(ctx.animEventName)) {
+        if (this.activeCasts.size === 0 || !this.isInteraptSpellCastAnim(ctx.animEventName)) {
             return;
         }
 
         this.controller.once('update', () => {
-            if (!this.lastSpellCastEventMsg || this.lastSpellCastEventMsg.interruptCast) {
-                return;
+            for (const key of Array.from(this.activeCasts.keys())) {
+                this.sendInterrupt(key);
             }
-
-            let msg: SpellCastMsgData = this.lastSpellCastEventMsg;
-            msg.interruptCast = true;
-            msg.actorAnimationVariables = this.getAnimationVariablesFromActorConverted(remoteIdToLocalId(this.lastSpellCastEventMsg.caster));
-
-            this.controller.emitter.emit("sendMessage", {
-                message: { t: MsgType.SpellCast, data: msg },
-                reliability: "reliable"
-            });
         });
 
+    }
+
+    // GREYMARCH: the end of a cast. The game does not always send the "equipped" animation event the stop used to wait for (letting go of
+    // a concentration spell like Flames often went unseen), and then the caster kept shooting fire in everyone else's game, hurting whoever
+    // stood in it. So each frame the casting actor's own "is casting" animation variable for that hand is read as well: once it is off
+    // (after it was seen on, or 400 ms after the cast when it never was), the end is sent. Leaving the hand without the spell does the same.
+    private checkActiveCasts() {
+        if (this.activeCasts.size === 0) {
+            return;
+        }
+
+        const now = Date.now();
+
+        for (const [key, cast] of Array.from(this.activeCasts.entries())) {
+            const casting = this.isStillCasting(cast.msg);
+            if (casting === true) {
+                cast.sawCasting = true;
+                continue;
+            }
+            if (casting === false && !cast.sawCasting && now - cast.startedAt < this.castNeverSeenMs) {
+                continue;
+            }
+            this.sendInterrupt(key);
+        }
+    }
+
+    // true / false, or null when the caster is gone (then the cast is ended too)
+    private isStillCasting(msg: SpellCastMsgData): boolean | null {
+        const ac = Actor.from(Game.getFormEx(remoteIdToLocalId(msg.caster)));
+        if (!ac) {
+            return null;
+        }
+
+        if (msg.castingSource === SpellType.Left || msg.castingSource === SpellType.Right) {
+            const equipped = ac.getEquippedSpell(msg.castingSource);
+            if (equipped && equipped.getFormID() !== msg.spell) {
+                return false;
+            }
+        }
+
+        try {
+            if (msg.isDualCasting && ac.getAnimationVariableBool("IsCastingDual")) {
+                return true;
+            }
+            if (msg.castingSource === SpellType.Left) {
+                return ac.getAnimationVariableBool("IsCastingLeft");
+            }
+            if (msg.castingSource === SpellType.Right) {
+                return ac.getAnimationVariableBool("IsCastingRight");
+            }
+            return ac.getAnimationVariableBool("IsCastingLeft") || ac.getAnimationVariableBool("IsCastingRight");
+        } catch (e) {
+            return false;
+        }
+    }
+
+    private sendInterrupt(key: string) {
+        const cast = this.activeCasts.get(key);
+        this.activeCasts.delete(key);
+        if (!cast) {
+            return;
+        }
+
+        const msg: SpellCastMsgData = { ...cast.msg, interruptCast: true };
+        try {
+            msg.actorAnimationVariables = this.getAnimationVariablesFromActorConverted(remoteIdToLocalId(cast.msg.caster));
+        } catch (e) {
+            // the caster is gone: the last known variables go with the end of the cast
+        }
+
+        this.controller.emitter.emit("sendMessage", {
+            message: { t: MsgType.SpellCast, data: msg },
+            reliability: "reliable"
+        });
+    }
+
+    private castKey(msg: SpellCastMsgData): string {
+        return `${msg.caster}:${msg.castingSource}`;
     }
 
     private getSpellCastEventData(e: SpellCastEvent, isInterruptCast: boolean): SpellCastMsgData {
@@ -176,6 +253,7 @@ export class MagicSyncService extends ClientListener {
 
     private playerId = 0x14;
     private sendUpdateAnimationVariablesRateMs = 500;
-    private lastSpellCastEventMsg: SpellCastMsgData | null = null;
+    private activeCasts = new Map<string, { msg: SpellCastMsgData, startedAt: number, sawCasting: boolean }>();
+    private readonly castNeverSeenMs = 400;
     private lastSendUpdateAnimationVariables: number = 0;
 }

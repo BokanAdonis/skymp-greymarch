@@ -9,7 +9,10 @@
 #include "SpellCastData.h"
 #include "SweetHidePlayerNamesService.h"
 #include "libespm/Loader.h"
+#include <chrono>
+#include <map>
 #include <memory>
+#include <tuple>
 
 class ServerState;
 class WorldState;
@@ -95,6 +98,12 @@ private:
   void OnWeaponHit(MpActor* aggressor, MpObjectReference* targetRef,
                    HitData hitData, bool isUnarmed);
 
+  // GREYMARCH: a concentration spell (Flames, Frostbite, Sparks...) reports a
+  // hit many times a second while it touches the target, and its magnitude is
+  // per second. Returns the seconds of contact this hit stands for.
+  float ConcentrationHitSeconds(uint32_t aggressorId, uint32_t targetId,
+                                uint32_t spellId);
+
   void SendPapyrusOnHitEvent(MpActor* aggressor, MpObjectReference* target,
                              const HitData& hitData);
 
@@ -107,6 +116,12 @@ private:
                             bool reliable = false);
 
   PartOne& partOne;
+
+  // GREYMARCH: last hit time per (caster, target, spell), for
+  // ConcentrationHitSeconds
+  std::map<std::tuple<uint32_t, uint32_t, uint32_t>,
+           std::chrono::steady_clock::time_point>
+    lastConcentrationHit;
 
   // TODO: inverse dependency
   std::shared_ptr<CraftService> craftService;
