@@ -19,16 +19,20 @@ export class LoadGameService extends ClientListener {
         }
         this._isCausedBySkyrimPlatform = true;
         this._greymarchLoadAt = Date.now(); // GREYMARCH: see onLoadGame
+        this._greymarchAnswered = false; // GREYMARCH: this request has not been answered by a load yet
         (this.controller.emitter as any).emit("greymarchStage", "stage: the game accepted the load request (it has not reported the load yet)");
     }
 
     private onLoadGame() {
-        try { (this.controller.emitter as any).emit("greymarchStage", "stage: the game reports a load (started by SkyMP: " + !!this._isCausedBySkyrimPlatform + ", recently: " + (!!this._greymarchLoadAt && Date.now() - this._greymarchLoadAt < 8000) + ")"); } catch (e) { /* GREYMARCH: diagnostics only */ }
+        try { (this.controller.emitter as any).emit("greymarchStage", "stage: the game reports a load (started by SkyMP: " + !!this._isCausedBySkyrimPlatform + ", recently: " + (!!this._greymarchLoadAt && Date.now() - this._greymarchLoadAt < 8000) + ", already answered: " + this._greymarchAnswered + ")"); } catch (e) { /* GREYMARCH: diagnostics only */ }
         try {
             const gameLoadEvent = {
                 // GREYMARCH: a slow PC's load event can arrive after the flag was cleared, so a load within 8 seconds of SkyMP starting one still counts as SkyMP's own
-                isCausedBySkyrimPlatform: this._isCausedBySkyrimPlatform || (!!this._greymarchLoadAt && Date.now() - this._greymarchLoadAt < 8000)
+                // But only ONE load per request: a second one within those 8 seconds is the player's own (New Game / Continue at the main menu loads
+                // their single-player save, with its own place and items: seen 2026-10-16), not SkyMP's.
+                isCausedBySkyrimPlatform: this._isCausedBySkyrimPlatform || (!!this._greymarchLoadAt && Date.now() - this._greymarchLoadAt < 8000 && !this._greymarchAnswered)
             };
+            if (gameLoadEvent.isCausedBySkyrimPlatform) this._greymarchAnswered = true; // GREYMARCH
             this.controller.emitter.emit("gameLoad", gameLoadEvent);
         } catch (e) {
             this.controller.once("tick", () => {
@@ -43,4 +47,5 @@ export class LoadGameService extends ClientListener {
 
     private _isCausedBySkyrimPlatform = false;
     private _greymarchLoadAt = 0; // GREYMARCH
+    private _greymarchAnswered = true; // GREYMARCH: the latest request already had its load (true before any request)
 }
