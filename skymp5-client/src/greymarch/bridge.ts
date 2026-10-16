@@ -15,6 +15,7 @@ const ADMIN_SCRIPT = "(function(){if(window.__gmAdminSend)return;var f=document.
 const CHAT_SCRIPT = "(function(){if(window.__gmChatSend)return;var f=document.createElement('iframe');f.id='greymarch-chat-frame';f.src='greymarch-chat.html';f.style.cssText='position:fixed;left:0;top:0;width:100%;height:100%;border:0;z-index:2147483100;background:transparent;display:block;pointer-events:none';f.setAttribute('allowtransparency','true');var ready=false,queue=[];window.addEventListener('message',function(e){if(e.source!==f.contentWindow)return;var d=e.data;if(!d)return;if(d.greymarchReady){ready=true;queue.forEach(function(q){f.contentWindow.postMessage({greymarchIn:q},'*')});queue=[]}else if(d.greymarchOut&&window.skyrimPlatform){window.skyrimPlatform.sendMessage('greymarch',JSON.stringify(d.greymarchOut))}});window.__gmChatSend=function(m){if(m.fn==='open'){f.style.pointerEvents='auto';try{f.focus()}catch(x){}}else if(m.fn==='close'||m.fn==='hide')f.style.pointerEvents='none';if(ready)f.contentWindow.postMessage({greymarchIn:m},'*');else queue.push(m)};document.body.appendChild(f)})();";
 const MENU_SCRIPT = "(function(){if(window.__gmMenuSend)return;var f=document.createElement('iframe');f.id='greymarch-menu-frame';f.src='greymarch-menu.html';f.style.cssText='position:fixed;left:0;top:0;width:100%;height:100%;border:0;z-index:2147483210;background:transparent;display:block;pointer-events:none';f.setAttribute('allowtransparency','true');var ready=false,queue=[];window.addEventListener('message',function(e){if(e.source!==f.contentWindow)return;var d=e.data;if(!d)return;if(d.greymarchReady){ready=true;queue.forEach(function(q){f.contentWindow.postMessage({greymarchIn:q},'*')});queue=[]}else if(d.greymarchOut&&window.skyrimPlatform){window.skyrimPlatform.sendMessage('greymarch',JSON.stringify(d.greymarchOut))}});window.__gmMenuSend=function(m){if(m.fn==='show'){f.style.pointerEvents='auto';try{f.focus()}catch(x){}}else if(m.fn==='hide')f.style.pointerEvents='none';if(ready)f.contentWindow.postMessage({greymarchIn:m},'*');else queue.push(m)};document.body.appendChild(f);document.addEventListener('keyup',function(e){if(e.key==='x'||e.key==='X'){try{f.contentWindow.postMessage({greymarchIn:{fn:'release'}},'*')}catch(x){}}});document.addEventListener('keydown',function(e){if(e.key==='Escape'){try{f.contentWindow.postMessage({greymarchIn:{fn:'escape'}},'*')}catch(x){}}})})();";
 const PROF_SCRIPT = "(function(){if(window.__gmProfSend)return;var f=document.createElement('iframe');f.id='greymarch-prof-frame';f.src='greymarch-prof.html';f.style.cssText='position:fixed;left:0;top:0;width:100%;height:100%;border:0;z-index:2147483220;background:transparent;display:block;pointer-events:none';f.setAttribute('allowtransparency','true');var ready=false,queue=[];window.addEventListener('message',function(e){if(e.source!==f.contentWindow)return;var d=e.data;if(!d)return;if(d.greymarchReady){ready=true;queue.forEach(function(q){f.contentWindow.postMessage({greymarchIn:q},'*')});queue=[]}else if(d.greymarchOut&&window.skyrimPlatform){window.skyrimPlatform.sendMessage('greymarch',JSON.stringify(d.greymarchOut))}});window.__gmProfSend=function(m){if(m.fn==='show'){f.style.pointerEvents='auto';try{f.focus()}catch(x){}}else if(m.fn==='hide')f.style.pointerEvents='none';if(ready)f.contentWindow.postMessage({greymarchIn:m},'*');else queue.push(m)};document.body.appendChild(f);document.addEventListener('keyup',function(e){if(e.key==='x'||e.key==='X'){try{f.contentWindow.postMessage({greymarchIn:{fn:'release'}},'*')}catch(x){}}});document.addEventListener('keydown',function(e){if(e.key==='Escape'){try{f.contentWindow.postMessage({greymarchIn:{fn:'escape'}},'*')}catch(x){}}})})();";
+const CONNECT_FAIL_MS = 90000; // the connecting screen over the main menu: this long without the character select, it says what to do (greymarchConnectCover)
 const WOLF_MORPH_MS = 4300; // the werewolf transformation: the race changes at the animation's "SetRace" cue, or after this long if the cue is not seen (the cue is about 4.0 s in, animationdatasinglefile.txt)
 const SHAPE_REST_MS = 800, SHAPE_POWER_REST_MS = 1600; // a creature's attacks: the rest after a normal and after a power attack (the server allows the same pace)
 const SHAPE_LAND_MS = 450; // a creature's swing is reported this long after it starts (about when it lands)
@@ -38,6 +39,32 @@ export class GreymarchBridge {
         this.controller.emitter.on("greymarchHead", (e: any) => { const m = this.greymarchHeads || (this.greymarchHeads = {}); m[e.name] = { x: e.x, y: e.y, at: Date.now() }; this.greymarchRes = { w: e.rw, h: e.rh }; }); // where each named player's head is on screen (for the microphone icon)
     }
 
+    // STRAIGHT INTO THE SERVER. Started by the launcher (it sets "greymarch-autoplay"), the game must never offer Skyrim's own main menu: New Game or
+    // Continue there load the player's single-player save (its place, its items). So from the first frame until the character select arrives, the
+    // select page covers the screen with "Connecting to Greymarch" and the browser holds the mouse and keyboard, so nothing reaches the menu below.
+    // Sent again every second (the page may still be loading, or reload). After CONNECT_FAIL_MS the page says what to do instead of spinning on.
+    // Started any other way (no launcher), SkyMP's own login and the main menu work as before.
+    greymarchConnectCover(now: number): any {
+        var c = this.greymarchConnect;
+        if (c && c.done) return;
+        if (!c) {
+            var cfg: any = {};
+            try { cfg = (this.sp.settings && this.sp.settings["skymp5-client"]) || {}; } catch (cfgErr) { cfg = {}; }
+            if (!cfg["greymarch-autoplay"]) { this.greymarchConnect = { done: true }; return; }
+            c = this.greymarchConnect = { at: now, next: 0, done: false, failed: false };
+        }
+        if (now < c.next) return;
+        c.next = now + 1000;
+        var waited = now - c.at;
+        var failed = waited >= CONNECT_FAIL_MS;
+        if (failed && !c.failed) { c.failed = true; this.greymarchLog("stage: no character select after " + Math.round(waited / 1000) + " s: the connecting screen says what to do"); }
+        try {
+            this.sp.browser.setVisible(true);
+            this.sp.browser.setFocused(true);
+        } catch (bErr) { /* the browser is not up yet: next second */ }
+        this.greymarchScreenUp = true;
+        this.greymarchToPage("connecting", { on: true, text: waited < 45000 ? "Connecting to Greymarch" : "Still connecting to Greymarch", failed: failed });
+    }
     // GREYMARCH: character select bridge. The screen is Platform/UI/greymarch-select.html, shown in an iframe over SkyMP's UI.
     greymarchToPage(fn: any, arg: any): any {
         var json = JSON.stringify({ fn: fn, arg: arg }).replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
@@ -72,6 +99,7 @@ export class GreymarchBridge {
         if (type === "greymarchFx") { this.greymarchFxWant = { noclip: !!msg.noclip, speed: Number(msg.speed) || 100, frozen: !!msg.frozen, god: !!msg.god }; if (msg.me) this.greymarchMeActor = msg.me; return; }
         if (type === "greymarchGhosts") { this.greymarchGhostList = Array.isArray(msg.ghosts) ? msg.ghosts : []; if (msg.me) this.greymarchMeActor = msg.me; this.greymarchOthers = Array.isArray(msg.others) ? msg.others : []; if (msg.stats !== undefined) this.greymarchStatsWant = msg.stats && typeof msg.stats === "object" ? msg.stats : null; var inv = Array.isArray(msg.invisible) ? msg.invisible : []; this.greymarchInvisList = inv; var invMap = {}; for (var q = 0; q < inv.length; q++) if (inv[q] !== msg.me) invMap[inv[q]] = true; try { Function("return this")().__gmInvisible = invMap; } catch (gErr) { /* names stay visible */ } return; }
         this.sp.printConsole("[greymarch] got " + type + (msg.characters ? " with " + msg.characters.length + " character(s)" : ""));
+        if (type === "greymarchSelect" || type === "greymarchEntered") this.greymarchConnect = { done: true }; // the connecting screen's job is over
         if (type === "greymarchSelect") {
             // From here on the game reports "alive" to the server every 3 seconds (greymarchTick). If the game dies, the LAST alive line in the server log tells
             // how far it got and when, even when the player's own logs are unusable.
@@ -174,6 +202,7 @@ export class GreymarchBridge {
     }
     // Runs every frame in the UPDATE phase (registered in the constructor): that is the only place Skyrim functions such as Game.getFormEx may be called. Cheap when there is nothing to do. Any error lifts the veil instead of trapping the player.
     greymarchTick(): any {
+        this.greymarchConnectCover(Date.now()); // straight into the server: the main menu is never usable (see greymarchConnectCover)
         this.greymarchDoorNamesApply(Date.now());
         this.greymarchDoorPrompt(Date.now());
         this.greymarchChatPending();
