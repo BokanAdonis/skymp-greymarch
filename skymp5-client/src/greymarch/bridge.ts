@@ -127,6 +127,7 @@ export class GreymarchBridge {
             this.sp.browser.setFocused(true);
             this.greymarchToPage("show", { max: msg.max, account: msg.account, characters: msg.characters });
             this.greymarchScreenUp = true;
+            this.greymarchChoosing = true; // until a character is chosen the screen keeps the keyboard and mouse: see greymarchSelectFocusGuard
             this.greymarchHudToPage("hello", true); // start the voice display's page early, so it is already running when the player enters the world
         } else if (type === "greymarchError") {
             this.greymarchToPage("error", msg.message);
@@ -135,6 +136,7 @@ export class GreymarchBridge {
             // the armor flash. The veil NEVER waits for anything that could stall: an existing character lifts it after 2.5s, a new
             // one as soon as the race menu is open (or after 12s). greymarchTick does it.
             this.greymarchToPage("busy", { on: true, text: "Entering the world", veil: true });
+            this.greymarchChoosing = false;
             this.greymarchReveal = { at: Date.now(), isNew: !!msg.isNew };
             this.greymarchTrace = { at: Date.now(), next: 0, menuWas: false, closedAt: 0 };
             this.greymarchLog("entered " + msg.id + " new=" + !!msg.isNew + " kit=" + (Array.isArray(msg.kit) ? msg.kit.length : 0) + " equip=" + (Array.isArray(msg.equip) ? msg.equip.length : 0));
@@ -218,7 +220,22 @@ export class GreymarchBridge {
         this.sp.printConsole("[greymarch] veil lifted (" + why + ")");
     }
     // Runs every frame in the UPDATE phase (registered in the constructor): that is the only place Skyrim functions such as Game.getFormEx may be called. Cheap when there is nothing to do. Any error lifts the veil instead of trapping the player.
+    // While the player is choosing a character, the select screen must have the keyboard and mouse. SkyMP takes them away when it sends the
+    // player's own body (skympClient.onActorCreateMessage: setFocused(false)), which often arrives a moment AFTER the screen: the cursor was
+    // gone and clicks swung the weapon of the body behind the screen. Esc does the same. So the focus is given back whenever it is lost.
+    greymarchSelectFocusGuard(now: any): any {
+        if (!this.greymarchChoosing || now < (this.greymarchSelectFocusNext || 0)) return;
+        this.greymarchSelectFocusNext = now + 200;
+        try {
+            if (this.sp.browser.isFocused()) return;
+            this.sp.browser.setVisible(true);
+            this.sp.browser.setFocused(true);
+            this.greymarchSelectRefocused = (this.greymarchSelectRefocused || 0) + 1;
+            if (this.greymarchSelectRefocused <= 3) this.greymarchLog("stage: the select screen lost the keyboard and mouse (SkyMP loaded the world or Esc), took them back");
+        } catch (e) { /* the next tick tries again */ }
+    }
     greymarchTick(): any {
+        this.greymarchSelectFocusGuard(Date.now());
         this.greymarchDoorNamesApply(Date.now());
         this.greymarchDoorPrompt(Date.now());
         this.greymarchChatPending();
