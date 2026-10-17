@@ -14,7 +14,7 @@ const BIT = 0xff000000;
 function make() {
   const log = { js: [], visible: [], focused: [], sent: [], lines: [], names: new Map(), blocked: [], blockArgs: [], notes: [] };
   const misc = { remoteIdToLocalId: (id) => (id === 0xdead ? 0 : id - BIT + 0x100), localIdToRemoteId: (id) => (id >= 0x100 ? id - 0x100 + BIT : 0), getViewFromStorage: () => null };
-  const mods = { "../messages": { MsgType: { CustomPacket: 77 } }, "../view/worldViewMisc": misc, "../sync/appearance": {}, "../services/services/remoteServer": { RemoteServer: {} }, "../services/services/singlePlayerService": { SinglePlayerService: {} } };
+  const mods = { "../messages": { MsgType: { CustomPacket: 77 } }, "./launchGuard": { launchGuard: { refused: "", joinedWith: null }, TITLE: "", HINT: "" }, "../view/worldViewMisc": misc, "../sync/appearance": {}, "../services/services/remoteServer": { RemoteServer: {} }, "../services/services/singlePlayerService": { SinglePlayerService: {} } };
   const mod = { exports: {} };
   new Function("require", "exports", "module", js)((p) => mods[p], mod.exports, mod);
   const actors = new Map();
