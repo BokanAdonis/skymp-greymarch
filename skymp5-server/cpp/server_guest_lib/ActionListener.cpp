@@ -1128,7 +1128,8 @@ void ActionListener::OnHit(const RawMessageData& rawMsgData,
   // then every spell hit was dropped: Flames did no damage.
   if (isSourceSpell &&
       (equipment.IsSpellEquipped(hitData.source) ||
-       aggressor->IsSpellLearned(hitData.source))) {
+       aggressor->IsSpellLearned(hitData.source) ||
+       IsDamageOfRecentCloak(aggressor->GetFormId(), hitData.source))) {
     OnSpellHit(aggressor, targetRef, hitData);
     return;
   }
@@ -1328,6 +1329,46 @@ void ActionListener::OnSpellHit(MpActor* aggressor,
                "damage. By caster: {3:x})",
                spellCastData.target, spellCastData.spell, damage,
                spellCastData.caster);
+}
+
+bool ActionListener::IsDamageOfRecentCloak(uint32_t casterId,
+                                           uint32_t spellId)
+{
+  // longer than any cloak lasts (vanilla cloaks last 60 seconds)
+  constexpr float kCloakWindowSeconds = 300.f;
+  const auto now = std::chrono::steady_clock::now();
+  auto& browser = partOne.worldState.GetEspm().GetBrowser();
+
+  for (const auto& [key, cast] : lastCasts) {
+    if (key.first != casterId) {
+      continue;
+    }
+    const std::chrono::duration<float> age = now - cast.at;
+    if (age.count() > kCloakWindowSeconds) {
+      continue;
+    }
+    const auto spellLookup = browser.LookupById(key.second);
+    if (!spellLookup.rec || spellLookup.rec->GetType() != espm::SPEL::kType) {
+      continue;
+    }
+    const auto spellData =
+      espm::GetData<espm::SPEL>(key.second, &partOne.worldState);
+    for (const auto& effect : spellData.effects) {
+      const uint32_t mgefId = spellLookup.ToGlobalId(effect.effectFormId);
+      const auto mgefLookup = browser.LookupById(mgefId);
+      if (!mgefLookup.rec || mgefLookup.rec->GetType() != espm::MGEF::kType) {
+        continue;
+      }
+      const auto mgef =
+        espm::GetData<espm::MGEF>(mgefId, &partOne.worldState).data;
+      if (mgef.effectType == espm::MGEF::EffectType::Cloak &&
+          mgef.associatedItem != 0 &&
+          mgefLookup.ToGlobalId(mgef.associatedItem) == spellId) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 float ActionListener::ConcentrationHitSeconds(uint32_t aggressorId,

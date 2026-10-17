@@ -93,6 +93,9 @@ public:
     // GREYMARCH: the actor value that resists this effect (FireResist for a
     // fire spell; None when nothing resists it)
     ActorValue resistValue = espm::ActorValue::None;
+    // GREYMARCH: the associated item (raw id, local to this record's file):
+    // for a cloak, the spell it casts on everyone nearby
+    uint32_t associatedItem = 0;
 
     [[nodiscard]] inline bool IsFlagSet(Flags flag) const
     {

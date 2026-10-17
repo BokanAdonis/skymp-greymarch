@@ -104,6 +104,11 @@ private:
   float ConcentrationHitSeconds(uint32_t aggressorId, uint32_t targetId,
                                 uint32_t spellId);
 
+  // GREYMARCH: true when spellId is the damage spell of a cloak (Flame Cloak,
+  // Mysticism's Whirlwind Cloak) the caster cast in the last few minutes: the
+  // cloak casts that spell on everyone nearby, and it is never "learned"
+  bool IsDamageOfRecentCloak(uint32_t casterId, uint32_t spellId);
+
   void SendPapyrusOnHitEvent(MpActor* aggressor, MpObjectReference* target,
                              const HitData& hitData);
 
