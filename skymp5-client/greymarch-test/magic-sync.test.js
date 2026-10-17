@@ -16,7 +16,9 @@ function load(file, mods) {
   return mod.exports;
 }
 
-const FLAMES = 0x12fcd, FIREBOLT = 0x12fd0, PLAYER_REMOTE = 0xff000013;
+const FLAMES = 0x12fcd, FIREBOLT = 0x12fd0, FIREBALL = 0x1c789, FIREBALL_BLAST = 0x1cea3, PLAYER_REMOTE = 0xff000013;
+// castingType 2 = concentration (held), 1 = fire and forget
+const SPELLS = { [FLAMES]: { type: 2 }, [FIREBOLT]: { type: 1 }, [FIREBALL]: { type: 1, explosion: FIREBALL_BLAST } };
 
 function make() {
   const handlers = {}, onceUpdate = [], sent = [], logs = [];
@@ -31,7 +33,7 @@ function make() {
   };
   const skyrimPlatform = {
     Actor: { from: (f) => f },
-    Game: { getPlayer: () => player, getFormEx: (id) => (id === 0x14 ? player : null) },
+    Game: { getPlayer: () => player, getFormEx: (id) => (id === 0x14 ? player : spellForm(id)) },
     getAnimationVariablesFromActor: () => ({ booleans: new ArrayBuffer(1), floats: new ArrayBuffer(1), integers: new ArrayBuffer(1) }),
     SpellType: { Left: 0, Right: 1, Voise: 2, Instant: 3 },
     SlotType: { Left: 0, Right: 1 },
@@ -42,7 +44,13 @@ function make() {
     once: (n, f) => { if (n === "update") onceUpdate.push(f); },
     emitter: { emit: (n, e) => { if (n === "sendMessage" && e.message.t === 23) sent.push(e.message.data); if (n === "greymarchStage") logs.push(e); } },
   };
-  const sp = { hooks: { sendAnimationEvent: { add: (h) => { animHook = h; } } } };
+  const spellForm = (id) => {
+    const d = SPELLS[id];
+    if (!d) return null;
+    const effect = { getCastingType: () => d.type, getExplosion: () => (d.explosion ? { getFormID: () => d.explosion } : null) };
+    return { getFormID: () => id, getNumEffects: () => 1, getNthEffectMagicEffect: (i) => (i === 0 ? effect : null) };
+  };
+  const sp = { hooks: { sendAnimationEvent: { add: (h) => { animHook = h; } } }, Spell: { from: (f) => f } };
   const mods = {
     skyrimPlatform,
     "./clientListener": { ClientListener: class {} },
@@ -53,11 +61,11 @@ function make() {
   const realNow = Date.now;
   Date.now = () => now;
   const { MagicSyncService } = load("magicSyncService.ts", mods);
-  new MagicSyncService(sp, controller);
+  const service = new MagicSyncService(sp, controller);
   const frame = (ms = 16) => { now += ms; handlers.update(); onceUpdate.splice(0).forEach((f) => f()); };
   const cast = (spell, castingSource = 1) => handlers.spellCast({ caster: player, target: null, spell: { getFormID: () => spell }, castingSource, isDualCasting: false, aimAngle: 0, aimHeading: 0 });
   const animEvent = (animEventName) => animHook.leave({ animEventName, animationSucceeded: true });
-  return { player, sent, logs, frame, cast, animEvent, done: () => { Date.now = realNow; } };
+  return { player, service, sent, logs, frame, cast, animEvent, done: () => { Date.now = realNow; } };
 }
 
 test("Flames: the cast keeps going while the casting variables flicker; the equipped animation event ends it once", () => {
@@ -68,18 +76,51 @@ test("Flames: the cast keeps going while the casting variables flicker; the equi
   for (let i = 0; i < 30; i++) g.frame();
   g.player.vars.IsCastingRight = false; // a variable going off is NOT the end
   for (let i = 0; i < 120; i++) g.frame(); // two more seconds of fire
-  assert.deepStrictEqual(g.sent.map((m) => m.interruptCast), [false]);
+  assert.ok(g.sent.every((m) => m.interruptCast === false), "no end while held");
+  assert.strictEqual(g.sent.length, 1 + 2, "the cast and a reminder every second (2.4 s held)");
   g.animEvent("MRh_Equipped_Event");
   g.frame();
-  assert.deepStrictEqual(g.sent.map((m) => m.interruptCast), [false, true]);
-  assert.strictEqual(g.sent[1].spell, FLAMES);
+  assert.strictEqual(g.sent[g.sent.length - 1].interruptCast, true);
+  assert.strictEqual(g.sent[g.sent.length - 1].spell, FLAMES);
   assert.strictEqual(g.sent[0].interruptCast, false, "the cast message itself is not changed");
+  const n = g.sent.length;
   g.animEvent("MRh_Equipped_Event");
-  for (let i = 0; i < 3; i++) g.frame();
-  assert.strictEqual(g.sent.length, 2, "the end goes out once");
+  for (let i = 0; i < 120; i++) g.frame();
+  assert.strictEqual(g.sent.length, n, "the end goes out once, and no reminder after it");
   assert.match(g.logs[0], /^magic: cast 12fcd hand 1 by ff000013$/);
   assert.match(g.logs[1], /^magic: end 12fcd hand 1 after \d+ ms \(MRh_Equipped_Event\); repeats 0; IsCastingRight on@16 off@496/);
   assert.match(g.logs[1], /events MRh_SpellAimedConcentrationStart@0 MRh_Equipped_Event@/);
+  g.done();
+});
+
+test("a held spell is repeated every second while held, with the same spell and hand", () => {
+  const g = make();
+  g.cast(FLAMES);
+  for (let i = 0; i < 64; i++) g.frame(); // 1.02 s
+  assert.deepStrictEqual(g.sent.map((m) => [m.spell, m.castingSource, m.interruptCast]), [[FLAMES, 1, false], [FLAMES, 1, false]]);
+  g.done();
+});
+
+test("a fire-and-forget spell is sent once and gets no end and no reminder", () => {
+  const g = make();
+  g.player.hands[1] = FIREBOLT;
+  g.cast(FIREBOLT);
+  g.animEvent("MRh_Equipped_Event");
+  for (let i = 0; i < 200; i++) g.frame();
+  assert.deepStrictEqual(g.sent.map((m) => m.interruptCast), [false]);
+  assert.match(g.logs[0], /\(fire and forget\)$/);
+  g.done();
+});
+
+test("an explosion is matched to the recent cast whose effect explodes into it, only for 5 s and only for that caster", () => {
+  const g = make();
+  g.player.hands[1] = FIREBALL;
+  g.cast(FIREBALL);
+  assert.strictEqual(g.service.findSpellForExplosion(0x14, FIREBALL_BLAST), FIREBALL);
+  assert.strictEqual(g.service.findSpellForExplosion(0xff000099, FIREBALL_BLAST), 0, "another caster");
+  assert.strictEqual(g.service.findSpellForExplosion(0x14, 0x1234), 0, "another explosion");
+  for (let i = 0; i < 320; i++) g.frame(); // 5.1 s
+  assert.strictEqual(g.service.findSpellForExplosion(0x14, FIREBALL_BLAST), 0, "too long ago");
   g.done();
 });
 
@@ -119,7 +160,7 @@ test("a cast of another spell from the same hand ends the one before it first; t
 test("the server log gets at most 40 lines from this service per session", () => {
   const g = make();
   for (let i = 0; i < 60; i++) { g.cast(FLAMES); g.animEvent("MRh_Equipped_Event"); g.frame(); }
-  assert.strictEqual(g.sent.length, 120);
+  assert.strictEqual(g.sent.length, 120); // each: the cast and its end
   assert.strictEqual(g.logs.length, 40);
   g.done();
 });

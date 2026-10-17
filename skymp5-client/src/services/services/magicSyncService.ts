@@ -75,13 +75,26 @@ export class MagicSyncService extends ClientListener {
             reliability: "reliable"
         });
 
+        // every cast is remembered for a few seconds: an explosion that hits someone is reported as the spell it came from (hitService)
+        this.recentCasts.unshift({ casterLocalId: event.caster.getFormID(), spell: msg.spell, at: Date.now() });
+        this.recentCasts.length = Math.min(this.recentCasts.length, 8);
+
         if (open && open.msg.spell === msg.spell) {
             open.msg = msg;
             open.repeats++;
+            open.lastSentAt = Date.now();
+            return;
+        }
+
+        // GREYMARCH: only a held (concentration) spell stays open: it gets an end, and a reminder every second while it is held so other
+        // games stop it by themselves when the reminders stop (a lost end can no longer leave fire burning). A fire-and-forget spell is
+        // done once it is cast: nothing more is sent for it.
+        if (!this.isConcentration(msg.spell)) {
+            this.diag(`magic: cast ${msg.spell.toString(16)} hand ${msg.castingSource}${msg.isDualCasting ? " dual" : ""} by ${msg.caster.toString(16)} (fire and forget)`);
             return;
         }
         // the caster's id in THIS game (the player is 0x14 here; their server id does not map back to it)
-        this.activeCasts.set(key, { msg, casterLocalId: event.caster.getFormID(), startedAt: Date.now(), repeats: 0, varsSeen: {}, events: [] });
+        this.activeCasts.set(key, { msg, casterLocalId: event.caster.getFormID(), startedAt: Date.now(), lastSentAt: Date.now(), repeats: 0, varsSeen: {}, events: [] });
         this.diag(`magic: cast ${msg.spell.toString(16)} hand ${msg.castingSource}${msg.isDualCasting ? " dual" : ""} by ${msg.caster.toString(16)}`);
     }
 
@@ -139,6 +152,13 @@ export class MagicSyncService extends ClientListener {
                 }
             }
 
+            if (now - cast.lastSentAt >= this.keepaliveMs) {
+                cast.lastSentAt = now;
+                const again: SpellCastMsgData = { ...cast.msg, interruptCast: false };
+                try { again.actorAnimationVariables = this.getAnimationVariablesFromActorConverted(cast.casterLocalId); } catch (e) { /* keep the last ones */ }
+                this.controller.emitter.emit("sendMessage", { message: { t: MsgType.SpellCast, data: again }, reliability: "reliable" });
+            }
+
             for (const name of this.castVars) {
                 let on = false;
                 try { on = ac.getAnimationVariableBool(name); } catch (e) { continue; }
@@ -180,6 +200,34 @@ export class MagicSyncService extends ClientListener {
         }
         this.diagLeft--;
         try { (this.controller.emitter as any).emit("greymarchStage", text); } catch (e) { /* diagnostics never break the game */ }
+    }
+
+    // a held spell: its first effect is cast by concentration (2)
+    private isConcentration(spellId: number): boolean {
+        try {
+            const spell = this.sp.Spell.from(Game.getFormEx(spellId));
+            const effect = spell ? spell.getNthEffectMagicEffect(0) : null;
+            return !!effect && effect.getCastingType() === 2;
+        } catch (e) {
+            return true; // unknown: treat it as held, so it still gets an end
+        }
+    }
+
+    // the spell a recent cast of this caster (within 5 s) that explodes into this explosion
+    public findSpellForExplosion(casterLocalId: number, explosionId: number): number {
+        const now = Date.now();
+        for (const cast of this.recentCasts) {
+            if (cast.casterLocalId !== casterLocalId || now - cast.at > 5000) continue;
+            try {
+                const spell = this.sp.Spell.from(Game.getFormEx(cast.spell));
+                const n = spell ? spell.getNumEffects() : 0;
+                for (let i = 0; i < n; i++) {
+                    const explosion = spell!.getNthEffectMagicEffect(i)?.getExplosion();
+                    if (explosion && explosion.getFormID() === explosionId) return cast.spell;
+                }
+            } catch (e) { /* next cast */ }
+        }
+        return 0;
     }
 
     private castKey(msg: SpellCastMsgData): string {
@@ -271,8 +319,10 @@ export class MagicSyncService extends ClientListener {
 
     private playerId = 0x14;
     private sendUpdateAnimationVariablesRateMs = 500;
-    private activeCasts = new Map<string, { msg: SpellCastMsgData, casterLocalId: number, startedAt: number, repeats: number, varsSeen: Record<string, { on: number, off: number, was: boolean }>, events: string[] }>();
+    private activeCasts = new Map<string, { msg: SpellCastMsgData, casterLocalId: number, startedAt: number, lastSentAt: number, repeats: number, varsSeen: Record<string, { on: number, off: number, was: boolean }>, events: string[] }>();
     private readonly castVars = ["IsCastingRight", "IsCastingLeft", "IsCastingDual", "bWantCastRight", "bWantCastLeft"];
     private diagLeft = 40;
+    private readonly keepaliveMs = 1000;
+    private recentCasts: { casterLocalId: number, spell: number, at: number }[] = [];
     private lastSendUpdateAnimationVariables: number = 0;
 }

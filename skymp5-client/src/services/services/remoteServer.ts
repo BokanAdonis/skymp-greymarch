@@ -122,6 +122,7 @@ export class RemoteServer extends ClientListener {
     this.controller.emitter.on("connectionAccepted", () => this.handleConnectionAccepted());
 
     this.controller.emitter.on("spellCastMessage", (e) => this.onSpellCastMessage(e));
+    on('update', () => this.greymarchEndSilentHeldSpells());
     this.controller.emitter.on("updateAnimVariablesMessage", (e) => this.onUpdateAnimVariablesMessage(e));
 
   }
@@ -978,6 +979,7 @@ export class RemoteServer extends ClientListener {
       const castKey = `${msg.data.caster}:${msg.data.castingSource}`;
 
       if (msg.data.interruptCast) {
+        this.greymarchHeldSpells.delete(castKey);
         interruptCast(ac.getFormID(), msg.data.castingSource, actorAnimationVariables);
         this.greymarchMagicDiag(`magic: saw ${msg.data.caster.toString(16)} end ${msg.data.spell.toString(16)} hand ${msg.data.castingSource}`);
         // GREYMARCH: the call above does nothing when the caster's animation variables cannot be applied, and a concentration spell
@@ -1004,13 +1006,46 @@ export class RemoteServer extends ClientListener {
       // GREYMARCH: the spell the caster named, when this game's copy of them does not hold it (their equipment arrived late or not at all)
       const held = ac.getEquippedSpell(msg.data.castingSource);
       const spell = held || Spell.from(Game.getFormEx(msg.data.spell));
+
+      // GREYMARCH: a held (concentration) spell is shown once; the caster's game repeats the cast every second while it is held, and those
+      // reminders only keep it going here. With no word for HELD_SILENCE_MS it is ended here (a lost end, a caster who left).
+      const isHeld = !!spell && this.greymarchIsHeld(spell);
+      const showing = this.greymarchHeldSpells.get(castKey);
+      if (isHeld && showing && showing.spell === spell!.getFormID()) {
+        showing.lastSeen = Date.now();
+        return;
+      }
+
       this.greymarchMagicDiag(`magic: saw ${msg.data.caster.toString(16)} cast ${msg.data.spell.toString(16)} hand ${msg.data.castingSource} (their copy holds ${held ? held.getFormID().toString(16) : "nothing"}, casting ${spell ? spell.getFormID().toString(16) : "nothing"})`);
       if (spell) {
         castSpellImmediate(ac.getFormID(), msg.data.castingSource, spell.getFormID(), remoteIdToLocalId(msg.data.target),
           msg.data.aimAngle, msg.data.aimHeading, actorAnimationVariables);
+        if (isHeld) {
+          this.greymarchHeldSpells.set(castKey, { spell: spell.getFormID(), casterId: ac.getFormID(), lastSeen: Date.now() });
+        } else {
+          this.greymarchHeldSpells.delete(castKey);
+        }
       }
     });
   }
+
+  private greymarchIsHeld(spell: Spell): boolean {
+    try { const effect = spell.getNthEffectMagicEffect(0); return !!effect && effect.getCastingType() === 2; } catch (e) { return false; }
+  }
+
+  private greymarchEndSilentHeldSpells(): void {
+    if (this.greymarchHeldSpells.size === 0) return;
+    const now = Date.now();
+    for (const [key, showing] of Array.from(this.greymarchHeldSpells.entries())) {
+      if (now - showing.lastSeen < RemoteServer.HELD_SILENCE_MS) continue;
+      this.greymarchHeldSpells.delete(key);
+      try { const ac = Actor.from(Game.getFormEx(showing.casterId)); if (ac) ac.interruptCast(); } catch (e) { /* not loaded */ }
+      this.greymarchMagicDiag(`magic: no word for ${RemoteServer.HELD_SILENCE_MS} ms about ${key} (${showing.spell.toString(16)}): ended here`);
+    }
+  }
+
+  private static readonly HELD_SILENCE_MS = 2500;
+  private greymarchHeldSpells = new Map<string, { spell: number, casterId: number, lastSeen: number }>();
 
   // GREYMARCH: what this game does with other players' spell casts, a few lines per session to the server log
   private greymarchMagicDiag(text: string): void {

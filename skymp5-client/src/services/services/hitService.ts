@@ -5,6 +5,7 @@ import { FormType, HitEvent, storage } from "skyrimPlatform";
 import { ClientListener, CombinedController, Sp } from "./clientListener";
 import { MsgType } from "../../messages";
 import { Hit } from "../messages/hitMessage";
+import { MagicSyncService } from "./magicSyncService";
 
 export class HitService extends ClientListener {
     constructor(private sp: Sp, private controller: CombinedController) {
@@ -72,28 +73,42 @@ export class HitService extends ClientListener {
         const isSpell = !isWeapon && this.sp.Spell.from(e.source);
         const isScroll = !isWeapon && !isSpell && this.sp.Scroll.from(e.source);
 
+        // GREYMARCH: an area spell's blast (Incinerate, Fireball, Lightning Storm) hits with its EXPLOSION as the source: reported as the
+        // spell it came from (a cast of this attacker in the last 5 s whose effect explodes into it), so area damage reaches the server
+        let source = e.source ? e.source.getFormID() : 0;
+        let fromExplosion = false;
         if (!isWeapon && !isSpell && !isScroll) {
-            return "skipped: the source is not a weapon, spell or scroll";
+            const isExplosion = !!e.source && e.source.getType() === FormType.Explosion;
+            const spell = isExplosion ? this.controller.lookupListener(MagicSyncService).findSpellForExplosion(aggressor, source) : 0;
+            if (!spell) {
+                return isExplosion ? "skipped: an explosion of no recent cast" : "skipped: the source is not a weapon, spell or scroll";
+            }
+            source = spell;
+            fromExplosion = true;
         }
 
         // prevent double hit that happens for some reason with magic projectiles
-        if (isSpell || isScroll) {
-            const aggressorId = e.aggressor.getFormID();
+        // GREYMARCH: per attacker, target and spell (it was per attacker: an area spell then counted only the first of the targets it hit)
+        if (isSpell || isScroll || fromExplosion) {
+            const key = `${aggressor}:${e.target.getFormID()}:${source}`;
             const now = Date.now();
 
-            const lastHitTime = this.recentMagicHits.get(aggressorId);
+            const lastHitTime = this.recentMagicHits.get(key);
             if (lastHitTime && now - lastHitTime < 100) {
                 return "skipped: within 100 ms of this attacker's last magic hit";
             }
 
-            this.recentMagicHits.set(aggressorId, now);
+            this.recentMagicHits.set(key, now);
+            if (this.recentMagicHits.size > 256) {
+                for (const [k, at] of Array.from(this.recentMagicHits.entries())) if (now - at > 1000) this.recentMagicHits.delete(k);
+            }
         }
 
         this.controller.emitter.emit("sendMessage", {
-            message: { t: MsgType.OnHit, data: this.getHitData(e) },
+            message: { t: MsgType.OnHit, data: { ...this.getHitData(e), source } },
             reliability: "reliable"
         });
-        return "sent to the server";
+        return fromExplosion ? `sent to the server as spell ${source.toString(16)}` : "sent to the server";
     }
 
     private getHitData(e: HitEvent): Hit {
@@ -110,5 +125,5 @@ export class HitService extends ClientListener {
         return hitData;
     }
 
-    private recentMagicHits: Map<number, number> = new Map();
+    private recentMagicHits: Map<string, number> = new Map();
 }

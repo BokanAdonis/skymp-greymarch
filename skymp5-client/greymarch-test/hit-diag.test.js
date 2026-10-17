@@ -15,12 +15,12 @@ function load(file, mods) {
   return mod.exports;
 }
 
-const FLAMES = 0x12fcd, IRON_SWORD = 0x12eb7;
+const FLAMES = 0x12fcd, IRON_SWORD = 0x12eb7, FIREBALL = 0x1c789, FIREBALL_BLAST = 0x1cea3;
 function make() {
   const handlers = {}, sent = [], logs = [];
   let now = 1000;
   const realNow = Date.now; Date.now = () => now;
-  const form = (id, extra = {}) => ({ getFormID: () => id, getBaseObject: () => ({ getType: () => 62 }), ...extra });
+  const form = (id, extra = {}) => ({ getFormID: () => id, getType: () => (id === FIREBALL_BLAST || id === 0x5555 ? 87 : 0), getBaseObject: () => ({ getType: () => 62 }), ...extra });
   const player = form(0x14, { getActorValue: () => 87.4 });
   const sp = {
     Weapon: { from: (f) => (f && f.getFormID() === IRON_SWORD ? f : null) },
@@ -30,10 +30,11 @@ function make() {
   };
   const controller = {
     on: (n, f) => { handlers[n] = f; },
+    lookupListener: () => ({ findSpellForExplosion: (caster, expl) => (caster === 0x14 && expl === FIREBALL_BLAST ? FIREBALL : 0) }),
     emitter: { emit: (n, e) => { if (n === "sendMessage") sent.push(e.message.data); if (n === "greymarchStage") logs.push(e); } },
   };
   const mods = {
-    skyrimPlatform: { FormType: { Static: 34, MovableStatic: 36 }, storage: { hosted: [] } },
+    skyrimPlatform: { FormType: { Static: 34, MovableStatic: 36, Explosion: 87 }, storage: { hosted: [] } },
     "./clientListener": { ClientListener: class {} },
     "../../messages": { MsgType: { OnHit: 11 } },
     "../../view/worldViewMisc": { localIdToRemoteId: (id) => id },
@@ -68,5 +69,17 @@ test("a source that is neither weapon, spell nor scroll says so; hits between ot
   g.hit(g.player, g.form(0xff00000f), 0x1234);
   g.hit(g.form(0xff000017), g.form(0xff00000f), IRON_SWORD);
   assert.deepStrictEqual(g.logs, ["hit: 14 -> ff00000f source 1234 projectile none: skipped: the source is not a weapon, spell or scroll"]);
+  g.done();
+});
+
+test("an area spell's explosion is reported as its spell, once per target: two targets in one blast both count", () => {
+  const g = make();
+  g.hit(g.player, g.form(0xff00000f), FIREBALL_BLAST);
+  g.hit(g.player, g.form(0xff000017), FIREBALL_BLAST);
+  g.hit(g.player, g.form(0xff000017), FIREBALL_BLAST); // the same target again at once
+  assert.deepStrictEqual(g.sent.map((h) => [h.target, h.source]), [[0xff00000f, FIREBALL], [0xff000017, FIREBALL]]);
+  assert.match(g.logs[0], /sent to the server as spell 1c789$/);
+  g.hit(g.player, g.form(0xff00000f), 0x5555);
+  assert.match(g.logs[g.logs.length - 1], /skipped: an explosion of no recent cast$/);
   g.done();
 });
