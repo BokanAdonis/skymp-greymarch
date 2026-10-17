@@ -39,6 +39,21 @@ const VAMP_FANG_RACES = [0x13746, 0x13744, 0x13741, 0x13748, 0x13743, 0x13749, 0
 const CHANCERY_SCRIPT =PROF_SCRIPT.split("__gmProfSend").join("__gmChanceryRun").split("greymarch-prof").join("greymarch-chancery").split("2147483220").join("2147483221"); // the chancery window (/chancery): the same loader, another page
 const VAMP_MENU_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmVampRun").split("greymarch-prof").join("greymarch-vampire").split("2147483220").join("2147483222"); // the vampire window (/vampire): the same loader, another page
 
+// Which way the camera faces, in degrees the Skyrim way (0 = north, 90 = east). Skyrim Platform has no camera call, so 24 points on a wide ring round the head are
+// put through worldPointToScreenPoint: the camera faces where the points in front of it cross the middle of the screen. null = could not tell (looking straight up or down).
+export function greymarchCameraYaw(project: (pts: number[][]) => number[][], head: number[]): number | null {
+    var R = 5000, N = 24, pts = [];
+    for (var i = 0; i < N; i++) { var a = (i * 360 / N) * Math.PI / 180; pts.push([head[0] + R * Math.sin(a), head[1] + R * Math.cos(a), head[2]]); }
+    var s = project(pts);
+    if (!s || s.length !== N) return null;
+    for (var j = 0; j < N; j++) {
+        var p = s[j], q = s[(j + 1) % N];
+        if (!p || !q || !(p[2] > 0) || !(q[2] > 0) || !(p[0] > -0.5 && p[0] < 1.5 && q[0] > -0.5 && q[0] < 1.5)) continue; // both in front of the camera, near the screen
+        if (p[0] <= 0.5 && q[0] >= 0.5 && q[0] > p[0]) return ((j + (0.5 - p[0]) / (q[0] - p[0])) * 360 / N) % 360; // left to right across the middle
+    }
+    return null;
+}
+
 export class GreymarchBridge {
     [key: string]: any;
 
@@ -59,6 +74,7 @@ export class GreymarchBridge {
         try { this.controller.on("magicEffectApply", (e: any) => { try { if (e && e.effect && e.target && e.target.getFormID() === 0x14) this.greymarchVampSignal("effect", e.effect.getFormID()); } catch (x) { /* not ours */ } }); } catch (veErr) { /* no effect events: a Potion of Blood is not reported */ } // a Potion of Blood drunk
         try { this.controller.on("equip", (e: any) => { try { if (e && e.baseObj && e.actor && e.actor.getFormID() === 0x14) this.greymarchVampSignal("equip", e.baseObj.getFormID()); } catch (x) { /* not ours */ } }); } catch (vqErr) { /* the effect event still sees it */ } // a potion is "equipped" when it is drunk
         this.controller.emitter.on("greymarchStage", (text: string) => this.greymarchLog(text)); // other services report where the game is, for the server log
+        this.controller.emitter.on("greymarchEar", (e: any) => { if (e && typeof e.name === "string" && isFinite(e.x) && isFinite(e.y) && isFinite(e.z)) { const m = this.greymarchEarsSeen || (this.greymarchEarsSeen = {}); m[e.name] = { x: e.x, y: e.y, z: e.z, at: Date.now() }; } }); // where each named player's head is in the world (where their voice comes from: greymarchEarsTick)
         this.controller.emitter.on("greymarchHead", (e: any) => { const m = this.greymarchHeads || (this.greymarchHeads = {}); m[e.name] = { x: e.x, y: e.y, at: Date.now() }; this.greymarchRes = { w: e.rw, h: e.rh }; }); // where each named player's head is on screen (for the microphone icon)
     }
 
@@ -275,6 +291,7 @@ export class GreymarchBridge {
         this.greymarchShapeTick(); // a creature form staff put the player in (a goat, a giant ...): the server decides, the body is changed here
         this.greymarchWolfTick(); // the werewolf form: the game's Beast Form power is the trigger, the server decides, the change is done here
         this.greymarchVampTick(); // a vampire: powers and potions reported, the abilities the server names, no Restoration, the feeding scene
+        this.greymarchEarsTick(Date.now()); // where each voice comes from, for the launcher (only while it is in voice)
         var beat = this.greymarchBeat;
         if (beat) {
             var bNow = Date.now();
@@ -359,6 +376,28 @@ export class GreymarchBridge {
             this.sp.browser.executeJavaScript(HUD_SCRIPT + "window.__gmHudSend(" + json + ");");
         } catch (err) { /* the voice display is a nicety: it must never break the game */ }
     }
+    // WHERE EACH VOICE COMES FROM. About 10 times a second, while the launcher is in voice, the voice display's page is told which way the camera faces and where
+    // nearby players' heads are; the page passes it to the launcher, which turns, muffles and fades each voice from it. Whether a voice can be heard at all stays the
+    // game server's call (the launcher's voice rules), so these numbers only change how a voice sounds.
+    greymarchEarsTick(now: number): any {
+        if (!this.greymarchListen || this.greymarchScreenUp || now < (this.greymarchEarsNext || 0)) return;
+        this.greymarchEarsNext = now + 100;
+        try {
+            var sp = this.sp, player = sp.Game.getPlayer();
+            var head = "NPC Head [Head]";
+            var me = [sp.NetImmerse.getNodeWorldPositionX(player, head, false), sp.NetImmerse.getNodeWorldPositionY(player, head, false), sp.NetImmerse.getNodeWorldPositionZ(player, head, false)];
+            if (!me.every(function (n: any) { return isFinite(n); }) || (me[0] === 0 && me[1] === 0 && me[2] === 0)) me = [player.getPositionX(), player.getPositionY(), player.getPositionZ() + 110]; // no head node (a creature form): about head height
+            var yaw = greymarchCameraYaw(function (pts: number[][]) { return sp.worldPointToScreenPoint.apply(null, pts); }, me);
+            if (yaw === null) yaw = player.getAngleZ(); // the camera could not be read: the way the character faces
+            var seen = this.greymarchEarsSeen || {}, list = [];
+            for (var id in seen) {
+                var e = seen[id];
+                if (now - e.at > 400) { delete seen[id]; continue; } // gone, or out of reach
+                if (/^#[2-9A-HJ-KM-NP-Z]{4}$/.test(id) && list.length < 32) list.push({ id: id, x: Math.round(e.x), y: Math.round(e.y), z: Math.round(e.z) });
+            }
+            this.greymarchHudToPage("ears", { yaw: Math.round(yaw * 10) / 10, me: [Math.round(me[0]), Math.round(me[1]), Math.round(me[2])], list: list });
+        } catch (err) { /* voices just stay centred */ }
+    }
     // The voice display reports "I am on / off, and these characters are talking". Only real character IDs are accepted.
     greymarchVoiceMessage(data: any): any {
         var ids = [];
@@ -368,6 +407,7 @@ export class GreymarchBridge {
             }
         }
         var hud = data.hud === true;
+        this.greymarchListen = data.listen === true; // the launcher is in voice: it wants to know where voices come from (greymarchEarsTick), even with the display off
         var changed = hud !== !!this.greymarchHudOn;
         this.greymarchVoice = { hud: hud, speaking: ids };
         // the floating names mark whoever is talking (formView.ts draws the mark as part of the name, so it moves with it and cannot lag)
