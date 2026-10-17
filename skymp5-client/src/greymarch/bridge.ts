@@ -5,6 +5,10 @@
 import { MsgType } from "../messages";
 import * as misc from "../view/worldViewMisc";
 import * as appearanceMod from "../sync/appearance";
+import * as moveGetMod from "../sync/movementGet";
+import * as moveApplyMod from "../sync/movementApply";
+import * as animMod from "../sync/animation";
+import { WorldCleanerService } from "../services/services/worldCleanerService";
 import { RemoteServer } from "../services/services/remoteServer";
 import { SinglePlayerService } from "../services/services/singlePlayerService";
 import { LoadGameService } from "../services/services/loadGameService";
@@ -101,7 +105,8 @@ export class GreymarchBridge {
         if (type === "greymarchProps") { this.greymarchDoorNames = msg.doors && typeof msg.doors === "object" ? msg.doors : {}; this.greymarchDoorNamesNext = 0; return; }
         if (type === "greymarchGmAlert") { this.greymarchChatToPage("alert", msg); return; } // a player typed /gm (the server only sends it to Trial GM and up)
         if (type === "greymarchMenuReply") { this.greymarchMenuToPage("reply", msg); return; }
-        if (type === "greymarchShape") { this.greymarchShapeMsg(msg); return; } // a creature form (staff): greymarchShapeTick changes the body
+        if (type === "greymarchShape") { this.greymarchShapeMsg(msg); return; }
+        if (type === "greymarchShapeAnim") { if (typeof msg.ev === "string" && msg.ev.length < 64 && Number(msg.actor) > 0) (this.greymarchShapeAnimQueue || (this.greymarchShapeAnimQueue = [])).push({ actor: Number(msg.actor), ev: msg.ev }); return; } // another player's creature attacked (played in greymarchShapeDrive) // a creature form (staff): greymarchShapeTick changes the body
         if (type === "greymarchWolfForm") { if (this.greymarchWolfWant !== !!msg.on) this.greymarchLog("wolf: the server says " + (msg.on ? "changed" : "no (change back)")); this.greymarchWolfWant = !!msg.on; if (msg.on) { this.greymarchWolfWordAt = Date.now(); this.greymarchWolfAlpha = !!msg.alpha; this.greymarchWolfPup = !msg.alpha && !!msg.pup; } return; } // (logged only when it changes: the server repeats it every 5 seconds) // the werewolf form (greymarchWolfTick)
         if (type === "greymarchWolfAlphas") { this.greymarchWolfAlphaList = Array.isArray(msg.actors) ? msg.actors : []; this.greymarchWolfPupList = Array.isArray(msg.pups) ? msg.pups : []; return; } // the other players in the Alpha form: drawn white (greymarchWolfAlphaOthers)
         if (type === "greymarchVampire") { this.greymarchVampWant = msg.on ? msg : null; this.greymarchHudToPage("blood", { on: !!msg.on, blood: msg.blood, empty: !!msg.empty }); return; } // a vampire's state: the blood drop and what the game applies (greymarchVampTick)
@@ -259,6 +264,7 @@ export class GreymarchBridge {
         if (this.greymarchMenuEscAt && Date.now() - this.greymarchMenuEscAt > 700) { this.greymarchMenuEscAt = 0; this.greymarchMenuHide(); } // Esc, and the menu page did not close itself
         this.greymarchToastTick(Date.now());
         this.greymarchEffects(); // staff effects: noclip, speed, frozen, ghosts (cheap: does real work every 400 ms)
+        this.greymarchShapeDrive(); // a creature form as an NPC: moved every frame like SkyMP moves other players; other players' creature attacks
         this.greymarchShapeTick(); // a creature form staff put the player in (a goat, a giant ...): the server decides, the body is changed here
         this.greymarchWolfTick(); // the werewolf form: the game's Beast Form power is the trigger, the server decides, the change is done here
         this.greymarchVampTick(); // a vampire: powers and potions reported, the abilities the server names, no Restoration, the feeding scene
@@ -881,7 +887,7 @@ export class GreymarchBridge {
             if (!was || was.race !== race) this.greymarchLog("shape: the server says " + (msg.name || "a creature") + " (race " + race.toString(16) + ")");
             var at = msg.attacks && typeof msg.attacks === "object" ? msg.attacks : {};
             var names = function (l: any) { return Array.isArray(l) ? l.filter(function (x: any) { return typeof x === "string" && x.length > 0 && x.length < 64; }) : []; };
-            this.greymarchShapeWant = { race: race, back: Number(msg.back) >>> 0, name: String(msg.name || ""), normal: names(at.normal), power: names(at.power) };
+            this.greymarchShapeWant = { race: race, back: Number(msg.back) >>> 0, name: String(msg.name || ""), normal: names(at.normal), power: names(at.power), mode: msg.mode === "race" ? "race" : "npc" };
             this.greymarchShapeWordAt = Date.now();
         } else {
             if (this.greymarchShapeWant || this.greymarchShapeOn) this.greymarchLog("shape: the server says change back");
@@ -911,14 +917,16 @@ export class GreymarchBridge {
                 this.greymarchShapeWant = want = null;
             }
             if (want) {
-                if (this.greymarchShapeOn !== want.race) this.greymarchShapeBecome(player, want, raceId);
+                if (this.greymarchShapeOn && this.greymarchShapeModeOn && this.greymarchShapeModeOn !== want.mode) this.greymarchShapeEnd(player, raceId); // the server switched the way: back first
+                if (this.greymarchShapeOn !== want.race) { if (want.mode === "race") this.greymarchShapeBecome(player, want, raceId); else this.greymarchShapeNpcBecome(player, want); }
+                else if (want.mode === "npc") { if (now - (this.greymarchShapeAlphaAt || 0) > 2000) { this.greymarchShapeAlphaAt = now; player.setAlpha(0, false); } } // the player's own body stays invisible
                 else if (raceId !== want.race && now - (this.greymarchShapeFixAt || 0) > 3000) { // something put another race back (a respawn, the game itself)
                     this.greymarchShapeFixAt = now;
                     var r = sp.Race.from(sp.Game.getFormEx(want.race));
                     if (r) { player.setRace(r); this.greymarchLog("shape: the race was not the creature's any more: set again"); }
                 }
                 this.greymarchShapeAttackTick(player, want, now);
-            } else if (this.greymarchShapeOn) this.greymarchShapeUnbecome(player, raceId);
+            } else if (this.greymarchShapeOn) this.greymarchShapeEnd(player, raceId);
             var wearAt = this.greymarchShapeWearAt;
             if (wearAt && now >= wearAt) { // the gear goes back on a moment after the body is back (the new skeleton must be in place first)
                 this.greymarchShapeWearAt = 0;
@@ -952,9 +960,13 @@ export class GreymarchBridge {
                 if (now - (this.greymarchShapeNoAttackSaid || 0) > 5000) { this.greymarchShapeNoAttackSaid = now; try { sp.Debug.notification("A " + (want.name || "creature") + " cannot attack."); } catch (nErr) { /* a nicety */ } }
             } else if (!inMenu && now - swing.at < 1000 && !(last && now - last.at < (last.power ? SHAPE_POWER_REST_MS : SHAPE_REST_MS))) {
                 var ev = pool[Math.floor(Math.random() * pool.length)];
-                sp.Debug.sendAnimationEvent(player, ev);
-                this.greymarchShapeLastSwing = { at: now, power: power };
-                this.greymarchShapeReport = { at: now + SHAPE_LAND_MS, power: power };
+                var body = this.greymarchShapeModeOn === "npc" ? this.greymarchShapePuppetActor() : player; // the creature NPC (mode "npc"), or the player's own body (mode "race")
+                if (body) {
+                    if (this.greymarchShapeModeOn === "npc") { this.greymarchShapeCombatUntil = now + 6000; try { if (!player.isWeaponDrawn()) player.drawWeapon(); } catch (dErr) { /* the stance is set on the NPC anyway */ } } // combat stance: here and, through the player's movement, in everyone's game
+                    sp.Debug.sendAnimationEvent(body, ev);
+                    this.greymarchShapeLastSwing = { at: now, power: power };
+                    this.greymarchShapeReport = { at: now + SHAPE_LAND_MS, power: power, ev: ev };
+                }
                 if (!this.greymarchShapeSwingLogged) { this.greymarchShapeSwingLogged = true; this.greymarchLog("shape: first attack (" + ev + ")"); }
             }
         }
@@ -963,11 +975,156 @@ export class GreymarchBridge {
             this.greymarchShapeReport = null;
             var target = 0;
             try { var ref = sp.Game.getCurrentCrosshairRef(); var id = ref ? ref.getFormID() : 0; if (id >= 0xff000000) target = misc.localIdToRemoteId(id); } catch (cErr) { target = 0; } // the one under the crosshair, if any (the server checks reach and facing)
-            var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchShapeAttack", power: rep.power, target: target }) };
+            var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchShapeAttack", power: rep.power, target: target, ev: rep.ev }) };
             this.controller.emitter.emit("sendMessage", { message: message, reliability: "reliable" });
         }
     }
-    // The body. Before the race changes: the character's own head (hair, face, brows) is taken off the character record, or it is drawn stretched over the creature's skeleton
+    // ---- THE CREATURE AS A REAL NPC (mode "npc", the default). Every OTHER game already draws a player as an NPC built from their appearance and moved by their movement
+    // (SkyMP's formView: an AI actor with the creature's own skeleton, animations and locomotion). This game now does the same for the player's own view: a local NPC of the
+    // creature's race is placed where the player is, protected the way SkyMP protects its NPCs, moved every frame by the player's own movement (SkyMP's applyMovement: walk, run,
+    // sprint, sneak, combat stance), with collision off so it never pushes the player, and the camera follows it. The player's own body is invisible. So the creature on this
+    // screen is exactly the NPC everyone else sees, with no SetRace on the player (a creature's animation graph is not made for player control: static or stretched bodies).
+    greymarchShapeNpcBecome(player: any, want: any): any {
+        var sp = this.sp;
+        var step = "start";
+        try {
+            if (!this.greymarchShapeOn) {
+                step = "beast form"; sp.Game.setBeastForm(true); // no inventory, magic or favourites menus: a creature cannot put on armor or cast the character's spells
+                step = "fast travel"; sp.Game.enableFastTravel(false);
+                step = "controls"; sp.Game.disablePlayerControls(false, false, true, false, false, false, false, false, 1); // only the camera switch: they still walk, sneak, fight and talk
+                step = "camera"; sp.Game.forceThirdPerson();
+                step = "unequip"; player.unequipAll();
+                try { (sp.storage as any)["greymarchShapeOn"] = true; } catch (stErr) { /* hitService then reports the game's own hits too */ }
+            }
+            step = "invisible"; player.setAlpha(0, false);
+            step = "npc"; this.greymarchShapePuppetRemove();
+            this.greymarchShapePuppetMake(player, want);
+            this.greymarchShapeOn = want.race;
+            this.greymarchShapeModeOn = "npc";
+            this.greymarchLog("shape: became " + (want.name || "a creature") + " as an NPC (race " + want.race.toString(16) + ", " + want.normal.length + " attacks, " + want.power.length + " power attacks)");
+        } catch (bErr) {
+            this.greymarchShapeOn = want.race; this.greymarchShapeModeOn = "npc";
+            this.greymarchLog("shape: the change failed at step '" + step + "': " + bErr);
+        }
+    }
+    // The NPC, as SkyMP's formView/SpawnProcess make one: a base built from the appearance (the creature's race, male, no head parts), placed disabled, moved to the player,
+    // enabled, resurrected; then local protections (the world cleaner leaves it alone, it cannot die or be hit here, it starts no fights, it deals no damage of its own: the
+    // server decides every hit) and the camera on it. Ready only after that; until then it is not moved.
+    greymarchShapePuppetMake(player: any, want: any): any {
+        var sp = this.sp;
+        var ap = { isFemale: false, raceId: want.race, weight: 50, skinColor: 0, hairColor: 0, headpartIds: [], headTextureSetId: 0, options: [], presets: [], tints: [], name: want.name || "" };
+        var base = appearanceMod.applyAppearance(ap as any);
+        var ref = player.placeAtMe(base, 1, true, true);
+        if (!ref) throw new Error("placeAtMe gave nothing");
+        var id = ref.getFormID();
+        var puppet = { id: id, race: want.race, ready: false, at: Date.now() };
+        this.greymarchShapePuppet = puppet;
+        try { this.controller.lookupListener(WorldCleanerService).modWcProtection(id, 1); } catch (wcErr) { this.greymarchLog("shape: the world cleaner could not be told to leave the NPC alone: " + wcErr); }
+        var self = this;
+        var pos = [player.getPositionX(), player.getPositionY(), player.getPositionZ()];
+        var live = function () { var r = sp.ObjectReference.from(sp.Game.getFormEx(id)); return self.greymarchShapePuppet === puppet && r && r.getFormID() === id ? r : null; };
+        var fail = function (where: string) { return function (e: any) { self.greymarchLog("shape: the NPC failed at '" + where + "': " + e); }; };
+        Promise.resolve(ref.setPosition(pos[0], pos[1], pos[2])).then(function () {
+            var r = live(); if (!r) return;
+            return Promise.resolve(r.enable(false)).then(function () {
+                var r2 = live(); if (!r2) return;
+                var ac = sp.Actor.from(r2);
+                return Promise.resolve(ac ? ac.resurrect() : null).then(function () {
+                    var r3 = live(); if (!r3) return;
+                    var a3 = sp.Actor.from(r3);
+                    if (a3) {
+                        a3.startDeferredKill(); // it never dies here (the server owns the player's health)
+                        a3.setActorValue("health", 1000000);
+                        a3.setActorValue("Aggression", 0); // it starts no fights of its own (SkyMP gives some creature races Aggression 2)
+                        a3.setActorValue("attackDamageMult", 0); // its own hits do nothing: the server decides every hit (shapeshift.js)
+                        try { a3.setGhost(true); } catch (gErr) { /* NPCs here then hit it, harmlessly */ }
+                        a3.blockActivation(true);
+                    }
+                    try { (sp as any).setCollision(id, false); } catch (cErr) { self.greymarchLog("shape: collision could not be switched off on the NPC: " + cErr); } // it stands where the player stands without pushing them
+                    try { sp.Game.setCameraTarget(a3); } catch (camErr) { self.greymarchLog("shape: the camera could not follow the NPC: " + camErr); }
+                    puppet.ready = true;
+                    self.greymarchLog("shape: the NPC is ready (" + id.toString(16) + ")");
+                }, fail("resurrect"));
+            }, fail("enable"));
+        }, fail("position"));
+    }
+    greymarchShapePuppetActor(): any {
+        var p = this.greymarchShapePuppet;
+        if (!p || !p.ready) return null;
+        try { var ac = this.sp.Actor.from(this.sp.Game.getFormEx(p.id)); return ac && ac.getFormID() === p.id && !ac.isDeleted() ? ac : null; } catch (e) { return null; }
+    }
+    greymarchShapePuppetRemove(): any {
+        var sp = this.sp;
+        var p = this.greymarchShapePuppet;
+        this.greymarchShapePuppet = null;
+        if (!p) return;
+        try { var player = sp.Game.getPlayer(); if (player) sp.Game.setCameraTarget(player); } catch (camErr) { /* the camera is the player's again anyway once the NPC is gone */ }
+        try { var r = sp.ObjectReference.from(sp.Game.getFormEx(p.id)); if (r && r.getFormID() === p.id) { r.disable(false); r.delete(); } } catch (dErr) { /* already gone */ }
+        try { this.controller.lookupListener(WorldCleanerService).modWcProtection(p.id, -1); } catch (wcErr) { /* nothing was protected */ }
+    }
+    // Every frame (greymarchTick): the NPC follows the player's movement exactly as SkyMP moves other players; a respawn is needed after a door or a long way (SkyMP's own rule).
+    // The animations other players' creatures should play (their attacks) are played here too.
+    greymarchShapeDrive(): any {
+        var q = this.greymarchShapeAnimQueue;
+        if (q && q.length) {
+            this.greymarchShapeAnimQueue = [];
+            for (var i = 0; i < q.length; i++) {
+                try {
+                    var localId = misc.remoteIdToLocalId(q[i].actor);
+                    var ref = localId ? this.sp.ObjectReference.from(this.sp.Game.getFormEx(localId)) : null;
+                    if (ref) animMod.applyAnimation(ref, { animEventName: q[i].ev, numChanges: 1 }, { lastNumChanges: 0, useAnimOverrides: false }); // SkyMP's own path (it lets an attack through on a player's NPC)
+                } catch (aErr) { /* that player is not drawn here */ }
+            }
+        }
+        if (this.greymarchShapeModeOn !== "npc" || !this.greymarchShapePuppet) return;
+        var ac = this.greymarchShapePuppetActor();
+        var p = this.greymarchShapePuppet;
+        var now = Date.now();
+        if (!ac) {
+            if (p.ready && now - (this.greymarchShapeRemakeAt || 0) > 2000) { this.greymarchShapeRemakeAt = now; this.greymarchShapeRemake("the NPC was gone"); }
+            return;
+        }
+        try {
+            var player = this.sp.Game.getPlayer();
+            var m = moveGetMod.getMovement(player);
+            if (now < (this.greymarchShapeCombatUntil || 0)) m.isWeapDrawn = true; // the creature's combat stance while it is attacking (its attacks need it)
+            moveApplyMod.applyMovement(ac, m);
+        } catch (mErr) {
+            if (now - (this.greymarchShapeRemakeAt || 0) > 2000) { this.greymarchShapeRemakeAt = now; this.greymarchShapeRemake("" + mErr); }
+        }
+    }
+    greymarchShapeRemake(why: string): any {
+        var want = this.greymarchShapeWant;
+        var player = this.sp.Game.getPlayer();
+        if (!want || !player || this.greymarchShapeModeOn !== "npc") return;
+        this.greymarchLog("shape: the NPC is placed again (" + why + ")");
+        this.greymarchShapePuppetRemove();
+        try { this.greymarchShapePuppetMake(player, want); } catch (e) { this.greymarchLog("shape: the NPC could not be placed again: " + e); }
+    }
+    greymarchShapeNpcUnbecome(player: any): any {
+        var sp = this.sp;
+        var step = "start";
+        this.greymarchShapeOn = 0; this.greymarchShapeModeOn = null;
+        this.greymarchShapeSwing = null; this.greymarchShapeReport = null; this.greymarchShapeCombatUntil = 0;
+        try { (sp.storage as any)["greymarchShapeOn"] = false; } catch (stErr) { /* nothing was set */ }
+        try {
+            step = "npc"; this.greymarchShapePuppetRemove();
+            step = "visible"; player.setAlpha(1, false);
+            step = "controls"; sp.Game.enablePlayerControls(false, false, true, false, false, false, false, false, 1);
+            step = "beast form"; sp.Game.setBeastForm(false);
+            step = "fast travel"; sp.Game.enableFastTravel(true);
+            this.greymarchShapeWearAt = Date.now() + 1000; // the gear, and the character's own look SkyMP kept aside, a moment later
+            this.greymarchLog("shape: changed back (the NPC is gone, the player is visible)");
+        } catch (uErr) {
+            this.greymarchLog("shape: changing back failed at step '" + step + "': " + uErr);
+        }
+    }
+    // the way back, whichever way the body was changed
+    greymarchShapeEnd(player: any, raceId: number): any {
+        if (this.greymarchShapeModeOn === "npc") this.greymarchShapeNpcUnbecome(player);
+        else this.greymarchShapeUnbecome(player, raceId);
+    }
+    // MODE "race" (the server's switch greymarch-data/shapeshift-race.on): the player's own body changes race. Before the race changes: the character's own head (hair, face, brows) is taken off the character record, or it is drawn stretched over the creature's skeleton
     // (black spikes where the head should be), and the record is made male (several creature races give the female slot another creature's animations). Both are put back on
     // the way back. Then ONE SetRace: remoteServer.ts no longer writes a creature race into the character (a SetRace to the race the game already "has" does nothing, and two in
     // one frame keep the first body with the second race: a headless person, or a creature's skeleton with a person's animations).
@@ -976,6 +1133,7 @@ export class GreymarchBridge {
         var step = "start";
         try {
             step = "race"; var r = sp.Race.from(sp.Game.getFormEx(want.race)); if (!r) throw new Error("the race " + want.race.toString(16) + " is not in this game");
+            this.greymarchShapeModeOn = "race";
             if (!this.greymarchShapeOn) { // from their own body (not from one creature to another): remember the race to go back to
                 this.greymarchShapeBackRace = want.back || raceId;
                 step = "beast form"; sp.Game.setBeastForm(true); // no inventory, magic or favourites menus: a creature cannot put on armor or cast the character's spells
