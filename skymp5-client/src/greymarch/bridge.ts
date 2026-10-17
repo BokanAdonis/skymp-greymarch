@@ -1142,9 +1142,21 @@ export class GreymarchBridge {
             var m = moveGetMod.getMovement(player);
             if (now < (this.greymarchShapeCombatUntil || 0)) m.isWeapDrawn = true; // the creature's combat stance while it is attacking (its attacks need it)
             moveApplyMod.applyMovement(ac, m);
+            this.greymarchShapeKeepOnGround(ac, m);
         } catch (mErr) {
             if (now - (this.greymarchShapeRemakeAt || 0) > 2000) { this.greymarchShapeRemakeAt = now; this.greymarchShapeRemake("" + mErr); }
         }
+    }
+    // SkyMP keeps an NPC walking by aiming it at a point just ahead and 512 (walking) or 1024 (running) units BELOW where it is: the ground stops it, and the distance tells the AI
+    // to walk or to run. The creature NPC has collision off (so it never pushes the player), so nothing stops it and it walked into the ground. So, right after SkyMP's call (the
+    // last call wins), the same aim with that distance straight AHEAD at the same height: the same walk or run, and SkyMP's translateTo still puts it exactly where the player is.
+    greymarchShapeKeepOnGround(ac: any, m: any): any {
+        if (!m || m.runMode === "Standing") return; // SkyMP's own aim has no height there
+        var dist = m.runMode === "Walking" ? 512 : 1024;
+        var offsetAngle = m.rot[2] - ac.getAngleZ();
+        if (Math.abs(offsetAngle) < 5) offsetAngle = 0;
+        var d = ((m.direction || 0) / 180) * Math.PI;
+        ac.keepOffsetFromActor(ac, dist * Math.sin(d), dist * Math.cos(d), 0, 0, 0, offsetAngle, m.runMode === "Walking" ? 2048 : 1, 1);
     }
     greymarchShapeRemake(why: string): any {
         var want = this.greymarchShapeWant;

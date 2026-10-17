@@ -13,11 +13,11 @@ const js = ts.transpileModule(src, { compilerOptions: { module: ts.ModuleKind.Co
 const NORD = 0x13746, GOAT = 0x131fa, GIANT = 0x131f9;
 const ATTACKS = { normal: ["attackStart_ClubAttack1", "attackStart_ClubAttack2"], power: ["attackPowerStart_Stomp"] };
 function make(opts = {}) {
-  const log = { lines: [], races: [], calls: [], equipped: [], events: [], sent: [], notes: [], applied: [], moves: [], wc: [], cam: [], av: [], remote: [], built: [] };
+  const log = { lines: [], races: [], calls: [], equipped: [], events: [], sent: [], notes: [], applied: [], moves: [], offsets: [], wc: [], cam: [], av: [], remote: [], built: [] };
   const PUP = 0xff0000aa;
   let pupDeleted = false;
-  const puppet = { getFormID: () => PUP, setPosition: () => Promise.resolve(), enable: () => Promise.resolve(), resurrect: () => Promise.resolve(), startDeferredKill() {}, setActorValue: (k, v) => log.av.push([k, v]), setGhost() {}, blockActivation() {}, disable() {}, delete: () => { pupDeleted = true; log.calls.push("npcDeleted"); }, isDeleted: () => pupDeleted };
-  const mods = { "../messages": { MsgType: { CustomPacket: 77 } }, "../view/worldViewMisc": { remoteIdToLocalId: (id) => (opts.others || {})[id] || 0, localIdToRemoteId: (id) => id - 0xff000000 + 0x10000 }, "../sync/appearance": { applyAppearanceToPlayer: (a) => log.applied.push(a), applyAppearance: (a) => { log.built.push(a); return { built: true }; } }, "../sync/movementGet": { getMovement: () => ({ pos: [1, 2, 3], isWeapDrawn: false, runMode: "Running" }) }, "../sync/movementApply": { applyMovement: (ac, m) => { if (opts.moveThrows) throw new Error("needs to be respawned"); log.moves.push({ id: ac.getFormID(), weap: m.isWeapDrawn }); } }, "../sync/animation": { applyAnimation: (ref, a) => log.remote.push([ref.id, a.animEventName]) }, "../services/services/worldCleanerService": { WorldCleanerService: function () {} }, "../services/services/remoteServer": { RemoteServer: {} }, "../services/services/singlePlayerService": { SinglePlayerService: {} } };
+  const puppet = { getAngleZ: () => 0, keepOffsetFromActor: (...a) => log.offsets.push(a), getFormID: () => PUP, setPosition: () => Promise.resolve(), enable: () => Promise.resolve(), resurrect: () => Promise.resolve(), startDeferredKill() {}, setActorValue: (k, v) => log.av.push([k, v]), setGhost() {}, blockActivation() {}, disable() {}, delete: () => { pupDeleted = true; log.calls.push("npcDeleted"); }, isDeleted: () => pupDeleted };
+  const mods = { "../messages": { MsgType: { CustomPacket: 77 } }, "../view/worldViewMisc": { remoteIdToLocalId: (id) => (opts.others || {})[id] || 0, localIdToRemoteId: (id) => id - 0xff000000 + 0x10000 }, "../sync/appearance": { applyAppearanceToPlayer: (a) => log.applied.push(a), applyAppearance: (a) => { log.built.push(a); return { built: true }; } }, "../sync/movementGet": { getMovement: () => ({ pos: [1, 2, 3], rot: [0, 0, 0], direction: 0, isWeapDrawn: false, runMode: opts.runMode || "Running" }) }, "../sync/movementApply": { applyMovement: (ac, m) => { if (opts.moveThrows) throw new Error("needs to be respawned"); log.moves.push({ id: ac.getFormID(), weap: m.isWeapDrawn }); } }, "../sync/animation": { applyAnimation: (ref, a) => log.remote.push([ref.id, a.animEventName]) }, "../services/services/worldCleanerService": { WorldCleanerService: function () {} }, "../services/services/remoteServer": { RemoteServer: {} }, "../services/services/singlePlayerService": { SinglePlayerService: {} } };
   const mod = { exports: {} };
   new Function("require", "exports", "module", js)((p) => mods[p], mod.exports, mod);
   const race = (id) => ({ id, getFormID: () => id });
@@ -292,4 +292,19 @@ test("NPC mode: an NPC that never gets ready, or none at all, is placed again af
   t.gm.sp.Game.getPlayer().placeAtMe = () => { t.log.calls.push("npcPlaced"); return { getFormID: () => 0xff0000bb, setPosition: () => Promise.resolve() }; };
   t.say(giantNpc); t.tick(3500);
   assert.ok(t.log.calls.includes("npcPlaced"), "the first placing failed: tried again");
+});
+
+test("NPC mode: walking and running aim the creature straight ahead at the same height, never below (it walked into the ground with collision off)", async () => {
+  for (const [mode, dist] of [["Walking", 512], ["Running", 1024]]) {
+    const s = make({ runMode: mode });
+    s.say(giantNpc); s.tick(); await flushAll();
+    s.drive();
+    const a = s.log.offsets.pop();
+    assert.strictEqual(a[3], 0, mode + ": no height offset");
+    assert.ok(Math.abs(a[2] - dist) < 1e-6 && Math.abs(a[1]) < 1e-6, mode + ": " + dist + " units ahead");
+  }
+  const st = make({ runMode: "Standing" });
+  st.say(giantNpc); st.tick(); await flushAll();
+  st.drive();
+  assert.deepStrictEqual(st.log.offsets, [], "standing: SkyMP's own call is kept");
 });
