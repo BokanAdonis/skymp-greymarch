@@ -25,6 +25,7 @@ const CONNECT_FAIL_MS = 90000; // the connecting screen over the main menu: this
 const WOLF_MORPH_MS = 4300; // the werewolf transformation: the race changes at the animation's "SetRace" cue, or after this long if the cue is not seen (the cue is about 4.0 s in, animationdatasinglefile.txt)
 const SHAPE_REST_MS = 800, SHAPE_POWER_REST_MS = 1600; // a creature's attacks: the rest after a normal and after a power attack (the server allows the same pace)
 const SHAPE_LAND_MS = 450; // a creature's swing is reported this long after it starts (about when it lands)
+const SHAPE_NPC_READY_MS = 8000; // a creature NPC that is not ready this long after it was placed is placed again
 const SHAPE_SILENCE_MS = 20000; // a creature form: with no word from the server for this long the player changes back by themselves (the server repeats "on" every 5 seconds)
 const WOLF_BACK_GRACE_MS = 2000; // Z changes back, but not in the first 2 seconds after the body changed
 const WOLF_ROAR_MS = 4000;  // R: one roar every this long (the howl animation lasts about 2.8 s)
@@ -919,7 +920,11 @@ export class GreymarchBridge {
             if (want) {
                 if (this.greymarchShapeOn && this.greymarchShapeModeOn && this.greymarchShapeModeOn !== want.mode) this.greymarchShapeEnd(player, raceId); // the server switched the way: back first
                 if (this.greymarchShapeOn !== want.race) { if (want.mode === "race") this.greymarchShapeBecome(player, want, raceId); else this.greymarchShapeNpcBecome(player, want); }
-                else if (want.mode === "npc") { if (now - (this.greymarchShapeAlphaAt || 0) > 2000) { this.greymarchShapeAlphaAt = now; player.setAlpha(0, false); } } // the player's own body stays invisible
+                else if (want.mode === "npc") {
+                    if (now - (this.greymarchShapeAlphaAt || 0) > 2000) { this.greymarchShapeAlphaAt = now; player.setAlpha(0, false); } // the player's own body stays invisible
+                    var pup = this.greymarchShapePuppet; // no NPC (its first placing failed) or one that never got ready (its spawn steps failed): placed again, at most every 3 seconds
+                    if ((!pup || (!pup.ready && now - pup.at > SHAPE_NPC_READY_MS)) && now - (this.greymarchShapeRemakeAt || 0) > 3000) { this.greymarchShapeRemakeAt = now; this.greymarchShapeRemake(pup ? "the NPC never got ready" : "there was no NPC"); }
+                }
                 else if (raceId !== want.race && now - (this.greymarchShapeFixAt || 0) > 3000) { // something put another race back (a respawn, the game itself)
                     this.greymarchShapeFixAt = now;
                     var r = sp.Race.from(sp.Game.getFormEx(want.race));
@@ -1046,7 +1051,7 @@ export class GreymarchBridge {
                     self.greymarchLog("shape: the NPC is ready (" + id.toString(16) + ")");
                 }, fail("resurrect"));
             }, fail("enable"));
-        }, fail("position"));
+        }, fail("position")).catch(fail("spawn")); // a step that throws (not only one that fails) is logged too; greymarchShapeTick places a never-ready NPC again
     }
     greymarchShapePuppetActor(): any {
         var p = this.greymarchShapePuppet;

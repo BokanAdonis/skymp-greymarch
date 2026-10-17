@@ -278,3 +278,18 @@ test("the server's mode is followed; switching from race to NPC changes back fir
   assert.deepStrictEqual(s.log.races, [GIANT, NORD], "the race body undone");
   assert.ok(s.log.calls.includes("npcPlaced"));
 });
+
+test("NPC mode: an NPC that never gets ready, or none at all, is placed again after a few seconds", async () => {
+  const s = make();
+  s.gm.sp.ObjectReference.from = () => null; // every spawn step finds nothing: never ready
+  s.say(giantNpc); s.tick();
+  assert.strictEqual(s.log.calls.filter((c) => c === "npcPlaced").length, 1);
+  s.say(giantNpc); s.tick(9000);
+  assert.strictEqual(s.log.calls.filter((c) => c === "npcPlaced").length, 2, "not ready after 8 seconds: placed again");
+  const t = make();
+  t.gm.sp.Game.getPlayer().placeAtMe = () => { throw new Error("no"); };
+  t.say(giantNpc); t.tick();
+  t.gm.sp.Game.getPlayer().placeAtMe = () => { t.log.calls.push("npcPlaced"); return { getFormID: () => 0xff0000bb, setPosition: () => Promise.resolve() }; };
+  t.say(giantNpc); t.tick(3500);
+  assert.ok(t.log.calls.includes("npcPlaced"), "the first placing failed: tried again");
+});
