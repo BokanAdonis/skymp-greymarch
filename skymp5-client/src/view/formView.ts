@@ -113,6 +113,20 @@ export class FormView {
       }
     }
 
+    // GREYMARCH: a werewolf variant (the Alpha, the pup) is drawn by BUILDING this player's NPC with the variant's race (the bridge's greymarchWolfAlphaOthers fills
+    // __gmWolfRace: server actor id -> race), the same way a changed look respawns it. A SetRace on the live actor rebuilt its skeleton's physics while SkyMP moved it
+    // and crashed the game (keyframed rigid bodies, 2026-10-17).
+    let gmWolfRace = 0;
+    try {
+      const gmMap: any = (Function("return this")() as any).__gmWolfRace;
+      const ap: any = this.appearanceState.appearance;
+      if (gmMap && ap && (ap.raceId >>> 0) === 0xcdd84 && !(Array.isArray(ap.headpartIds) && ap.headpartIds.length > 0)) gmWolfRace = Number(gmMap[this.getRemoteRefrId()]) || 0;
+    } catch (gmErr) { gmWolfRace = 0; }
+    if (gmWolfRace !== this.gmWolfRace) {
+      this.gmWolfRace = gmWolfRace;
+      this.appearanceBasedBaseId = 0; // built again, so the body is respawned with the variant's race
+    }
+
     const refId =
       model.refrId && model.refrId < 0xff000000 ? model.refrId : undefined;
     if (refId) {
@@ -632,7 +646,8 @@ export class FormView {
   private getAppearanceBasedBase(): number {
     const base = ActorBase.from(Game.getFormEx(this.appearanceBasedBaseId));
     if (!base && this.appearanceState.appearance) {
-      this.appearanceBasedBaseId = applyAppearance(this.appearanceState.appearance).getFormID();
+      const gmLook = this.gmWolfRace ? { ...this.appearanceState.appearance, raceId: this.gmWolfRace } : this.appearanceState.appearance; // GREYMARCH: a werewolf variant's race
+      this.appearanceBasedBaseId = applyAppearance(gmLook).getFormID();
     }
     return this.appearanceBasedBaseId;
   }
@@ -704,6 +719,7 @@ export class FormView {
   private appearanceState = this.getDefaultAppearanceState();
   private eqState = this.getDefaultEquipState();
   private appearanceBasedBaseId = 0;
+  private gmWolfRace = 0; // GREYMARCH: the werewolf variant's race this player's NPC was built with (0: none)
   private leveledBaseId = 0;
   private isOnScreen = false;
   private lastPcWorldOrCell = 0;

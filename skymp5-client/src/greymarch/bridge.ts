@@ -725,43 +725,24 @@ export class GreymarchBridge {
     greymarchWolfIsBeast(raceId: number): boolean { return raceId === 0xcdd84 || (!!raceId && (raceId === this.greymarchWolfAlphaRaceId() || raceId === this.greymarchWolfPupRaceId())); }
     greymarchWolfRaceId(): number { return (this.greymarchWolfAlpha && this.greymarchWolfAlphaRaceId()) || (this.greymarchWolfPup && this.greymarchWolfPupRaceId()) || 0xcdd84; }
     greymarchWolfRace(): any { return this.sp.Race.from(this.sp.Game.getFormEx(this.greymarchWolfRaceId())); }
-    // Other players who are Alphas or pups: SkyMP draws them with the race of their appearance, which the server can only set to the normal werewolf.
-    // Every second, a listed player drawn as the normal werewolf (or as the other variant) is given their variant's race on this screen; one that is not listed any more
-    // goes back to the normal werewolf.
+    // Other players who are Alphas or pups: SkyMP draws them with the race of their appearance, which the server can only set to the normal werewolf. Every second the
+    // lists become __gmWolfRace (server actor id -> the variant's race), which formView.ts uses to BUILD that player's NPC with the variant's race (it respawns it when
+    // the race changes). Never a SetRace on another player's live actor: that rebuilt its skeleton's physics while SkyMP moved it and crashed the game.
     greymarchWolfAlphaOthers(now: number): any {
         if (now < (this.greymarchWolfAlphaNext || 0)) return;
         this.greymarchWolfAlphaNext = now + 1000;
         var alphas = this.greymarchWolfAlphaList || [], pups = this.greymarchWolfPupList || [];
-        var drawn = this.greymarchWolfAlphaDrawn || (this.greymarchWolfAlphaDrawn = {});
-        if (!alphas.length && !pups.length && !Object.keys(drawn).length) return;
-        var sp = this.sp;
-        var alphaId = alphas.length ? this.greymarchWolfAlphaRaceId() : 0, pupId = pups.length ? this.greymarchWolfPupRaceId() : 0;
-        var want: any = {};
+        var before = this.greymarchWolfRaceMap || {};
+        if (!alphas.length && !pups.length && !Object.keys(before).length) return;
+        var map: any = {};
         var self = this;
-        var mark = function (list: any[], raceId: number, name: string) {
-            if (!raceId) return;
-            for (var i = 0; i < list.length; i++) {
-                if (list[i] === self.greymarchMeActor) continue; // my own body is changed by greymarchWolfTick
-                var localId = misc.remoteIdToLocalId(list[i]);
-                if (!localId) continue;
-                want[localId] = raceId;
-                try {
-                    var actor = sp.Actor.from(sp.Game.getFormEx(localId));
-                    var r = actor ? actor.getRace() : null;
-                    var cur = r ? r.getFormID() : 0;
-                    if (cur === raceId) drawn[localId] = raceId;
-                    else if (cur && self.greymarchWolfIsBeast(cur)) { actor.setRace(sp.Race.from(sp.Game.getFormEx(raceId))); drawn[localId] = raceId; self.greymarchLog("wolf: " + localId.toString(16) + " drawn as the " + name); }
-                } catch (aErr) { /* not loaded here: the next second */ }
-            }
-        };
-        mark(alphas, alphaId, "Alpha");
-        mark(pups, pupId, "pup");
-        for (var k in drawn) {
-            if (want[k]) continue;
-            var was = drawn[k];
-            delete drawn[k];
-            try { var a2 = sp.Actor.from(sp.Game.getFormEx(Number(k))); var r2 = a2 ? a2.getRace() : null; if (r2 && r2.getFormID() === was) a2.setRace(sp.Race.from(sp.Game.getFormEx(0xcdd84))); } catch (bErr) { /* gone */ }
-        }
+        var put = function (list: any[], raceId: number) { if (!raceId) return; for (var i = 0; i < list.length; i++) if (list[i] !== self.greymarchMeActor) map[list[i]] = raceId; };
+        put(alphas, alphas.length ? this.greymarchWolfAlphaRaceId() : 0);
+        put(pups, pups.length ? this.greymarchWolfPupRaceId() : 0);
+        for (var k in map) if (before[k] !== map[k]) this.greymarchLog("wolf: " + Number(k).toString(16) + " drawn as the " + (map[k] === this.greymarchWolfPupRaceId() ? "pup" : "Alpha"));
+        for (var k2 in before) if (!map[k2]) this.greymarchLog("wolf: " + Number(k2).toString(16) + " drawn as the normal werewolf again");
+        this.greymarchWolfRaceMap = map;
+        try { (Function("return this")() as any).__gmWolfRace = map; } catch (gErr) { /* drawn as the normal werewolf */ }
     }
     // ---- VAMPIRES (gamemode vampire.js decides everything; this only reports what the game did and shows what the server says)
     greymarchVampForm(key: string): number { // the real ID of one of VAMP_FORMS in this game's load order (0 while unknown)

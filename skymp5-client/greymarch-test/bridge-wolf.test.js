@@ -167,18 +167,6 @@ test("the Alpha form: staff switch it on or off mid-form and the body follows; w
   assert.ok(n.log.lines.some((l) => /Alpha race is not in GreymarchCore.esp/.test(l)));
 });
 
-test("other players in the Alpha form: one drawn as the normal werewolf gets the Alpha race on this screen, and goes back when the server stops listing them", () => {
-  const races = { 0xff000a01: BEAST, 0xff000a02: NORD };
-  const other = (id) => ({ getRace: () => ({ getFormID: () => races[id] }), setRace: (r) => { races[id] = r.id; } });
-  const s = make({ others: { 501: 0xff000a01, 502: 0xff000a02 }, actors: { 0xff000a01: other(0xff000a01), 0xff000a02: other(0xff000a02) } });
-  s.say({ customPacketType: "greymarchWolfAlphas", actors: [501, 502] });
-  s.tick(1100);
-  assert.strictEqual(races[0xff000a01], ALPHA, "the werewolf is drawn as the Alpha");
-  assert.strictEqual(races[0xff000a02], NORD, "a human (no wolf look) is left alone");
-  s.say({ customPacketType: "greymarchWolfAlphas", actors: [] });
-  s.tick(1100);
-  assert.strictEqual(races[0xff000a01], BEAST, "no longer listed: the normal werewolf again");
-});
 
 test("Z while changed asks the server to change back (the server decides); not mid-transformation, not right after the change, not in a menu or the chat, and not as a human", () => {
   const s = make({ refuseIdle: true });
@@ -227,20 +215,6 @@ test("the pup: the server says pup, the body becomes the pup race from Greymarch
   assert.strictEqual(s.race(), NORD);
 });
 
-test("other players who are pups are drawn as the pup here, Alphas as the Alpha; one taken off the lists goes back to the normal werewolf", () => {
-  const races = { 0xff000a01: BEAST, 0xff000a02: BEAST, 0xff000a03: NORD };
-  const other = (id) => ({ getRace: () => ({ getFormID: () => races[id] }), setRace: (r) => { races[id] = r.id; } });
-  const s = make({ others: { 501: 0xff000a01, 502: 0xff000a02, 503: 0xff000a03 }, actors: { 0xff000a01: other(0xff000a01), 0xff000a02: other(0xff000a02), 0xff000a03: other(0xff000a03) } });
-  s.say({ customPacketType: "greymarchWolfAlphas", actors: [501], pups: [502, 503] });
-  s.tick(1100);
-  assert.strictEqual(races[0xff000a01], ALPHA);
-  assert.strictEqual(races[0xff000a02], PUP);
-  assert.strictEqual(races[0xff000a03], NORD, "a human is left alone");
-  s.say({ customPacketType: "greymarchWolfAlphas", actors: [502], pups: [] });
-  s.tick(1100);
-  assert.strictEqual(races[0xff000a02], ALPHA, "a pup made an Alpha is redrawn");
-  assert.strictEqual(races[0xff000a01], BEAST, "no longer listed: the normal werewolf");
-});
 
 test("the way back: while changed SkyMP keeps the character's own look aside (storage flag); a second after the race is back the kept look is put on and the gear goes back on", () => {
   const s = make({ refuseIdle: true, worn: { 4: 0x12eb7, 8: 0x13911 }, weapon: 0x1397e, have: [0x12eb7, 0x13911, 0x1397e] });
@@ -276,4 +250,31 @@ test("the way back: gear sold or dropped while changed is not put on; with no ke
   assert.deepStrictEqual(s.log.equipped, []);
   assert.deepStrictEqual(s.log.applied, []);
   assert.ok(s.log.lines.some((l) => /put 0 of 1 worn items back on/.test(l)));
+});
+
+test("other Alphas and pups: the lists become __gmWolfRace (server id -> the variant's race) for formView.ts to build their NPC with; no SetRace on another player's actor (that crashed the game)", () => {
+  const races = { 0xff000a01: BEAST, 0xff000a02: BEAST };
+  const setRaces = [];
+  const other = (id) => ({ getRace: () => ({ getFormID: () => races[id] }), setRace: (r) => { setRaces.push([id, r.id]); } });
+  const s = make({ others: { 501: 0xff000a01, 502: 0xff000a02 }, actors: { 0xff000a01: other(0xff000a01), 0xff000a02: other(0xff000a02) } });
+  const g = Function("return this")();
+  delete g.__gmWolfRace;
+  s.say({ customPacketType: "greymarchWolfAlphas", actors: [501], pups: [502] });
+  s.tick(1100);
+  assert.deepStrictEqual(g.__gmWolfRace, { 501: ALPHA, 502: PUP });
+  assert.ok(s.log.lines.some((l) => /1f5 drawn as the Alpha/.test(l)) && s.log.lines.some((l) => /1f6 drawn as the pup/.test(l)));
+  s.say({ customPacketType: "greymarchWolfAlphas", actors: [502], pups: [] });
+  s.tick(1100);
+  assert.deepStrictEqual(g.__gmWolfRace, { 502: ALPHA }, "a pup made an Alpha; one off the lists is the normal werewolf again");
+  assert.ok(s.log.lines.some((l) => /1f5 drawn as the normal werewolf again/.test(l)));
+  assert.deepStrictEqual(setRaces, [], "never a SetRace on another player's live actor");
+  delete g.__gmWolfRace;
+});
+
+test("formView.ts builds a werewolf variant's NPC with the variant's race (respawned when it changes), only for a werewolf look", () => {
+  const fv = fs.readFileSync(path.join(__dirname, "..", "src", "view", "formView.ts"), "utf8");
+  assert.ok(fv.includes("__gmWolfRace"), "reads the bridge's map");
+  assert.ok(fv.includes("(ap.raceId >>> 0) === 0xcdd84 && !(Array.isArray(ap.headpartIds) && ap.headpartIds.length > 0)"), "only a werewolf look (no head parts)");
+  assert.ok(fv.includes("this.appearanceBasedBaseId = 0; // built again"), "a change of variant respawns the NPC");
+  assert.ok(fv.includes("{ ...this.appearanceState.appearance, raceId: this.gmWolfRace }"), "built with the variant's race");
 });
