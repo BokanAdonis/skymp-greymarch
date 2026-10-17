@@ -15,6 +15,7 @@ import { localIdToRemoteId } from "./worldViewMisc";
 import { SpApiInteractor } from "../services/spApiInteractor";
 import { WorldCleanerService } from "../services/services/worldCleanerService";
 import { GamemodeUpdateService } from "../services/services/gamemodeUpdateService";
+import { disableThenDeleteActor } from "./actorDelete";
 
 export interface ScreenResolution {
   width: number;
@@ -332,13 +333,17 @@ export class FormView {
     once("update", () => {
       if (refrId >= 0xff000000) {
         const refr = ObjectReference.from(Game.getFormEx(refrId));
-        if (refr) {
-          refr.delete();
-        }
-        SpApiInteractor.getControllerInstance().lookupListener(WorldCleanerService).modWcProtection(refrId, -1);
+        const releaseWcProtection = () => SpApiInteractor.getControllerInstance().lookupListener(WorldCleanerService).modWcProtection(refrId, -1);
         const ac = Actor.from(refr);
         if (ac) {
+          // GREYMARCH: disabled first, deleted once that has finished (see actorDelete.ts); the WorldCleaner protection stays until then
           TESModPlatform.setWeaponDrawnMode(ac, -1);
+          disableThenDeleteActor(ac, releaseWcProtection);
+        } else {
+          if (refr) {
+            refr.delete();
+          }
+          releaseWcProtection();
         }
       }
     })
