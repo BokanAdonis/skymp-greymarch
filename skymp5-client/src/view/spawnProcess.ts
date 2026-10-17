@@ -25,7 +25,11 @@ export class SpawnProcess {
     }
 
     const ac = Actor.from(refr);
-    if (ac && appearance) {
+    // GREYMARCH: not for a look with no head parts (a werewolf or a creature form): it has no tints, and applyTints ends by giving the actor's base the PLAYER's form ID,
+    // so the game built the werewolf's animation graph for a "player" that is not the PlayerCharacter and crashed (bad vtable in BShkbAnimationGraph, WerewolfBeastProject,
+    // every other player's game when a werewolf was drawn, 2026-10-17). A person's look is unchanged.
+    const beastLook = !!appearance && !(Array.isArray(appearance.headpartIds) && appearance.headpartIds.length > 0);
+    if (ac && appearance && !beastLook) {
       applyTints(ac, appearance);
     }
     refr.enable(false).then(() => this.resurrect(refrId));
