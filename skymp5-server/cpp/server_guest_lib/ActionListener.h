@@ -117,6 +117,15 @@ private:
 
   PartOne& partOne;
 
+  // GREYMARCH: the last cast per (caster, spell): when, and whether it was
+  // dual cast (a dual-cast spell's damage is multiplied, as in the game)
+  struct LastCast
+  {
+    std::chrono::steady_clock::time_point at;
+    bool isDualCasting = false;
+  };
+  std::map<std::pair<uint32_t, uint32_t>, LastCast> lastCasts;
+
   // GREYMARCH: last hit time per (caster, target, spell), for
   // ConcentrationHitSeconds
   std::map<std::tuple<uint32_t, uint32_t, uint32_t>,

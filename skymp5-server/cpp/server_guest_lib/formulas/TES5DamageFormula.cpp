@@ -5,6 +5,7 @@
 #include "SpellCastData.h"
 #include "WorldState.h"
 #include "libespm/espm.h"
+#include <algorithm>
 
 namespace internal {
 
@@ -183,6 +184,7 @@ private:
 
 private:
   [[nodiscard]] float GetBaseSpellDamage() const;
+  [[nodiscard]] float TargetResistance(espm::ActorValue av) const;
 };
 
 TES5SpellDamageFormulaImpl::TES5SpellDamageFormulaImpl(
@@ -195,10 +197,104 @@ TES5SpellDamageFormulaImpl::TES5SpellDamageFormulaImpl(
 {
 }
 
+// GREYMARCH: the target's resistance to one actor value, in percent: the
+// abilities of their race and of their base record (a Nord's frost, a Dunmer's
+// fire, a Breton's magic) and the enchantments of what they wear. Effect and
+// enchantment ids inside a record are local to its file and are converted.
+float TES5SpellDamageFormulaImpl::TargetResistance(espm::ActorValue av) const
+{
+  if (av == espm::ActorValue::None) {
+    return 0.f;
+  }
+  auto& browser = espmProvider->GetEspm().GetBrowser();
+  float total = 0.f;
+
+  auto effectIs = [&](uint32_t mgefId) {
+    const auto mgefLookup = browser.LookupById(mgefId);
+    return mgefLookup.rec && mgefLookup.rec->GetType() == espm::MGEF::kType &&
+      espm::GetData<espm::MGEF>(mgefId, espmProvider).data.primaryAV == av;
+  };
+
+  auto addAbility = [&](uint32_t spellId) {
+    const auto spellLookup = browser.LookupById(spellId);
+    if (!spellLookup.rec || spellLookup.rec->GetType() != espm::SPEL::kType) {
+      return;
+    }
+    const auto data = espm::GetData<espm::SPEL>(spellId, espmProvider);
+    if (!data.spellItem ||
+        data.spellItem->type != espm::SPEL::SpellType::Ability) {
+      return;
+    }
+    for (const auto& effect : data.effects) {
+      if (effect.effectItem &&
+          effectIs(spellLookup.ToGlobalId(effect.effectFormId))) {
+        total += effect.effectItem->magnitude;
+      }
+    }
+  };
+
+  const uint32_t raceId = target.GetRaceId();
+  const auto raceLookup = browser.LookupById(raceId);
+  if (raceLookup.rec && raceLookup.rec->GetType() == espm::RACE::kType) {
+    for (auto raw : espm::GetData<espm::RACE>(raceId, espmProvider).spells) {
+      addAbility(raceLookup.ToGlobalId(raw));
+    }
+  }
+
+  const uint32_t baseId = target.GetBaseId();
+  const auto npcLookup = browser.LookupById(baseId);
+  if (npcLookup.rec && npcLookup.rec->GetType() == espm::NPC_::kType) {
+    for (auto raw : espm::GetData<espm::NPC_>(baseId, espmProvider).spells) {
+      addAbility(npcLookup.ToGlobalId(raw));
+    }
+  }
+
+  for (const auto& entry : target.GetEquipment().inv.entries) {
+    if (entry.GetWorn() == Inventory::Worn::None) {
+      continue;
+    }
+    const auto armorLookup = browser.LookupById(entry.baseId);
+    if (!armorLookup.rec || armorLookup.rec->GetType() != espm::ARMO::kType) {
+      continue;
+    }
+    const auto armor = espm::GetData<espm::ARMO>(entry.baseId, espmProvider);
+    if (!armor.enchantmentFormId) {
+      continue;
+    }
+    const uint32_t enchId = armorLookup.ToGlobalId(armor.enchantmentFormId);
+    const auto enchLookup = browser.LookupById(enchId);
+    if (!enchLookup.rec || enchLookup.rec->GetType() != espm::ENCH::kType) {
+      continue;
+    }
+    for (const auto& effect :
+         espm::GetData<espm::ENCH>(enchId, espmProvider).effects) {
+      if (effectIs(enchLookup.ToGlobalId(effect.effectId))) {
+        total += effect.magnitude;
+      }
+    }
+  }
+
+  return total;
+}
+
 float TES5SpellDamageFormulaImpl::GetBaseSpellDamage() const
 {
+  auto& browser = espmProvider->GetEspm().GetBrowser();
+  const auto spellLookup = browser.LookupById(spellCastData.spell);
+  if (!spellLookup.rec || spellLookup.rec->GetType() != espm::SPEL::kType) {
+    return 0.f;
+  }
+
   const auto spellData =
     espm::GetData<espm::SPEL>(spellCastData.spell, espmProvider);
+
+  // the most a resistance can take off, as in the game
+  constexpr float kMaxResistPercent = 85.f;
+  auto factor = [&](float percent) {
+    return 1.f - std::clamp(percent, 0.f, kMaxResistPercent) / 100.f;
+  };
+  const float magicFactor =
+    factor(TargetResistance(espm::ActorValue::MagicResist));
 
   float damage = 0.f;
 
@@ -208,8 +304,15 @@ float TES5SpellDamageFormulaImpl::GetBaseSpellDamage() const
       continue;
     }
 
-    auto magicEffect =
-      espm::GetData<espm::MGEF>(effect.effectFormId, espmProvider);
+    // GREYMARCH: the effect id is local to the spell's file (a mod's own
+    // effect, like Mysticism's, was looked up under the wrong id)
+    const uint32_t mgefId = spellLookup.ToGlobalId(effect.effectFormId);
+    const auto mgefLookup = browser.LookupById(mgefId);
+    if (!mgefLookup.rec || mgefLookup.rec->GetType() != espm::MGEF::kType) {
+      continue;
+    }
+
+    auto magicEffect = espm::GetData<espm::MGEF>(mgefId, espmProvider);
 
     // GREYMARCH: a hidden effect with conditions is a perk's extra (the
     // server cannot check its conditions). The vanilla Disintegrate perk
@@ -227,8 +330,13 @@ float TES5SpellDamageFormulaImpl::GetBaseSpellDamage() const
 
     if (needAddDamage &&
         magicEffect.data.primaryAV == espm::ActorValue::Health) {
-
-      damage += effect.effectItem->magnitude;
+      // GREYMARCH: the target's resistance to this effect (fire, frost,
+      // shock...) and their magic resistance, each at most 85%
+      const auto resistAv = magicEffect.data.resistValue;
+      const float elementFactor = resistAv == espm::ActorValue::MagicResist
+        ? 1.f
+        : factor(TargetResistance(resistAv));
+      damage += effect.effectItem->magnitude * elementFactor * magicFactor;
     }
   }
   return damage;

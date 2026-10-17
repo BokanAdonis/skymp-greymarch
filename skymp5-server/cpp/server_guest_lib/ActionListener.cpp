@@ -1233,6 +1233,14 @@ void ActionListener::OnSpellCast(const RawMessageData& rawMsgData,
 
   SendToNeighbours(myActor->idx, rawMsgData, true);
 
+  // GREYMARCH: remembered for the damage of this spell's hits (dual cast)
+  if (lastCasts.size() > 4096) {
+    lastCasts.clear();
+  }
+  lastCasts[{ caster->GetFormId(), spellCastData.spell }] = {
+    std::chrono::steady_clock::now(), spellCastData.isDualCasting
+  };
+
   auto& browser = partOne.worldState.GetEspm().GetBrowser();
 
   const std::array<VarValue, 1> args{ VarValue(
@@ -1284,6 +1292,18 @@ void ActionListener::OnSpellHit(MpActor* aggressor,
   float damage =
     partOne.CalculateDamage(*aggressor, *targetActorPtr, spellCastData);
   damage = damage <= 0.f ? 0.f : damage;
+
+  // GREYMARCH: a spell dual cast in the last 10 seconds hits 2.2 times as
+  // hard (the game's dual-casting magnitude)
+  constexpr float kDualCastMult = 2.2f;
+  if (auto it = lastCasts.find({ aggressor->GetFormId(), hitData.source });
+      it != lastCasts.end() && it->second.isDualCasting) {
+    const std::chrono::duration<float> age =
+      std::chrono::steady_clock::now() - it->second.at;
+    if (age.count() <= 10.f) {
+      damage *= kDualCastMult;
+    }
+  }
 
   // GREYMARCH: a concentration spell's magnitude is per second of contact
   const auto spellData =

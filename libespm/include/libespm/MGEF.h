@@ -90,6 +90,9 @@ public:
     Flags flags;
     ActorValue primaryAV = espm::ActorValue::None;
     EffectType effectType;
+    // GREYMARCH: the actor value that resists this effect (FireResist for a
+    // fire spell; None when nothing resists it)
+    ActorValue resistValue = espm::ActorValue::None;
 
     [[nodiscard]] inline bool IsFlagSet(Flags flag) const
     {

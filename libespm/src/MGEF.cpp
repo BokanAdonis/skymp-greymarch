@@ -14,6 +14,9 @@ MGEF::Data MGEF::GetData(
     [&](const char* type, uint32_t size, const char* data) {
       if (!std::memcmp(type, "DATA", 4)) {
         result.data.flags = *reinterpret_cast<const Flags*>(data);
+        result.data.resistValue = ActorValue(
+          *reinterpret_cast<const std::underlying_type_t<ActorValue>*>(data +
+                                                                       0x10));
         result.data.effectType = EffectType{
           *reinterpret_cast<const std::underlying_type_t<EffectType>*>(data +
                                                                        0x40)
