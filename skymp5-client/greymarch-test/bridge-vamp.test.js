@@ -146,3 +146,41 @@ test("blue eyes and fangs: every listed vampire gets the eye part for their glow
     assert.deepStrictEqual(worn.me, { 2: 0x111, 0: 0x333 }, "no longer a vampire: their own eyes and teeth");
   } finally { Date.now = realNow; }
 });
+
+test("a Potion of Blood drunk from the inventory (the equip event) is reported too", () => {
+  const s = make();
+  s.fire("equip", { baseObj: { getFormID: () => DG + 0x18ef3 }, actor: me });
+  s.fire("equip", { baseObj: { getFormID: () => 0x3eadd }, actor: me }); // a healing potion: not ours
+  s.tick();
+  assert.deepStrictEqual(s.log.sent.filter((m) => m.customPacketType === "greymarchVamp"), [{ customPacketType: "greymarchVamp", op: "drank" }]);
+});
+
+test("the vampire window: the server opens it, the page's questions go to the server, the answers come back, Esc and the page close it", () => {
+  const s = make();
+  const js = [];
+  s.gm.sp.browser = { executeJavaScript: (x) => js.push(x), setVisible() {}, setFocused() {} };
+  s.say({ customPacketType: "greymarchVampMenuOpen" });
+  assert.strictEqual(s.gm.greymarchVampMenuOn, true);
+  assert.ok(js.some((x) => x.includes("greymarch-vampire.html") && x.includes('window.__gmVampRun({"fn":"show"')));
+  s.gm.greymarchBrowserMessage({ arguments: ["greymarch", JSON.stringify({ type: "vampire", rid: 3, op: "eyes" })] });
+  assert.deepStrictEqual(s.log.sent.filter((m) => m.customPacketType === "greymarchVampMenu"), [{ customPacketType: "greymarchVampMenu", rid: 3, op: "eyes" }]);
+  s.say({ customPacketType: "greymarchVampMenuReply", rid: 3, ok: true });
+  assert.ok(js.some((x) => x.includes('window.__gmVampRun({"fn":"reply"')));
+  s.gm.greymarchBrowserMessage({ arguments: ["greymarch", JSON.stringify({ type: "vampire-close" })] });
+  assert.strictEqual(s.gm.greymarchVampMenuOn, false);
+});
+
+test("eye colours: each bloodline's colour picks its own eye parts (Volkihar red, glow 4)", () => {
+  const s = make();
+  const sp = s.gm.sp, GM = 0x0a000000;
+  const worn = { 2: 0x111, 0: 0x333 };
+  const part = (id) => ({ getFormID: () => id, getType: () => (id === 0x333 || id === GM + 0x81c ? 0 : 2) });
+  Object.assign(sp.Game.getPlayer(), { getRace: () => ({ getFormID: () => 0x13746 }), getBaseObject: () => ({ sex: 0 }), changeHeadPart: (hp) => { worn[hp.getType()] = hp.getFormID(); } });
+  sp.Game.getFormFromFile = (id, file) => (file === "GreymarchCore.esp" ? { id: GM + id } : null);
+  sp.HeadPart = { from: (f) => (f ? part(f.id) : null) };
+  sp.ActorBase = { from: (b) => (b ? { getSex: () => b.sex, getNumHeadParts: () => 2, getNthHeadPart: (i) => part(worn[i === 0 ? 2 : 0]) } : null) };
+  s.say({ customPacketType: "greymarchGhosts", ghosts: [], me: 0xff000001 });
+  s.say({ customPacketType: "greymarchVampLooks", vampires: [{ actor: 0xff000001, glow: 4, fangs: false, eyes: "red" }] });
+  s.tick();
+  assert.strictEqual(worn[2], GM + 0x81f + 4, "GM_VampEyesMaleRed4");
+});
