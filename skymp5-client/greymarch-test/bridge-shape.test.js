@@ -91,7 +91,7 @@ test("the character's own look that SkyMP kept aside during the form is put back
 
 test("remoteServer.ts keeps a look with no head parts (a creature's) and any look during a form away from the player's own body", () => {
   const rs = fs.readFileSync(path.join(__dirname, "..", "src", "services", "services", "remoteServer.ts"), "utf8");
-  assert.ok(rs.includes("if (noHead || storage[\"greymarchShapeOn\"] === true) {"));
+  assert.ok(rs.includes("if (noHead || storage[\"greymarchShapeOn\"] === true || storage[\"greymarchWolfOn\"] === true) {"), "a creature form or the werewolf");
   assert.ok(rs.includes("storage[\"greymarchPendingAppearance\"] = noHead ? null : newAppearance;"));
 });
 

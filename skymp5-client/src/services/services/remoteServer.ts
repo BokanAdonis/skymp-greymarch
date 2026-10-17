@@ -720,7 +720,7 @@ export class RemoteServer extends ClientListener {
       // animations. So a look with no head parts (only creature looks are like that) is not applied to the player, and while a form is on, their own look is kept for the
       // bridge, which puts it back after it has changed the body back (greymarchShapeUnbecome).
       const noHead = !(Array.isArray(newAppearance.headpartIds) && newAppearance.headpartIds.length > 0);
-      if (noHead || storage["greymarchShapeOn"] === true) {
+      if (noHead || storage["greymarchShapeOn"] === true || storage["greymarchWolfOn"] === true) { // GREYMARCH: the werewolf too (bridge greymarchWolfUnbecome puts it back)
         storage["greymarchPendingAppearance"] = noHead ? null : newAppearance;
         logTrace(this, "Appearance for the player kept for the creature form");
         return;

@@ -11,8 +11,8 @@ const js = ts.transpileModule(src, { compilerOptions: { module: ts.ModuleKind.Co
 
 const BEAST = 0xcdd84, NORD = 0x13746, ALPHA = 0xfe000804, PUP = 0xfe00080a;
 function make(opts = {}) {
-  const log = { lines: [], idles: [], events: [], races: [], waits: [], sent: [] };
-  const mods = { "../messages": { MsgType: { CustomPacket: 77 } }, "../view/worldViewMisc": { remoteIdToLocalId: (id) => (opts.others || {})[id] || 0 }, "../sync/appearance": {}, "../services/services/remoteServer": { RemoteServer: {} }, "../services/services/singlePlayerService": { SinglePlayerService: {} } };
+  const log = { lines: [], idles: [], events: [], races: [], waits: [], sent: [], applied: [], equipped: [], redraws: 0 };
+  const mods = { "../messages": { MsgType: { CustomPacket: 77 } }, "../view/worldViewMisc": { remoteIdToLocalId: (id) => (opts.others || {})[id] || 0 }, "../sync/appearance": { applyAppearanceToPlayer: (a) => log.applied.push(a) }, "../services/services/remoteServer": { RemoteServer: {} }, "../services/services/singlePlayerService": { SinglePlayerService: {} } };
   const mod = { exports: {} };
   new Function("require", "exports", "module", js)((p) => mods[p], mod.exports, mod);
   const race = (id) => ({ id, getFormID: () => id });
@@ -21,7 +21,11 @@ function make(opts = {}) {
     getRace: () => race(current), setRace: (r) => { current = r.id; log.races.push(r.id); },
     playIdle: (idle) => { log.idles.push(idle.id); return opts.refuseIdle ? false : true; },
     waitForAnimationEvent: (name) => new Promise((resolve) => log.waits.push({ name, resolve })),
-    hasSpell: () => true, hasMagicEffect: () => false, dispelSpell() {}, unequipAll() {}, getBaseObject: () => null,
+    hasSpell: () => true, hasMagicEffect: () => false, dispelSpell() {}, getBaseObject: () => null,
+    unequipAll() { log.unequipped = true; },
+    getWornForm: (mask) => ((opts.worn || {})[mask] ? { getFormID: () => opts.worn[mask] } : null),
+    getEquippedWeapon: (left) => (!left && opts.weapon ? { getFormID: () => opts.weapon } : null), getEquippedShield: () => null,
+    getItemCount: (form) => ((opts.have || []).includes(form.id) ? 1 : 0), equipItem: (form) => log.equipped.push(form.id), queueNiNodeUpdate: () => { log.redraws++; },
   };
   const pass = (f) => (f ? f : null);
   const sp = {
@@ -31,6 +35,7 @@ function make(opts = {}) {
     Debug: { sendAnimationEvent: (ref, name) => log.events.push(name), notification() {} },
     Utility: { isInMenuMode: () => menu },
     on() {},
+    storage: {},
   };
   const controller = { on() {}, emitter: { on() {}, emit: (n, m) => { if (n === "sendMessage") log.sent.push(JSON.parse(m.message.contentJsonDump)); } } };
   const gm = new mod.exports.GreymarchBridge(sp, controller);
@@ -40,7 +45,7 @@ function make(opts = {}) {
   const at = (fn) => { Date.now = () => t; try { return fn(); } finally { Date.now = realNow; } };
   const say = (msg) => at(() => gm.greymarchPacket(msg));
   const key = (code, down) => at(() => gm.greymarchKey({ code, isDown: down }));
-  return { gm, log, tick, say, key, race: () => current, setMenu: (v) => { menu = v; } };
+  return { gm, log, sp, tick, say, key, race: () => current, setMenu: (v) => { menu = v; } };
 }
 const flush = () => new Promise((r) => setImmediate(r));
 
@@ -223,4 +228,35 @@ test("other players who are pups are drawn as the pup here, Alphas as the Alpha;
   s.tick(1100);
   assert.strictEqual(races[0xff000a02], ALPHA, "a pup made an Alpha is redrawn");
   assert.strictEqual(races[0xff000a01], BEAST, "no longer listed: the normal werewolf");
+});
+
+test("the way back: while changed SkyMP keeps the character's own look aside (storage flag); a second after the race is back the kept look is put on and the gear goes back on", () => {
+  const s = make({ refuseIdle: true, worn: { 4: 0x12eb7, 8: 0x13911 }, weapon: 0x1397e, have: [0x12eb7, 0x13911, 0x1397e] });
+  s.say({ customPacketType: "greymarchWolfForm", on: true });
+  s.tick();
+  assert.strictEqual(s.race(), BEAST);
+  assert.strictEqual(s.sp.storage.greymarchWolfOn, true, "SkyMP keeps a look the server sends aside while changed");
+  assert.ok(s.log.unequipped);
+  s.sp.storage.greymarchPendingAppearance = { raceId: NORD, headpartIds: [1, 2] }; // the server put the human look back; SkyMP kept it aside
+  s.say({ customPacketType: "greymarchWolfForm", on: false }); s.tick();
+  assert.strictEqual(s.race(), NORD);
+  assert.strictEqual(s.sp.storage.greymarchWolfOn, false);
+  assert.ok(s.log.redraws > 0, "the body is redrawn");
+  assert.deepStrictEqual(s.log.applied, [], "not before the person's skeleton is in place");
+  s.tick(1100);
+  assert.deepStrictEqual(s.log.applied, [{ raceId: NORD, headpartIds: [1, 2] }], "the own look put on properly");
+  assert.strictEqual(s.sp.storage.greymarchPendingAppearance, null);
+  assert.deepStrictEqual(s.log.equipped.sort(), [0x12eb7, 0x13911, 0x1397e].sort(), "the armor and the weapon back on");
+  assert.ok(s.log.lines.some((l) => /put 3 of 3 worn items back on/.test(l)));
+  s.tick(1100);
+  assert.strictEqual(s.log.equipped.length, 3, "only once");
+});
+
+test("the way back: gear sold or dropped while changed is not put on; with no kept look nothing is applied", () => {
+  const s = make({ refuseIdle: true, worn: { 4: 0x12eb7 }, have: [] });
+  s.say({ customPacketType: "greymarchWolfForm", on: true }); s.tick();
+  s.say({ customPacketType: "greymarchWolfForm", on: false }); s.tick(); s.tick(1100);
+  assert.deepStrictEqual(s.log.equipped, []);
+  assert.deepStrictEqual(s.log.applied, []);
+  assert.ok(s.log.lines.some((l) => /put 0 of 1 worn items back on/.test(l)));
 });

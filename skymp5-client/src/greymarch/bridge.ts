@@ -564,6 +564,7 @@ export class GreymarchBridge {
                 if (want === false) this.greymarchWolfWant = undefined; // handled: the next use of the power is reported afresh
             }
             this.greymarchWolfAlphaOthers(now);
+            this.greymarchWolfDress(player, now);
             // Z while changed: the player asks to change back. The server decides (it ends the form with the normal cooldown and says on: false); nothing is changed here first.
             // Not mid-transformation, not in a menu, not in the first WOLF_BACK_GRACE_MS after the change (the Z press that started the change cannot also end it).
             var backAt = this.greymarchWolfBackAt;
@@ -607,6 +608,8 @@ export class GreymarchBridge {
     greymarchWolfBecome(player: any): any {
         var sp = this.sp;
         this.greymarchWolfOn = true;
+        // while changed, SkyMP keeps the character's own look aside instead of writing it onto the beast's body halfway (remoteServer.ts); it is put on properly after the way back
+        try { (sp.storage as any)["greymarchWolfOn"] = true; } catch (stErr) { /* the look is then applied as it comes */ }
         var morph = { at: Date.now(), cue: false };
         var played = false;
         try { sp.Game.forceThirdPerson(); } catch (cErr) { /* the change sets the camera anyway */ } // the animation is seen from outside
@@ -628,6 +631,7 @@ export class GreymarchBridge {
             step = "dispel"; try { var dl = sp.FormList.from(sp.Game.getFormEx(0x10dea0)); var n = dl ? dl.getSize() : 0; for (var i = 0; i < n; i++) { var s = sp.Spell.from(dl.getAt(i)); if (s) player.dispelSpell(s); } } catch (dErr) { /* nothing to dispel */ }
             step = "controls"; sp.Game.disablePlayerControls(false, false, true, false, false, false, false, false, 1);
             step = "camera"; sp.Game.forceThirdPerson(); sp.Game.showFirstPersonGeometry(false);
+            step = "gear"; this.greymarchWolfWear = this.greymarchWolfWorn(player); // put back on after the way back
             step = "unequip"; player.unequipAll();
             step = "race"; var wr = this.greymarchWolfRace(); if (!wr) throw new Error("the werewolf race was not found");
             player.setRace(wr);
@@ -646,6 +650,8 @@ export class GreymarchBridge {
             this.greymarchWolfMorph = null;
             try { sp.Debug.sendAnimationEvent(player, "IdleForceDefaultState"); } catch (sErr) { /* it ends by itself */ }
             this.greymarchLog("wolf: the transformation was stopped before the body changed");
+            try { (sp.storage as any)["greymarchWolfOn"] = false; } catch (stErr) { /* nothing was set */ }
+            this.greymarchWolfWearAt = Date.now() + 200; // a look the server sent meanwhile goes on (nothing else was changed)
             return;
         }
         var step = "start";
@@ -660,6 +666,10 @@ export class GreymarchBridge {
             step = "camera"; sp.Game.showFirstPersonGeometry(true);
             step = "beast form"; sp.Game.setBeastForm(false);
             step = "fast travel"; sp.Game.enableFastTravel(true);
+            step = "animation"; sp.Debug.sendAnimationEvent(player, "IdleForceDefaultState"); // the person's animations from their idle
+            step = "redraw"; player.queueNiNodeUpdate();
+            try { (sp.storage as any)["greymarchWolfOn"] = false; } catch (stErr) { /* nothing was set */ }
+            this.greymarchWolfWearAt = Date.now() + 1000; // the character's own look (kept aside by SkyMP) and the gear, a moment later: the person's skeleton must be in place first
             var r = player.getRace();
             this.greymarchLog("wolf: changed back (race now " + (r ? r.getFormID().toString(16) : "none") + ")");
         } catch (uErr) {
@@ -669,6 +679,31 @@ export class GreymarchBridge {
     // THE ALPHA FORM (the server says alpha: true): a white/grey werewolf, 1.3 times the size, the race GM_AlphaWerewolfBeastRace in GreymarchCore.esp (0x804; a copy of
     // WerewolfBeastRace with its own skin, the vanilla body with the white textures, and 1.3 times its height). GreymarchCore.esp is not on the server's plugin list, so the
     // server cannot name the race by number: it says alpha and this code finds the race in the file. If it is missing, the normal werewolf race is used.
+    // The gear worn and held when the change starts (armor in every body slot, both hands, the shield): put back on after the way back.
+    greymarchWolfWorn(player: any): number[] {
+        var ids: any = {};
+        for (var b = 0; b < 32; b++) { try { var f = player.getWornForm(Math.pow(2, b)); if (f) ids[f.getFormID()] = true; } catch (e) { /* that slot is empty */ } }
+        try { var w1 = player.getEquippedWeapon(false); if (w1) ids[w1.getFormID()] = true; } catch (e1) { /* nothing in the right hand */ }
+        try { var w2 = player.getEquippedWeapon(true); if (w2) ids[w2.getFormID()] = true; } catch (e2) { /* nothing in the left hand */ }
+        try { var sh = player.getEquippedShield(); if (sh) ids[sh.getFormID()] = true; } catch (e3) { /* no shield */ }
+        return Object.keys(ids).map(function (k) { return Number(k); });
+    }
+    // After the way back: the character's own look that SkyMP kept aside is put on properly (face, head parts, body), then the gear goes back on.
+    greymarchWolfDress(player: any, now: number): any {
+        var at = this.greymarchWolfWearAt;
+        if (!at || now < at || this.greymarchWolfOn) return;
+        this.greymarchWolfWearAt = 0;
+        var sp = this.sp;
+        var kept = null; try { kept = (sp.storage as any)["greymarchPendingAppearance"]; (sp.storage as any)["greymarchPendingAppearance"] = null; } catch (kErr) { kept = null; }
+        if (kept && !this.greymarchShapeOn) { try { appearanceMod.applyAppearanceToPlayer(kept); this.greymarchLog("wolf: the character's own look put back"); } catch (aErr) { this.greymarchLog("wolf: the own look could not be put back: " + aErr); } }
+        var list = this.greymarchWolfWear || [];
+        this.greymarchWolfWear = [];
+        var put = 0;
+        for (var i = 0; i < list.length; i++) {
+            try { var f = sp.Game.getFormEx(list[i]); if (f && player.getItemCount(f) > 0) { player.equipItem(f, false, true); put++; } } catch (eErr) { /* that one stays in the inventory */ }
+        }
+        if (list.length) this.greymarchLog("wolf: put " + put + " of " + list.length + " worn items back on");
+    }
     // THE PUP (the server says pup: true): a smaller brown werewolf, 0.75 times the size, GM_PupWerewolfBeastRace (0x80A in GreymarchCore.esp), found the same way.
     greymarchWolfKindRaceId(kind: string): number {
         var cache = this.greymarchWolfKindIds || (this.greymarchWolfKindIds = {});
