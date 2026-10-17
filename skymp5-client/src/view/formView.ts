@@ -236,7 +236,8 @@ export class FormView {
           const wolfRace = 0x1320a;
 
           // potential masterambushscript
-          if (race === draugrRace
+          // GREYMARCH: not for a player drawn as a creature (a creature form has an appearance; SkyMP's own NPCs do not): Aggression 2 made their NPC here start fights
+          if (!model.appearance && (race === draugrRace
             || race === falmerRace
             || race === chaurusRace
             || race === frostbiteSpiderRaceGiant
@@ -249,7 +250,7 @@ export class FormView {
             || race === sprigganRace3
             || race === sprigganRace4
             || race === sprigganRace5
-            || race === wolfRace) {
+            || race === wolfRace)) {
             Actor.from(refr)?.setActorValue("Aggression", 2);
           }
         }

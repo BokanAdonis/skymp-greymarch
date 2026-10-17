@@ -13,8 +13,11 @@ const js = ts.transpileModule(src, { compilerOptions: { module: ts.ModuleKind.Co
 const NORD = 0x13746, GOAT = 0x131fa, GIANT = 0x131f9;
 const ATTACKS = { normal: ["attackStart_ClubAttack1", "attackStart_ClubAttack2"], power: ["attackPowerStart_Stomp"] };
 function make(opts = {}) {
-  const log = { lines: [], races: [], calls: [], equipped: [], events: [], sent: [], notes: [], applied: [] };
-  const mods = { "../messages": { MsgType: { CustomPacket: 77 } }, "../view/worldViewMisc": { remoteIdToLocalId: () => 0, localIdToRemoteId: (id) => id - 0xff000000 + 0x10000 }, "../sync/appearance": { applyAppearanceToPlayer: (a) => log.applied.push(a) }, "../services/services/remoteServer": { RemoteServer: {} }, "../services/services/singlePlayerService": { SinglePlayerService: {} } };
+  const log = { lines: [], races: [], calls: [], equipped: [], events: [], sent: [], notes: [], applied: [], moves: [], wc: [], cam: [], av: [], remote: [], built: [] };
+  const PUP = 0xff0000aa;
+  let pupDeleted = false;
+  const puppet = { getFormID: () => PUP, setPosition: () => Promise.resolve(), enable: () => Promise.resolve(), resurrect: () => Promise.resolve(), startDeferredKill() {}, setActorValue: (k, v) => log.av.push([k, v]), setGhost() {}, blockActivation() {}, disable() {}, delete: () => { pupDeleted = true; log.calls.push("npcDeleted"); }, isDeleted: () => pupDeleted };
+  const mods = { "../messages": { MsgType: { CustomPacket: 77 } }, "../view/worldViewMisc": { remoteIdToLocalId: (id) => (opts.others || {})[id] || 0, localIdToRemoteId: (id) => id - 0xff000000 + 0x10000 }, "../sync/appearance": { applyAppearanceToPlayer: (a) => log.applied.push(a), applyAppearance: (a) => { log.built.push(a); return { built: true }; } }, "../sync/movementGet": { getMovement: () => ({ pos: [1, 2, 3], isWeapDrawn: false, runMode: "Running" }) }, "../sync/movementApply": { applyMovement: (ac, m) => { if (opts.moveThrows) throw new Error("needs to be respawned"); log.moves.push({ id: ac.getFormID(), weap: m.isWeapDrawn }); } }, "../sync/animation": { applyAnimation: (ref, a) => log.remote.push([ref.id, a.animEventName]) }, "../services/services/worldCleanerService": { WorldCleanerService: function () {} }, "../services/services/remoteServer": { RemoteServer: {} }, "../services/services/singlePlayerService": { SinglePlayerService: {} } };
   const mod = { exports: {} };
   new Function("require", "exports", "module", js)((p) => mods[p], mod.exports, mod);
   const race = (id) => ({ id, getFormID: () => id });
@@ -26,25 +29,28 @@ function make(opts = {}) {
     unequipAll: () => log.calls.push("unequipAll"), getBaseObject: () => base, queueNiNodeUpdate: () => log.calls.push("redraw"),
     getItemCount: (f) => items[f.id] || 0, equipItem: (f) => log.equipped.push(f.id),
     hasSpell: () => false, hasMagicEffect: () => false,
+    placeAtMe: () => { pupDeleted = false; log.calls.push("npcPlaced"); return puppet; }, setAlpha: (a) => log.calls.push("alpha:" + a), isWeaponDrawn: () => false, drawWeapon: () => log.calls.push("drawWeapon"),
+    getPositionX: () => 1, getPositionY: () => 2, getPositionZ: () => 3, getFormID: () => 0x14,
   };
   const call = (name) => (...a) => log.calls.push(name + (a.length ? ":" + a[0] : ""));
   const storage = {};
   const sp = {
     printConsole() {}, writeLogs: (n, l) => log.lines.push(l), storage,
-    Game: { getPlayer: () => player, getFormEx: (id) => (opts.noRace && id === opts.noRace ? null : { id }), getFormFromFile: () => null, setBeastForm: call("beastForm"), enableFastTravel: call("fastTravel"), disablePlayerControls: call("controlsOff"), enablePlayerControls: call("controlsOn"), forceThirdPerson: call("thirdPerson"), showFirstPersonGeometry() {}, getCurrentCrosshairRef: () => crosshair },
-    Race: { from: (f) => (f ? race(f.id) : null) }, ActorBase: { from: (b) => b }, HeadPart: { from: (f) => f }, Spell: { from: () => null }, MagicEffect: { from: () => null },
+    Game: { getPlayer: () => player, getFormEx: (id) => (opts.noRace && id === opts.noRace ? null : { id }), getFormFromFile: () => null, setBeastForm: call("beastForm"), enableFastTravel: call("fastTravel"), disablePlayerControls: call("controlsOff"), enablePlayerControls: call("controlsOn"), forceThirdPerson: call("thirdPerson"), showFirstPersonGeometry() {}, getCurrentCrosshairRef: () => crosshair, setCameraTarget: (a) => log.cam.push(a && a.getFormID()) },
+    Race: { from: (f) => (f ? race(f.id) : null) }, Actor: { from: (r) => (r && r.getFormID ? r : r && r.id === PUP && !pupDeleted ? puppet : null) }, ObjectReference: { from: (f) => (f && f.id === PUP && !pupDeleted ? puppet : f && f.id && f.id !== PUP ? { id: f.id, getFormID: () => f.id } : null) }, setCollision: (id, on) => log.calls.push("collision:" + on), ActorBase: { from: (b) => b }, HeadPart: { from: (f) => f }, Spell: { from: () => null }, MagicEffect: { from: () => null },
     TESModPlatform: { resizeHeadpartsArray: (b, n) => { b.parts.length = n; }, setNpcSex: (b, s) => { b.sex = s; } },
     Debug: { sendAnimationEvent: (ref, name) => log.events.push(name), notification: (t) => log.notes.push(t) }, Utility: { isInMenuMode: () => menu }, on() {},
   };
-  const controller = { on() {}, emitter: { on() {}, emit: (n, m) => { if (n !== "sendMessage") return; const j = JSON.parse(m.message.contentJsonDump); if (j.customPacketType === "greymarchShapeAttack") log.sent.push(j); } } };
+  const controller = { on() {}, lookupListener: () => ({ modWcProtection: (id, n) => log.wc.push([id, n]) }), emitter: { on() {}, emit: (n, m) => { if (n !== "sendMessage") return; const j = JSON.parse(m.message.contentJsonDump); if (j.customPacketType === "greymarchShapeAttack") log.sent.push(j); } } };
   const gm = new mod.exports.GreymarchBridge(sp, controller);
   let t = 1_000_000;
   const realNow = Date.now;
   const at = (fn) => { Date.now = () => t; try { return fn(); } finally { Date.now = realNow; } };
   const tick = (ms = 300) => { t += ms; at(() => gm.greymarchShapeTick()); };
-  const say = (msg) => at(() => gm.greymarchPacket({ customPacketType: "greymarchShape", ...msg }));
+  const say = (msg) => at(() => gm.greymarchPacket({ customPacketType: "greymarchShape", mode: "race", ...msg })); // the tests above the NPC ones are about mode "race"
+  const drive = () => at(() => gm.greymarchShapeDrive());
   const click = (code = 256) => at(() => { gm.greymarchKey({ code, isDown: true }); gm.greymarchKey({ code, isUp: true }); });
-  return { gm, log, tick, say, click, base, storage, race: () => current, setRace: (id) => { current = id; }, setMenu: (v) => { menu = v; }, aim: (id) => { crosshair = id ? { getFormID: () => id } : null; } };
+  return { gm, log, tick, say, click, drive, PUP, base, storage, race: () => current, setRace: (id) => { current = id; }, setMenu: (v) => { menu = v; }, aim: (id) => { crosshair = id ? { getFormID: () => id } : null; } };
 }
 const giant = { on: true, race: GIANT, back: NORD, name: "Giant", attacks: ATTACKS };
 
@@ -126,7 +132,9 @@ test("a click plays one of the creature's own attacks and reports the swing abou
   assert.ok(ATTACKS.normal.includes(s.log.events[s.log.events.length - 1]), "a club attack");
   assert.deepStrictEqual(s.log.sent, [], "not reported yet");
   s.tick(500);
-  assert.deepStrictEqual(s.log.sent, [{ customPacketType: "greymarchShapeAttack", power: false, target: 0x10005 }]);
+  assert.strictEqual(s.log.sent.length, 1);
+  assert.deepStrictEqual({ ...s.log.sent[0], ev: undefined }, { customPacketType: "greymarchShapeAttack", power: false, target: 0x10005, ev: undefined });
+  assert.ok(ATTACKS.normal.includes(s.log.sent[0].ev), "the animation it played, for everyone else's game");
 });
 
 test("right click is a power attack; the creature's pace is kept; a menu or the chat stops the click", () => {
@@ -203,4 +211,85 @@ test("F8 opens the staff panel page as the tester menu; F7 as the staff panel", 
   s.gm.greymarchAdminOn = false;
   s.gm.greymarchKey({ code: 65, isDown: true }); s.gm.greymarchKey({ code: 65, isUp: true });
   assert.deepStrictEqual(shown.pop(), ["show", true]);
+});
+
+const flushAll = async () => { for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r)); };
+const giantNpc = { ...giant, mode: "npc" };
+
+test("NPC mode: the player becomes invisible and a creature NPC is placed, protected, made harmless and followed by the camera; no SetRace on the player", async () => {
+  const s = make();
+  s.say(giantNpc); s.tick();
+  assert.deepStrictEqual(s.log.races, [], "the player's race is not touched");
+  assert.ok(s.log.calls.includes("alpha:0"), "invisible");
+  assert.ok(s.log.calls.includes("npcPlaced"));
+  assert.strictEqual(s.log.built[0].raceId, GIANT);
+  assert.strictEqual(s.log.built[0].isFemale, false);
+  assert.deepStrictEqual(s.log.built[0].headpartIds, []);
+  assert.deepStrictEqual(s.log.wc, [[s.PUP, 1]], "the world cleaner leaves it alone");
+  s.drive();
+  assert.deepStrictEqual(s.log.moves, [], "not moved before it is ready");
+  await flushAll();
+  assert.deepStrictEqual(s.log.cam, [s.PUP], "the camera follows the NPC");
+  assert.ok(s.log.calls.includes("collision:false"));
+  assert.ok(s.log.av.some(([k, v]) => k === "Aggression" && v === 0) && s.log.av.some(([k, v]) => k === "attackDamageMult" && v === 0));
+  s.drive(); s.drive();
+  assert.deepStrictEqual(s.log.moves.map((m) => m.id), [s.PUP, s.PUP], "moved every frame by the player's movement");
+});
+
+test("NPC mode: a click plays the attack on the NPC, in combat stance, and the report names the animation", async () => {
+  const s = make();
+  s.say(giantNpc); s.tick(); await flushAll();
+  s.click(); s.tick(10);
+  assert.ok(ATTACKS.normal.includes(s.log.events[s.log.events.length - 1]));
+  assert.ok(s.log.calls.includes("drawWeapon"));
+  s.drive();
+  assert.strictEqual(s.log.moves.pop().weap, true, "the creature's combat stance");
+  s.tick(500);
+  assert.ok(ATTACKS.normal.includes(s.log.sent[0].ev));
+});
+
+test("NPC mode: changing back removes the NPC, gives the camera back and makes the player visible; a lost NPC is placed again", async () => {
+  const s = make();
+  s.say(giantNpc); s.tick(); await flushAll();
+  s.say({ on: false, back: NORD, wear: [] }); s.tick();
+  assert.ok(s.log.calls.includes("npcDeleted"));
+  assert.ok(s.log.calls.includes("alpha:1"));
+  assert.strictEqual(s.log.cam[s.log.cam.length - 1], 0x14, "the camera is the player's again");
+  assert.deepStrictEqual(s.log.wc[s.log.wc.length - 1], [s.PUP, -1]);
+  assert.deepStrictEqual(s.log.races, []);
+  const t = make({ moveThrows: true });
+  t.say(giantNpc); t.tick(); await flushAll();
+  t.drive();
+  assert.strictEqual(t.log.calls.filter((c) => c === "npcPlaced").length, 2, "placed again after a door or a long way");
+});
+
+test("another player's creature attack is played on their NPC here, through SkyMP's own animation path", () => {
+  const s = make({ others: { 0xff000007: 0xff00aa07 } });
+  s.gm.greymarchPacket({ customPacketType: "greymarchShapeAnim", actor: 0xff000007, ev: "attackStart_ClubAttack1" });
+  s.drive();
+  assert.deepStrictEqual(s.log.remote, [[0xff00aa07, "attackStart_ClubAttack1"]]);
+});
+
+test("the server's mode is followed; switching from race to NPC changes back first", async () => {
+  const s = make();
+  s.say(giant); s.tick();
+  assert.deepStrictEqual(s.log.races, [GIANT]);
+  s.say(giantNpc); s.tick();
+  assert.deepStrictEqual(s.log.races, [GIANT, NORD], "the race body undone");
+  assert.ok(s.log.calls.includes("npcPlaced"));
+});
+
+test("NPC mode: an NPC that never gets ready, or none at all, is placed again after a few seconds", async () => {
+  const s = make();
+  s.gm.sp.ObjectReference.from = () => null; // every spawn step finds nothing: never ready
+  s.say(giantNpc); s.tick();
+  assert.strictEqual(s.log.calls.filter((c) => c === "npcPlaced").length, 1);
+  s.say(giantNpc); s.tick(9000);
+  assert.strictEqual(s.log.calls.filter((c) => c === "npcPlaced").length, 2, "not ready after 8 seconds: placed again");
+  const t = make();
+  t.gm.sp.Game.getPlayer().placeAtMe = () => { throw new Error("no"); };
+  t.say(giantNpc); t.tick();
+  t.gm.sp.Game.getPlayer().placeAtMe = () => { t.log.calls.push("npcPlaced"); return { getFormID: () => 0xff0000bb, setPosition: () => Promise.resolve() }; };
+  t.say(giantNpc); t.tick(3500);
+  assert.ok(t.log.calls.includes("npcPlaced"), "the first placing failed: tried again");
 });
