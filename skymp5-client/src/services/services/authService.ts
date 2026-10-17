@@ -11,6 +11,7 @@ import { MasterApiAuthStatus } from "../messages_http/masterApiAuthStatus";
 import { logTrace, logError } from "../../logging";
 import { ConnectionMessage } from "../events/connectionMessage";
 import { GreymarchBridge } from "../../greymarch/bridge"; // GREYMARCH
+import { launchGuard, decide as launchDecide } from "../../greymarch/launchGuard"; // GREYMARCH: join only from the launcher's Play
 import { CreateActorMessage } from "../messages/createActorMessage";
 import { CustomPacketMessage } from "../messages/customPacketMessage";
 import { NetworkingService } from "./networkingService";
@@ -192,6 +193,11 @@ export class AuthService extends ClientListener {
       // GREYMARCH: character select and staff packets from the server
       case 'greymarchHold':
       case 'greymarchSelect':
+        // GREYMARCH: the server sends these only to a player it has logged in. With select before the world the player's own body is held (bodyHold.ts), so
+        // SkyMP's "logged in" sign (our createActor) does not come for as long as they choose, and after 15 s onTick took the login for failed: it closed
+        // the connection and wiped the saved login. The login worked: stop that clock here.
+        this.loggingStartMoment = 0;
+        this.authAttemptProgressIndicator = false;
       case 'greymarchEntered':
       case 'greymarchError':
       case 'greymarchAdminReply':
@@ -281,10 +287,21 @@ export class AuthService extends ClientListener {
     logTrace(this, `Showing widgets and starting loop`);
 
     authData = this.readAuthDataFromDisk();
-    // GREYMARCH: the launcher already logged the player in, so skip the join menu and connect straight away
-    if (authData && (this.sp.settings["skymp5-client"] as any)["greymarch-autoplay"]) {
-      this.writeAuthDataToDisk(authData);
-      this.controller.emitter.emit("authAttempt", { authGameData: { remote: authData } });
+    // GREYMARCH: the launcher already logged the player in, so skip the join menu and connect straight away. Only with a login from THIS start of the game
+    // (launchGuard.ts): a game started outside the launcher's Play may number the mods differently from the server, so it does not join, and SkyMP's own
+    // in-game login is not offered either; the connecting screen says to start the game with Play.
+    if ((this.sp.settings["skymp5-client"] as any)["greymarch-autoplay"]) {
+      const verdict = launchDecide(authData, Date.now(), !!launchGuard.joinedWith);
+      const use: RemoteAuthGameData | null = launchGuard.joinedWith || authData; // a reconnect: the login this game joined with, whatever the file says now
+      if (verdict === "connect" && use) {
+        authData = use;
+        launchGuard.joinedWith = use;
+        this.writeAuthDataToDisk(use);
+        this.controller.emitter.emit("authAttempt", { authGameData: { remote: use } });
+        return;
+      }
+      launchGuard.refused = verdict;
+      logTrace(this, `Not joining: the login is`, verdict, `(the game was not started with the launcher's Play)`);
       return;
     }
     this.refreshWidgets();
