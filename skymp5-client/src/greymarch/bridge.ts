@@ -588,6 +588,9 @@ export class GreymarchBridge {
                     sp.Debug.sendAnimationEvent(player, "HowlStart");
                     this.greymarchWolfRoarRelease = now + 200; // released at once: a short howl, as a quick tap of the shout key does it
                     this.greymarchLog("wolf: roar");
+                    // the howl calls the pack: the server tells every online packmate where it came from (werewolf.js howl; it keeps its own wait between calls)
+                    var howlMsg = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchWolf", op: "howl" }) };
+                    this.controller.emitter.emit("sendMessage", { message: howlMsg, reliability: "reliable" });
                 }
             }
             if (this.greymarchWolfRoarRelease && now >= this.greymarchWolfRoarRelease) { this.greymarchWolfRoarRelease = 0; if (this.greymarchWolfOn) sp.Debug.sendAnimationEvent(player, "HowlRelease"); }

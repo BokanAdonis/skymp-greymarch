@@ -109,6 +109,18 @@ test("R roars only while changed, never mid-transformation or in a menu, and not
   assert.strictEqual(s.log.events.length, 4, "typing in the chat is not a roar");
 });
 
+test("the roar is a howl the server hears (it calls the pack): one report per roar, none for a human or a roar too soon", () => {
+  const s = make({ refuseIdle: true });
+  const howls = () => s.log.sent.filter((m) => m.customPacketType === "greymarchWolf" && m.op === "howl").length;
+  s.key(19, true); s.key(19, false); s.tick();
+  assert.strictEqual(howls(), 0, "human: R is the game's own key");
+  s.say({ customPacketType: "greymarchWolfForm", on: true }); s.tick();
+  s.key(19, true); s.tick();
+  assert.strictEqual(howls(), 1);
+  s.key(19, false); s.key(19, true); s.tick();
+  assert.strictEqual(howls(), 1, "a roar too soon is not a howl either");
+});
+
 test("the server says the wolf fed: the vanilla feeding animation (SpecialFeeding) plays on the beast body", () => {
   const s = make();
   s.say({ customPacketType: "greymarchWolfForm", on: true });
