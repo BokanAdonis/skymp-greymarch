@@ -43,6 +43,8 @@ export class GreymarchBridge {
     [key: string]: any;
 
     constructor(public sp: any, public controller: any) {
+        // a new bridge is never mid-form; SkyrimPlatform's storage outlives a script reload, so a flag left on would keep every look for this player aside forever (remoteServer.ts)
+        try { (this.sp.storage as any)["greymarchWolfOn"] = false; } catch (stErr) { /* no storage: nothing to clear */ }
         this.controller.on("browserMessage", (e: any) => this.greymarchBrowserMessage(e));
         this.controller.on("buttonEvent", (e: any) => this.greymarchKey(e)); // F7 opens the staff panel
         try { this.sp.on("hit", (e: any) => this.greymarchHit(e)); } catch (hitErr) { /* no hit events: the combat history stays empty */ }

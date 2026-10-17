@@ -252,6 +252,11 @@ test("the way back: while changed SkyMP keeps the character's own look aside (st
   assert.strictEqual(s.log.equipped.length, 3, "only once");
 });
 
+test("a new bridge clears a werewolf flag left in storage (a script reload mid-form must not keep the player's look aside forever)", () => {
+  const s = make();
+  assert.strictEqual(s.sp.storage.greymarchWolfOn, false);
+});
+
 test("the way back: gear sold or dropped while changed is not put on; with no kept look nothing is applied", () => {
   const s = make({ refuseIdle: true, worn: { 4: 0x12eb7 }, have: [] });
   s.say({ customPacketType: "greymarchWolfForm", on: true }); s.tick();
