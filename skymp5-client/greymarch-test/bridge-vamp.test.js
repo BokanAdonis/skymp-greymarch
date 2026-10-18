@@ -166,9 +166,11 @@ test("fangs on a character with no teeth part of their own: on, reported to the 
     s.say({ customPacketType: "greymarchGhosts", ghosts: [], me: 0xff000001 });
     look([{ actor: 0xff000001, glow: 1, fangs: true }]);
     assert.strictEqual(worn[0], FANG_M);
-    assert.deepStrictEqual(reports(), [{ customPacketType: "greymarchVamp", op: "fangs", actor: 0xff000001, self: true, result: "on", detail: "race teeth -> a00081c" }]);
+    assert.deepStrictEqual(reports(), [{ customPacketType: "greymarchVamp", op: "fangs", actor: 0xff000001, self: true, result: "swapped in", detail: "no teeth part -> a00081c; Misc parts before: " }]);
     look([{ actor: 0xff000001, glow: 1, fangs: true }]);
-    assert.strictEqual(reports().length, 1, "nothing changed: not reported again");
+    assert.deepStrictEqual(reports().pop(), { customPacketType: "greymarchVamp", op: "fangs", actor: 0xff000001, self: true, result: "on", detail: "Misc parts: a00081c" }, "on, the next look reads them back");
+    look([{ actor: 0xff000001, glow: 1, fangs: true }]);
+    assert.strictEqual(reports().length, 2, "nothing changed: not reported again");
     look([{ actor: 0xff000001, glow: 1, fangs: false }]);
     assert.strictEqual(worn[0], 0x51631, "the race's teeth (MaleMouthHumanoidDefault), not stuck with the fangs");
     assert.deepStrictEqual(reports().pop(), { customPacketType: "greymarchVamp", op: "fangs", actor: 0xff000001, self: true, result: "off", detail: "51631" });
@@ -180,6 +182,32 @@ test("the looks packet says which vampire is this player, so their own eyes and 
   assert.ok(!s.gm.greymarchMeActor);
   s.say({ customPacketType: "greymarchVampLooks", vampires: [{ actor: 0xff000009, glow: 1, fangs: true }], me: 0xff000009 });
   assert.strictEqual(s.gm.greymarchMeActor, 0xff000009);
+});
+
+test("only the teeth are swapped: another Misc part (a KS Hairdo's hairstyle brings one) is never touched, on or off", () => {
+  const s = make();
+  const sp = s.gm.sp;
+  const GM = 0x0a000000, FANG_M = GM + 0x81c, KS = 0x330151da, TEETH = 0x51631;
+  const part = (id) => ({ getFormID: () => id, getType: () => (id === 0x111 ? 2 : 0) });
+  let parts = [0x111, KS, TEETH]; // eyes, the hairstyle's Misc part first, then the race's teeth
+  const swaps = [];
+  Object.assign(sp.Game.getPlayer(), { name: "me", getRace: () => ({ getFormID: () => 0x13746 }), getBaseObject: () => ({ sex: 0 }), changeHeadPart: (hp) => { if (hp.getType() === 2) parts = parts.map((x) => (x === 0x111 || x > GM ? x : x)); },
+    replaceHeadPart: (old, hp) => { swaps.push([old.getFormID(), hp.getFormID()]); parts = parts.map((x) => (x === old.getFormID() ? hp.getFormID() : x)); } });
+  sp.Actor.from = (f) => f;
+  sp.Game.getFormEx = (id) => ({ id });
+  sp.Game.getFormFromFile = (id, file) => (file === "GreymarchCore.esp" ? { id: GM + id } : null);
+  sp.HeadPart = { from: (f) => (f ? part(f.id) : null) };
+  sp.ActorBase = { from: (b) => (b ? { getSex: () => 0, getNumHeadParts: () => parts.length, getNthHeadPart: (i) => part(parts[i]) } : null) };
+  let t = 5_000_000; const realNow = Date.now; Date.now = () => t;
+  const look = (fangs) => { s.say({ customPacketType: "greymarchVampLooks", vampires: [{ actor: 0xff000001, glow: 0, fangs }], me: 0xff000001 }); s.tick(); t += 2500; };
+  try {
+    look(true); look(true); look(true);
+    assert.deepStrictEqual(swaps, [[TEETH, FANG_M]], "the race's teeth swapped once, the hairstyle's part left alone");
+    assert.deepStrictEqual(parts, [0x111, KS, FANG_M]);
+    look(false);
+    assert.deepStrictEqual(swaps.pop(), [FANG_M, TEETH]);
+    assert.deepStrictEqual(parts, [0x111, KS, TEETH]);
+  } finally { Date.now = realNow; }
 });
 
 test("a Potion of Blood drunk from the inventory (the equip event) is reported too", () => {
