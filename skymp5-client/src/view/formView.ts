@@ -565,7 +565,7 @@ export class FormView {
       try {
         if (refr.is3DLoaded() && Game.getPlayer()!.getDistance(refr) <= 4500) {
           const gmHead = "NPC Head [Head]";
-          (SpApiInteractor.getControllerInstance().emitter as any).emit("greymarchEar", { name: model.appearance.name, x: NetImmerse.getNodeWorldPositionX(refr, gmHead, false), y: NetImmerse.getNodeWorldPositionY(refr, gmHead, false), z: NetImmerse.getNodeWorldPositionZ(refr, gmHead, false) });
+          (SpApiInteractor.getControllerInstance().emitter as any).emit("greymarchEar", { name: model.appearance.name, id: this.refrId, x: NetImmerse.getNodeWorldPositionX(refr, gmHead, false), y: NetImmerse.getNodeWorldPositionY(refr, gmHead, false), z: NetImmerse.getNodeWorldPositionZ(refr, gmHead, false) });
         }
       } catch (gmErr) { /* their voice just stays centred */ }
     }

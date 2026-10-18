@@ -29,6 +29,9 @@ const SHAPE_LAND_MS = 450; // a creature's swing is reported this long after it 
 const SHAPE_NPC_READY_MS = 8000; // a creature NPC that is not ready this long after it was placed is placed again
 const SHAPE_SILENCE_MS = 20000; // a creature form: with no word from the server for this long the player changes back by themselves (the server repeats "on" every 5 seconds)
 const WOLF_BACK_GRACE_MS = 2000; // Z changes back, but not in the first 2 seconds after the body changed
+const LIP_STEP_MS = 110; // a talking mouth changes shape this often
+const LIP_OPEN = [[0, 0.55], [1, 0.45], [6, 0.6], [11, 0.5], [5, 0.45], [8, 0.5]]; // [phoneme, strength]: Aah, BigAah, Eh, Oh, Eee, I
+const LIP_CLOSED = [[2, 0.55], [4, 0.4], [10, 0.4]]; // BMP, DST, N: the lips meet or nearly
 const WOLF_ROAR_MS = 4000;  // R: one roar every this long (the howl animation lasts about 2.8 s)
 // vampires (gamemode vampire.js): the game's own records, inside Dawnguard.esm (read from the game files); the real IDs are looked up with Game.getFormFromFile
 const VAMP_FORMS = { mist: 0x38ba, lord: 0x283b, potionFx: 0x18ef4, potion: 0x18ef3, feedIdle: 0xe6a8 }; // DLC1VampireMistform, DLC1VampireChange, DLC1BloodPotionEffect, DLC1BloodPotion, IdleVampireStandingFeedFront_Loose
@@ -76,7 +79,7 @@ export class GreymarchBridge {
         try { this.controller.on("magicEffectApply", (e: any) => { try { if (e && e.effect && e.target && e.target.getFormID() === 0x14) this.greymarchVampSignal("effect", e.effect.getFormID()); } catch (x) { /* not ours */ } }); } catch (veErr) { /* no effect events: a Potion of Blood is not reported */ } // a Potion of Blood drunk
         try { this.controller.on("equip", (e: any) => { try { if (e && e.baseObj && e.actor && e.actor.getFormID() === 0x14) this.greymarchVampSignal("equip", e.baseObj.getFormID()); } catch (x) { /* not ours */ } }); } catch (vqErr) { /* the effect event still sees it */ } // a potion is "equipped" when it is drunk
         this.controller.emitter.on("greymarchStage", (text: string) => this.greymarchLog(text)); // other services report where the game is, for the server log
-        this.controller.emitter.on("greymarchEar", (e: any) => { if (e && typeof e.name === "string" && isFinite(e.x) && isFinite(e.y) && isFinite(e.z)) { const m = this.greymarchEarsSeen || (this.greymarchEarsSeen = {}); m[e.name] = { x: e.x, y: e.y, z: e.z, at: Date.now() }; } }); // where each named player's head is in the world (where their voice comes from: greymarchEarsTick)
+        this.controller.emitter.on("greymarchEar", (e: any) => { if (e && typeof e.name === "string" && isFinite(e.x) && isFinite(e.y) && isFinite(e.z)) { const m = this.greymarchEarsSeen || (this.greymarchEarsSeen = {}); m[e.name] = { x: e.x, y: e.y, z: e.z, at: Date.now(), localId: Number(e.id) || 0 }; } }); // where each named player's head is in the world (where their voice comes from: greymarchEarsTick), and which character this game draws for them (their mouth moves while they talk: greymarchLipTick)
         this.controller.emitter.on("greymarchHead", (e: any) => { const m = this.greymarchHeads || (this.greymarchHeads = {}); m[e.name] = { x: e.x, y: e.y, at: Date.now() }; this.greymarchRes = { w: e.rw, h: e.rh }; }); // where each named player's head is on screen (for the microphone icon)
     }
 
@@ -301,6 +304,7 @@ export class GreymarchBridge {
         this.greymarchVampTick(); // a vampire: powers and potions reported, the abilities the server names, no Restoration, the feeding scene
         this.greymarchCuffsTick(Date.now()); // in cuffs: the cuffs worn, the bound pose (others' too), the chain drawn to whoever holds it
         this.greymarchEarsTick(Date.now()); // where each voice comes from, for the launcher (only while it is in voice)
+        this.greymarchLipTick(Date.now()); // the mouths of whoever is talking in voice move (this player's too)
         var beat = this.greymarchBeat;
         if (beat) {
             var bNow = Date.now();
@@ -419,6 +423,8 @@ export class GreymarchBridge {
         this.greymarchListen = data.listen === true; // the launcher is in voice: it wants to know where voices come from (greymarchEarsTick), even with the display off
         var changed = hud !== !!this.greymarchHudOn;
         this.greymarchVoice = { hud: hud, speaking: ids };
+        this.greymarchLipIds = ids; // who is talking: their mouths move (greymarchLipTick), with the voice display on or off
+        this.greymarchLipMe = data.talking === true;
         // the floating names mark whoever is talking (formView.ts draws the mark as part of the name, so it moves with it and cannot lag)
         try { var talking = {}; if (hud) for (var ti = 0; ti < ids.length; ti++) talking[ids[ti]] = 1; (Function("return this")() as any).__gmSpeaking = talking; } catch (e) { /* the names stay unmarked */ }
         this.greymarchHudOn = hud;
@@ -1977,6 +1983,47 @@ export class GreymarchBridge {
             if (!ac) { o.localId = 0; continue; } // not drawn here now
             this.greymarchFaceApply(ac, o.face, o.localId !== localId); // a character drawn again starts clean
             o.localId = localId;
+        }
+    }
+    // ---- MOVING MOUTHS. While someone talks in voice (the launcher says who: this player while push-to-talk is held, and the character IDs of others), the mouth of the
+    // character this game draws for them moves: about 9 times a second the game's own mouth shapes (Actor.setExpressionPhoneme: Aah, Eh, Oh ... and now and then a closed
+    // one) are put on at random strengths. Nothing goes through the server: every game hears the same voices and moves the mouths itself. When they stop, the mouth
+    // closes and a face from the wheel (Open mouth, Bare fangs ...) is put back.
+    greymarchLipTick(now: number): any {
+        if (now < (this.greymarchLipNext || 0)) return;
+        this.greymarchLipNext = now + LIP_STEP_MS;
+        var sp = this.sp;
+        var want: any = {};
+        if (this.greymarchLipMe && !this.greymarchWolfOn && !this.greymarchShapeOn) want[0x14] = true;
+        var ids = this.greymarchLipIds || [], seen = this.greymarchEarsSeen || {};
+        for (var i = 0; i < ids.length; i++) { var s = seen[ids[i]]; if (s && s.localId && now - s.at < 1000) want[s.localId] = true; } // drawn here, near enough to be heard
+        var moving = this.greymarchLipOn || (this.greymarchLipOn = {});
+        if (!Object.keys(want).length && !Object.keys(moving).length) return;
+        var step = this.greymarchLipStep = (this.greymarchLipStep || 0) + 1;
+        for (var key in want) {
+            var id = Number(key), ac: any = null;
+            try { ac = id === 0x14 ? sp.Game.getPlayer() : sp.Actor.from(sp.Game.getFormEx(id)); } catch (e) { ac = null; }
+            if (!ac) continue;
+            var prev = moving[key];
+            var pool = (step + id) % 3 === 0 ? LIP_CLOSED : LIP_OPEN; // every third step or so the lips meet (B, D, N)
+            var shape = pool[Math.floor(Math.random() * pool.length)];
+            if (prev !== undefined && prev[0] === shape[0]) shape = pool[(pool.indexOf(shape) + 1) % pool.length];
+            var value = shape[1] * (0.6 + Math.random() * 0.6);
+            try { if (prev !== undefined) ac.setExpressionPhoneme(prev[0], 0); ac.setExpressionPhoneme(shape[0], Math.min(1, value)); } catch (e) { continue; }
+            moving[key] = [shape[0], value];
+        }
+        for (var mk in moving) {
+            if (want[mk]) continue;
+            var was = moving[mk];
+            delete moving[mk];
+            var mid = Number(mk), mac: any = null;
+            try { mac = mid === 0x14 ? sp.Game.getPlayer() : sp.Actor.from(sp.Game.getFormEx(mid)); } catch (e) { mac = null; }
+            if (!mac) continue;
+            try { mac.setExpressionPhoneme(was[0], 0); } catch (e) { /* the next face clears it */ }
+            var face = null; // a face from the wheel goes back on at once
+            if (mid === 0x14) face = this.greymarchFaceMine ? this.greymarchFaceMine.face : null;
+            else { var others = this.greymarchFaceOthers || {}; for (var fk in others) if (others[fk].localId === mid) face = others[fk].face; }
+            if (face) this.greymarchFaceApply(mac, face, false);
         }
     }
     greymarchEmoteEnd(why: string): any {

@@ -241,3 +241,53 @@ test("the faces are the ones the server knows (gamemode faces.js)", () => {
   assert.deepStrictEqual(faces.map((x) => x.id), ["open", "fangs", "snarl", "shout", "smile", "frown", "sad", "surprise", "fear", "disgust"]);
   for (const x of faces) assert.ok(x.kind === "face" && x.face && (typeof x.face.mood === "number" || (x.face.phonemes || []).length), x.id);
 });
+
+// moving mouths: the launcher says who is talking (greymarchVoiceMessage), the bridge works their mouths (greymarchLipTick)
+const lipTick = (s, ms = 120) => { s.tick(0); s.gm.__t = (s.gm.__t || 2_000_000) + ms; const real = Date.now; Date.now = () => s.gm.__t; try { s.gm.greymarchLipTick(s.gm.__t); } finally { Date.now = real; } };
+const phonemes = (list) => (list || []).filter((x) => x[0] === "ph");
+
+test("talking in voice (push-to-talk held): the player's own mouth changes shape every step, and closes when they stop", () => {
+  const s = make();
+  s.gm.greymarchVoiceMessage({ hud: false, listen: true, talking: true, speaking: [] });
+  s.log.faces.me = [];
+  for (let i = 0; i < 6; i++) lipTick(s);
+  const ph = phonemes(s.log.faces.me);
+  const opens = ph.filter((x) => x[2] > 0), closes = ph.filter((x) => x[2] === 0);
+  assert.strictEqual(opens.length, 6, "a new mouth shape each step");
+  assert.strictEqual(closes.length, 5, "the shape before it is let go each time");
+  assert.ok(opens.every((x) => x[2] <= 1 && [0, 1, 2, 4, 5, 6, 8, 10, 11].includes(x[1])), JSON.stringify(opens));
+  assert.ok(new Set(opens.map((x) => x[1])).size >= 2, "the mouth does not hold one shape");
+  s.gm.greymarchVoiceMessage({ hud: false, listen: true, talking: false, speaking: [] });
+  s.log.faces.me = [];
+  lipTick(s);
+  assert.deepStrictEqual(phonemes(s.log.faces.me).map((x) => x[2]), [0], "closed");
+  s.log.faces.me = [];
+  lipTick(s);
+  assert.deepStrictEqual(s.log.faces.me, [], "and then left alone");
+});
+
+test("another player talking: the mouth of the character drawn for them moves, with the voice display on or off; not when they are not drawn here", () => {
+  const s = make({ others: { 0xff000777: 0xff000021 } });
+  s.gm.greymarchEarsSeen = { "#ABCD": { x: 0, y: 0, z: 0, at: 2_000_000, localId: 0xff000021 }, "#WXYZ": { x: 0, y: 0, z: 0, at: 0, localId: 0xff000099 } };
+  s.gm.greymarchVoiceMessage({ hud: false, listen: true, talking: false, speaking: ["#ABCD", "#WXYZ"] });
+  lipTick(s); lipTick(s);
+  assert.ok(phonemes(s.log.faces["ff000021"]).some((x) => x[2] > 0), "their mouth moves");
+  assert.strictEqual(s.log.faces.me, undefined, "not this player's");
+  assert.deepStrictEqual(Object.keys(s.gm.greymarchLipOn), [String(0xff000021)], "#WXYZ was last seen long ago: not moved");
+});
+
+test("a face from the wheel goes back on when the talking stops; a beast's own mouth is left alone", () => {
+  const s = make();
+  s.page({ type: "emote", id: "fangs" }); s.tick();
+  s.gm.greymarchVoiceMessage({ hud: true, listen: true, talking: true, speaking: [] });
+  lipTick(s); lipTick(s);
+  s.gm.greymarchVoiceMessage({ hud: true, listen: true, talking: false, speaking: [] });
+  s.log.faces.me = [];
+  lipTick(s);
+  assert.deepStrictEqual(s.log.faces.me.slice(1), [["mood", 15, 100], ["ph", 5, 0.8], ["ph", 1, 0.4]], "Bare fangs again right after the mouth closed");
+  const w = make();
+  w.gm.greymarchWolfOn = true;
+  w.gm.greymarchVoiceMessage({ hud: false, listen: true, talking: true, speaking: [] });
+  lipTick(w);
+  assert.strictEqual(w.log.faces.me, undefined);
+});
