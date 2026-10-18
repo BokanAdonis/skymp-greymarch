@@ -559,6 +559,17 @@ export class FormView {
       }
     }
 
+    // GREYMARCH: where this player's head is, about 10 times a second, so the launcher can play their voice from there (direction, muffle, floors; see bridge.ts greymarchEarsTick)
+    if (this.refrId && model.appearance?.name && Date.now() >= this.gmEarNext) {
+      this.gmEarNext = Date.now() + 100;
+      try {
+        if (refr.is3DLoaded() && Game.getPlayer()!.getDistance(refr) <= 4500) {
+          const gmHead = "NPC Head [Head]";
+          (SpApiInteractor.getControllerInstance().emitter as any).emit("greymarchEar", { name: model.appearance.name, x: NetImmerse.getNodeWorldPositionX(refr, gmHead, false), y: NetImmerse.getNodeWorldPositionY(refr, gmHead, false), z: NetImmerse.getNodeWorldPositionZ(refr, gmHead, false) });
+        }
+      } catch (gmErr) { /* their voice just stays centred */ }
+    }
+
     if (FormView.isDisplayingNicknames && this.refrId && model.appearance?.name) {
       const headPart = "NPC Head [Head]";
       const maxNicknameDrawDistance = 1000;
@@ -731,6 +742,7 @@ export class FormView {
   private textNameId: number | undefined = undefined;
   private textNameShown: string | undefined = undefined;
   private textIdId: number | undefined = undefined; // GREYMARCH: the ID line under an introduced character's name
+  private gmEarNext = 0; // GREYMARCH: when this player's head position is next reported for the voice (see update)
 
 
   public static isDisplayingNicknames: boolean = true;
