@@ -967,13 +967,15 @@ export class GreymarchBridge {
                     var has = !!mouth && !!fp && mouth.getFormID() === fp.getFormID();
                     if (!fp) this.greymarchVampFangReport(v.actor, localId, "no fang part in GreymarchCore.esp (old game files?)");
                     else if (want && !has) {
-                        actor.changeHeadPart(fp);
+                        // the teeth are a Misc part, and a character may have several: changeHeadPart only ADDS the fangs next to their teeth, which keep showing
+                        // (the report read back their own teeth). replaceHeadPart swaps their teeth for the fangs in place; changeHeadPart only when they have none.
+                        if (mouth) actor.replaceHeadPart(mouth, fp); else actor.changeHeadPart(fp);
                         var after = this.greymarchVampEyePart(base, 0);
                         this.greymarchVampFangReport(v.actor, localId, after && after.getFormID() === fp.getFormID() ? "on" : "put on, but the teeth read back as " + (after ? after.getFormID().toString(16) : "none"), (mouth ? mouth.getFormID().toString(16) : "race teeth") + " -> " + fp.getFormID().toString(16));
                     }
                     else if (!want && has) {
                         var own = sp.HeadPart.from(sp.Game.getFormEx(rec.mouth || (female ? VAMP_OWN_TEETH.female : VAMP_OWN_TEETH.male))); // their own teeth, or the race's when they had none of their own
-                        if (own) { actor.changeHeadPart(own); this.greymarchVampFangReport(v.actor, localId, "off", own.getFormID().toString(16)); }
+                        if (own) { actor.replaceHeadPart(fp, own); this.greymarchVampFangReport(v.actor, localId, "off", own.getFormID().toString(16)); }
                     }
                     else if (want && has) this.greymarchVampFangReport(v.actor, localId, "on");
                     rec.fangs = want;
@@ -987,8 +989,11 @@ export class GreymarchBridge {
                 var a2 = Number(k) === 0x14 ? sp.Game.getPlayer() : sp.Actor.from(sp.Game.getFormEx(Number(k)));
                 var orig = back.orig ? sp.HeadPart.from(sp.Game.getFormEx(back.orig)) : null;
                 if (a2 && orig) { a2.changeHeadPart(orig); this.greymarchLog("vampire: " + Number(k).toString(16) + " has their own eyes back"); }
-                var teeth = back.fangs && back.mouth ? sp.HeadPart.from(sp.Game.getFormEx(back.mouth)) : null;
-                if (a2 && teeth) a2.changeHeadPart(teeth);
+                if (a2 && back.fangs) { // the fangs swapped back for their own teeth (or the race's), in place: changeHeadPart would only add a second Misc part
+                    var base2 = sp.ActorBase.from(a2.getBaseObject()), cur2 = base2 ? this.greymarchVampEyePart(base2, 0) : null;
+                    var teeth = sp.HeadPart.from(sp.Game.getFormEx(back.mouth || (base2 && base2.getSex() === 1 ? VAMP_OWN_TEETH.female : VAMP_OWN_TEETH.male)));
+                    if (teeth && cur2 && cur2.getFormID() !== teeth.getFormID()) a2.replaceHeadPart(cur2, teeth);
+                }
             } catch (bErr) { /* gone */ }
         }
     }

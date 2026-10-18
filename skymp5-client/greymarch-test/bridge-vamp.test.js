@@ -121,7 +121,7 @@ test("blue eyes and fangs: every listed vampire gets the eye part for their glow
   const typeOf = (id) => (id === FANG_M || id === FANG_F || id === 0x333 || id === 0x444 ? 0 : 2);
   const part = (id) => ({ getFormID: () => id, getType: () => typeOf(id) });
   const worn = { me: { 2: 0x111, 0: 0x333 }, them: { 2: 0x222, 0: 0x444 } }; // name -> type -> head part id
-  const body = (name, race, sex) => ({ name, getRace: () => ({ getFormID: () => race }), getBaseObject: () => ({ name, sex }), changeHeadPart: (hp) => { worn[name][hp.getType()] = hp.getFormID(); } });
+  const body = (name, race, sex) => ({ name, getRace: () => ({ getFormID: () => race }), getBaseObject: () => ({ name, sex }), changeHeadPart: (hp) => { if (hp.getType() === 0 && worn[name][0]) throw new Error("changeHeadPart only adds a second Misc part: the teeth stay"); worn[name][hp.getType()] = hp.getFormID(); }, replaceHeadPart: (old, hp) => { assert.strictEqual(worn[name][old.getType()], old.getFormID(), "replaces the part that is there"); worn[name][hp.getType()] = hp.getFormID(); } });
   Object.assign(sp.Game.getPlayer(), body("me", 0x13746, 1));
   const them = body("them", 0x13745, 0); // a Khajiit: not made yet
   sp.Game.getFormEx = (id) => (id === 0x5000 ? them : { id });
@@ -153,7 +153,7 @@ test("fangs on a character with no teeth part of their own: on, reported to the 
   const GM = 0x0a000000, FANG_M = GM + 0x81c;
   const part = (id) => ({ getFormID: () => id, getType: () => (id === FANG_M || id === 0x51631 ? 0 : 2) });
   const worn = { 2: 0x111 }; // their eyes; no teeth part of their own (the race's teeth show)
-  Object.assign(sp.Game.getPlayer(), { name: "me", getRace: () => ({ getFormID: () => 0x13746 }), getBaseObject: () => ({ sex: 0 }), changeHeadPart: (hp) => { worn[hp.getType()] = hp.getFormID(); } });
+  Object.assign(sp.Game.getPlayer(), { name: "me", getRace: () => ({ getFormID: () => 0x13746 }), getBaseObject: () => ({ sex: 0 }), changeHeadPart: (hp) => { worn[hp.getType()] = hp.getFormID(); }, replaceHeadPart: (old, hp) => { assert.strictEqual(worn[old.getType()], old.getFormID()); worn[hp.getType()] = hp.getFormID(); } });
   sp.Actor.from = (f) => f;
   sp.Game.getFormEx = (id) => ({ id });
   sp.Game.getFormFromFile = (id, file) => (file === "GreymarchCore.esp" ? { id: GM + id } : file === "Dawnguard.esm" ? { getFormID: () => DG + id } : null);
