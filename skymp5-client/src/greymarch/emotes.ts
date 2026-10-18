@@ -4,9 +4,13 @@
 //   kind "once": plays and ends by itself.   "loop": lasts until the player moves, jumps, draws a weapon or picks Stop (IdleStop_Loose).
 //   "walk": a carry or walk style the player keeps while moving; ends with Stop or a drawn weapon (OffsetStop, or IdleDrunkStop for the drunk walk).
 // The other players see it because SkyMP sends the player's animation events (sync/animation.ts); the server only passes them on.
+//   "face": not an animation but a face (the Face group: open the mouth, bare the teeth so a vampire's fangs show, snarl, smile ...), made with the game's own
+//   Actor.setExpressionOverride (a mood and its strength, 0-100) and setExpressionPhoneme (a mouth shape, 0-1). SkyMP does not send faces, so the server passes it on
+//   (gamemode faces.js, the same ids). A face stays while the player moves and does other emotes; picking it again or the middle of the wheel takes it off.
 
-export type EmoteKind = "once" | "loop" | "walk";
-export interface Emote { id: string; name: string; idle: number; kind: EmoteKind; stop?: number }
+export type EmoteKind = "once" | "loop" | "walk" | "face";
+export interface Face { mood?: number; strength?: number; phonemes?: number[][] } // phonemes: [index, 0-1] (0 Aah, 1 BigAah, 5 Eee ...)
+export interface Emote { id: string; name: string; idle: number; kind: EmoteKind; stop?: number; face?: Face }
 export interface EmoteGroup { id: string; name: string; items: Emote[] }
 
 export const IDLE_STOP = 0x10d9ee;       // IdleStop_Loose (event IdleStop): ends a loop
@@ -14,11 +18,18 @@ export const OFFSET_STOP = 0x8c0a0;      // OffsetStop: ends a carry / arms cros
 export const DRUNK_STOP = 0xcefd1;       // IdleDrunkStop (event DrunkStop)
 
 const e = (id: string, name: string, idle: number, kind: EmoteKind, stop?: number): Emote => (stop ? { id, name, idle, kind, stop } : { id, name, idle, kind });
+const f = (id: string, name: string, face: Face): Emote => ({ id, name, idle: 0, kind: "face", face });
+// the moods setExpressionOverride knows: 0 anger, 1 fear, 2 happy, 3 sad, 4 surprise, 6 disgust (the dialogue faces), 15 combat anger (teeth bared), 16 combat shout
 
 export const EMOTE_GROUPS: EmoteGroup[] = [
     { id: "greet", name: "Greet", items: [
         e("wave", "Wave", 0x3ea32, "once"), e("beckon", "Come here", 0xf6ccf, "once"), e("hey", "Hey, you", 0x6ff15, "loop"), e("welcome", "Welcome", 0xf4331, "once"),
         e("salute", "Salute", 0xf4333, "once"), e("attention", "Attention", 0xb240b, "once"), e("bow", "Bow", 0xd8735, "once"), e("surrender", "Surrender", 0x105d47, "once"),
+    ] },
+    { id: "face", name: "Face", items: [
+        f("open", "Open mouth", { phonemes: [[1, 0.65]] }), f("fangs", "Bare fangs", { mood: 15, strength: 100, phonemes: [[5, 0.8], [1, 0.4]] }), f("snarl", "Snarl", { mood: 15, strength: 100 }),
+        f("shout", "Roar", { mood: 16, strength: 100 }), f("smile", "Smile", { mood: 2, strength: 80 }), f("frown", "Angry", { mood: 0, strength: 80 }),
+        f("sad", "Sad", { mood: 3, strength: 80 }), f("surprise", "Surprised", { mood: 4, strength: 80 }), f("fear", "Afraid", { mood: 1, strength: 80 }), f("disgust", "Disgusted", { mood: 6, strength: 80 }),
     ] },
     { id: "point", name: "Point & show", items: [
         e("pointclose", "Point here", 0xffa0c, "once"), e("pointmed", "Point there", 0xb8f1f, "once"), e("pointfar", "Point far", 0xb8f1e, "once"), e("lookfar", "Look far", 0x75c62, "once"),

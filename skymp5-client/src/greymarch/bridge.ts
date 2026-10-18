@@ -129,6 +129,7 @@ export class GreymarchBridge {
         if (type === "greymarchGmAlert") { this.greymarchChatToPage("alert", msg); return; } // a player typed /gm (the server only sends it to Trial GM and up)
         if (type === "greymarchMenuReply") { this.greymarchMenuToPage("reply", msg); return; }
         if (type === "greymarchShape") { this.greymarchShapeMsg(msg); return; }
+        if (type === "greymarchFaceOf") { this.greymarchFaceOf(msg); return; } // another player's face from the emote wheel (gamemode faces.js; put on in greymarchFaceTick)
         if (type === "greymarchShapeAnim") { if (typeof msg.ev === "string" && msg.ev.length < 64 && Number(msg.actor) > 0) (this.greymarchShapeAnimQueue || (this.greymarchShapeAnimQueue = [])).push({ actor: Number(msg.actor), ev: msg.ev }); return; } // another player's creature attacked (played in greymarchShapeDrive) // a creature form (staff): greymarchShapeTick changes the body
         if (type === "greymarchWolfForm") { if (this.greymarchWolfWant !== !!msg.on) this.greymarchLog("wolf: the server says " + (msg.on ? "changed" : "no (change back)")); this.greymarchWolfWant = !!msg.on; if (msg.on) { this.greymarchWolfWordAt = Date.now(); this.greymarchWolfAlpha = !!msg.alpha; this.greymarchWolfPup = !msg.alpha && !!msg.pup; this.greymarchWolfBearRace = msg.bear && Number(msg.race) > 0 ? Number(msg.race) >>> 0 : 0; if (this.greymarchWolfBearRace) this.greymarchWolfBearSeen = this.greymarchWolfBearRace; this.greymarchWolfBlack = !!this.greymarchWolfBearRace && !!msg.black; } return; } // (logged only when it changes: the server repeats it every 5 seconds) // the werewolf form (greymarchWolfTick)
         if (type === "greymarchWolfAlphas") { this.greymarchWolfAlphaList = Array.isArray(msg.actors) ? msg.actors : []; this.greymarchWolfPupList = Array.isArray(msg.pups) ? msg.pups : []; this.greymarchWolfBlackList = Array.isArray(msg.blackbears) ? msg.blackbears : []; return; } // the other players in the Alpha form: drawn white (greymarchWolfAlphaOthers)
@@ -444,7 +445,7 @@ export class GreymarchBridge {
         if (data && data.type === "vampire") { this.greymarchVampMenuAsk(data); return; } // the vampire window asks the server (the SERVER decides)
         if (data && data.type === "vampire-close") { this.greymarchVampMenuHide(); return; }
         if (data && data.type === "emote") { this.greymarchEmotePlayWanted = { id: data.id, at: Date.now() }; return; } // the emote wheel: play one (greymarchEmoteTick checks it is on the list)
-        if (data && data.type === "emote-stop") { this.greymarchEmoteStopWanted = Date.now(); return; }
+        if (data && data.type === "emote-stop") { this.greymarchEmoteStopWanted = Date.now(); this.greymarchFaceClearWanted = Date.now(); return; } // the middle of the wheel: the emote and the face
         if (data && data.type === "emote-close") { this.greymarchEmoteHide(); return; }
         if (!data || (data.type !== "play" && data.type !== "create" && data.type !== "delete")) return;
         // Play and Create make SkyMP load the world. If the world from logging in is still loading, a second load on top of it never finishes (stuck),
@@ -1860,7 +1861,7 @@ export class GreymarchBridge {
         this.sp.browser.setVisible(true);
         this.sp.browser.setFocused(true);
         var now = this.greymarchEmoteNow;
-        this.greymarchEmoteToPage("show", { mode: mode === "open" ? "open" : "hold", groups: emoteMod.emoteGroupsForPage(), playing: now ? now.id : null });
+        this.greymarchEmoteToPage("show", { mode: mode === "open" ? "open" : "hold", groups: emoteMod.emoteGroupsForPage(), playing: now ? now.id : this.greymarchFaceMine ? this.greymarchFaceMine.id : null });
     }
     greymarchEmoteHide(): any {
         if (!this.greymarchEmoteOn) return;
@@ -1887,8 +1888,10 @@ export class GreymarchBridge {
         if (play) {
             this.greymarchEmotePlayWanted = null;
             var em = emoteMod.emoteById(play.id);
-            if (em && now - play.at <= 2000) this.greymarchEmotePlay(em);
+            if (em && now - play.at <= 2000) { if (em.kind === "face") this.greymarchFaceSet(em); else this.greymarchEmotePlay(em); }
         }
+        if (this.greymarchFaceClearWanted) { this.greymarchFaceClearWanted = 0; if (this.greymarchFaceMine) this.greymarchFaceSet(null); }
+        this.greymarchFaceTick(now);
         var cur = this.greymarchEmoteNow;
         if (!cur) { this.greymarchEmoteStopWanted = 0; return; }
         var stopWhy = "";
@@ -1920,6 +1923,61 @@ export class GreymarchBridge {
         if (n <= 20) this.greymarchLog("emote: " + em.id + " (idle " + em.idle.toString(16) + ", " + em.kind + ") " + (ok ? "played" : "refused by the game"));
         if (!ok) { this.greymarchEmoteSay("You cannot do that right now"); return; }
         this.greymarchEmoteNow = em.kind === "once" ? null : { id: em.id, kind: em.kind, stop: em.stop || emoteMod.IDLE_STOP, at: Date.now() };
+    }
+    // ---- FACES (the wheel's Face group). The face is put on the player's own body here and reported to the server, which passes it to everyone else (gamemode faces.js);
+    // the faces of other players come back as { customPacketType: "greymarchFaceOf", actor, face } and are put on the characters this game draws. The game can drop a face
+    // (dialogue, blinking, a character drawn again), so every face that is on is put on again once a second.
+    greymarchFaceSet(em: any): any {
+        var mine = this.greymarchFaceMine;
+        if (em && mine && mine.id === em.id) em = null; // picking the face that is on takes it off
+        this.greymarchFaceMine = em ? { id: em.id, face: em.face } : null;
+        this.greymarchFaceNext = Date.now() + 1000; // put on now: the once-a-second repeat starts a second later
+        var player: any = null;
+        try { player = this.sp.Game.getPlayer(); } catch (e) { player = null; }
+        if (player) this.greymarchFaceApply(player, em ? em.face : null, true);
+        if (em) { try { this.sp.Game.forceThirdPerson(); } catch (tpErr) { /* the face is on anyway */ } }
+        var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchFace", face: em ? em.id : null }) };
+        this.controller.emitter.emit("sendMessage", { message: message, reliability: "reliable" });
+        if ((this.greymarchEmoteLogged = (this.greymarchEmoteLogged || 0) + 1) <= 20) this.greymarchLog("emote: face " + (em ? em.id : "off"));
+    }
+    greymarchFaceApply(actor: any, face: any, fresh: boolean): any {
+        try {
+            if (fresh) { actor.clearExpressionOverride(); actor.resetExpressionOverrides(); }
+            if (!face) return;
+            if (typeof face.mood === "number") actor.setExpressionOverride(face.mood, face.strength || 100);
+            var ph = face.phonemes || [];
+            for (var i = 0; i < ph.length; i++) actor.setExpressionPhoneme(ph[i][0], ph[i][1]);
+        } catch (e) { /* the next second tries again */ }
+    }
+    greymarchFaceOf(msg: any): any {
+        var actor = Number(msg.actor) >>> 0;
+        if (!actor) return;
+        var em = msg.face === null ? null : emoteMod.emoteById(msg.face);
+        if (msg.face !== null && (!em || em.kind !== "face")) return; // not a face this game knows
+        var all = this.greymarchFaceOthers || (this.greymarchFaceOthers = {});
+        if (!em && !all[actor]) return;
+        if (em && !all[actor] && Object.keys(all).length >= 64) return;
+        all[actor] = { face: em ? em.face : null, localId: 0 };
+    }
+    greymarchFaceTick(now: number): any {
+        if (now < (this.greymarchFaceNext || 0)) return;
+        this.greymarchFaceNext = now + 1000;
+        var sp = this.sp;
+        var mine = this.greymarchFaceMine;
+        if (mine) { try { this.greymarchFaceApply(sp.Game.getPlayer(), mine.face, false); } catch (e) { /* next second */ } }
+        var all = this.greymarchFaceOthers;
+        if (!all) return;
+        for (var key in all) {
+            var o = all[key];
+            var localId = 0;
+            try { localId = misc.remoteIdToLocalId(Number(key)) || 0; } catch (e) { localId = 0; }
+            var ac: any = null;
+            if (localId) { try { ac = sp.Actor.from(sp.Game.getFormEx(localId)); } catch (e) { ac = null; } }
+            if (!o.face) { if (ac) this.greymarchFaceApply(ac, null, true); delete all[key]; continue; } // taken off (or the player left)
+            if (!ac) { o.localId = 0; continue; } // not drawn here now
+            this.greymarchFaceApply(ac, o.face, o.localId !== localId); // a character drawn again starts clean
+            o.localId = localId;
+        }
     }
     greymarchEmoteEnd(why: string): any {
         var sp = this.sp, cur = this.greymarchEmoteNow;

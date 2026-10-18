@@ -13,26 +13,29 @@ const emotes = load(tr("emotes.ts"), {});
 const bridgeJs = tr("bridge.ts");
 
 function make(opts = {}) {
-  const log = { idles: [], events: [], notes: [], pages: [], lines: [], thirdPerson: 0, focused: [] };
-  const mods = { "../messages": { MsgType: { CustomPacket: 77 } }, "./emotes": emotes, "../view/worldViewMisc": {}, "../services/services/remoteServer": { RemoteServer: {} }, "../services/services/singlePlayerService": { SinglePlayerService: {} } };
+  const log = { idles: [], events: [], notes: [], pages: [], lines: [], thirdPerson: 0, focused: [], sent: [], faces: {} };
+  const faceLog = (who) => ({ clearExpressionOverride: () => (log.faces[who] = []), resetExpressionOverrides: () => (log.faces[who] = []), setExpressionOverride: (m, s) => (log.faces[who] = log.faces[who] || []).push(["mood", m, s]), setExpressionPhoneme: (i, v) => (log.faces[who] = log.faces[who] || []).push(["ph", i, v]) });
+  const mods = { "../messages": { MsgType: { CustomPacket: 77 } }, "./emotes": emotes, "../view/worldViewMisc": { remoteIdToLocalId: (id) => (opts.others || {})[id] || 0 }, "../services/services/remoteServer": { RemoteServer: {} }, "../services/services/singlePlayerService": { SinglePlayerService: {} } };
   const bridge = load(bridgeJs, mods);
   const state = { drawn: false, speed: 0, menu: null, refuse: false };
   const player = {
     playIdle: (idle) => { log.idles.push(idle.id); return !state.refuse; },
     isWeaponDrawn: () => state.drawn,
     getAnimationVariableFloat: (n) => (n === "Speed" ? state.speed : 0),
+    ...faceLog("me"),
   };
+  const actors = {}; for (const local of Object.values(opts.others || {})) actors[local] = faceLog(local.toString(16));
   const sp = {
     printConsole() {}, writeLogs: (n, l) => log.lines.push(l),
     Game: { getPlayer: () => player, getFormEx: (id) => ({ id }), forceThirdPerson: () => { log.thirdPerson++; } },
-    Idle: { from: (f) => f || null },
+    Idle: { from: (f) => f || null }, Actor: { from: (f) => (f && actors[f.id]) || null },
     Debug: { sendAnimationEvent: (ref, name) => log.events.push(name), notification: (t) => log.notes.push(t) },
     Ui: { isMenuOpen: (name) => name === state.menu },
     Utility: { isInMenuMode: () => false },
     browser: { setVisible() {}, setFocused: (v) => log.focused.push(v), isFocused: () => true, executeJavaScript: (js) => { const m = /window\.__gmEmoteRun\((.*)\);$/.exec(js); if (m) log.pages.push(JSON.parse(m[1])); } },
     on() {}, storage: {},
   };
-  const controller = { on() {}, emitter: { on() {}, emit() {} } };
+  const controller = { on() {}, emitter: { on() {}, emit: (n, m) => { if (n === "sendMessage") { const c = JSON.parse(m.message.contentJsonDump); if (c.customPacketType !== "greymarchLog") log.sent.push(c); } } } };
   const gm = new bridge.GreymarchBridge(sp, controller);
   let t = 1_000_000;
   const realNow = Date.now;
@@ -41,7 +44,8 @@ function make(opts = {}) {
   const key = (code, down) => at(() => gm.greymarchKey({ code, isDown: down }));
   const page = (msg) => at(() => gm.greymarchBrowserMessage({ arguments: ["greymarch", JSON.stringify(msg)] }));
   const shown = () => log.pages.filter((p) => p.fn === "show");
-  return { gm, log, state, tick, key, page, shown, bridgeSrc: bridgeJs };
+  const say = (msg) => at(() => gm.greymarchPacket(msg));
+  return { gm, log, state, tick, key, page, shown, say, bridgeSrc: bridgeJs };
 }
 
 test("holding G opens the wheel (hold mode) with every group, from the update phase; letting go tells the page", () => {
@@ -176,8 +180,8 @@ test("the emote list: unique ids, at most 12 per group, real idle numbers, the p
     assert.ok(g.items.length >= 1 && g.items.length <= 12, g.id);
     for (const e of g.items) {
       assert.ok(!ids.has(e.id), "duplicate " + e.id); ids.add(e.id);
-      assert.ok(Number.isInteger(e.idle) && e.idle > 0 && e.idle < 0x1000000, e.id + " is a Skyrim.esm idle");
-      assert.ok(["once", "loop", "walk"].includes(e.kind), e.id);
+      if (e.kind !== "face") assert.ok(Number.isInteger(e.idle) && e.idle > 0 && e.idle < 0x1000000, e.id + " is a Skyrim.esm idle");
+      assert.ok(["once", "loop", "walk", "face"].includes(e.kind), e.id);
       if (e.kind === "walk") assert.ok(e.stop, e.id + " has its own stop");
     }
   }
@@ -195,4 +199,45 @@ test("the wheel's loader shows greymarch-emote.html in its own layer and treats 
   s.gm.greymarchEmoteToPage("show", {});
   assert.ok(js.includes("greymarch-emote.html") && js.includes("__gmEmoteRun") && js.includes("2147483223"));
   assert.ok(js.includes("e.key==='g'||e.key==='G'") && !js.includes("e.key==='x'"));
+});
+
+test("a face (Bare fangs): put on the player's own face, reported to the server, the camera to third person; picking it again or the middle of the wheel takes it off", () => {
+  const s = make();
+  s.page({ type: "emote", id: "fangs" }); s.tick();
+  assert.deepStrictEqual(s.log.faces.me, [["mood", 15, 100], ["ph", 5, 0.8], ["ph", 1, 0.4]], "combat anger with the teeth shown and the mouth a little open");
+  assert.deepStrictEqual(s.log.sent, [{ customPacketType: "greymarchFace", face: "fangs" }]);
+  assert.strictEqual(s.log.thirdPerson, 1);
+  assert.deepStrictEqual(s.log.idles, [], "no animation");
+  s.key(17, true); s.tick(); s.key(17, false);
+  assert.strictEqual(s.gm.greymarchFaceMine.id, "fangs", "walking keeps the face");
+  s.log.faces.me = null; s.tick(1100);
+  assert.deepStrictEqual(s.log.faces.me, [["mood", 15, 100], ["ph", 5, 0.8], ["ph", 1, 0.4]], "put on again every second (the game drops it)");
+  s.key(34, true); s.tick();
+  assert.strictEqual(s.shown()[0].arg.playing, "fangs", "the wheel's middle shows it");
+  s.key(34, false);
+  s.page({ type: "emote-stop" }); s.tick();
+  assert.deepStrictEqual(s.log.faces.me, [], "cleared");
+  assert.deepStrictEqual(s.log.sent.at(-1), { customPacketType: "greymarchFace", face: null });
+  s.page({ type: "emote", id: "open" }); s.tick(); s.page({ type: "emote", id: "open" }); s.tick();
+  assert.deepStrictEqual(s.log.sent.slice(-2).map((m) => m.face), ["open", null], "the same face again takes it off");
+});
+
+test("another player's face: put on the character this game draws for them, every second, and taken off when the server says so", () => {
+  const s = make({ others: { 0xff000777: 0xff000021 } });
+  s.say({ customPacketType: "greymarchFaceOf", actor: 0xff000777, face: "open" });
+  s.say({ customPacketType: "greymarchFaceOf", actor: 0xff000888, face: "smile" }); // not drawn here
+  s.say({ customPacketType: "greymarchFaceOf", actor: 0xff000777, face: "explode" }); // not a face
+  s.tick();
+  assert.deepStrictEqual(s.log.faces["ff000021"], [["ph", 1, 0.65]]);
+  s.log.faces["ff000021"] = null; s.tick(1100);
+  assert.deepStrictEqual(s.log.faces["ff000021"], [["ph", 1, 0.65]], "again a second later");
+  s.say({ customPacketType: "greymarchFaceOf", actor: 0xff000777, face: null }); s.tick(1100);
+  assert.deepStrictEqual(s.log.faces["ff000021"], []);
+  assert.deepStrictEqual(Object.keys(s.gm.greymarchFaceOthers), ["4278192264"], "only the one not drawn here waits");
+});
+
+test("the faces are the ones the server knows (gamemode faces.js)", () => {
+  const faces = emotes.EMOTE_GROUPS.find((g) => g.id === "face").items;
+  assert.deepStrictEqual(faces.map((x) => x.id), ["open", "fangs", "snarl", "shout", "smile", "frown", "sad", "surprise", "fear", "disgust"]);
+  for (const x of faces) assert.ok(x.kind === "face" && x.face && (typeof x.face.mood === "number" || (x.face.phonemes || []).length), x.id);
 });

@@ -217,6 +217,7 @@ export class AuthService extends ClientListener {
       case 'greymarchProgress':
       case 'greymarchShape':
       case 'greymarchShapeAnim':
+      case 'greymarchFaceOf': // another player's face from the emote wheel (gamemode faces.js)
       case 'greymarchWolfFeed':
       case 'greymarchVampire':
       case 'greymarchVampLooks':
