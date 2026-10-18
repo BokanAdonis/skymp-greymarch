@@ -40,6 +40,7 @@ const VAMP_EYES: any = { blue: { male: 0x80e, female: 0x815 }, red: { male: 0x81
 const VAMP_EYE_RACES = [0x13746, 0x13744, 0x13741, 0x13748, 0x13743, 0x13749, 0x13742, 0x13747]; // Nord, Imperial, Breton, Redguard, High Elf, Wood Elf, Dark Elf, Orc (the human eye shape; khajiit and argonian eyes are not made yet)
 const VAMP_FANGS = { male: 0x81c, female: 0x81d }; // GM_VampFangsMale / GM_VampFangsFemale: the human teeth with the upper canines pulled into fangs
 const VAMP_FANG_RACES = [0x13746, 0x13744, 0x13741, 0x13748, 0x13743, 0x13749, 0x13742]; // the human and elf teeth; orcs keep their tusks
+const VAMP_OWN_TEETH = { male: 0x51631, female: 0x5150f }; // MaleMouthHumanoidDefault / FemaleMouthHumanoidDefault (Skyrim.esm): the race's teeth, put back for a character with no teeth part of their own
 const CHANCERY_SCRIPT =PROF_SCRIPT.split("__gmProfSend").join("__gmChanceryRun").split("greymarch-prof").join("greymarch-chancery").split("2147483220").join("2147483221"); // the chancery window (/chancery): the same loader, another page
 const EMOTE_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmEmoteRun").split("greymarch-prof").join("greymarch-emote").split("2147483220").join("2147483223").split("e.key==='x'||e.key==='X'").join("e.key==='g'||e.key==='G'"); // the emote wheel (G): the same loader, another page; letting go of G inside the page is a release too
 const VAMP_MENU_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmVampRun").split("greymarch-prof").join("greymarch-vampire").split("2147483220").join("2147483222"); // the vampire window (/vampire): the same loader, another page
@@ -820,6 +821,14 @@ export class GreymarchBridge {
         var q = this.greymarchVampSignals || (this.greymarchVampSignals = []);
         if (q.length < 8) q.push({ kind: kind, id: id });
     }
+    // What happened to a vampire's fangs on this screen, straight to the server (greymarchVamp op "fangs"), which always writes it to its log. Diagnostic lines through
+    // greymarchLog are rate-limited by the server and can be lost right after loading, when the fangs go on. Sent only when the result changes for that character.
+    greymarchVampFangReport(actor: number, localId: number, result: string, detail?: string): any {
+        var said = this.greymarchVampFangSaid || (this.greymarchVampFangSaid = {});
+        if (said[localId] === result) return;
+        said[localId] = result;
+        this.greymarchVampSend({ op: "fangs", actor: actor, self: localId === 0x14, result: result, detail: detail || "" });
+    }
     greymarchVampSend(msg: any): any {
         var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify(Object.assign({ customPacketType: "greymarchVamp" }, msg)) };
         this.controller.emitter.emit("sendMessage", { message: message, reliability: "reliable" });
@@ -955,11 +964,20 @@ export class GreymarchBridge {
                     var want = !!v.fangs && !!fp;
                     if (mouth && fp && mouth.getFormID() !== fp.getFormID()) rec.mouth = mouth.getFormID(); // their own teeth (kept to put back)
                     var has = !!mouth && !!fp && mouth.getFormID() === fp.getFormID();
-                    if (want && !has) { actor.changeHeadPart(fp); if (!rec.fangs) this.greymarchLog("vampire: " + localId.toString(16) + " bares fangs"); }
-                    else if (!want && has && rec.mouth) { var own = sp.HeadPart.from(sp.Game.getFormEx(rec.mouth)); if (own) actor.changeHeadPart(own); }
+                    if (!fp) this.greymarchVampFangReport(v.actor, localId, "no fang part in GreymarchCore.esp (old game files?)");
+                    else if (want && !has) {
+                        actor.changeHeadPart(fp);
+                        var after = this.greymarchVampEyePart(base, 0);
+                        this.greymarchVampFangReport(v.actor, localId, after && after.getFormID() === fp.getFormID() ? "on" : "put on, but the teeth read back as " + (after ? after.getFormID().toString(16) : "none"), (mouth ? mouth.getFormID().toString(16) : "race teeth") + " -> " + fp.getFormID().toString(16));
+                    }
+                    else if (!want && has) {
+                        var own = sp.HeadPart.from(sp.Game.getFormEx(rec.mouth || (female ? VAMP_OWN_TEETH.female : VAMP_OWN_TEETH.male))); // their own teeth, or the race's when they had none of their own
+                        if (own) { actor.changeHeadPart(own); this.greymarchVampFangReport(v.actor, localId, "off", own.getFormID().toString(16)); }
+                    }
+                    else if (want && has) this.greymarchVampFangReport(v.actor, localId, "on");
                     rec.fangs = want;
-                }
-            } catch (eErr) { /* not loaded here: the next look */ }
+                } else if (v.fangs) this.greymarchVampFangReport(v.actor, localId, "no fangs for race " + race.getFormID().toString(16));
+            } catch (eErr) { this.greymarchVampFangReport(v.actor, localId, "error: " + String(eErr).slice(0, 200)); /* not loaded here: the next look */ }
         }
         for (var k in done) {
             if (seen[k]) continue;

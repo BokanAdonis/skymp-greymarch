@@ -147,6 +147,34 @@ test("blue eyes and fangs: every listed vampire gets the eye part for their glow
   } finally { Date.now = realNow; }
 });
 
+test("fangs on a character with no teeth part of their own: on, reported to the server once; /fangs off puts the race's teeth back, reported too", () => {
+  const s = make();
+  const sp = s.gm.sp;
+  const GM = 0x0a000000, FANG_M = GM + 0x81c;
+  const part = (id) => ({ getFormID: () => id, getType: () => (id === FANG_M || id === 0x51631 ? 0 : 2) });
+  const worn = { 2: 0x111 }; // their eyes; no teeth part of their own (the race's teeth show)
+  Object.assign(sp.Game.getPlayer(), { name: "me", getRace: () => ({ getFormID: () => 0x13746 }), getBaseObject: () => ({ sex: 0 }), changeHeadPart: (hp) => { worn[hp.getType()] = hp.getFormID(); } });
+  sp.Actor.from = (f) => f;
+  sp.Game.getFormEx = (id) => ({ id });
+  sp.Game.getFormFromFile = (id, file) => (file === "GreymarchCore.esp" ? { id: GM + id } : file === "Dawnguard.esm" ? { getFormID: () => DG + id } : null);
+  sp.HeadPart = { from: (f) => (f ? part(f.id) : null) };
+  sp.ActorBase = { from: (b) => (b ? { getSex: () => b.sex, getNumHeadParts: () => Object.keys(worn).length, getNthHeadPart: (i) => part(worn[Object.keys(worn)[i]]) } : null) };
+  let t = 5_000_000; const realNow = Date.now; Date.now = () => t;
+  const look = (list) => { s.say({ customPacketType: "greymarchVampLooks", vampires: list }); s.tick(); t += 2500; };
+  const reports = () => s.log.sent.filter((m) => m.customPacketType === "greymarchVamp" && m.op === "fangs");
+  try {
+    s.say({ customPacketType: "greymarchGhosts", ghosts: [], me: 0xff000001 });
+    look([{ actor: 0xff000001, glow: 1, fangs: true }]);
+    assert.strictEqual(worn[0], FANG_M);
+    assert.deepStrictEqual(reports(), [{ customPacketType: "greymarchVamp", op: "fangs", actor: 0xff000001, self: true, result: "on", detail: "race teeth -> a00081c" }]);
+    look([{ actor: 0xff000001, glow: 1, fangs: true }]);
+    assert.strictEqual(reports().length, 1, "nothing changed: not reported again");
+    look([{ actor: 0xff000001, glow: 1, fangs: false }]);
+    assert.strictEqual(worn[0], 0x51631, "the race's teeth (MaleMouthHumanoidDefault), not stuck with the fangs");
+    assert.deepStrictEqual(reports().pop(), { customPacketType: "greymarchVamp", op: "fangs", actor: 0xff000001, self: true, result: "off", detail: "51631" });
+  } finally { Date.now = realNow; }
+});
+
 test("a Potion of Blood drunk from the inventory (the equip event) is reported too", () => {
   const s = make();
   s.fire("equip", { baseObj: { getFormID: () => DG + 0x18ef3 }, actor: me });
