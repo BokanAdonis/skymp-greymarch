@@ -36,6 +36,10 @@ const VAMP_EYES: any = { blue: { male: 0x80e, female: 0x815 }, red: { male: 0x81
 const VAMP_EYE_RACES = [0x13746, 0x13744, 0x13741, 0x13748, 0x13743, 0x13749, 0x13742, 0x13747]; // Nord, Imperial, Breton, Redguard, High Elf, Wood Elf, Dark Elf, Orc (the human eye shape; khajiit and argonian eyes are not made yet)
 const VAMP_FANGS = { male: 0x81c, female: 0x81d }; // GM_VampFangsMale / GM_VampFangsFemale: the human teeth with the upper canines pulled into fangs
 const VAMP_FANG_RACES = [0x13746, 0x13744, 0x13741, 0x13748, 0x13743, 0x13749, 0x13742]; // the human and elf teeth; orcs keep their tusks
+// RaceMenu's Body Scales sliders (RaceMenuPlugin.psc): NiOverride node scales under its own key. SkyMP's appearance does not carry them, so the server does
+// (gamemode/src/bodyscale.js keeps the same list and the slider ranges). The same key on every game, so the sliders show what the server kept.
+const SCALE_NODES = ["NPC", "NPC Head [Head]", "NPC L Breast", "NPC R Breast", "NPC L Breast01", "NPC R Breast01", "NPC L Butt", "NPC R Butt", "NPC L UpperarmTwist1 [LUt1]", "NPC R UpperarmTwist1 [RUt1]", "NPC L UpperarmTwist2 [LUt2]", "NPC R UpperarmTwist2 [RUt2]", "QUIVER", "WeaponBow", "WeaponAxe", "WeaponSword", "WeaponMace", "SHIELD", "WeaponBack", "WEAPON"];
+const SCALE_KEY = "RSMPlugin";
 const CHANCERY_SCRIPT =PROF_SCRIPT.split("__gmProfSend").join("__gmChanceryRun").split("greymarch-prof").join("greymarch-chancery").split("2147483220").join("2147483221"); // the chancery window (/chancery): the same loader, another page
 const VAMP_MENU_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmVampRun").split("greymarch-prof").join("greymarch-vampire").split("2147483220").join("2147483222"); // the vampire window (/vampire): the same loader, another page
 
@@ -131,6 +135,7 @@ export class GreymarchBridge {
         if (type === "greymarchWolfForm") { if (this.greymarchWolfWant !== !!msg.on) this.greymarchLog("wolf: the server says " + (msg.on ? "changed" : "no (change back)")); this.greymarchWolfWant = !!msg.on; if (msg.on) { this.greymarchWolfWordAt = Date.now(); this.greymarchWolfAlpha = !!msg.alpha; this.greymarchWolfPup = !msg.alpha && !!msg.pup; this.greymarchWolfBearRace = msg.bear && Number(msg.race) > 0 ? Number(msg.race) >>> 0 : 0; if (this.greymarchWolfBearRace) this.greymarchWolfBearSeen = this.greymarchWolfBearRace; this.greymarchWolfBlack = !!this.greymarchWolfBearRace && !!msg.black; } return; } // (logged only when it changes: the server repeats it every 5 seconds) // the werewolf form (greymarchWolfTick)
         if (type === "greymarchWolfAlphas") { this.greymarchWolfAlphaList = Array.isArray(msg.actors) ? msg.actors : []; this.greymarchWolfPupList = Array.isArray(msg.pups) ? msg.pups : []; this.greymarchWolfBlackList = Array.isArray(msg.blackbears) ? msg.blackbears : []; return; } // the other players in the Alpha form: drawn white (greymarchWolfAlphaOthers)
         if (type === "greymarchVampire") { this.greymarchVampWant = msg.on ? msg : null; this.greymarchHudToPage("blood", { on: !!msg.on, blood: msg.blood, empty: !!msg.empty }); return; } // a vampire's state: the blood drop and what the game applies (greymarchVampTick)
+        if (type === "greymarchBodyScales") { this.greymarchScaleList = Array.isArray(msg.list) ? msg.list : []; this.greymarchScaleNext = 0; return; } // RaceMenu's body scales of everyone in the world (greymarchBodyScales)
         if (type === "greymarchVampLooks") { this.greymarchVampLookList = Array.isArray(msg.vampires) ? msg.vampires : []; return; } // how every vampire in the world looks (eyes and fangs)
         if (type === "greymarchVampFeed") { this.greymarchVampFeedWant = msg.on ? { role: msg.role, partner: msg.partner, at: Date.now(), done: false } : { off: true }; return; } // the feeding scene
         if (type === "greymarchVampMist") { if (!msg.on) this.greymarchVampMistEnd = true; return; } // Mist Form refused or over: the game's own mist is ended
@@ -291,6 +296,7 @@ export class GreymarchBridge {
         this.greymarchShapeDrive(); // a creature form as an NPC: moved every frame like SkyMP moves other players; other players' creature attacks
         this.greymarchShapeTick(); // a creature form staff put the player in (a goat, a giant ...): the server decides, the body is changed here
         this.greymarchWolfTick(); // the werewolf form: the game's Beast Form power is the trigger, the server decides, the change is done here
+        this.greymarchBodyScales(Date.now()); // RaceMenu's body scales: reported when the race menu closes, everyone's drawn from the server's list
         this.greymarchVampTick(); // a vampire: powers and potions reported, the abilities the server names, no Restoration, the feeding scene
         this.greymarchEarsTick(Date.now()); // where each voice comes from, for the launcher (only while it is in voice)
         var beat = this.greymarchBeat;
@@ -950,6 +956,83 @@ export class GreymarchBridge {
                 var teeth = back.fangs && back.mouth ? sp.HeadPart.from(sp.Game.getFormEx(back.mouth)) : null;
                 if (a2 && teeth) a2.changeHeadPart(teeth);
             } catch (bErr) { /* gone */ }
+        }
+    }
+    // RaceMenu's Body Scales (Height, Head, ...). When the race menu closes, this game reads the player's and sends them; the server keeps what is allowed and
+    // tells every game who is scaled how (the player too, so a value it cut back is what the player sees). Applied when the list or the character changes, when
+    // a character's 3D comes back, and again every 30 seconds (SkyMP redraws characters now and then). The player's own body is left to RaceMenu while it is open
+    // and for 5 seconds after (until the server's answer has arrived). A character who leaves the list (all default, or now a werewolf or a creature) is put back.
+    greymarchBodyScales(now: number): any {
+        var sp = this.sp, open = false;
+        try { open = !!sp.Ui.isMenuOpen("RaceSex Menu"); } catch (mErr) { open = false; }
+        if (this.greymarchScaleMenuWas && !open) { this.greymarchScaleReport(); this.greymarchScaleHoldMe = now + 5000; }
+        this.greymarchScaleMenuWas = open;
+        if (now < (this.greymarchScaleNext || 0)) return;
+        this.greymarchScaleNext = now + 2000;
+        var list = this.greymarchScaleList || [];
+        var done = this.greymarchScaleDone || (this.greymarchScaleDone = {}); // localId -> what was applied ("scales json|30s slot")
+        var holdMe = open || now < (this.greymarchScaleHoldMe || 0);
+        var slot = Math.floor(now / 30000);
+        var seen: any = {};
+        for (var i = 0; i < list.length; i++) {
+            var v = list[i];
+            if (!v || !v.scales || typeof v.scales !== "object") continue;
+            var mine = !!this.greymarchMeActor && v.actor === this.greymarchMeActor;
+            var localId = mine ? 0x14 : misc.remoteIdToLocalId(v.actor);
+            if (!localId) continue;
+            seen[localId] = true;
+            if (mine && holdMe) continue;
+            try {
+                var actor = mine ? sp.Game.getPlayer() : sp.Actor.from(sp.Game.getFormEx(localId));
+                if (!actor || !actor.is3DLoaded()) { delete done[localId]; continue; }
+                var key = JSON.stringify(v.scales) + "|" + slot;
+                if (done[localId] === key) continue;
+                var first = done[localId] === undefined || done[localId].split("|")[0] !== JSON.stringify(v.scales);
+                this.greymarchScaleApply(actor, v.scales);
+                done[localId] = key;
+                if (first) this.greymarchLog("body scales: " + localId.toString(16) + " drawn at " + Object.keys(v.scales).map(function (n) { return n + "=" + v.scales[n]; }).join(", "));
+            } catch (aErr) { /* not loaded here: the next pass */ }
+        }
+        for (var k in done) {
+            if (seen[k] || (Number(k) === 0x14 && holdMe)) continue;
+            delete done[k];
+            try {
+                var a2 = Number(k) === 0x14 ? sp.Game.getPlayer() : sp.Actor.from(sp.Game.getFormEx(Number(k)));
+                if (a2) { this.greymarchScaleApply(a2, {}); this.greymarchLog("body scales: " + Number(k).toString(16) + " back to the default size"); }
+            } catch (bErr) { /* gone */ }
+        }
+    }
+    greymarchScaleFemale(actor: any): boolean {
+        var base = this.sp.ActorBase.from(actor.getBaseObject());
+        return !!base && base.getSex() === 1;
+    }
+    greymarchScaleReport(): any {
+        var sp = this.sp;
+        try {
+            var pl = sp.Game.getPlayer();
+            var female = this.greymarchScaleFemale(pl);
+            var scales: any = {}, changed = 0;
+            for (var i = 0; i < SCALE_NODES.length; i++) {
+                var v = Number(sp.callNative("NiOverride", "GetNodeTransformScale", undefined, pl, false, female, SCALE_NODES[i], SCALE_KEY));
+                scales[SCALE_NODES[i]] = isFinite(v) && v > 0 ? Math.round(v * 100) / 100 : 1; // 0: RaceMenu never set it
+                if (scales[SCALE_NODES[i]] !== 1) changed++;
+            }
+            var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchBodyScales", scales: scales }) };
+            this.controller.emitter.emit("sendMessage", { message: message, reliability: "reliable" });
+            this.greymarchLog("body scales: sent after the race menu (" + changed + " not default)");
+        } catch (err) {
+            this.greymarchLog("body scales: could not be read (is RaceMenu installed?): " + err);
+        }
+    }
+    greymarchScaleApply(actor: any, scales: any): any {
+        var sp = this.sp, female = this.greymarchScaleFemale(actor);
+        for (var i = 0; i < SCALE_NODES.length; i++) {
+            var node = SCALE_NODES[i], v = Number(scales[node]) || 1;
+            for (var fp = 0; fp < 2; fp++) {
+                if (v !== 1) sp.callNative("NiOverride", "AddNodeTransformScale", undefined, actor, fp === 1, female, node, SCALE_KEY, v);
+                else sp.callNative("NiOverride", "RemoveNodeTransformScale", undefined, actor, fp === 1, female, node, SCALE_KEY);
+                sp.callNative("NiOverride", "UpdateNodeTransform", undefined, actor, fp === 1, female, node);
+            }
         }
     }
     greymarchVampEyePart(base: any, type: number): any { // the head part of that type a character's base wears now (2: eyes, 0: misc, the teeth)
