@@ -265,6 +265,7 @@ export class GreymarchBridge {
         this.greymarchDoorNamesApply(Date.now());
         this.greymarchDoorPrompt(Date.now());
         this.greymarchChatPending();
+        this.greymarchProfPending();
         this.greymarchChatWatch(Date.now());
         this.greymarchWorldViewGuard(Date.now()); // other players are drawn only while SkyMP's world view is on: see greymarchWorldViewGuard
         if (this.greymarchChatOn && Date.now() >= (this.greymarchChatNext || 0)) { this.greymarchChatNext = Date.now() + 2000; this.greymarchChatToPage("show", true); }
@@ -374,7 +375,7 @@ export class GreymarchBridge {
         try { var talking = {}; if (hud) for (var ti = 0; ti < ids.length; ti++) talking[ids[ti]] = 1; (Function("return this")() as any).__gmSpeaking = talking; } catch (e) { /* the names stay unmarked */ }
         this.greymarchHudOn = hud;
         // the page is shown (never focused) while the display is on, hidden when it is off; the select screen and the veil decide for themselves while they are up
-        if (changed && !this.greymarchScreenUp) { try { this.sp.browser.setVisible(hud || !!this.greymarchChatOn || !!(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn)); if (!this.greymarchChatTyping) this.sp.browser.setFocused(false); } catch (err) { /* nothing to do */ } }
+        if (changed && !this.greymarchScreenUp) { try { this.sp.browser.setVisible(hud || !!this.greymarchChatOn || !!(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn)); if (!this.greymarchChatTyping && !this.greymarchPanelHasKeys()) this.sp.browser.setFocused(false); } catch (err) { /* nothing to do */ } }
     }
     greymarchBrowserMessage(e: any): any {
         if (!e.arguments || e.arguments[0] !== "greymarch") return;
@@ -496,7 +497,7 @@ export class GreymarchBridge {
         else if (e.code === 1 && this.greymarchMenuOn) this.greymarchMenuEscape();
         else if (e.code === 65 && !this.greymarchAdminOn && !this.greymarchMenuOn) this.greymarchAdminShow();
         else if (e.code === 66 && !this.greymarchAdminOn && !this.greymarchMenuOn && !this.greymarchChatTyping) this.greymarchAdminShow("tester"); // F8: the same panel as the tester menu (teleports, items, NPCs; the server gives testers those commands on the test server only)
-        else if (e.code === 37 && !this.greymarchChatTyping && !(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn)) this.greymarchProfShow(); // K opens the professions window (the page itself closes it with K or Esc, like the staff panel with F7)
+        else if (e.code === 37 && !this.greymarchChatTyping && !(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn)) this.greymarchProfWanted = Date.now(); // K opens the professions window from the update phase (greymarchProfPending), where the game's menus can be asked about (the page itself closes it with K or Esc, like the staff panel with F7)
         else if (e.code === 1 && this.greymarchProfOn) this.greymarchProfHide();
         else if (e.code === 1 && this.greymarchChanceryOn) this.greymarchChanceryHide();
         else if (e.code === 1 && this.greymarchVampMenuOn) this.greymarchVampMenuHide();
@@ -1553,6 +1554,15 @@ export class GreymarchBridge {
             this.sp.printConsole("[greymarch] could not reach the professions window: " + err);
         }
     }
+    // K, handled every frame: a K typed into a game menu (the race menu's name box, the console) is a letter, not the window (2026-10-18: the window popped up while naming a new character)
+    greymarchProfPending(): any {
+        var at = this.greymarchProfWanted || 0;
+        if (!at) return;
+        this.greymarchProfWanted = 0;
+        if (Date.now() - at > 1000) return; // a press from long ago
+        if (this.greymarchInMenu()) { this.greymarchChatWhy("K ignored: the game says '" + this.greymarchMenuName + "' is open"); return; }
+        this.greymarchProfShow();
+    }
     greymarchProfShow(): any {
         if (this.greymarchScreenUp || this.greymarchAdminOn || this.greymarchMenuOn || (this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn) || this.greymarchChatTyping) return; // not over the select screen, the other panels, or while typing
         this.greymarchProfOn = true;
@@ -1690,6 +1700,8 @@ export class GreymarchBridge {
     }
     // The chat page answers every "show" (a few seconds apart) with whether it is really typing. If the game thinks otherwise, the game gives way: a keyboard that the page is not using is released,
     // so movement can never stay locked behind a chat that is not open. (An input opened less than a second ago is left alone: the answer may have been sent before it.)
+    // The windows that hold the keyboard (and the mouse cursor) while they are open. The chat's keyboard releases leave them alone: releasing it every 2 s took the K window's cursor away (2026-10-18).
+    greymarchPanelHasKeys(): any { return !!(this.greymarchAdminOn || this.greymarchMenuOn || this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn); }
     greymarchChatSync(pageTyping: boolean): any {
         if (this.greymarchChatTyping && !pageTyping) {
             if (Date.now() - (this.greymarchChatOpenedAt || 0) < 1000) return;
@@ -1697,7 +1709,7 @@ export class GreymarchBridge {
             this.greymarchChatFocus(false);
         } else if (!this.greymarchChatTyping && pageTyping) {
             this.greymarchChatFocus(true); // the page is showing its input: it gets the keyboard
-        } else if (!pageTyping && !this.greymarchScreenUp && !this.greymarchAdminOn && !this.greymarchMenuOn) {
+        } else if (!pageTyping && !this.greymarchScreenUp && !this.greymarchPanelHasKeys()) {
             try { this.sp.browser.setFocused(false); } catch (e) { /* nothing to release */ } // neither is typing: nothing may hold the keyboard
         }
     }
@@ -1709,7 +1721,7 @@ export class GreymarchBridge {
         if (!this.greymarchChatTyping) {
             this.greymarchChatLost = 0;
             // HARD RULE: after a close the keyboard is released again a few times, so movement cannot stay locked whatever the page did
-            if (now < (this.greymarchChatReleaseUntil || 0) && !this.greymarchScreenUp && !this.greymarchAdminOn && !this.greymarchMenuOn) { try { this.sp.browser.setFocused(false); } catch (e0) { /* nothing to release */ } }
+            if (now < (this.greymarchChatReleaseUntil || 0) && !this.greymarchScreenUp && !this.greymarchPanelHasKeys()) { try { this.sp.browser.setFocused(false); } catch (e0) { /* nothing to release */ } }
             return;
         }
         // HARD RULES while the input is open: a menu or the console opening closes it; and it never stays open longer than two minutes
@@ -1774,7 +1786,7 @@ export class GreymarchBridge {
         this.greymarchChatTyping = !!on;
         if (!on) { this.greymarchChatClosedAt = Date.now(); this.greymarchChatReleaseUntil = Date.now() + 1000; }
         if (on) { this.sp.browser.setVisible(true); this.sp.browser.setFocused(true); return; }
-        if (!this.greymarchScreenUp && !this.greymarchAdminOn && !this.greymarchMenuOn) this.sp.browser.setFocused(false);
+        if (!this.greymarchScreenUp && !this.greymarchPanelHasKeys()) this.sp.browser.setFocused(false);
         this.greymarchChatToPage("close", true); // the page layer lets the mouse through again
     }
     greymarchChatSend(data: any): any {
