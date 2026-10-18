@@ -876,15 +876,21 @@ export class GreymarchBridge {
         }
         this.greymarchVampEyes(now); // every vampire's blue eyes, on this screen (the fangs are not made yet)
     }
-    // Every vampire in the world (the player included) gets the blue eye part for their glow and, while their fangs show, the fanged teeth, by the server's list
-    // (greymarchVampLooks). Only those parts change: the character is not redrawn. The eyes and teeth they had are kept and put back when they are no longer a vampire
-    // (and the teeth when /fangs hides them). Checked again every 2 seconds, because SkyMP puts a character's saved look back now and then (a load, a redraw).
+    // Every vampire in the world (the player included) gets their bloodline's eye part for their glow and, while their fangs show, the fanged teeth, by the server's
+    // list (greymarchVampLooks). Only those parts change: the character is not redrawn. Their OWN eyes and teeth are kept and put back while /eyes or /fangs hides
+    // them (glow 0) and when they are no longer a vampire. Greymarch's own eye parts never count as "their own" (a reload or a colour change finds one already on).
+    // Checked again every 2 seconds, because SkyMP puts a character's saved look back now and then (a load, a redraw): that look is their own eyes, kept again.
     greymarchVampEyes(now: number): any {
         if (now < (this.greymarchVampEyesNext || 0)) return;
         this.greymarchVampEyesNext = now + 2000;
         var sp = this.sp, list = this.greymarchVampLookList || [];
         var done = this.greymarchVampEyesDone || (this.greymarchVampEyesDone = {}); // localId -> { orig: eye head part id, glow, mouth: teeth head part id, fangs }
         var seen: any = {};
+        if (!list.length && !Object.keys(done).length) return;
+        var gmOff = -1; // GreymarchCore.esp's place in this game's load order
+        try { var gmBlue = sp.HeadPart.from(sp.Game.getFormFromFile(VAMP_EYES.blue.male, "GreymarchCore.esp")); if (gmBlue) gmOff = gmBlue.getFormID() - VAMP_EYES.blue.male; } catch (gErr) { gmOff = -1; }
+        var ours = function (id: number) { return gmOff >= 0 && id - gmOff >= 0x80d && id - gmOff <= 0x859; }; // one of Greymarch's vampire eye parts
+        var skipped = this.greymarchVampEyesSkipped || (this.greymarchVampEyesSkipped = {});
         for (var i = 0; i < list.length; i++) {
             var v = list[i];
             var localId = this.greymarchMeActor && v.actor === this.greymarchMeActor ? 0x14 : misc.remoteIdToLocalId(v.actor);
@@ -894,7 +900,11 @@ export class GreymarchBridge {
                 var actor = localId === 0x14 ? sp.Game.getPlayer() : sp.Actor.from(sp.Game.getFormEx(localId));
                 if (!actor) continue;
                 var race = actor.getRace();
-                if (!race || VAMP_EYE_RACES.indexOf(race.getFormID()) < 0) continue; // a beast race, or in a creature's or the Lord's shape
+                if (!race || VAMP_EYE_RACES.indexOf(race.getFormID()) < 0) { // a beast race (khajiit and argonian eyes are not made yet), or in a creature's or the Lord's shape
+                    var rid = race ? race.getFormID() : 0;
+                    if (skipped[localId] !== rid) { skipped[localId] = rid; this.greymarchLog("vampire: " + localId.toString(16) + " keeps their eyes: no vampire eyes for race " + rid.toString(16) + " yet"); }
+                    continue;
+                }
                 var base = sp.ActorBase.from(actor.getBaseObject());
                 if (!base) continue;
                 var female = base.getSex() === 1;
@@ -905,11 +915,14 @@ export class GreymarchBridge {
                 var cur = this.greymarchVampEyePart(base, 2);
                 var mouth = this.greymarchVampEyePart(base, 0);
                 var rec = done[localId];
-                if (!rec) rec = done[localId] = { orig: cur && cur.getFormID() !== hp.getFormID() ? cur.getFormID() : 0, glow: -1, colour: "", mouth: 0, fangs: false };
-                if (!(rec.glow === glow && rec.colour === colour && cur && cur.getFormID() === hp.getFormID())) {
-                    actor.changeHeadPart(hp);
-                    if (rec.glow !== glow || rec.colour !== colour) this.greymarchLog("vampire: " + localId.toString(16) + " has " + colour + " eyes, glow " + glow);
-                    rec.glow = glow; rec.colour = colour;
+                if (!rec) rec = done[localId] = { orig: 0, key: "", mouth: 0, fangs: false };
+                if (cur && !ours(cur.getFormID())) rec.orig = cur.getFormID(); // what they wear that is not ours is their own eyes (SkyMP may have put their look back)
+                var own = glow === 0 && rec.orig ? sp.HeadPart.from(sp.Game.getFormEx(rec.orig)) : null; // /eyes hides them: their own eyes
+                var wantEyes = own || hp, key = own ? "own" : colour + glow;
+                if (!(rec.key === key && cur && cur.getFormID() === wantEyes.getFormID())) {
+                    actor.changeHeadPart(wantEyes);
+                    if (rec.key !== key) this.greymarchLog("vampire: " + localId.toString(16) + (own ? " shows their own eyes (/eyes)" : " has " + colour + " eyes, glow " + glow));
+                    rec.key = key;
                 }
                 // the fangs: the fanged teeth while they show, the character's own teeth while /fangs hides them
                 if (VAMP_FANG_RACES.indexOf(race.getFormID()) >= 0) {
