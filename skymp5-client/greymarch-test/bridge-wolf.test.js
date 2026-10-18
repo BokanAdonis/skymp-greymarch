@@ -109,6 +109,19 @@ test("R roars only while changed, never mid-transformation or in a menu, and not
   assert.strictEqual(s.log.events.length, 4, "typing in the chat is not a roar");
 });
 
+test("the Bear Blood: the server says bear with the race, the body becomes the werebear; R roars on it; back to the human race at the end", () => {
+  const BEARR = 0x0401e17b;
+  const s = make({ refuseIdle: true });
+  s.say({ customPacketType: "greymarchWolfForm", on: true, alpha: false, pup: false, bear: true, race: BEARR });
+  s.tick();
+  assert.strictEqual(s.race(), BEARR);
+  assert.ok(s.log.lines.some((l) => /changed into the werebear/.test(l)));
+  s.key(19, true); s.tick(); s.tick();
+  assert.deepStrictEqual(s.log.events.slice(-2), ["HowlStart", "HowlRelease"], "the werebear roars");
+  s.say({ customPacketType: "greymarchWolfForm", on: false }); s.tick();
+  assert.strictEqual(s.race(), NORD, "and the person's race comes back, not the bear's");
+});
+
 test("the roar is a howl the server hears (it calls the pack): one report per roar, none for a human or a roar too soon", () => {
   const s = make({ refuseIdle: true });
   const howls = () => s.log.sent.filter((m) => m.customPacketType === "greymarchWolf" && m.op === "howl").length;

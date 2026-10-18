@@ -128,7 +128,7 @@ export class GreymarchBridge {
         if (type === "greymarchMenuReply") { this.greymarchMenuToPage("reply", msg); return; }
         if (type === "greymarchShape") { this.greymarchShapeMsg(msg); return; }
         if (type === "greymarchShapeAnim") { if (typeof msg.ev === "string" && msg.ev.length < 64 && Number(msg.actor) > 0) (this.greymarchShapeAnimQueue || (this.greymarchShapeAnimQueue = [])).push({ actor: Number(msg.actor), ev: msg.ev }); return; } // another player's creature attacked (played in greymarchShapeDrive) // a creature form (staff): greymarchShapeTick changes the body
-        if (type === "greymarchWolfForm") { if (this.greymarchWolfWant !== !!msg.on) this.greymarchLog("wolf: the server says " + (msg.on ? "changed" : "no (change back)")); this.greymarchWolfWant = !!msg.on; if (msg.on) { this.greymarchWolfWordAt = Date.now(); this.greymarchWolfAlpha = !!msg.alpha; this.greymarchWolfPup = !msg.alpha && !!msg.pup; } return; } // (logged only when it changes: the server repeats it every 5 seconds) // the werewolf form (greymarchWolfTick)
+        if (type === "greymarchWolfForm") { if (this.greymarchWolfWant !== !!msg.on) this.greymarchLog("wolf: the server says " + (msg.on ? "changed" : "no (change back)")); this.greymarchWolfWant = !!msg.on; if (msg.on) { this.greymarchWolfWordAt = Date.now(); this.greymarchWolfAlpha = !!msg.alpha; this.greymarchWolfPup = !msg.alpha && !!msg.pup; this.greymarchWolfBearRace = msg.bear && Number(msg.race) > 0 ? Number(msg.race) >>> 0 : 0; if (this.greymarchWolfBearRace) this.greymarchWolfBearSeen = this.greymarchWolfBearRace; } return; } // (logged only when it changes: the server repeats it every 5 seconds) // the werewolf form (greymarchWolfTick)
         if (type === "greymarchWolfAlphas") { this.greymarchWolfAlphaList = Array.isArray(msg.actors) ? msg.actors : []; this.greymarchWolfPupList = Array.isArray(msg.pups) ? msg.pups : []; return; } // the other players in the Alpha form: drawn white (greymarchWolfAlphaOthers)
         if (type === "greymarchVampire") { this.greymarchVampWant = msg.on ? msg : null; this.greymarchHudToPage("blood", { on: !!msg.on, blood: msg.blood, empty: !!msg.empty }); return; } // a vampire's state: the blood drop and what the game applies (greymarchVampTick)
         if (type === "greymarchVampLooks") { this.greymarchVampLookList = Array.isArray(msg.vampires) ? msg.vampires : []; return; } // how every vampire in the world looks (eyes and fangs)
@@ -682,7 +682,7 @@ export class GreymarchBridge {
             step = "race"; var wr = this.greymarchWolfRace(); if (!wr) throw new Error("the werewolf race was not found");
             player.setRace(wr);
             step = "check"; var r = player.getRace();
-            this.greymarchLog("wolf: changed into the " + (this.greymarchWolfAlpha ? "Alpha " : this.greymarchWolfPup ? "pup " : "") + "beast (race now " + (r ? r.getFormID().toString(16) : "none") + ", will change back to " + (this.greymarchWolfHumanRace || 0).toString(16) + ")");
+            this.greymarchLog("wolf: changed into the " + (this.greymarchWolfBearRace ? "werebear" : (this.greymarchWolfAlpha ? "Alpha " : this.greymarchWolfPup ? "pup " : "") + "beast") + " (race now " + (r ? r.getFormID().toString(16) : "none") + ", will change back to " + (this.greymarchWolfHumanRace || 0).toString(16) + ")");
         } catch (bErr) {
             this.greymarchLog("wolf: the change failed at step '" + step + "': " + bErr);
         }
@@ -763,8 +763,9 @@ export class GreymarchBridge {
     }
     greymarchWolfAlphaRaceId(): number { return this.greymarchWolfKindRaceId("alpha"); }
     greymarchWolfPupRaceId(): number { return this.greymarchWolfKindRaceId("pup"); }
-    greymarchWolfIsBeast(raceId: number): boolean { return raceId === 0xcdd84 || (!!raceId && (raceId === this.greymarchWolfAlphaRaceId() || raceId === this.greymarchWolfPupRaceId())); }
-    greymarchWolfRaceId(): number { return (this.greymarchWolfAlpha && this.greymarchWolfAlphaRaceId()) || (this.greymarchWolfPup && this.greymarchWolfPupRaceId()) || 0xcdd84; }
+    // THE BEAR BLOOD (the server says bear: true, race: the werebear race in this load order, Dragonborn's DLC2WerebearBeastRace): the body becomes the werebear
+    greymarchWolfIsBeast(raceId: number): boolean { return raceId === 0xcdd84 || (!!raceId && (raceId === this.greymarchWolfAlphaRaceId() || raceId === this.greymarchWolfPupRaceId() || raceId === this.greymarchWolfBearSeen)); }
+    greymarchWolfRaceId(): number { return this.greymarchWolfBearRace || (this.greymarchWolfAlpha && this.greymarchWolfAlphaRaceId()) || (this.greymarchWolfPup && this.greymarchWolfPupRaceId()) || 0xcdd84; }
     greymarchWolfRace(): any { return this.sp.Race.from(this.sp.Game.getFormEx(this.greymarchWolfRaceId())); }
     // Other players who are Alphas or pups: SkyMP draws them with the race of their appearance, which the server can only set to the normal werewolf. Every second the
     // lists become __gmWolfRace (server actor id -> the variant's race), which formView.ts uses to BUILD that player's NPC with the variant's race (it respawns it when
