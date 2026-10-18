@@ -120,7 +120,7 @@ export class FormView {
     try {
       const gmMap: any = (Function("return this")() as any).__gmWolfRace;
       const ap: any = this.appearanceState.appearance;
-      if (gmMap && ap && (ap.raceId >>> 0) === 0xcdd84 && !(Array.isArray(ap.headpartIds) && ap.headpartIds.length > 0)) gmWolfRace = Number(gmMap[this.getRemoteRefrId()]) || 0;
+      if (gmMap && ap && !(Array.isArray(ap.headpartIds) && ap.headpartIds.length > 0)) gmWolfRace = Number(gmMap[this.getRemoteRefrId()]) || 0;
     } catch (gmErr) { gmWolfRace = 0; }
     if (gmWolfRace !== this.gmWolfRace) {
       this.gmWolfRace = gmWolfRace;

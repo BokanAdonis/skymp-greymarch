@@ -9,7 +9,7 @@ const ts = require("typescript");
 const src = fs.readFileSync(path.join(__dirname, "..", "src", "greymarch", "bridge.ts"), "utf8");
 const js = ts.transpileModule(src, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2019 } }).outputText;
 
-const BEAST = 0xcdd84, NORD = 0x13746, ALPHA = 0xfe000804, PUP = 0xfe00080a;
+const BEAST = 0xcdd84, NORD = 0x13746, ALPHA = 0xfe000804, PUP = 0xfe00080a, BLACK = 0xfe00085c;
 function make(opts = {}) {
   const log = { lines: [], idles: [], events: [], races: [], waits: [], sent: [], applied: [], equipped: [], redraws: 0 };
   const mods = { "../messages": { MsgType: { CustomPacket: 77 } }, "../view/worldViewMisc": { remoteIdToLocalId: (id) => (opts.others || {})[id] || 0 }, "../sync/appearance": { applyAppearanceToPlayer: (a) => log.applied.push(a) }, "../services/services/remoteServer": { RemoteServer: {} }, "../services/services/singlePlayerService": { SinglePlayerService: {} } };
@@ -30,7 +30,7 @@ function make(opts = {}) {
   const pass = (f) => (f ? f : null);
   const sp = {
     printConsole() {}, writeLogs: (n, l) => log.lines.push(l),
-    Game: { getPlayer: () => player, getFormEx: (id) => ({ id }), getFormFromFile: (id, file) => (opts.noAlpha || file !== "GreymarchCore.esp" ? null : id === 0x804 ? { getFormID: () => ALPHA } : id === 0x80a ? { getFormID: () => PUP } : null), setBeastForm() {}, enableFastTravel() {}, disablePlayerControls() {}, enablePlayerControls() {}, forceThirdPerson() {}, showFirstPersonGeometry() {} },
+    Game: { getPlayer: () => player, getFormEx: (id) => ({ id }), getFormFromFile: (id, file) => (opts.noAlpha || file !== "GreymarchCore.esp" ? null : id === 0x804 ? { getFormID: () => ALPHA } : id === 0x80a ? { getFormID: () => PUP } : id === 0x85c ? { getFormID: () => BLACK } : null), setBeastForm() {}, enableFastTravel() {}, disablePlayerControls() {}, enablePlayerControls() {}, forceThirdPerson() {}, showFirstPersonGeometry() {} },
     Spell: { from: pass }, MagicEffect: { from: pass }, Race: { from: (f) => race(f.id) }, Actor: { from: (f) => (f && opts.actors && opts.actors[f.id]) || null }, Idle: { from: pass }, FormList: { from: () => null }, ImageSpaceModifier: { from: () => null }, Sound: { from: () => null }, ActorBase: { from: () => null },
     Debug: { sendAnimationEvent: (ref, name) => log.events.push(name), notification() {} },
     Utility: { isInMenuMode: () => menu },
@@ -120,6 +120,30 @@ test("the Bear Blood: the server says bear with the race, the body becomes the w
   assert.deepStrictEqual(s.log.events.slice(-2), ["HowlStart", "HowlRelease"], "the werebear roars");
   s.say({ customPacketType: "greymarchWolfForm", on: false }); s.tick();
   assert.strictEqual(s.race(), NORD, "and the person's race comes back, not the bear's");
+});
+
+test("the black bear: the server says bear and black, the body becomes GreymarchCore's black bear race; switched off mid-form it goes back to the werebear", () => {
+  const BEARR = 0x0401e17b;
+  const s = make({ refuseIdle: true });
+  s.say({ customPacketType: "greymarchWolfForm", on: true, alpha: false, pup: false, bear: true, race: BEARR, black: true });
+  s.tick();
+  assert.strictEqual(s.race(), BLACK);
+  s.say({ customPacketType: "greymarchWolfForm", on: true, alpha: false, pup: false, bear: true, race: BEARR, black: false });
+  s.tick(3100);
+  assert.strictEqual(s.race(), BEARR, "the plain werebear again");
+  s.say({ customPacketType: "greymarchWolfForm", on: false }); s.tick();
+  assert.strictEqual(s.race(), NORD);
+});
+
+test("other black bears: the blackbears list puts GreymarchCore's black bear race into __gmWolfRace", () => {
+  const s = make({ others: { 503: 0xff000a03 } });
+  const g = Function("return this")();
+  delete g.__gmWolfRace;
+  s.say({ customPacketType: "greymarchWolfAlphas", actors: [], pups: [], blackbears: [503] });
+  s.tick(1100);
+  assert.deepStrictEqual(g.__gmWolfRace, { 503: BLACK });
+  assert.ok(s.log.lines.some((l) => /1f7 drawn as the black bear/.test(l)));
+  delete g.__gmWolfRace;
 });
 
 test("the roar is a howl the server hears (it calls the pack): one report per roar, none for a human or a roar too soon", () => {
@@ -279,7 +303,7 @@ test("other Alphas and pups: the lists become __gmWolfRace (server id -> the var
   s.say({ customPacketType: "greymarchWolfAlphas", actors: [502], pups: [] });
   s.tick(1100);
   assert.deepStrictEqual(g.__gmWolfRace, { 502: ALPHA }, "a pup made an Alpha; one off the lists is the normal werewolf again");
-  assert.ok(s.log.lines.some((l) => /1f5 drawn as the normal werewolf again/.test(l)));
+  assert.ok(s.log.lines.some((l) => /1f5 drawn as the normal beast again/.test(l)));
   assert.deepStrictEqual(setRaces, [], "never a SetRace on another player's live actor");
   delete g.__gmWolfRace;
 });
@@ -287,7 +311,7 @@ test("other Alphas and pups: the lists become __gmWolfRace (server id -> the var
 test("formView.ts builds a werewolf variant's NPC with the variant's race (respawned when it changes), only for a werewolf look", () => {
   const fv = fs.readFileSync(path.join(__dirname, "..", "src", "view", "formView.ts"), "utf8");
   assert.ok(fv.includes("__gmWolfRace"), "reads the bridge's map");
-  assert.ok(fv.includes("(ap.raceId >>> 0) === 0xcdd84 && !(Array.isArray(ap.headpartIds) && ap.headpartIds.length > 0)"), "only a werewolf look (no head parts)");
+  assert.ok(fv.includes("gmMap && ap && !(Array.isArray(ap.headpartIds) && ap.headpartIds.length > 0)"), "only a beast look (no head parts): the werewolf's or the werebear's");
   assert.ok(fv.includes("this.appearanceBasedBaseId = 0; // built again"), "a change of variant respawns the NPC");
   assert.ok(fv.includes("{ ...this.appearanceState.appearance, raceId: this.gmWolfRace }"), "built with the variant's race");
 });
