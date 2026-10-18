@@ -151,7 +151,8 @@ test("fangs on a character with no teeth part of their own: on, reported to the 
   const s = make();
   const sp = s.gm.sp;
   const GM = 0x0a000000, FANG_M = GM + 0x81c;
-  const part = (id) => ({ getFormID: () => id, getType: () => (id === FANG_M || id === 0x51631 ? 0 : 2) });
+  const part = (id) => ({ getFormID: () => id, getType: () => (id === FANG_M || id === 0x51631 ? 0 : 2), getPartName: () => (id === FANG_M ? "GM_VampFangsMale" : id === 0x51631 ? "MaleMouthHumanoidDefault" : "eyes") });
+  sp.NetImmerse = { hasNode: (a, n) => n === "GM_VampFangsMale", getNodeScale: () => 1, setNodeScale() {} }; // the face draws the fangs
   const worn = { 2: 0x111 }; // their eyes; no teeth part of their own (the race's teeth show)
   Object.assign(sp.Game.getPlayer(), { name: "me", getRace: () => ({ getFormID: () => 0x13746 }), getBaseObject: () => ({ sex: 0 }), changeHeadPart: (hp) => { worn[hp.getType()] = hp.getFormID(); }, regenerateHead: () => {} });
   sp.Actor.from = (f) => f;
@@ -168,7 +169,7 @@ test("fangs on a character with no teeth part of their own: on, reported to the 
     assert.strictEqual(worn[0], FANG_M);
     assert.deepStrictEqual(reports(), [{ customPacketType: "greymarchVamp", op: "fangs", actor: 0xff000001, self: true, result: "swapped in (try 1)", detail: "no teeth part -> a00081c; Misc parts before: " }]);
     look([{ actor: 0xff000001, glow: 1, fangs: true }]);
-    assert.deepStrictEqual(reports().pop(), { customPacketType: "greymarchVamp", op: "fangs", actor: 0xff000001, self: true, result: "on", detail: "Misc parts: a00081c" }, "on, the next look reads them back");
+    assert.deepStrictEqual(reports().pop(), { customPacketType: "greymarchVamp", op: "fangs", actor: 0xff000001, self: true, result: "on; drawn: fangs yes, own teeth no", detail: "names GM_VampFangsMale / MaleMouthHumanoidDefault; Misc parts: a00081c" }, "on, the next look reads them back");
     look([{ actor: 0xff000001, glow: 1, fangs: true }]);
     assert.strictEqual(reports().length, 2, "nothing changed: not reported again");
     look([{ actor: 0xff000001, glow: 1, fangs: false }]);
@@ -188,7 +189,8 @@ test("only the teeth are swapped: another Misc part (a KS Hairdo's hairstyle bri
   const s = make();
   const sp = s.gm.sp;
   const GM = 0x0a000000, FANG_M = GM + 0x81c, KS = 0x330151da, TEETH = 0x51631;
-  const part = (id) => ({ getFormID: () => id, getType: () => (id === 0x111 ? 2 : 0) });
+  const part = (id) => ({ getFormID: () => id, getType: () => (id === 0x111 ? 2 : 0), getPartName: () => (id === FANG_M ? "GM_VampFangsMale" : id === TEETH ? "MaleMouthHumanoidDefault" : "KSHairline") });
+  sp.NetImmerse = { hasNode: (a, n) => n === "GM_VampFangsMale", getNodeScale: () => 1, setNodeScale() {} };
   let parts = [0x111, KS, TEETH]; // eyes, the hairstyle's Misc part first, then the race's teeth
   let rebuilt = 0;
   Object.assign(sp.Game.getPlayer(), { name: "me", getRace: () => ({ getFormID: () => 0x13746 }), getBaseObject: () => ({ sex: 0 }), changeHeadPart: (hp) => { if (hp.getType() === 2) parts = parts.map((x) => (x === 0x111 || x > GM ? x : x)); },
@@ -226,6 +228,31 @@ test("if the fangs never get into the parts list, the head is rebuilt at most 3 
     for (let i = 0; i < 8; i++) { s.say({ customPacketType: "greymarchVampLooks", vampires: [{ actor: 0xff000001, glow: 0, fangs: true }], me: 0xff000001 }); s.tick(); t += 2500; }
     assert.strictEqual(rebuilt, 3);
     assert.match(s.log.sent.filter((m) => m.op === "fangs").pop().result, /^gave up/);
+  } finally { Date.now = realNow; }
+});
+
+test("the list says fangs but the face is drawn with their own teeth: those are hidden (shrunk to nothing), reported, and shown again for /fangs off", () => {
+  const s = make();
+  const sp = s.gm.sp;
+  const GM = 0x0a000000, FANG_M = GM + 0x81c, TEETH = 0x51631;
+  const part = (id) => ({ getFormID: () => id, getType: () => (id === 0x111 ? 2 : 0), getPartName: () => (id === FANG_M ? "GM_VampFangsMale" : id === TEETH ? "MaleMouthHumanoidDefault" : "eyes") });
+  const parts = [0x111, TEETH]; const scales = { MaleMouthHumanoidDefault: 1 };
+  Object.assign(sp.Game.getPlayer(), { name: "me", getRace: () => ({ getFormID: () => 0x13746 }), getBaseObject: () => ({ sex: 0 }), changeHeadPart() {}, regenerateHead() {} });
+  sp.Actor.from = (f) => f;
+  sp.Game.getFormEx = (id) => ({ id });
+  sp.Game.getFormFromFile = (id, file) => (file === "GreymarchCore.esp" ? { id: GM + id } : null);
+  sp.HeadPart = { from: (f) => (f ? part(f.id) : null) };
+  sp.ActorBase = { from: (b) => (b ? { getSex: () => 0, getNumHeadParts: () => parts.length, getNthHeadPart: (i) => part(parts[i]), setNthHeadPart: (hp, i) => { parts[i] = hp.getFormID(); } } : null) };
+  sp.NetImmerse = { hasNode: () => true, getNodeScale: (a, n) => scales[n] ?? 1, setNodeScale: (a, n, v) => { scales[n] = v; } }; // both drawn: their own teeth came back
+  let t = 5_000_000; const realNow = Date.now; Date.now = () => t;
+  const look = (fangs) => { s.say({ customPacketType: "greymarchVampLooks", vampires: [{ actor: 0xff000001, glow: 0, fangs }], me: 0xff000001 }); s.tick(); t += 2500; };
+  try {
+    look(true); look(true);
+    assert.strictEqual(scales.MaleMouthHumanoidDefault, 0, "their own teeth hidden");
+    assert.strictEqual(s.log.sent.filter((m) => m.op === "fangs").pop().result, "on; drawn: fangs yes, own teeth yes (hidden now)");
+    look(false);
+    assert.strictEqual(scales.MaleMouthHumanoidDefault, 1, "shown again for /fangs off");
+    assert.deepStrictEqual(parts, [0x111, TEETH]);
   } finally { Date.now = realNow; }
 });
 
