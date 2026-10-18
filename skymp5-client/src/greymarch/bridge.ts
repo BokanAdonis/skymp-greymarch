@@ -974,15 +974,24 @@ export class GreymarchBridge {
                     var list0 = miscParts.map(function (x: any) { return x.getFormID().toString(16); }).join(",");
                     if (!fp) this.greymarchVampFangReport(v.actor, localId, "no fang part in GreymarchCore.esp (old game files?)");
                     else if (want && !has) {
-                        // changeHeadPart only ADDS a Misc part (the teeth kept showing): replaceHeadPart swaps the teeth for the fangs in place; changeHeadPart only with no teeth part
-                        if (teeth) actor.replaceHeadPart(teeth, fp); else actor.changeHeadPart(fp);
-                        this.greymarchVampFangReport(v.actor, localId, "swapped in", (teeth ? teeth.getFormID().toString(16) : "no teeth part") + " -> " + fpId.toString(16) + "; Misc parts before: " + list0);
+                        // The fangs go INTO the list of parts the character is built from, where their teeth were, and the head is rebuilt from it: SkyMP's own way of
+                        // giving a character their look (setNthHeadPart). changeHeadPart only added the fangs beside the teeth, replaceHeadPart left the list as it was,
+                        // and in both the teeth kept showing. Only the head is rebuilt, not the whole character, and only when the fangs change (at most 3 tries).
+                        rec.fangTries = (rec.fangTries || 0) + 1;
+                        if (rec.fangTries <= 3) {
+                            var slot = this.greymarchVampPartSlot(base, teeth);
+                            if (slot >= 0) base.setNthHeadPart(fp, slot); else actor.changeHeadPart(fp);
+                            actor.regenerateHead();
+                            this.greymarchVampFangReport(v.actor, localId, "swapped in (try " + rec.fangTries + ")", (teeth ? teeth.getFormID().toString(16) + " at " + slot : "no teeth part") + " -> " + fpId.toString(16) + "; Misc parts before: " + list0);
+                        } else this.greymarchVampFangReport(v.actor, localId, "gave up: the fangs are not in the parts list after 3 tries", "Misc parts: " + list0);
                     }
                     else if (!want && has) {
                         var own = sp.HeadPart.from(sp.Game.getFormEx(rec.mouth || (female ? VAMP_OWN_TEETH.female : VAMP_OWN_TEETH.male))); // their own teeth, or the race's when they had none of their own
-                        if (own) { actor.replaceHeadPart(fp, own); this.greymarchVampFangReport(v.actor, localId, "off", own.getFormID().toString(16)); }
+                        var fslot = this.greymarchVampPartSlot(base, fp);
+                        if (own && fslot >= 0) { base.setNthHeadPart(own, fslot); actor.regenerateHead(); rec.fangTries = 0; this.greymarchVampFangReport(v.actor, localId, "off", own.getFormID().toString(16)); }
                     }
-                    else if (want && has) this.greymarchVampFangReport(v.actor, localId, "on", "Misc parts: " + list0);
+                    else if (want && has) { rec.fangTries = 0; this.greymarchVampFangReport(v.actor, localId, "on", "Misc parts: " + list0); }
+                    if (!want) rec.fangTries = 0;
                     rec.fangs = want;
                 } else if (v.fangs) this.greymarchVampFangReport(v.actor, localId, "no fangs for race " + race.getFormID().toString(16));
             } catch (eErr) { this.greymarchVampFangReport(v.actor, localId, "error: " + String(eErr).slice(0, 200)); /* not loaded here: the next look */ }
@@ -998,11 +1007,17 @@ export class GreymarchBridge {
                     var base2 = sp.ActorBase.from(a2.getBaseObject()), female2 = !!base2 && base2.getSex() === 1;
                     var fang2 = sp.HeadPart.from(sp.Game.getFormFromFile(female2 ? VAMP_FANGS.female : VAMP_FANGS.male, "GreymarchCore.esp"));
                     var teeth2 = sp.HeadPart.from(sp.Game.getFormEx(back.mouth || (female2 ? VAMP_OWN_TEETH.female : VAMP_OWN_TEETH.male)));
-                    var wearing = !!base2 && !!fang2 && this.greymarchVampMiscParts(base2).some(function (x: any) { return x.getFormID() === fang2.getFormID(); });
-                    if (wearing && teeth2) a2.replaceHeadPart(fang2, teeth2);
+                    var slot2 = base2 && fang2 ? this.greymarchVampPartSlot(base2, fang2) : -1;
+                    if (slot2 >= 0 && teeth2) { base2.setNthHeadPart(teeth2, slot2); a2.regenerateHead(); }
                 }
             } catch (bErr) { /* gone */ }
         }
+    }
+    greymarchVampPartSlot(base: any, part: any): number { // where that head part is in the character's list of parts (-1: not there)
+        if (!part) return -1;
+        var n = base.getNumHeadParts(), id = part.getFormID();
+        for (var i = 0; i < n; i++) { var hp = base.getNthHeadPart(i); if (hp && hp.getFormID() === id) return i; }
+        return -1;
     }
     greymarchVampMiscParts(base: any): any[] { // every Misc head part a character's base wears (teeth, and whatever else mods add there)
         var out = [], n = base.getNumHeadParts();
