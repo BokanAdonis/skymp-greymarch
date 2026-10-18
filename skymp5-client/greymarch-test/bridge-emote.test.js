@@ -238,7 +238,7 @@ test("another player's face: put on the character this game draws for them, ever
 
 test("the faces are the ones the server knows (gamemode faces.js)", () => {
   const faces = emotes.EMOTE_GROUPS.find((g) => g.id === "face").items;
-  assert.deepStrictEqual(faces.map((x) => x.id), ["open", "fangs", "snarl", "shout", "smile", "frown", "sad", "surprise", "fear", "disgust"]);
+  assert.deepStrictEqual(faces.map((x) => x.id), ["open", "closed", "fangs", "snarl", "shout", "smile", "frown", "sad", "surprise", "fear", "disgust"]);
   for (const x of faces) assert.ok(x.kind === "face" && x.face && (typeof x.face.mood === "number" || (x.face.phonemes || []).length), x.id);
 });
 

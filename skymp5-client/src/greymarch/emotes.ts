@@ -27,7 +27,7 @@ export const EMOTE_GROUPS: EmoteGroup[] = [
         e("salute", "Salute", 0xf4333, "once"), e("attention", "Attention", 0xb240b, "once"), e("bow", "Bow", 0xd8735, "once"), e("surrender", "Surrender", 0x105d47, "once"),
     ] },
     { id: "face", name: "Face", items: [
-        f("open", "Open mouth", { phonemes: [[1, 0.65]] }), f("fangs", "Bare fangs", { mood: 15, strength: 100, phonemes: [[5, 0.8], [1, 0.4]] }), f("snarl", "Snarl", { mood: 15, strength: 100 }),
+        f("open", "Open mouth", { phonemes: [[1, 0.65]] }), f("closed", "Close mouth", { phonemes: [[2, 1]] }), f("fangs", "Bare fangs", { mood: 15, strength: 100, phonemes: [[5, 0.8], [1, 0.4]] }), f("snarl", "Snarl", { mood: 15, strength: 100 }),
         f("shout", "Roar", { mood: 16, strength: 100 }), f("smile", "Smile", { mood: 2, strength: 80 }), f("frown", "Angry", { mood: 0, strength: 80 }),
         f("sad", "Sad", { mood: 3, strength: 80 }), f("surprise", "Surprised", { mood: 4, strength: 80 }), f("fear", "Afraid", { mood: 1, strength: 80 }), f("disgust", "Disgusted", { mood: 6, strength: 80 }),
     ] },
