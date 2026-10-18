@@ -135,6 +135,9 @@ export class GreymarchBridge {
         if (type === "greymarchVampFeed") { this.greymarchVampFeedWant = msg.on ? { role: msg.role, partner: msg.partner, at: Date.now(), done: false } : { off: true }; return; } // the feeding scene
         if (type === "greymarchVampMist") { if (!msg.on) this.greymarchVampMistEnd = true; return; } // Mist Form refused or over: the game's own mist is ended
         if (type === "greymarchVampLord") { if (this.greymarchVampLordWas !== !!msg.on) { this.greymarchVampLordWas = !!msg.on; this.greymarchLog("vampire: the server says the Lord's shape is " + (msg.on ? "on" : "off")); } return; } // the body itself is the creature form (greymarchShape)
+        if (type === "greymarchCuffs") { this.greymarchCuffsWant = msg.on ? msg : null; return; } // in cuffs (guards.js): the cuffs worn and the bound pose (greymarchCuffsTick)
+        if (type === "greymarchChains") { this.greymarchChainList = Array.isArray(msg.chains) ? msg.chains.slice(0, 16) : []; this.greymarchCuffedList = Array.isArray(msg.cuffed) ? msg.cuffed.slice(0, 64) : []; return; } // who is on whose chain (drawn on the HUD), who is in cuffs (posed)
+        if (type === "greymarchProgress") { var pOn = !msg.off && Number(msg.ms) > 0; this.greymarchProgressUntil = pOn ? Date.now() + Math.min(60000, Number(msg.ms)) + 500 : 0; this.greymarchGuardsHudCheck(); this.greymarchHudToPage("progress", pOn ? { on: true, ms: Number(msg.ms), text: String(msg.text || "").slice(0, 120) } : { on: false }); return; } // a timed action (the 7 seconds of cuffing): a bar on the HUD
         if (type === "greymarchWolfFeed") { this.greymarchWolfFeedAt = Date.now(); return; } // the wolf fed (a kill or a corpse): the feeding animation (greymarchWolfTick)
         if (type === "greymarchChanceryReply") { this.greymarchChanceryToPage("reply", msg); return; } // the chancery window (/chancery)
         if (type === "greymarchChanceryOpen") { this.greymarchChanceryShow(); return; }
@@ -142,7 +145,7 @@ export class GreymarchBridge {
         if (type === "greymarchVampMenuOpen") { this.greymarchVampMenuShow(); return; }
         if (type === "greymarchProfReply") { this.greymarchLog("prof: the server's answer arrived (rid " + msg.rid + ", ok " + msg.ok + ")"); this.greymarchProfToPage("reply", msg); return; } // the professions window (K)
         if (type === "greymarchCombatMod") { var cm = Number(msg.mult); this.greymarchCombatWant = cm >= 0.1 && cm <= 3 ? cm : 1; return; } // the damage multiplier for what is in hand (professions: a weapon above your rank hits weaker, a Brawler's fists hit harder)
-        if (type === "greymarchMenuEvent") { if ((msg.type === "trade_invite" || msg.type === "trade" || msg.type === "feed_invite") && !this.greymarchMenuOn) this.greymarchMenuShow({ mode: "invite", looking: 0 }); /* a trade or a vampire's request to feed opens the menu by itself */ this.greymarchMenuToPage("event", msg); return; }
+        if (type === "greymarchMenuEvent") { if ((msg.type === "trade_invite" || msg.type === "trade" || msg.type === "feed_invite" || msg.type === "frisk_invite" || msg.type === "guard_view") && !this.greymarchMenuOn) this.greymarchMenuShow({ mode: "invite", looking: 0 }); /* a trade, a vampire's request to feed, a guard's request to frisk or what the frisk found opens the menu by itself */ this.greymarchMenuToPage("event", msg); return; }
         if (type === "greymarchFx") { this.greymarchFxWant = { noclip: !!msg.noclip, speed: Number(msg.speed) || 100, frozen: !!msg.frozen, god: !!msg.god }; if (msg.me) this.greymarchMeActor = msg.me; return; }
         if (type === "greymarchGhosts") { this.greymarchGhostList = Array.isArray(msg.ghosts) ? msg.ghosts : []; if (msg.me) this.greymarchMeActor = msg.me; this.greymarchOthers = Array.isArray(msg.others) ? msg.others : []; if (msg.stats !== undefined) this.greymarchStatsWant = msg.stats && typeof msg.stats === "object" ? msg.stats : null; var inv = Array.isArray(msg.invisible) ? msg.invisible : []; this.greymarchInvisList = inv; var invMap = {}; for (var q = 0; q < inv.length; q++) if (inv[q] !== msg.me) invMap[inv[q]] = true; try { Function("return this")().__gmInvisible = invMap; } catch (gErr) { /* names stay visible */ } return; }
         this.sp.printConsole("[greymarch] got " + type + (msg.characters ? " with " + msg.characters.length + " character(s)" : ""));
@@ -253,7 +256,7 @@ export class GreymarchBridge {
         this.greymarchToPage("hide");
         this.sp.browser.setFocused(false);
         this.greymarchScreenUp = false;
-        this.sp.browser.setVisible(!!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn)); // stays visible (but never focused) while the voice display is on; the staff panel keeps it up and focused
+        this.sp.browser.setVisible(!!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchGuardsHud || !!(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn)); // stays visible (but never focused) while the voice display is on; the staff panel keeps it up and focused
         if (this.greymarchAdminOn) this.sp.browser.setFocused(true);
         this.greymarchChatShow();
         this.greymarchReportLoadOrder();
@@ -292,6 +295,7 @@ export class GreymarchBridge {
         this.greymarchShapeTick(); // a creature form staff put the player in (a goat, a giant ...): the server decides, the body is changed here
         this.greymarchWolfTick(); // the werewolf form: the game's Beast Form power is the trigger, the server decides, the change is done here
         this.greymarchVampTick(); // a vampire: powers and potions reported, the abilities the server names, no Restoration, the feeding scene
+        this.greymarchCuffsTick(Date.now()); // in cuffs: the cuffs worn, the bound pose (others' too), the chain drawn to whoever holds it
         this.greymarchEarsTick(Date.now()); // where each voice comes from, for the launcher (only while it is in voice)
         var beat = this.greymarchBeat;
         if (beat) {
@@ -415,7 +419,7 @@ export class GreymarchBridge {
         try { var talking = {}; if (hud) for (var ti = 0; ti < ids.length; ti++) talking[ids[ti]] = 1; (Function("return this")() as any).__gmSpeaking = talking; } catch (e) { /* the names stay unmarked */ }
         this.greymarchHudOn = hud;
         // the page is shown (never focused) while the display is on, hidden when it is off; the select screen and the veil decide for themselves while they are up
-        if (changed && !this.greymarchScreenUp) { try { this.sp.browser.setVisible(hud || !!this.greymarchChatOn || !!(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn)); if (!this.greymarchChatTyping && !this.greymarchPanelHasKeys()) this.sp.browser.setFocused(false); } catch (err) { /* nothing to do */ } }
+        if (changed && !this.greymarchScreenUp) { try { this.sp.browser.setVisible(hud || !!this.greymarchChatOn || !!this.greymarchGuardsHud || !!(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn)); if (!this.greymarchChatTyping && !this.greymarchPanelHasKeys()) this.sp.browser.setFocused(false); } catch (err) { /* nothing to do */ } }
     }
     greymarchBrowserMessage(e: any): any {
         if (!e.arguments || e.arguments[0] !== "greymarch") return;
@@ -513,7 +517,7 @@ export class GreymarchBridge {
     greymarchAdminHide(): any {
         this.greymarchAdminOn = false;
         this.greymarchAdminToPage("hide", true);
-        if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchHudOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn)); }
+        if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchHudOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchGuardsHud || !!(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn)); }
     }
     greymarchAdminSend(data: any): any {
         var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchAdmin", rid: data.rid, op: data.op, args: data.args }) };
@@ -962,6 +966,88 @@ export class GreymarchBridge {
         var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchWolf", op: "game", beast: beast }) };
         this.controller.emitter.emit("sendMessage", { message: message, reliability: "reliable" });
     }
+    // CUFFS (guards.js). The server says { customPacketType: "greymarchCuffs", on, bound, gagged, cuffs } to the prisoner: the Prisoner's Cuffs it put in their inventory are
+    // worn and cannot be taken off (the server puts them back if they go), the bound-hands pose plays (again every 10 seconds: other animations end it), and both stop on
+    // on: false. Every game hears { customPacketType: "greymarchChains", chains: [{ from, to }], cuffed: [actor] }: other players in cuffs are posed too, and a chain is drawn
+    // on the HUD from each prisoner's hands to the hand of whoever holds the chain. Following the chain, through load doors too, is the server's work: it moves the prisoner.
+    greymarchCuffsTick(now: number): any {
+        var sp = this.sp;
+        if (now >= (this.greymarchCuffsNext || 0)) {
+            this.greymarchCuffsNext = now + 500;
+            var want = this.greymarchCuffsWant;
+            try {
+                var player = sp.Game.getPlayer();
+                if (want) {
+                    var f = Number(want.cuffs) > 0 ? sp.Game.getFormEx(Number(want.cuffs) >>> 0) : null;
+                    if (f && player.getItemCount(f) > 0 && !player.isEquipped(f)) player.equipItem(f, true, true); // preventRemoval: on until the server takes them off
+                    if (!this.greymarchCuffsPosed || now - (this.greymarchCuffsPosedAt || 0) > 10000) {
+                        if (!this.greymarchCuffsPosed) this.greymarchLog("guards: in cuffs (" + (want.bound ? "on a chain" : "walking freely") + (want.gagged ? ", gagged" : "") + ")");
+                        sp.Debug.sendAnimationEvent(player, "OffsetBoundStandingStart");
+                        this.greymarchCuffsPosed = true; this.greymarchCuffsPosedAt = now;
+                    }
+                } else if (this.greymarchCuffsPosed) {
+                    this.greymarchCuffsPosed = false;
+                    sp.Debug.sendAnimationEvent(player, "OffsetStop");
+                    this.greymarchLog("guards: the cuffs are off");
+                }
+            } catch (err) { /* tried again in half a second */ }
+            var posed = this.greymarchCuffsOthers || (this.greymarchCuffsOthers = {}), list = this.greymarchCuffedList || [], still: any = {};
+            for (var i = 0; i < list.length; i++) {
+                if (this.greymarchMeActor && list[i] === this.greymarchMeActor) continue;
+                var lid = misc.remoteIdToLocalId(list[i]);
+                if (!lid) continue;
+                still[lid] = true;
+                if (posed[lid] && now - posed[lid] < 10000) continue;
+                try { var a = sp.Actor.from(sp.Game.getFormEx(lid)); if (a) { sp.Debug.sendAnimationEvent(a, "OffsetBoundStandingStart"); posed[lid] = now; } } catch (aErr) { /* tried again */ }
+            }
+            for (var k in posed) {
+                if (still[k]) continue;
+                delete posed[k];
+                try { var b = sp.Actor.from(sp.Game.getFormEx(Number(k))); if (b) sp.Debug.sendAnimationEvent(b, "OffsetStop"); } catch (bErr) { /* gone */ }
+            }
+        }
+        this.greymarchChainsDraw(now);
+    }
+    // the chains on the HUD: each end where the hand is on screen (0..1 from the top left), about 30 times a second while one is in sight; nothing is sent while nothing changes
+    greymarchChainsDraw(now: number): any {
+        var list = this.greymarchChainList || [], out = [];
+        if (list.length) {
+            if (now < (this.greymarchChainsNext || 0)) return;
+            this.greymarchChainsNext = now + 33;
+            var sp = this.sp, self = this;
+            try {
+                var player = sp.Game.getPlayer();
+                var refOf = function (id: number) { if (self.greymarchMeActor && id === self.greymarchMeActor) return player; var l = misc.remoteIdToLocalId(id); return l ? sp.Actor.from(sp.Game.getFormEx(l)) : null; };
+                var hand = function (a: any, node: string) {
+                    var p = [sp.NetImmerse.getNodeWorldPositionX(a, node, false), sp.NetImmerse.getNodeWorldPositionY(a, node, false), sp.NetImmerse.getNodeWorldPositionZ(a, node, false)];
+                    if (!p.every(function (n: any) { return isFinite(n); }) || (p[0] === 0 && p[1] === 0 && p[2] === 0)) p = [a.getPositionX(), a.getPositionY(), a.getPositionZ() + 90]; // no hand node: about waist height
+                    return p;
+                };
+                var r4 = function (n: number) { return Math.round(n * 10000) / 10000; };
+                for (var i = 0; i < list.length; i++) {
+                    var a = refOf(Number(list[i].from)), b = refOf(Number(list[i].to));
+                    if (!a || !b || (player.getDistance(a) > 4000 && player.getDistance(b) > 4000)) continue; // not here, or far off
+                    var s = sp.worldPointToScreenPoint(hand(a, "NPC R Hand [RHnd]"), hand(b, "NPC L Hand [LHnd]"));
+                    var p = s && s[0], q = s && s[1];
+                    if (!p || !q || !(p[2] > 0) || !(q[2] > 0)) continue; // an end behind the camera
+                    out.push([r4(p[0]), r4(1 - p[1]), r4(q[0]), r4(1 - q[1])]);
+                }
+            } catch (err) { out = []; }
+        }
+        var key = JSON.stringify(out);
+        if (key === this.greymarchChainsKey) return;
+        this.greymarchChainsKey = key;
+        this.greymarchChainsShown = out.length > 0;
+        this.greymarchGuardsHudCheck();
+        this.greymarchHudToPage("chains", { list: out });
+    }
+    // the page layer stays up while a chain or the cuffing bar is on the HUD (never focused), like the voice display
+    greymarchGuardsHudCheck(): any {
+        var on = !!this.greymarchChainsShown || Date.now() < (this.greymarchProgressUntil || 0);
+        if (on === !!this.greymarchGuardsHud) return;
+        this.greymarchGuardsHud = on;
+        if (on && !this.greymarchScreenUp) { try { this.sp.browser.setVisible(true); } catch (e) { /* the page layer is not available */ } }
+    }
     // CREATURE FORMS. Staff turn a player into a creature (the server's shapeshift.js); the server says { customPacketType: "greymarchShape", on: true, race, back, name } and repeats it
     // every 5 seconds, then { on: false, back, wear } to change back. Other players see the creature because the server changes the character's appearance (SkyMP redraws it);
     // THIS game changes the player's own body: Beast Form mode (no inventory or magic menus, as the werewolf), no fast travel, no first person (creature bodies have none), gear
@@ -1393,7 +1479,7 @@ export class GreymarchBridge {
     greymarchToastTick(now: any): any {
         if (!this.greymarchToastUntil || now < this.greymarchToastUntil) return;
         this.greymarchToastUntil = 0;
-        if (!this.greymarchAdminOn && !this.greymarchMenuOn && !this.greymarchHudOn && !this.greymarchChatOn && !(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn) && !this.greymarchScreenUp) { try { this.sp.browser.setVisible(false); } catch (e2) { /* fine */ } }
+        if (!this.greymarchAdminOn && !this.greymarchMenuOn && !this.greymarchHudOn && !this.greymarchChatOn && !this.greymarchGuardsHud && !(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn) && !this.greymarchScreenUp) { try { this.sp.browser.setVisible(false); } catch (e2) { /* fine */ } }
     }
     // KILL: staff kill a character from THEIR OWN game, which is the one thing every SkyMP build lets a game do to its own character.
     greymarchKillMe(): any {
@@ -1600,7 +1686,7 @@ export class GreymarchBridge {
         this.greymarchMenuOn = false;
         this.greymarchMenuToPage("hide", true);
         this.greymarchMenuEscAt = 0;
-        if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchChatOn || !!(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn)); }
+        if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchChatOn || !!this.greymarchGuardsHud || !!(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn)); }
     }
     // ---- THE PROFESSIONS WINDOW (K). The page is Platform/UI/greymarch-prof.html; the SERVER decides what a profession allows, the ranks and the XP.
     greymarchProfToPage(fn: any, arg: any): any {
@@ -1631,7 +1717,7 @@ export class GreymarchBridge {
         if (!(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn)) return;
         this.greymarchProfOn = false;
         this.greymarchProfToPage("hide", true);
-        if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn)); }
+        if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchGuardsHud || !!(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn)); }
     }
     greymarchProfSend(data: any): any {
         this.greymarchLog("prof: window asks the server (rid " + data.rid + ", " + data.op + ")");
@@ -1658,7 +1744,7 @@ export class GreymarchBridge {
         if (!this.greymarchChanceryOn) return;
         this.greymarchChanceryOn = false;
         this.greymarchChanceryToPage("hide", true);
-        if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchProfOn || !!this.greymarchVampMenuOn); }
+        if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchGuardsHud || !!this.greymarchProfOn || !!this.greymarchVampMenuOn); }
     }
     greymarchChanceryAsk(data: any): any {
         var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchChancery", rid: data.rid, op: data.op, args: data.args }) };
@@ -1685,7 +1771,7 @@ export class GreymarchBridge {
         if (!this.greymarchVampMenuOn) return;
         this.greymarchVampMenuOn = false;
         this.greymarchVampMenuToPage("hide", true);
-        if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchProfOn || !!this.greymarchChanceryOn); }
+        if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchGuardsHud || !!this.greymarchProfOn || !!this.greymarchChanceryOn); }
     }
     greymarchVampMenuAsk(data: any): any {
         var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchVampMenu", rid: data.rid, op: data.op }) };
