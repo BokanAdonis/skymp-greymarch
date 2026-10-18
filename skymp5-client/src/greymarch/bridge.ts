@@ -138,7 +138,7 @@ export class GreymarchBridge {
         if (type === "greymarchWolfForm") { if (this.greymarchWolfWant !== !!msg.on) this.greymarchLog("wolf: the server says " + (msg.on ? "changed" : "no (change back)")); this.greymarchWolfWant = !!msg.on; if (msg.on) { this.greymarchWolfWordAt = Date.now(); this.greymarchWolfAlpha = !!msg.alpha; this.greymarchWolfPup = !msg.alpha && !!msg.pup; this.greymarchWolfBearRace = msg.bear && Number(msg.race) > 0 ? Number(msg.race) >>> 0 : 0; if (this.greymarchWolfBearRace) this.greymarchWolfBearSeen = this.greymarchWolfBearRace; this.greymarchWolfBlack = !!this.greymarchWolfBearRace && !!msg.black; } return; } // (logged only when it changes: the server repeats it every 5 seconds) // the werewolf form (greymarchWolfTick)
         if (type === "greymarchWolfAlphas") { this.greymarchWolfAlphaList = Array.isArray(msg.actors) ? msg.actors : []; this.greymarchWolfPupList = Array.isArray(msg.pups) ? msg.pups : []; this.greymarchWolfBlackList = Array.isArray(msg.blackbears) ? msg.blackbears : []; return; } // the other players in the Alpha form: drawn white (greymarchWolfAlphaOthers)
         if (type === "greymarchVampire") { this.greymarchVampWant = msg.on ? msg : null; this.greymarchHudToPage("blood", { on: !!msg.on, blood: msg.blood, empty: !!msg.empty }); return; } // a vampire's state: the blood drop and what the game applies (greymarchVampTick)
-        if (type === "greymarchVampLooks") { this.greymarchVampLookList = Array.isArray(msg.vampires) ? msg.vampires : []; return; } // how every vampire in the world looks (eyes and fangs)
+        if (type === "greymarchVampLooks") { this.greymarchVampLookList = Array.isArray(msg.vampires) ? msg.vampires : []; if (Number(msg.me) > 0) this.greymarchMeActor = Number(msg.me) >>> 0; return; } // (me: which of them is this player: the ghosts and effects packets that also say so may not have come yet, and without it the player's own eyes and fangs were never put on) // how every vampire in the world looks (eyes and fangs)
         if (type === "greymarchVampFeed") { this.greymarchVampFeedWant = msg.on ? { role: msg.role, partner: msg.partner, at: Date.now(), done: false } : { off: true }; return; } // the feeding scene
         if (type === "greymarchVampMist") { if (!msg.on) this.greymarchVampMistEnd = true; return; } // Mist Form refused or over: the game's own mist is ended
         if (type === "greymarchVampLord") { if (this.greymarchVampLordWas !== !!msg.on) { this.greymarchVampLordWas = !!msg.on; this.greymarchLog("vampire: the server says the Lord's shape is " + (msg.on ? "on" : "off")); } return; } // the body itself is the creature form (greymarchShape)
@@ -937,6 +937,7 @@ export class GreymarchBridge {
                 if (!race || VAMP_EYE_RACES.indexOf(race.getFormID()) < 0) { // a beast race (khajiit and argonian eyes are not made yet), or in a creature's or the Lord's shape
                     var rid = race ? race.getFormID() : 0;
                     if (skipped[localId] !== rid) { skipped[localId] = rid; this.greymarchLog("vampire: " + localId.toString(16) + " keeps their eyes: no vampire eyes for race " + rid.toString(16) + " yet"); }
+                    if (v.fangs) this.greymarchVampFangReport(v.actor, localId, "no vampire eyes or fangs for race " + rid.toString(16));
                     continue;
                 }
                 var base = sp.ActorBase.from(actor.getBaseObject());
@@ -1966,7 +1967,7 @@ export class GreymarchBridge {
     }
     greymarchFaceApply(actor: any, face: any, fresh: boolean): any {
         try {
-            if (fresh) { actor.clearExpressionOverride(); actor.resetExpressionOverrides(); }
+            if (fresh) { actor.clearExpressionOverride(); actor.resetExpressionOverrides(); for (var p0 = 0; p0 < 16; p0++) actor.setExpressionPhoneme(p0, 0); } // every mouth shape off too: the last face's (Open mouth ...) stayed under the next one
             if (!face) return;
             if (typeof face.mood === "number") actor.setExpressionOverride(face.mood, face.strength || 100);
             var ph = face.phonemes || [];

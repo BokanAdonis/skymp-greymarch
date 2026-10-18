@@ -201,10 +201,11 @@ test("the wheel's loader shows greymarch-emote.html in its own layer and treats 
   assert.ok(js.includes("e.key==='g'||e.key==='G'") && !js.includes("e.key==='x'"));
 });
 
+const CLEAN = Array.from({ length: 16 }, (_, i) => ["ph", i, 0]); // every mouth shape off, before a face goes on or when it comes off
 test("a face (Bare fangs): put on the player's own face, reported to the server, the camera to third person; picking it again or the middle of the wheel takes it off", () => {
   const s = make();
   s.page({ type: "emote", id: "fangs" }); s.tick();
-  assert.deepStrictEqual(s.log.faces.me, [["mood", 15, 100], ["ph", 5, 0.8], ["ph", 1, 0.4]], "combat anger with the teeth shown and the mouth a little open");
+  assert.deepStrictEqual(s.log.faces.me, [...CLEAN, ["mood", 15, 100], ["ph", 5, 0.8], ["ph", 1, 0.4]], "combat anger with the teeth shown and the mouth a little open");
   assert.deepStrictEqual(s.log.sent, [{ customPacketType: "greymarchFace", face: "fangs" }]);
   assert.strictEqual(s.log.thirdPerson, 1);
   assert.deepStrictEqual(s.log.idles, [], "no animation");
@@ -216,7 +217,7 @@ test("a face (Bare fangs): put on the player's own face, reported to the server,
   assert.strictEqual(s.shown()[0].arg.playing, "fangs", "the wheel's middle shows it");
   s.key(34, false);
   s.page({ type: "emote-stop" }); s.tick();
-  assert.deepStrictEqual(s.log.faces.me, [], "cleared");
+  assert.deepStrictEqual(s.log.faces.me, CLEAN, "cleared, the mouth shapes too");
   assert.deepStrictEqual(s.log.sent.at(-1), { customPacketType: "greymarchFace", face: null });
   s.page({ type: "emote", id: "open" }); s.tick(); s.page({ type: "emote", id: "open" }); s.tick();
   assert.deepStrictEqual(s.log.sent.slice(-2).map((m) => m.face), ["open", null], "the same face again takes it off");
@@ -228,12 +229,22 @@ test("another player's face: put on the character this game draws for them, ever
   s.say({ customPacketType: "greymarchFaceOf", actor: 0xff000888, face: "smile" }); // not drawn here
   s.say({ customPacketType: "greymarchFaceOf", actor: 0xff000777, face: "explode" }); // not a face
   s.tick();
-  assert.deepStrictEqual(s.log.faces["ff000021"], [["ph", 1, 0.65]]);
+  assert.deepStrictEqual(s.log.faces["ff000021"], [...CLEAN, ["ph", 1, 0.65]]);
   s.log.faces["ff000021"] = null; s.tick(1100);
   assert.deepStrictEqual(s.log.faces["ff000021"], [["ph", 1, 0.65]], "again a second later");
   s.say({ customPacketType: "greymarchFaceOf", actor: 0xff000777, face: null }); s.tick(1100);
-  assert.deepStrictEqual(s.log.faces["ff000021"], []);
+  assert.deepStrictEqual(s.log.faces["ff000021"], CLEAN);
   assert.deepStrictEqual(Object.keys(s.gm.greymarchFaceOthers), ["4278192264"], "only the one not drawn here waits");
+});
+
+test("Open mouth, then Close mouth: the open shape is taken off before the lips are pressed shut (the mouth stayed open)", () => {
+  const s = make();
+  s.page({ type: "emote", id: "open" }); s.tick();
+  s.page({ type: "emote", id: "closed" }); s.tick();
+  const ph = s.log.faces.me.filter((x) => x[0] === "ph");
+  assert.deepStrictEqual(ph.at(-1), ["ph", 2, 1], "BMP at full strength last");
+  assert.ok(ph.some((x) => x[1] === 1 && x[2] === 0), "BigAah (Open mouth's shape) set back to 0");
+  assert.ok(!ph.some((x) => x[2] > 0 && x[1] !== 2), "nothing else holds the mouth open");
 });
 
 test("the faces are the ones the server knows (gamemode faces.js)", () => {

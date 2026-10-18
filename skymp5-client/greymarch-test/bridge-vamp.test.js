@@ -175,6 +175,13 @@ test("fangs on a character with no teeth part of their own: on, reported to the 
   } finally { Date.now = realNow; }
 });
 
+test("the looks packet says which vampire is this player, so their own eyes and fangs go on without the ghosts or effects packets", () => {
+  const s = make();
+  assert.ok(!s.gm.greymarchMeActor);
+  s.say({ customPacketType: "greymarchVampLooks", vampires: [{ actor: 0xff000009, glow: 1, fangs: true }], me: 0xff000009 });
+  assert.strictEqual(s.gm.greymarchMeActor, 0xff000009);
+});
+
 test("a Potion of Blood drunk from the inventory (the equip event) is reported too", () => {
   const s = make();
   s.fire("equip", { baseObj: { getFormID: () => DG + 0x18ef3 }, actor: me });
