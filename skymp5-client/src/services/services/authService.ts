@@ -212,6 +212,9 @@ export class AuthService extends ClientListener {
       case 'greymarchGmAlert':
       case 'greymarchProps':
       case 'greymarchWolfForm':
+      case 'greymarchCuffs':
+      case 'greymarchChains':
+      case 'greymarchProgress':
       case 'greymarchShape':
       case 'greymarchShapeAnim':
       case 'greymarchWolfFeed':
@@ -220,6 +223,8 @@ export class AuthService extends ClientListener {
       case 'greymarchVampFeed':
       case 'greymarchVampMist':
       case 'greymarchVampLord':
+      case 'greymarchVampMenuReply':
+      case 'greymarchVampMenuOpen':
       case 'greymarchWolfAlphas':
         this.gm.greymarchPacket(msgContent);
         break;

@@ -25,22 +25,41 @@ const CONNECT_FAIL_MS = 90000; // the connecting screen over the main menu: this
 const WOLF_MORPH_MS = 4300; // the werewolf transformation: the race changes at the animation's "SetRace" cue, or after this long if the cue is not seen (the cue is about 4.0 s in, animationdatasinglefile.txt)
 const SHAPE_REST_MS = 800, SHAPE_POWER_REST_MS = 1600; // a creature's attacks: the rest after a normal and after a power attack (the server allows the same pace)
 const SHAPE_LAND_MS = 450; // a creature's swing is reported this long after it starts (about when it lands)
+const SHAPE_NPC_READY_MS = 8000; // a creature NPC that is not ready this long after it was placed is placed again
 const SHAPE_SILENCE_MS = 20000; // a creature form: with no word from the server for this long the player changes back by themselves (the server repeats "on" every 5 seconds)
 const WOLF_BACK_GRACE_MS = 2000; // Z changes back, but not in the first 2 seconds after the body changed
 const WOLF_ROAR_MS = 4000;  // R: one roar every this long (the howl animation lasts about 2.8 s)
 // vampires (gamemode vampire.js): the game's own records, inside Dawnguard.esm (read from the game files); the real IDs are looked up with Game.getFormFromFile
-const VAMP_FORMS = { mist: 0x38ba, lord: 0x283b, potionFx: 0x18ef4, feedIdle: 0xe6a8 }; // DLC1VampireMistform, DLC1VampireChange, DLC1BloodPotionEffect, IdleVampireStandingFeedFront_Loose
-// a vampire's blue eyes (GreymarchCore.esp, made by tools/vampire-eyes.js in the launcher repo): GM_VampEyesMaleBlue0..6 and GM_VampEyesFemaleBlue0..6, glow 0 (none) to 6 (a Lord)
-const VAMP_EYES = { male: 0x80e, female: 0x815 };
+const VAMP_FORMS = { mist: 0x38ba, lord: 0x283b, potionFx: 0x18ef4, potion: 0x18ef3, feedIdle: 0xe6a8 }; // DLC1VampireMistform, DLC1VampireChange, DLC1BloodPotionEffect, DLC1BloodPotion, IdleVampireStandingFeedFront_Loose
+// a vampire's eyes, one colour per bloodline (GreymarchCore.esp, made by tools/vampire-eyes.js in the launcher repo): GM_VampEyes{Male,Female}{Colour}0..6, glow 0 (none) to 6 (a Lord)
+const VAMP_EYES: any = { blue: { male: 0x80e, female: 0x815 }, red: { male: 0x81f, female: 0x826 }, yellow: { male: 0x82e, female: 0x835 }, green: { male: 0x83d, female: 0x844 }, purple: { male: 0x84c, female: 0x853 } };
 const VAMP_EYE_RACES = [0x13746, 0x13744, 0x13741, 0x13748, 0x13743, 0x13749, 0x13742, 0x13747]; // Nord, Imperial, Breton, Redguard, High Elf, Wood Elf, Dark Elf, Orc (the human eye shape; khajiit and argonian eyes are not made yet)
 const VAMP_FANGS = { male: 0x81c, female: 0x81d }; // GM_VampFangsMale / GM_VampFangsFemale: the human teeth with the upper canines pulled into fangs
 const VAMP_FANG_RACES = [0x13746, 0x13744, 0x13741, 0x13748, 0x13743, 0x13749, 0x13742]; // the human and elf teeth; orcs keep their tusks
 const CHANCERY_SCRIPT =PROF_SCRIPT.split("__gmProfSend").join("__gmChanceryRun").split("greymarch-prof").join("greymarch-chancery").split("2147483220").join("2147483221"); // the chancery window (/chancery): the same loader, another page
+const VAMP_MENU_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmVampRun").split("greymarch-prof").join("greymarch-vampire").split("2147483220").join("2147483222"); // the vampire window (/vampire): the same loader, another page
+
+// Which way the camera faces, in degrees the Skyrim way (0 = north, 90 = east). Skyrim Platform has no camera call, so 24 points on a wide ring round the head are
+// put through worldPointToScreenPoint: the camera faces where the points in front of it cross the middle of the screen. null = could not tell (looking straight up or down).
+export function greymarchCameraYaw(project: (pts: number[][]) => number[][], head: number[]): number | null {
+    var R = 5000, N = 24, pts = [];
+    for (var i = 0; i < N; i++) { var a = (i * 360 / N) * Math.PI / 180; pts.push([head[0] + R * Math.sin(a), head[1] + R * Math.cos(a), head[2]]); }
+    var s = project(pts);
+    if (!s || s.length !== N) return null;
+    for (var j = 0; j < N; j++) {
+        var p = s[j], q = s[(j + 1) % N];
+        if (!p || !q || !(p[2] > 0) || !(q[2] > 0) || !(p[0] > -0.5 && p[0] < 1.5 && q[0] > -0.5 && q[0] < 1.5)) continue; // both in front of the camera, near the screen
+        if (p[0] <= 0.5 && q[0] >= 0.5 && q[0] > p[0]) return ((j + (0.5 - p[0]) / (q[0] - p[0])) * 360 / N) % 360; // left to right across the middle
+    }
+    return null;
+}
 
 export class GreymarchBridge {
     [key: string]: any;
 
     constructor(public sp: any, public controller: any) {
+        // a new bridge is never mid-form; SkyrimPlatform's storage outlives a script reload, so a flag left on would keep every look for this player aside forever (remoteServer.ts)
+        try { (this.sp.storage as any)["greymarchWolfOn"] = false; } catch (stErr) { /* no storage: nothing to clear */ }
         this.controller.on("browserMessage", (e: any) => this.greymarchBrowserMessage(e));
         this.controller.on("buttonEvent", (e: any) => this.greymarchKey(e)); // F7 opens the staff panel
         try { this.sp.on("hit", (e: any) => this.greymarchHit(e)); } catch (hitErr) { /* no hit events: the combat history stays empty */ }
@@ -53,7 +72,9 @@ export class GreymarchBridge {
         try { this.controller.on("magicEffectApply", (e: any) => { try { if (e && e.effect && e.effect.getFormID() === 0x92c45 && e.target && e.target.getFormID() === 0x14) this.greymarchWolfSignal("magicEffectApply"); } catch (x) { /* not ours */ } }); } catch (maErr) { /* the other signals still see it */ }
         try { this.controller.on("spellCast", (e: any) => { try { if (e && e.spell && e.caster && e.caster.getFormID() === 0x14) this.greymarchVampSignal("cast", e.spell.getFormID()); } catch (x) { /* not ours */ } }); } catch (vcErr) { /* no cast events: the powers are not reported */ } // a vampire's Mist Form or Vampire Lord (greymarchVampTick)
         try { this.controller.on("magicEffectApply", (e: any) => { try { if (e && e.effect && e.target && e.target.getFormID() === 0x14) this.greymarchVampSignal("effect", e.effect.getFormID()); } catch (x) { /* not ours */ } }); } catch (veErr) { /* no effect events: a Potion of Blood is not reported */ } // a Potion of Blood drunk
+        try { this.controller.on("equip", (e: any) => { try { if (e && e.baseObj && e.actor && e.actor.getFormID() === 0x14) this.greymarchVampSignal("equip", e.baseObj.getFormID()); } catch (x) { /* not ours */ } }); } catch (vqErr) { /* the effect event still sees it */ } // a potion is "equipped" when it is drunk
         this.controller.emitter.on("greymarchStage", (text: string) => this.greymarchLog(text)); // other services report where the game is, for the server log
+        this.controller.emitter.on("greymarchEar", (e: any) => { if (e && typeof e.name === "string" && isFinite(e.x) && isFinite(e.y) && isFinite(e.z)) { const m = this.greymarchEarsSeen || (this.greymarchEarsSeen = {}); m[e.name] = { x: e.x, y: e.y, z: e.z, at: Date.now() }; } }); // where each named player's head is in the world (where their voice comes from: greymarchEarsTick)
         this.controller.emitter.on("greymarchHead", (e: any) => { const m = this.greymarchHeads || (this.greymarchHeads = {}); m[e.name] = { x: e.x, y: e.y, at: Date.now() }; this.greymarchRes = { w: e.rw, h: e.rh }; }); // where each named player's head is on screen (for the microphone icon)
     }
 
@@ -107,19 +128,24 @@ export class GreymarchBridge {
         if (type === "greymarchMenuReply") { this.greymarchMenuToPage("reply", msg); return; }
         if (type === "greymarchShape") { this.greymarchShapeMsg(msg); return; }
         if (type === "greymarchShapeAnim") { if (typeof msg.ev === "string" && msg.ev.length < 64 && Number(msg.actor) > 0) (this.greymarchShapeAnimQueue || (this.greymarchShapeAnimQueue = [])).push({ actor: Number(msg.actor), ev: msg.ev }); return; } // another player's creature attacked (played in greymarchShapeDrive) // a creature form (staff): greymarchShapeTick changes the body
-        if (type === "greymarchWolfForm") { if (this.greymarchWolfWant !== !!msg.on) this.greymarchLog("wolf: the server says " + (msg.on ? "changed" : "no (change back)")); this.greymarchWolfWant = !!msg.on; if (msg.on) { this.greymarchWolfWordAt = Date.now(); this.greymarchWolfAlpha = !!msg.alpha; this.greymarchWolfPup = !msg.alpha && !!msg.pup; } return; } // (logged only when it changes: the server repeats it every 5 seconds) // the werewolf form (greymarchWolfTick)
-        if (type === "greymarchWolfAlphas") { this.greymarchWolfAlphaList = Array.isArray(msg.actors) ? msg.actors : []; this.greymarchWolfPupList = Array.isArray(msg.pups) ? msg.pups : []; return; } // the other players in the Alpha form: drawn white (greymarchWolfAlphaOthers)
+        if (type === "greymarchWolfForm") { if (this.greymarchWolfWant !== !!msg.on) this.greymarchLog("wolf: the server says " + (msg.on ? "changed" : "no (change back)")); this.greymarchWolfWant = !!msg.on; if (msg.on) { this.greymarchWolfWordAt = Date.now(); this.greymarchWolfAlpha = !!msg.alpha; this.greymarchWolfPup = !msg.alpha && !!msg.pup; this.greymarchWolfBearRace = msg.bear && Number(msg.race) > 0 ? Number(msg.race) >>> 0 : 0; if (this.greymarchWolfBearRace) this.greymarchWolfBearSeen = this.greymarchWolfBearRace; this.greymarchWolfBlack = !!this.greymarchWolfBearRace && !!msg.black; } return; } // (logged only when it changes: the server repeats it every 5 seconds) // the werewolf form (greymarchWolfTick)
+        if (type === "greymarchWolfAlphas") { this.greymarchWolfAlphaList = Array.isArray(msg.actors) ? msg.actors : []; this.greymarchWolfPupList = Array.isArray(msg.pups) ? msg.pups : []; this.greymarchWolfBlackList = Array.isArray(msg.blackbears) ? msg.blackbears : []; return; } // the other players in the Alpha form: drawn white (greymarchWolfAlphaOthers)
         if (type === "greymarchVampire") { this.greymarchVampWant = msg.on ? msg : null; this.greymarchHudToPage("blood", { on: !!msg.on, blood: msg.blood, empty: !!msg.empty }); return; } // a vampire's state: the blood drop and what the game applies (greymarchVampTick)
         if (type === "greymarchVampLooks") { this.greymarchVampLookList = Array.isArray(msg.vampires) ? msg.vampires : []; return; } // how every vampire in the world looks (eyes and fangs)
         if (type === "greymarchVampFeed") { this.greymarchVampFeedWant = msg.on ? { role: msg.role, partner: msg.partner, at: Date.now(), done: false } : { off: true }; return; } // the feeding scene
         if (type === "greymarchVampMist") { if (!msg.on) this.greymarchVampMistEnd = true; return; } // Mist Form refused or over: the game's own mist is ended
         if (type === "greymarchVampLord") { if (this.greymarchVampLordWas !== !!msg.on) { this.greymarchVampLordWas = !!msg.on; this.greymarchLog("vampire: the server says the Lord's shape is " + (msg.on ? "on" : "off")); } return; } // the body itself is the creature form (greymarchShape)
+        if (type === "greymarchCuffs") { this.greymarchCuffsWant = msg.on ? msg : null; return; } // in cuffs (guards.js): the cuffs worn and the bound pose (greymarchCuffsTick)
+        if (type === "greymarchChains") { this.greymarchChainList = Array.isArray(msg.chains) ? msg.chains.slice(0, 16) : []; this.greymarchCuffedList = Array.isArray(msg.cuffed) ? msg.cuffed.slice(0, 64) : []; return; } // who is on whose chain (drawn on the HUD), who is in cuffs (posed)
+        if (type === "greymarchProgress") { var pOn = !msg.off && Number(msg.ms) > 0; this.greymarchProgressUntil = pOn ? Date.now() + Math.min(60000, Number(msg.ms)) + 500 : 0; this.greymarchGuardsHudCheck(); this.greymarchHudToPage("progress", pOn ? { on: true, ms: Number(msg.ms), text: String(msg.text || "").slice(0, 120) } : { on: false }); return; } // a timed action (the 7 seconds of cuffing): a bar on the HUD
         if (type === "greymarchWolfFeed") { this.greymarchWolfFeedAt = Date.now(); return; } // the wolf fed (a kill or a corpse): the feeding animation (greymarchWolfTick)
         if (type === "greymarchChanceryReply") { this.greymarchChanceryToPage("reply", msg); return; } // the chancery window (/chancery)
         if (type === "greymarchChanceryOpen") { this.greymarchChanceryShow(); return; }
+        if (type === "greymarchVampMenuReply") { this.greymarchVampMenuToPage("reply", msg); return; } // the vampire window (/vampire)
+        if (type === "greymarchVampMenuOpen") { this.greymarchVampMenuShow(); return; }
         if (type === "greymarchProfReply") { this.greymarchLog("prof: the server's answer arrived (rid " + msg.rid + ", ok " + msg.ok + ")"); this.greymarchProfToPage("reply", msg); return; } // the professions window (K)
         if (type === "greymarchCombatMod") { var cm = Number(msg.mult); this.greymarchCombatWant = cm >= 0.1 && cm <= 3 ? cm : 1; return; } // the damage multiplier for what is in hand (professions: a weapon above your rank hits weaker, a Brawler's fists hit harder)
-        if (type === "greymarchMenuEvent") { if ((msg.type === "trade_invite" || msg.type === "trade" || msg.type === "feed_invite") && !this.greymarchMenuOn) this.greymarchMenuShow({ mode: "invite", looking: 0 }); /* a trade or a vampire's request to feed opens the menu by itself */ this.greymarchMenuToPage("event", msg); return; }
+        if (type === "greymarchMenuEvent") { if ((msg.type === "trade_invite" || msg.type === "trade" || msg.type === "feed_invite" || msg.type === "frisk_invite" || msg.type === "guard_view") && !this.greymarchMenuOn) this.greymarchMenuShow({ mode: "invite", looking: 0 }); /* a trade, a vampire's request to feed, a guard's request to frisk or what the frisk found opens the menu by itself */ this.greymarchMenuToPage("event", msg); return; }
         if (type === "greymarchFx") { this.greymarchFxWant = { noclip: !!msg.noclip, speed: Number(msg.speed) || 100, frozen: !!msg.frozen, god: !!msg.god }; if (msg.me) this.greymarchMeActor = msg.me; return; }
         if (type === "greymarchGhosts") { this.greymarchGhostList = Array.isArray(msg.ghosts) ? msg.ghosts : []; if (msg.me) this.greymarchMeActor = msg.me; this.greymarchOthers = Array.isArray(msg.others) ? msg.others : []; if (msg.stats !== undefined) this.greymarchStatsWant = msg.stats && typeof msg.stats === "object" ? msg.stats : null; var inv = Array.isArray(msg.invisible) ? msg.invisible : []; this.greymarchInvisList = inv; var invMap = {}; for (var q = 0; q < inv.length; q++) if (inv[q] !== msg.me) invMap[inv[q]] = true; try { Function("return this")().__gmInvisible = invMap; } catch (gErr) { /* names stay visible */ } return; }
         this.sp.printConsole("[greymarch] got " + type + (msg.characters ? " with " + msg.characters.length + " character(s)" : ""));
@@ -230,7 +256,7 @@ export class GreymarchBridge {
         this.greymarchToPage("hide");
         this.sp.browser.setFocused(false);
         this.greymarchScreenUp = false;
-        this.sp.browser.setVisible(!!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!(this.greymarchProfOn || this.greymarchChanceryOn)); // stays visible (but never focused) while the voice display is on; the staff panel keeps it up and focused
+        this.sp.browser.setVisible(!!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchGuardsHud || !!(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn)); // stays visible (but never focused) while the voice display is on; the staff panel keeps it up and focused
         if (this.greymarchAdminOn) this.sp.browser.setFocused(true);
         this.greymarchChatShow();
         this.greymarchReportLoadOrder();
@@ -258,6 +284,7 @@ export class GreymarchBridge {
         this.greymarchDoorNamesApply(Date.now());
         this.greymarchDoorPrompt(Date.now());
         this.greymarchChatPending();
+        this.greymarchProfPending();
         this.greymarchChatWatch(Date.now());
         this.greymarchWorldViewGuard(Date.now()); // other players are drawn only while SkyMP's world view is on: see greymarchWorldViewGuard
         if (this.greymarchChatOn && Date.now() >= (this.greymarchChatNext || 0)) { this.greymarchChatNext = Date.now() + 2000; this.greymarchChatToPage("show", true); }
@@ -268,6 +295,8 @@ export class GreymarchBridge {
         this.greymarchShapeTick(); // a creature form staff put the player in (a goat, a giant ...): the server decides, the body is changed here
         this.greymarchWolfTick(); // the werewolf form: the game's Beast Form power is the trigger, the server decides, the change is done here
         this.greymarchVampTick(); // a vampire: powers and potions reported, the abilities the server names, no Restoration, the feeding scene
+        this.greymarchCuffsTick(Date.now()); // in cuffs: the cuffs worn, the bound pose (others' too), the chain drawn to whoever holds it
+        this.greymarchEarsTick(Date.now()); // where each voice comes from, for the launcher (only while it is in voice)
         var beat = this.greymarchBeat;
         if (beat) {
             var bNow = Date.now();
@@ -352,6 +381,28 @@ export class GreymarchBridge {
             this.sp.browser.executeJavaScript(HUD_SCRIPT + "window.__gmHudSend(" + json + ");");
         } catch (err) { /* the voice display is a nicety: it must never break the game */ }
     }
+    // WHERE EACH VOICE COMES FROM. About 10 times a second, while the launcher is in voice, the voice display's page is told which way the camera faces and where
+    // nearby players' heads are; the page passes it to the launcher, which turns, muffles and fades each voice from it. Whether a voice can be heard at all stays the
+    // game server's call (the launcher's voice rules), so these numbers only change how a voice sounds.
+    greymarchEarsTick(now: number): any {
+        if (!this.greymarchListen || this.greymarchScreenUp || now < (this.greymarchEarsNext || 0)) return;
+        this.greymarchEarsNext = now + 100;
+        try {
+            var sp = this.sp, player = sp.Game.getPlayer();
+            var head = "NPC Head [Head]";
+            var me = [sp.NetImmerse.getNodeWorldPositionX(player, head, false), sp.NetImmerse.getNodeWorldPositionY(player, head, false), sp.NetImmerse.getNodeWorldPositionZ(player, head, false)];
+            if (!me.every(function (n: any) { return isFinite(n); }) || (me[0] === 0 && me[1] === 0 && me[2] === 0)) me = [player.getPositionX(), player.getPositionY(), player.getPositionZ() + 110]; // no head node (a creature form): about head height
+            var yaw = greymarchCameraYaw(function (pts: number[][]) { return sp.worldPointToScreenPoint.apply(null, pts); }, me);
+            if (yaw === null) yaw = player.getAngleZ(); // the camera could not be read: the way the character faces
+            var seen = this.greymarchEarsSeen || {}, list = [];
+            for (var id in seen) {
+                var e = seen[id];
+                if (now - e.at > 400) { delete seen[id]; continue; } // gone, or out of reach
+                if (/^#[2-9A-HJ-KM-NP-Z]{4}$/.test(id) && list.length < 32) list.push({ id: id, x: Math.round(e.x), y: Math.round(e.y), z: Math.round(e.z) });
+            }
+            this.greymarchHudToPage("ears", { yaw: Math.round(yaw * 10) / 10, me: [Math.round(me[0]), Math.round(me[1]), Math.round(me[2])], list: list });
+        } catch (err) { /* voices just stay centred */ }
+    }
     // The voice display reports "I am on / off, and these characters are talking". Only real character IDs are accepted.
     greymarchVoiceMessage(data: any): any {
         var ids = [];
@@ -361,13 +412,14 @@ export class GreymarchBridge {
             }
         }
         var hud = data.hud === true;
+        this.greymarchListen = data.listen === true; // the launcher is in voice: it wants to know where voices come from (greymarchEarsTick), even with the display off
         var changed = hud !== !!this.greymarchHudOn;
         this.greymarchVoice = { hud: hud, speaking: ids };
         // the floating names mark whoever is talking (formView.ts draws the mark as part of the name, so it moves with it and cannot lag)
         try { var talking = {}; if (hud) for (var ti = 0; ti < ids.length; ti++) talking[ids[ti]] = 1; (Function("return this")() as any).__gmSpeaking = talking; } catch (e) { /* the names stay unmarked */ }
         this.greymarchHudOn = hud;
         // the page is shown (never focused) while the display is on, hidden when it is off; the select screen and the veil decide for themselves while they are up
-        if (changed && !this.greymarchScreenUp) { try { this.sp.browser.setVisible(hud || !!this.greymarchChatOn || !!(this.greymarchProfOn || this.greymarchChanceryOn)); if (!this.greymarchChatTyping) this.sp.browser.setFocused(false); } catch (err) { /* nothing to do */ } }
+        if (changed && !this.greymarchScreenUp) { try { this.sp.browser.setVisible(hud || !!this.greymarchChatOn || !!this.greymarchGuardsHud || !!(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn)); if (!this.greymarchChatTyping && !this.greymarchPanelHasKeys()) this.sp.browser.setFocused(false); } catch (err) { /* nothing to do */ } }
     }
     greymarchBrowserMessage(e: any): any {
         if (!e.arguments || e.arguments[0] !== "greymarch") return;
@@ -386,6 +438,8 @@ export class GreymarchBridge {
         if (data && data.type === "prof-close") { this.greymarchProfHide(); return; }
         if (data && data.type === "chancery") { this.greymarchChanceryAsk(data); return; } // the chancery window asks the server (the SERVER decides)
         if (data && data.type === "chancery-close") { this.greymarchChanceryHide(); return; }
+        if (data && data.type === "vampire") { this.greymarchVampMenuAsk(data); return; } // the vampire window asks the server (the SERVER decides)
+        if (data && data.type === "vampire-close") { this.greymarchVampMenuHide(); return; }
         if (!data || (data.type !== "play" && data.type !== "create" && data.type !== "delete")) return;
         // Play and Create make SkyMP load the world. If the world from logging in is still loading, a second load on top of it never finishes (stuck),
         // so the choice is held until the game reports that load (greymarchChoiceTick); the screen shows the player it is working.
@@ -463,7 +517,7 @@ export class GreymarchBridge {
     greymarchAdminHide(): any {
         this.greymarchAdminOn = false;
         this.greymarchAdminToPage("hide", true);
-        if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchHudOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!(this.greymarchProfOn || this.greymarchChanceryOn)); }
+        if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchHudOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchGuardsHud || !!(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn)); }
     }
     greymarchAdminSend(data: any): any {
         var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchAdmin", rid: data.rid, op: data.op, args: data.args }) };
@@ -487,9 +541,10 @@ export class GreymarchBridge {
         else if (e.code === 1 && this.greymarchMenuOn) this.greymarchMenuEscape();
         else if (e.code === 65 && !this.greymarchAdminOn && !this.greymarchMenuOn) this.greymarchAdminShow();
         else if (e.code === 66 && !this.greymarchAdminOn && !this.greymarchMenuOn && !this.greymarchChatTyping) this.greymarchAdminShow("tester"); // F8: the same panel as the tester menu (teleports, items, NPCs; the server gives testers those commands on the test server only)
-        else if (e.code === 37 && !this.greymarchChatTyping && !(this.greymarchProfOn || this.greymarchChanceryOn)) this.greymarchProfShow(); // K opens the professions window (the page itself closes it with K or Esc, like the staff panel with F7)
+        else if (e.code === 37 && !this.greymarchChatTyping && !(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn)) this.greymarchProfWanted = Date.now(); // K opens the professions window from the update phase (greymarchProfPending), where the game's menus can be asked about (the page itself closes it with K or Esc, like the staff panel with F7)
         else if (e.code === 1 && this.greymarchProfOn) this.greymarchProfHide();
         else if (e.code === 1 && this.greymarchChanceryOn) this.greymarchChanceryHide();
+        else if (e.code === 1 && this.greymarchVampMenuOn) this.greymarchVampMenuHide();
         else if (e.code === 1 && this.greymarchAdminOn) this.greymarchAdminHide();
     }
     // ---- THE WEREWOLF FORM: the game's OWN power "Beast Form" (the spell WerewolfChange, Skyrim.esm 0x092C48) is the trigger; the SERVER decides; THIS CODE does the change.
@@ -556,6 +611,7 @@ export class GreymarchBridge {
                 if (want === false) this.greymarchWolfWant = undefined; // handled: the next use of the power is reported afresh
             }
             this.greymarchWolfAlphaOthers(now);
+            this.greymarchWolfDress(player, now);
             // Z while changed: the player asks to change back. The server decides (it ends the form with the normal cooldown and says on: false); nothing is changed here first.
             // Not mid-transformation, not in a menu, not in the first WOLF_BACK_GRACE_MS after the change (the Z press that started the change cannot also end it).
             var backAt = this.greymarchWolfBackAt;
@@ -577,6 +633,9 @@ export class GreymarchBridge {
                     sp.Debug.sendAnimationEvent(player, "HowlStart");
                     this.greymarchWolfRoarRelease = now + 200; // released at once: a short howl, as a quick tap of the shout key does it
                     this.greymarchLog("wolf: roar");
+                    // the howl calls the pack: the server tells every online packmate where it came from (werewolf.js howl; it keeps its own wait between calls)
+                    var howlMsg = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchWolf", op: "howl" }) };
+                    this.controller.emitter.emit("sendMessage", { message: howlMsg, reliability: "reliable" });
                 }
             }
             if (this.greymarchWolfRoarRelease && now >= this.greymarchWolfRoarRelease) { this.greymarchWolfRoarRelease = 0; if (this.greymarchWolfOn) sp.Debug.sendAnimationEvent(player, "HowlRelease"); }
@@ -599,6 +658,8 @@ export class GreymarchBridge {
     greymarchWolfBecome(player: any): any {
         var sp = this.sp;
         this.greymarchWolfOn = true;
+        // while changed, SkyMP keeps the character's own look aside instead of writing it onto the beast's body halfway (remoteServer.ts); it is put on properly after the way back
+        try { (sp.storage as any)["greymarchWolfOn"] = true; } catch (stErr) { /* the look is then applied as it comes */ }
         var morph = { at: Date.now(), cue: false };
         var played = false;
         try { sp.Game.forceThirdPerson(); } catch (cErr) { /* the change sets the camera anyway */ } // the animation is seen from outside
@@ -620,11 +681,12 @@ export class GreymarchBridge {
             step = "dispel"; try { var dl = sp.FormList.from(sp.Game.getFormEx(0x10dea0)); var n = dl ? dl.getSize() : 0; for (var i = 0; i < n; i++) { var s = sp.Spell.from(dl.getAt(i)); if (s) player.dispelSpell(s); } } catch (dErr) { /* nothing to dispel */ }
             step = "controls"; sp.Game.disablePlayerControls(false, false, true, false, false, false, false, false, 1);
             step = "camera"; sp.Game.forceThirdPerson(); sp.Game.showFirstPersonGeometry(false);
+            step = "gear"; this.greymarchWolfWear = this.greymarchWolfWorn(player); // put back on after the way back
             step = "unequip"; player.unequipAll();
             step = "race"; var wr = this.greymarchWolfRace(); if (!wr) throw new Error("the werewolf race was not found");
             player.setRace(wr);
             step = "check"; var r = player.getRace();
-            this.greymarchLog("wolf: changed into the " + (this.greymarchWolfAlpha ? "Alpha " : this.greymarchWolfPup ? "pup " : "") + "beast (race now " + (r ? r.getFormID().toString(16) : "none") + ", will change back to " + (this.greymarchWolfHumanRace || 0).toString(16) + ")");
+            this.greymarchLog("wolf: changed into the " + (this.greymarchWolfBearRace ? "werebear" : (this.greymarchWolfAlpha ? "Alpha " : this.greymarchWolfPup ? "pup " : "") + "beast") + " (race now " + (r ? r.getFormID().toString(16) : "none") + ", will change back to " + (this.greymarchWolfHumanRace || 0).toString(16) + ")");
         } catch (bErr) {
             this.greymarchLog("wolf: the change failed at step '" + step + "': " + bErr);
         }
@@ -638,6 +700,8 @@ export class GreymarchBridge {
             this.greymarchWolfMorph = null;
             try { sp.Debug.sendAnimationEvent(player, "IdleForceDefaultState"); } catch (sErr) { /* it ends by itself */ }
             this.greymarchLog("wolf: the transformation was stopped before the body changed");
+            try { (sp.storage as any)["greymarchWolfOn"] = false; } catch (stErr) { /* nothing was set */ }
+            this.greymarchWolfWearAt = Date.now() + 200; // a look the server sent meanwhile goes on (nothing else was changed)
             return;
         }
         var step = "start";
@@ -652,6 +716,10 @@ export class GreymarchBridge {
             step = "camera"; sp.Game.showFirstPersonGeometry(true);
             step = "beast form"; sp.Game.setBeastForm(false);
             step = "fast travel"; sp.Game.enableFastTravel(true);
+            step = "animation"; sp.Debug.sendAnimationEvent(player, "IdleForceDefaultState"); // the person's animations from their idle
+            step = "redraw"; player.queueNiNodeUpdate();
+            try { (sp.storage as any)["greymarchWolfOn"] = false; } catch (stErr) { /* nothing was set */ }
+            this.greymarchWolfWearAt = Date.now() + 1000; // the character's own look (kept aside by SkyMP) and the gear, a moment later: the person's skeleton must be in place first
             var r = player.getRace();
             this.greymarchLog("wolf: changed back (race now " + (r ? r.getFormID().toString(16) : "none") + ")");
         } catch (uErr) {
@@ -661,59 +729,69 @@ export class GreymarchBridge {
     // THE ALPHA FORM (the server says alpha: true): a white/grey werewolf, 1.3 times the size, the race GM_AlphaWerewolfBeastRace in GreymarchCore.esp (0x804; a copy of
     // WerewolfBeastRace with its own skin, the vanilla body with the white textures, and 1.3 times its height). GreymarchCore.esp is not on the server's plugin list, so the
     // server cannot name the race by number: it says alpha and this code finds the race in the file. If it is missing, the normal werewolf race is used.
+    // The gear worn and held when the change starts (armor in every body slot, both hands, the shield): put back on after the way back.
+    greymarchWolfWorn(player: any): number[] {
+        var ids: any = {};
+        for (var b = 0; b < 32; b++) { try { var f = player.getWornForm(Math.pow(2, b)); if (f) ids[f.getFormID()] = true; } catch (e) { /* that slot is empty */ } }
+        try { var w1 = player.getEquippedWeapon(false); if (w1) ids[w1.getFormID()] = true; } catch (e1) { /* nothing in the right hand */ }
+        try { var w2 = player.getEquippedWeapon(true); if (w2) ids[w2.getFormID()] = true; } catch (e2) { /* nothing in the left hand */ }
+        try { var sh = player.getEquippedShield(); if (sh) ids[sh.getFormID()] = true; } catch (e3) { /* no shield */ }
+        return Object.keys(ids).map(function (k) { return Number(k); });
+    }
+    // After the way back: the character's own look that SkyMP kept aside is put on properly (face, head parts, body), then the gear goes back on.
+    greymarchWolfDress(player: any, now: number): any {
+        var at = this.greymarchWolfWearAt;
+        if (!at || now < at || this.greymarchWolfOn) return;
+        this.greymarchWolfWearAt = 0;
+        var sp = this.sp;
+        var kept = null; try { kept = (sp.storage as any)["greymarchPendingAppearance"]; (sp.storage as any)["greymarchPendingAppearance"] = null; } catch (kErr) { kept = null; }
+        if (kept && !this.greymarchShapeOn) { try { appearanceMod.applyAppearanceToPlayer(kept); this.greymarchLog("wolf: the character's own look put back"); } catch (aErr) { this.greymarchLog("wolf: the own look could not be put back: " + aErr); } }
+        var list = this.greymarchWolfWear || [];
+        this.greymarchWolfWear = [];
+        var put = 0;
+        for (var i = 0; i < list.length; i++) {
+            try { var f = sp.Game.getFormEx(list[i]); if (f && player.getItemCount(f) > 0) { player.equipItem(f, false, true); put++; } } catch (eErr) { /* that one stays in the inventory */ }
+        }
+        if (list.length) this.greymarchLog("wolf: put " + put + " of " + list.length + " worn items back on");
+    }
     // THE PUP (the server says pup: true): a smaller brown werewolf, 0.75 times the size, GM_PupWerewolfBeastRace (0x80A in GreymarchCore.esp), found the same way.
     greymarchWolfKindRaceId(kind: string): number {
         var cache = this.greymarchWolfKindIds || (this.greymarchWolfKindIds = {});
         if (cache[kind] === undefined) {
-            var id = 0, local = kind === "pup" ? 0x80a : 0x804, name = kind === "pup" ? "pup" : "Alpha";
+            var id = 0, local = kind === "pup" ? 0x80a : kind === "black" ? 0x85c : 0x804, name = kind === "pup" ? "pup" : kind === "black" ? "black bear" : "Alpha";
             try { var f = this.sp.Game.getFormFromFile(local, "GreymarchCore.esp"); id = f ? f.getFormID() : 0; } catch (e) { id = 0; }
             cache[kind] = id;
-            this.greymarchLog(id ? "wolf: the " + name + " race is " + id.toString(16) : "wolf: the " + name + " race is not in GreymarchCore.esp; the " + name + " form uses the normal werewolf");
+            this.greymarchLog(id ? "wolf: the " + name + " race is " + id.toString(16) : "wolf: the " + name + " race is not in GreymarchCore.esp; the " + name + " form uses the normal " + (kind === "black" ? "werebear" : "werewolf"));
         }
         return cache[kind];
     }
     greymarchWolfAlphaRaceId(): number { return this.greymarchWolfKindRaceId("alpha"); }
     greymarchWolfPupRaceId(): number { return this.greymarchWolfKindRaceId("pup"); }
-    greymarchWolfIsBeast(raceId: number): boolean { return raceId === 0xcdd84 || (!!raceId && (raceId === this.greymarchWolfAlphaRaceId() || raceId === this.greymarchWolfPupRaceId())); }
-    greymarchWolfRaceId(): number { return (this.greymarchWolfAlpha && this.greymarchWolfAlphaRaceId()) || (this.greymarchWolfPup && this.greymarchWolfPupRaceId()) || 0xcdd84; }
+    // THE BLACK BEAR (the server says bear and black: true): a werebear with black fur and a tan muzzle, GM_BlackBearWerebearRace (0x85C in GreymarchCore.esp)
+    greymarchWolfBlackRaceId(): number { return this.greymarchWolfKindRaceId("black"); }
+    // THE BEAR BLOOD (the server says bear: true, race: the werebear race in this load order, Dragonborn's DLC2WerebearBeastRace): the body becomes the werebear
+    greymarchWolfIsBeast(raceId: number): boolean { return raceId === 0xcdd84 || (!!raceId && (raceId === this.greymarchWolfAlphaRaceId() || raceId === this.greymarchWolfPupRaceId() || raceId === this.greymarchWolfBlackRaceId() || raceId === this.greymarchWolfBearSeen)); }
+    greymarchWolfRaceId(): number { return (this.greymarchWolfBearRace && this.greymarchWolfBlack && this.greymarchWolfBlackRaceId()) || this.greymarchWolfBearRace || (this.greymarchWolfAlpha && this.greymarchWolfAlphaRaceId()) || (this.greymarchWolfPup && this.greymarchWolfPupRaceId()) || 0xcdd84; }
     greymarchWolfRace(): any { return this.sp.Race.from(this.sp.Game.getFormEx(this.greymarchWolfRaceId())); }
-    // Other players who are Alphas or pups: SkyMP draws them with the race of their appearance, which the server can only set to the normal werewolf.
-    // Every second, a listed player drawn as the normal werewolf (or as the other variant) is given their variant's race on this screen; one that is not listed any more
-    // goes back to the normal werewolf.
+    // Other players who are Alphas, pups or black bears: SkyMP draws them with the race of their appearance, which the server can only set to the normal werewolf. Every second the
+    // lists become __gmWolfRace (server actor id -> the variant's race), which formView.ts uses to BUILD that player's NPC with the variant's race (it respawns it when
+    // the race changes). Never a SetRace on another player's live actor: that rebuilt its skeleton's physics while SkyMP moved it and crashed the game.
     greymarchWolfAlphaOthers(now: number): any {
         if (now < (this.greymarchWolfAlphaNext || 0)) return;
         this.greymarchWolfAlphaNext = now + 1000;
-        var alphas = this.greymarchWolfAlphaList || [], pups = this.greymarchWolfPupList || [];
-        var drawn = this.greymarchWolfAlphaDrawn || (this.greymarchWolfAlphaDrawn = {});
-        if (!alphas.length && !pups.length && !Object.keys(drawn).length) return;
-        var sp = this.sp;
-        var alphaId = alphas.length ? this.greymarchWolfAlphaRaceId() : 0, pupId = pups.length ? this.greymarchWolfPupRaceId() : 0;
-        var want: any = {};
+        var alphas = this.greymarchWolfAlphaList || [], pups = this.greymarchWolfPupList || [], blacks = this.greymarchWolfBlackList || [];
+        var before = this.greymarchWolfRaceMap || {};
+        if (!alphas.length && !pups.length && !blacks.length && !Object.keys(before).length) return;
+        var map: any = {};
         var self = this;
-        var mark = function (list: any[], raceId: number, name: string) {
-            if (!raceId) return;
-            for (var i = 0; i < list.length; i++) {
-                if (list[i] === self.greymarchMeActor) continue; // my own body is changed by greymarchWolfTick
-                var localId = misc.remoteIdToLocalId(list[i]);
-                if (!localId) continue;
-                want[localId] = raceId;
-                try {
-                    var actor = sp.Actor.from(sp.Game.getFormEx(localId));
-                    var r = actor ? actor.getRace() : null;
-                    var cur = r ? r.getFormID() : 0;
-                    if (cur === raceId) drawn[localId] = raceId;
-                    else if (cur && self.greymarchWolfIsBeast(cur)) { actor.setRace(sp.Race.from(sp.Game.getFormEx(raceId))); drawn[localId] = raceId; self.greymarchLog("wolf: " + localId.toString(16) + " drawn as the " + name); }
-                } catch (aErr) { /* not loaded here: the next second */ }
-            }
-        };
-        mark(alphas, alphaId, "Alpha");
-        mark(pups, pupId, "pup");
-        for (var k in drawn) {
-            if (want[k]) continue;
-            var was = drawn[k];
-            delete drawn[k];
-            try { var a2 = sp.Actor.from(sp.Game.getFormEx(Number(k))); var r2 = a2 ? a2.getRace() : null; if (r2 && r2.getFormID() === was) a2.setRace(sp.Race.from(sp.Game.getFormEx(0xcdd84))); } catch (bErr) { /* gone */ }
-        }
+        var put = function (list: any[], raceId: number) { if (!raceId) return; for (var i = 0; i < list.length; i++) if (list[i] !== self.greymarchMeActor) map[list[i]] = raceId; };
+        put(alphas, alphas.length ? this.greymarchWolfAlphaRaceId() : 0);
+        put(pups, pups.length ? this.greymarchWolfPupRaceId() : 0);
+        put(blacks, blacks.length ? this.greymarchWolfBlackRaceId() : 0);
+        for (var k in map) if (before[k] !== map[k]) this.greymarchLog("wolf: " + Number(k).toString(16) + " drawn as the " + (map[k] === this.greymarchWolfPupRaceId() ? "pup" : map[k] === this.greymarchWolfBlackRaceId() ? "black bear" : "Alpha"));
+        for (var k2 in before) if (!map[k2]) this.greymarchLog("wolf: " + Number(k2).toString(16) + " drawn as the normal beast again");
+        this.greymarchWolfRaceMap = map;
+        try { (Function("return this")() as any).__gmWolfRace = map; } catch (gErr) { /* drawn as the normal werewolf */ }
     }
     // ---- VAMPIRES (gamemode vampire.js decides everything; this only reports what the game did and shows what the server says)
     greymarchVampForm(key: string): number { // the real ID of one of VAMP_FORMS in this game's load order (0 while unknown)
@@ -740,7 +818,7 @@ export class GreymarchBridge {
                 var s = q[i];
                 if (s.kind === "cast" && s.id && s.id === this.greymarchVampForm("mist")) { this.greymarchLog("vampire: Mist Form used"); this.greymarchVampSend({ op: "game", power: "mist", on: true }); }
                 else if (s.kind === "cast" && s.id && s.id === this.greymarchVampForm("lord")) { this.greymarchLog("vampire: the Vampire Lord power used"); this.greymarchVampSend({ op: "game", power: "lord", on: true }); }
-                else if (s.kind === "effect" && s.id && s.id === this.greymarchVampForm("potionFx") && now - (this.greymarchVampDrankAt || 0) > 1000) { this.greymarchVampDrankAt = now; this.greymarchVampSend({ op: "drank" }); }
+                else if (((s.kind === "effect" && s.id === this.greymarchVampForm("potionFx")) || (s.kind === "equip" && s.id === this.greymarchVampForm("potion"))) && s.id && now - (this.greymarchVampDrankAt || 0) > 1000) { this.greymarchVampDrankAt = now; this.greymarchLog("vampire: a Potion of Blood was drunk (" + s.kind + ")"); this.greymarchVampSend({ op: "drank" }); }
             }
         }
         var player: any = null;
@@ -806,15 +884,21 @@ export class GreymarchBridge {
         }
         this.greymarchVampEyes(now); // every vampire's blue eyes, on this screen (the fangs are not made yet)
     }
-    // Every vampire in the world (the player included) gets the blue eye part for their glow and, while their fangs show, the fanged teeth, by the server's list
-    // (greymarchVampLooks). Only those parts change: the character is not redrawn. The eyes and teeth they had are kept and put back when they are no longer a vampire
-    // (and the teeth when /fangs hides them). Checked again every 2 seconds, because SkyMP puts a character's saved look back now and then (a load, a redraw).
+    // Every vampire in the world (the player included) gets their bloodline's eye part for their glow and, while their fangs show, the fanged teeth, by the server's
+    // list (greymarchVampLooks). Only those parts change: the character is not redrawn. Their OWN eyes and teeth are kept and put back while /eyes or /fangs hides
+    // them (glow 0) and when they are no longer a vampire. Greymarch's own eye parts never count as "their own" (a reload or a colour change finds one already on).
+    // Checked again every 2 seconds, because SkyMP puts a character's saved look back now and then (a load, a redraw): that look is their own eyes, kept again.
     greymarchVampEyes(now: number): any {
         if (now < (this.greymarchVampEyesNext || 0)) return;
         this.greymarchVampEyesNext = now + 2000;
         var sp = this.sp, list = this.greymarchVampLookList || [];
         var done = this.greymarchVampEyesDone || (this.greymarchVampEyesDone = {}); // localId -> { orig: eye head part id, glow, mouth: teeth head part id, fangs }
         var seen: any = {};
+        if (!list.length && !Object.keys(done).length) return;
+        var gmOff = -1; // GreymarchCore.esp's place in this game's load order
+        try { var gmBlue = sp.HeadPart.from(sp.Game.getFormFromFile(VAMP_EYES.blue.male, "GreymarchCore.esp")); if (gmBlue) gmOff = gmBlue.getFormID() - VAMP_EYES.blue.male; } catch (gErr) { gmOff = -1; }
+        var ours = function (id: number) { return gmOff >= 0 && id - gmOff >= 0x80d && id - gmOff <= 0x859; }; // one of Greymarch's vampire eye parts
+        var skipped = this.greymarchVampEyesSkipped || (this.greymarchVampEyesSkipped = {});
         for (var i = 0; i < list.length; i++) {
             var v = list[i];
             var localId = this.greymarchMeActor && v.actor === this.greymarchMeActor ? 0x14 : misc.remoteIdToLocalId(v.actor);
@@ -824,21 +908,29 @@ export class GreymarchBridge {
                 var actor = localId === 0x14 ? sp.Game.getPlayer() : sp.Actor.from(sp.Game.getFormEx(localId));
                 if (!actor) continue;
                 var race = actor.getRace();
-                if (!race || VAMP_EYE_RACES.indexOf(race.getFormID()) < 0) continue; // a beast race, or in a creature's or the Lord's shape
+                if (!race || VAMP_EYE_RACES.indexOf(race.getFormID()) < 0) { // a beast race (khajiit and argonian eyes are not made yet), or in a creature's or the Lord's shape
+                    var rid = race ? race.getFormID() : 0;
+                    if (skipped[localId] !== rid) { skipped[localId] = rid; this.greymarchLog("vampire: " + localId.toString(16) + " keeps their eyes: no vampire eyes for race " + rid.toString(16) + " yet"); }
+                    continue;
+                }
                 var base = sp.ActorBase.from(actor.getBaseObject());
                 if (!base) continue;
                 var female = base.getSex() === 1;
                 var glow = Math.max(0, Math.min(6, Number(v.glow) || 0));
-                var hp = sp.HeadPart.from(sp.Game.getFormFromFile((female ? VAMP_EYES.female : VAMP_EYES.male) + glow, "GreymarchCore.esp"));
+                var colour = VAMP_EYES[v.eyes] ? v.eyes : "blue"; // the bloodline's colour
+                var hp = sp.HeadPart.from(sp.Game.getFormFromFile((female ? VAMP_EYES[colour].female : VAMP_EYES[colour].male) + glow, "GreymarchCore.esp"));
                 if (!hp) { if (!this.greymarchVampEyesMissing) { this.greymarchVampEyesMissing = true; this.greymarchLog("vampire: the blue eye parts are not in GreymarchCore.esp (old game files?)"); } return; }
                 var cur = this.greymarchVampEyePart(base, 2);
                 var mouth = this.greymarchVampEyePart(base, 0);
                 var rec = done[localId];
-                if (!rec) rec = done[localId] = { orig: cur && cur.getFormID() !== hp.getFormID() ? cur.getFormID() : 0, glow: -1, mouth: 0, fangs: false };
-                if (!(rec.glow === glow && cur && cur.getFormID() === hp.getFormID())) {
-                    actor.changeHeadPart(hp);
-                    if (rec.glow !== glow) this.greymarchLog("vampire: " + localId.toString(16) + " has blue eyes, glow " + glow);
-                    rec.glow = glow;
+                if (!rec) rec = done[localId] = { orig: 0, key: "", mouth: 0, fangs: false };
+                if (cur && !ours(cur.getFormID())) rec.orig = cur.getFormID(); // what they wear that is not ours is their own eyes (SkyMP may have put their look back)
+                var own = glow === 0 && rec.orig ? sp.HeadPart.from(sp.Game.getFormEx(rec.orig)) : null; // /eyes hides them: their own eyes
+                var wantEyes = own || hp, key = own ? "own" : colour + glow;
+                if (!(rec.key === key && cur && cur.getFormID() === wantEyes.getFormID())) {
+                    actor.changeHeadPart(wantEyes);
+                    if (rec.key !== key) this.greymarchLog("vampire: " + localId.toString(16) + (own ? " shows their own eyes (/eyes)" : " has " + colour + " eyes, glow " + glow));
+                    rec.key = key;
                 }
                 // the fangs: the fanged teeth while they show, the character's own teeth while /fangs hides them
                 if (VAMP_FANG_RACES.indexOf(race.getFormID()) >= 0) {
@@ -873,6 +965,88 @@ export class GreymarchBridge {
         this.greymarchLog("wolf: telling the server the player " + (beast ? "became the beast (the power was used)" : "is human again"));
         var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchWolf", op: "game", beast: beast }) };
         this.controller.emitter.emit("sendMessage", { message: message, reliability: "reliable" });
+    }
+    // CUFFS (guards.js). The server says { customPacketType: "greymarchCuffs", on, bound, gagged, cuffs } to the prisoner: the Prisoner's Cuffs it put in their inventory are
+    // worn and cannot be taken off (the server puts them back if they go), the bound-hands pose plays (again every 10 seconds: other animations end it), and both stop on
+    // on: false. Every game hears { customPacketType: "greymarchChains", chains: [{ from, to }], cuffed: [actor] }: other players in cuffs are posed too, and a chain is drawn
+    // on the HUD from each prisoner's hands to the hand of whoever holds the chain. Following the chain, through load doors too, is the server's work: it moves the prisoner.
+    greymarchCuffsTick(now: number): any {
+        var sp = this.sp;
+        if (now >= (this.greymarchCuffsNext || 0)) {
+            this.greymarchCuffsNext = now + 500;
+            var want = this.greymarchCuffsWant;
+            try {
+                var player = sp.Game.getPlayer();
+                if (want) {
+                    var f = Number(want.cuffs) > 0 ? sp.Game.getFormEx(Number(want.cuffs) >>> 0) : null;
+                    if (f && player.getItemCount(f) > 0 && !player.isEquipped(f)) player.equipItem(f, true, true); // preventRemoval: on until the server takes them off
+                    if (!this.greymarchCuffsPosed || now - (this.greymarchCuffsPosedAt || 0) > 10000) {
+                        if (!this.greymarchCuffsPosed) this.greymarchLog("guards: in cuffs (" + (want.bound ? "on a chain" : "walking freely") + (want.gagged ? ", gagged" : "") + ")");
+                        sp.Debug.sendAnimationEvent(player, "OffsetBoundStandingStart");
+                        this.greymarchCuffsPosed = true; this.greymarchCuffsPosedAt = now;
+                    }
+                } else if (this.greymarchCuffsPosed) {
+                    this.greymarchCuffsPosed = false;
+                    sp.Debug.sendAnimationEvent(player, "OffsetStop");
+                    this.greymarchLog("guards: the cuffs are off");
+                }
+            } catch (err) { /* tried again in half a second */ }
+            var posed = this.greymarchCuffsOthers || (this.greymarchCuffsOthers = {}), list = this.greymarchCuffedList || [], still: any = {};
+            for (var i = 0; i < list.length; i++) {
+                if (this.greymarchMeActor && list[i] === this.greymarchMeActor) continue;
+                var lid = misc.remoteIdToLocalId(list[i]);
+                if (!lid) continue;
+                still[lid] = true;
+                if (posed[lid] && now - posed[lid] < 10000) continue;
+                try { var a = sp.Actor.from(sp.Game.getFormEx(lid)); if (a) { sp.Debug.sendAnimationEvent(a, "OffsetBoundStandingStart"); posed[lid] = now; } } catch (aErr) { /* tried again */ }
+            }
+            for (var k in posed) {
+                if (still[k]) continue;
+                delete posed[k];
+                try { var b = sp.Actor.from(sp.Game.getFormEx(Number(k))); if (b) sp.Debug.sendAnimationEvent(b, "OffsetStop"); } catch (bErr) { /* gone */ }
+            }
+        }
+        this.greymarchChainsDraw(now);
+    }
+    // the chains on the HUD: each end where the hand is on screen (0..1 from the top left), about 30 times a second while one is in sight; nothing is sent while nothing changes
+    greymarchChainsDraw(now: number): any {
+        var list = this.greymarchChainList || [], out = [];
+        if (list.length) {
+            if (now < (this.greymarchChainsNext || 0)) return;
+            this.greymarchChainsNext = now + 33;
+            var sp = this.sp, self = this;
+            try {
+                var player = sp.Game.getPlayer();
+                var refOf = function (id: number) { if (self.greymarchMeActor && id === self.greymarchMeActor) return player; var l = misc.remoteIdToLocalId(id); return l ? sp.Actor.from(sp.Game.getFormEx(l)) : null; };
+                var hand = function (a: any, node: string) {
+                    var p = [sp.NetImmerse.getNodeWorldPositionX(a, node, false), sp.NetImmerse.getNodeWorldPositionY(a, node, false), sp.NetImmerse.getNodeWorldPositionZ(a, node, false)];
+                    if (!p.every(function (n: any) { return isFinite(n); }) || (p[0] === 0 && p[1] === 0 && p[2] === 0)) p = [a.getPositionX(), a.getPositionY(), a.getPositionZ() + 90]; // no hand node: about waist height
+                    return p;
+                };
+                var r4 = function (n: number) { return Math.round(n * 10000) / 10000; };
+                for (var i = 0; i < list.length; i++) {
+                    var a = refOf(Number(list[i].from)), b = refOf(Number(list[i].to));
+                    if (!a || !b || (player.getDistance(a) > 4000 && player.getDistance(b) > 4000)) continue; // not here, or far off
+                    var s = sp.worldPointToScreenPoint(hand(a, "NPC R Hand [RHnd]"), hand(b, "NPC L Hand [LHnd]"));
+                    var p = s && s[0], q = s && s[1];
+                    if (!p || !q || !(p[2] > 0) || !(q[2] > 0)) continue; // an end behind the camera
+                    out.push([r4(p[0]), r4(1 - p[1]), r4(q[0]), r4(1 - q[1])]);
+                }
+            } catch (err) { out = []; }
+        }
+        var key = JSON.stringify(out);
+        if (key === this.greymarchChainsKey) return;
+        this.greymarchChainsKey = key;
+        this.greymarchChainsShown = out.length > 0;
+        this.greymarchGuardsHudCheck();
+        this.greymarchHudToPage("chains", { list: out });
+    }
+    // the page layer stays up while a chain or the cuffing bar is on the HUD (never focused), like the voice display
+    greymarchGuardsHudCheck(): any {
+        var on = !!this.greymarchChainsShown || Date.now() < (this.greymarchProgressUntil || 0);
+        if (on === !!this.greymarchGuardsHud) return;
+        this.greymarchGuardsHud = on;
+        if (on && !this.greymarchScreenUp) { try { this.sp.browser.setVisible(true); } catch (e) { /* the page layer is not available */ } }
     }
     // CREATURE FORMS. Staff turn a player into a creature (the server's shapeshift.js); the server says { customPacketType: "greymarchShape", on: true, race, back, name } and repeats it
     // every 5 seconds, then { on: false, back, wear } to change back. Other players see the creature because the server changes the character's appearance (SkyMP redraws it);
@@ -919,7 +1093,11 @@ export class GreymarchBridge {
             if (want) {
                 if (this.greymarchShapeOn && this.greymarchShapeModeOn && this.greymarchShapeModeOn !== want.mode) this.greymarchShapeEnd(player, raceId); // the server switched the way: back first
                 if (this.greymarchShapeOn !== want.race) { if (want.mode === "race") this.greymarchShapeBecome(player, want, raceId); else this.greymarchShapeNpcBecome(player, want); }
-                else if (want.mode === "npc") { if (now - (this.greymarchShapeAlphaAt || 0) > 2000) { this.greymarchShapeAlphaAt = now; player.setAlpha(0, false); } } // the player's own body stays invisible
+                else if (want.mode === "npc") {
+                    if (now - (this.greymarchShapeAlphaAt || 0) > 2000) { this.greymarchShapeAlphaAt = now; player.setAlpha(0, false); } // the player's own body stays invisible
+                    var pup = this.greymarchShapePuppet; // no NPC (its first placing failed) or one that never got ready (its spawn steps failed): placed again, at most every 3 seconds
+                    if ((!pup || (!pup.ready && now - pup.at > SHAPE_NPC_READY_MS)) && now - (this.greymarchShapeRemakeAt || 0) > 3000) { this.greymarchShapeRemakeAt = now; this.greymarchShapeRemake(pup ? "the NPC never got ready" : "there was no NPC"); }
+                }
                 else if (raceId !== want.race && now - (this.greymarchShapeFixAt || 0) > 3000) { // something put another race back (a respawn, the game itself)
                     this.greymarchShapeFixAt = now;
                     var r = sp.Race.from(sp.Game.getFormEx(want.race));
@@ -1046,7 +1224,7 @@ export class GreymarchBridge {
                     self.greymarchLog("shape: the NPC is ready (" + id.toString(16) + ")");
                 }, fail("resurrect"));
             }, fail("enable"));
-        }, fail("position"));
+        }, fail("position")).catch(fail("spawn")); // a step that throws (not only one that fails) is logged too; greymarchShapeTick places a never-ready NPC again
     }
     greymarchShapePuppetActor(): any {
         var p = this.greymarchShapePuppet;
@@ -1089,9 +1267,21 @@ export class GreymarchBridge {
             var m = moveGetMod.getMovement(player);
             if (now < (this.greymarchShapeCombatUntil || 0)) m.isWeapDrawn = true; // the creature's combat stance while it is attacking (its attacks need it)
             moveApplyMod.applyMovement(ac, m);
+            this.greymarchShapeKeepOnGround(ac, m);
         } catch (mErr) {
             if (now - (this.greymarchShapeRemakeAt || 0) > 2000) { this.greymarchShapeRemakeAt = now; this.greymarchShapeRemake("" + mErr); }
         }
+    }
+    // SkyMP keeps an NPC walking by aiming it at a point just ahead and 512 (walking) or 1024 (running) units BELOW where it is: the ground stops it, and the distance tells the AI
+    // to walk or to run. The creature NPC has collision off (so it never pushes the player), so nothing stops it and it walked into the ground. So, right after SkyMP's call (the
+    // last call wins), the same aim with that distance straight AHEAD at the same height: the same walk or run, and SkyMP's translateTo still puts it exactly where the player is.
+    greymarchShapeKeepOnGround(ac: any, m: any): any {
+        if (!m || m.runMode === "Standing") return; // SkyMP's own aim has no height there
+        var dist = m.runMode === "Walking" ? 512 : 1024;
+        var offsetAngle = m.rot[2] - ac.getAngleZ();
+        if (Math.abs(offsetAngle) < 5) offsetAngle = 0;
+        var d = ((m.direction || 0) / 180) * Math.PI;
+        ac.keepOffsetFromActor(ac, dist * Math.sin(d), dist * Math.cos(d), 0, 0, 0, offsetAngle, m.runMode === "Walking" ? 2048 : 1, 1);
     }
     greymarchShapeRemake(why: string): any {
         var want = this.greymarchShapeWant;
@@ -1289,7 +1479,7 @@ export class GreymarchBridge {
     greymarchToastTick(now: any): any {
         if (!this.greymarchToastUntil || now < this.greymarchToastUntil) return;
         this.greymarchToastUntil = 0;
-        if (!this.greymarchAdminOn && !this.greymarchMenuOn && !this.greymarchHudOn && !this.greymarchChatOn && !(this.greymarchProfOn || this.greymarchChanceryOn) && !this.greymarchScreenUp) { try { this.sp.browser.setVisible(false); } catch (e2) { /* fine */ } }
+        if (!this.greymarchAdminOn && !this.greymarchMenuOn && !this.greymarchHudOn && !this.greymarchChatOn && !this.greymarchGuardsHud && !(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn) && !this.greymarchScreenUp) { try { this.sp.browser.setVisible(false); } catch (e2) { /* fine */ } }
     }
     // KILL: staff kill a character from THEIR OWN game, which is the one thing every SkyMP build lets a game do to its own character.
     greymarchKillMe(): any {
@@ -1454,7 +1644,7 @@ export class GreymarchBridge {
         }
     }
     greymarchMenuShow(arg: any): any {
-        if (this.greymarchScreenUp || this.greymarchAdminOn || this.greymarchMenuOn || (this.greymarchProfOn || this.greymarchChanceryOn)) return; // not over the select screen, the staff panel, the professions window, or itself
+        if (this.greymarchScreenUp || this.greymarchAdminOn || this.greymarchMenuOn || (this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn)) return; // not over the select screen, the staff panel, the professions window, or itself
         this.greymarchMenuOn = true;
         this.sp.browser.setVisible(true);
         this.sp.browser.setFocused(true);
@@ -1463,7 +1653,7 @@ export class GreymarchBridge {
     // HOLD X: look at a player and hold X, and the menu for THAT player appears; let go of X over an option to pick it (the page does the picking: it gets "release").
     // Not looking at a player: nothing opens (a short hint says why). The page is shown and focused while it is up, so the mouse is a cursor.
     greymarchMenuHold(): any {
-        if (this.greymarchScreenUp || this.greymarchAdminOn || this.greymarchMenuOn || (this.greymarchProfOn || this.greymarchChanceryOn)) return;
+        if (this.greymarchScreenUp || this.greymarchAdminOn || this.greymarchMenuOn || (this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn)) return;
         var looking = 0, isObject = false;
         try {
             var ref = this.sp.Game.getCurrentCrosshairRef();
@@ -1496,7 +1686,7 @@ export class GreymarchBridge {
         this.greymarchMenuOn = false;
         this.greymarchMenuToPage("hide", true);
         this.greymarchMenuEscAt = 0;
-        if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchChatOn || !!(this.greymarchProfOn || this.greymarchChanceryOn)); }
+        if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchChatOn || !!this.greymarchGuardsHud || !!(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn)); }
     }
     // ---- THE PROFESSIONS WINDOW (K). The page is Platform/UI/greymarch-prof.html; the SERVER decides what a profession allows, the ranks and the XP.
     greymarchProfToPage(fn: any, arg: any): any {
@@ -1507,18 +1697,27 @@ export class GreymarchBridge {
             this.sp.printConsole("[greymarch] could not reach the professions window: " + err);
         }
     }
+    // K, handled every frame: a K typed into a game menu (the race menu's name box, the console) is a letter, not the window (2026-10-18: the window popped up while naming a new character)
+    greymarchProfPending(): any {
+        var at = this.greymarchProfWanted || 0;
+        if (!at) return;
+        this.greymarchProfWanted = 0;
+        if (Date.now() - at > 1000) return; // a press from long ago
+        if (this.greymarchInMenu()) { this.greymarchChatWhy("K ignored: the game says '" + this.greymarchMenuName + "' is open"); return; }
+        this.greymarchProfShow();
+    }
     greymarchProfShow(): any {
-        if (this.greymarchScreenUp || this.greymarchAdminOn || this.greymarchMenuOn || (this.greymarchProfOn || this.greymarchChanceryOn) || this.greymarchChatTyping) return; // not over the select screen, the other panels, or while typing
+        if (this.greymarchScreenUp || this.greymarchAdminOn || this.greymarchMenuOn || (this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn) || this.greymarchChatTyping) return; // not over the select screen, the other panels, or while typing
         this.greymarchProfOn = true;
         this.sp.browser.setVisible(true);
         this.sp.browser.setFocused(true);
         this.greymarchProfToPage("show", true);
     }
     greymarchProfHide(): any {
-        if (!(this.greymarchProfOn || this.greymarchChanceryOn)) return;
+        if (!(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn)) return;
         this.greymarchProfOn = false;
         this.greymarchProfToPage("hide", true);
-        if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!(this.greymarchProfOn || this.greymarchChanceryOn)); }
+        if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchGuardsHud || !!(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn)); }
     }
     greymarchProfSend(data: any): any {
         this.greymarchLog("prof: window asks the server (rid " + data.rid + ", " + data.op + ")");
@@ -1535,7 +1734,7 @@ export class GreymarchBridge {
         }
     }
     greymarchChanceryShow(): any {
-        if (this.greymarchScreenUp || this.greymarchAdminOn || this.greymarchMenuOn || this.greymarchProfOn || this.greymarchChanceryOn) return; // not over the select screen or the other panels
+        if (this.greymarchScreenUp || this.greymarchAdminOn || this.greymarchMenuOn || this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn) return; // not over the select screen or the other panels
         this.greymarchChanceryOn = true;
         this.sp.browser.setVisible(true);
         this.sp.browser.setFocused(true);
@@ -1545,10 +1744,37 @@ export class GreymarchBridge {
         if (!this.greymarchChanceryOn) return;
         this.greymarchChanceryOn = false;
         this.greymarchChanceryToPage("hide", true);
-        if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchProfOn); }
+        if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchGuardsHud || !!this.greymarchProfOn || !!this.greymarchVampMenuOn); }
     }
     greymarchChanceryAsk(data: any): any {
         var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchChancery", rid: data.rid, op: data.op, args: data.args }) };
+        this.controller.emitter.emit("sendMessage", { message: message, reliability: "reliable" });
+    }
+    // ---- THE VAMPIRE WINDOW (/vampire). The page is Platform/UI/greymarch-vampire.html; the SERVER decides everything (gamemode/src/vampire.js), which opens it
+    // ({ customPacketType: "greymarchVampMenuOpen" }) for a vampire who typed /vampire. Built like the chancery window.
+    greymarchVampMenuToPage(fn: any, arg: any): any {
+        var json = JSON.stringify({ fn: fn, arg: arg }).replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
+        try {
+            this.sp.browser.executeJavaScript(VAMP_MENU_SCRIPT + "window.__gmVampRun(" + json + ");");
+        } catch (err) {
+            this.sp.printConsole("[greymarch] could not reach the vampire window: " + err);
+        }
+    }
+    greymarchVampMenuShow(): any {
+        if (this.greymarchScreenUp || this.greymarchAdminOn || this.greymarchMenuOn || this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn) return; // not over the select screen or the other panels
+        this.greymarchVampMenuOn = true;
+        this.sp.browser.setVisible(true);
+        this.sp.browser.setFocused(true);
+        this.greymarchVampMenuToPage("show", true);
+    }
+    greymarchVampMenuHide(): any {
+        if (!this.greymarchVampMenuOn) return;
+        this.greymarchVampMenuOn = false;
+        this.greymarchVampMenuToPage("hide", true);
+        if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchGuardsHud || !!this.greymarchProfOn || !!this.greymarchChanceryOn); }
+    }
+    greymarchVampMenuAsk(data: any): any {
+        var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchVampMenu", rid: data.rid, op: data.op }) };
         this.controller.emitter.emit("sendMessage", { message: message, reliability: "reliable" });
     }
     greymarchMenuSend(data: any): any {
@@ -1617,6 +1843,8 @@ export class GreymarchBridge {
     }
     // The chat page answers every "show" (a few seconds apart) with whether it is really typing. If the game thinks otherwise, the game gives way: a keyboard that the page is not using is released,
     // so movement can never stay locked behind a chat that is not open. (An input opened less than a second ago is left alone: the answer may have been sent before it.)
+    // The windows that hold the keyboard (and the mouse cursor) while they are open. The chat's keyboard releases leave them alone: releasing it every 2 s took the K window's cursor away (2026-10-18).
+    greymarchPanelHasKeys(): any { return !!(this.greymarchAdminOn || this.greymarchMenuOn || this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn); }
     greymarchChatSync(pageTyping: boolean): any {
         if (this.greymarchChatTyping && !pageTyping) {
             if (Date.now() - (this.greymarchChatOpenedAt || 0) < 1000) return;
@@ -1624,7 +1852,7 @@ export class GreymarchBridge {
             this.greymarchChatFocus(false);
         } else if (!this.greymarchChatTyping && pageTyping) {
             this.greymarchChatFocus(true); // the page is showing its input: it gets the keyboard
-        } else if (!pageTyping && !this.greymarchScreenUp && !this.greymarchAdminOn && !this.greymarchMenuOn) {
+        } else if (!pageTyping && !this.greymarchScreenUp && !this.greymarchPanelHasKeys()) {
             try { this.sp.browser.setFocused(false); } catch (e) { /* nothing to release */ } // neither is typing: nothing may hold the keyboard
         }
     }
@@ -1636,7 +1864,7 @@ export class GreymarchBridge {
         if (!this.greymarchChatTyping) {
             this.greymarchChatLost = 0;
             // HARD RULE: after a close the keyboard is released again a few times, so movement cannot stay locked whatever the page did
-            if (now < (this.greymarchChatReleaseUntil || 0) && !this.greymarchScreenUp && !this.greymarchAdminOn && !this.greymarchMenuOn) { try { this.sp.browser.setFocused(false); } catch (e0) { /* nothing to release */ } }
+            if (now < (this.greymarchChatReleaseUntil || 0) && !this.greymarchScreenUp && !this.greymarchPanelHasKeys()) { try { this.sp.browser.setFocused(false); } catch (e0) { /* nothing to release */ } }
             return;
         }
         // HARD RULES while the input is open: a menu or the console opening closes it; and it never stays open longer than two minutes
@@ -1664,15 +1892,16 @@ export class GreymarchBridge {
     // them is still marked open means the mark is stale (the window closed without saying so, or lost the keyboard): the mark is cleared and that window hidden, so the chat opens.
     // While the browser really has the keyboard, the window is open for real and Enter belongs to it.
     greymarchChatStaleWindows(): any {
-        if (!this.greymarchAdminOn && !this.greymarchMenuOn && !this.greymarchProfOn && !this.greymarchChanceryOn) return;
+        if (!this.greymarchAdminOn && !this.greymarchMenuOn && !this.greymarchProfOn && !this.greymarchChanceryOn && !this.greymarchVampMenuOn) return;
         var focused = true;
         try { focused = !!this.sp.browser.isFocused(); } catch (e) { focused = true; } // cannot tell: leave the window alone
         if (focused) return;
-        this.greymarchLog("chat: Enter reached the game while " + [this.greymarchAdminOn ? "the staff panel" : "", this.greymarchMenuOn ? "the X menu" : "", this.greymarchProfOn ? "the K window" : "", this.greymarchChanceryOn ? "the chancery" : ""].filter(Boolean).join(", ") + " was marked open without the keyboard; closed it so the chat opens");
+        this.greymarchLog("chat: Enter reached the game while " + [this.greymarchAdminOn ? "the staff panel" : "", this.greymarchMenuOn ? "the X menu" : "", this.greymarchProfOn ? "the K window" : "", this.greymarchChanceryOn ? "the chancery" : "", this.greymarchVampMenuOn ? "the vampire window" : ""].filter(Boolean).join(", ") + " was marked open without the keyboard; closed it so the chat opens");
         if (this.greymarchAdminOn) { try { this.greymarchAdminHide(); } catch (e1) { this.greymarchAdminOn = false; } }
         if (this.greymarchMenuOn) { try { this.greymarchMenuHide(); } catch (e2) { this.greymarchMenuOn = false; } }
         if (this.greymarchProfOn) { try { this.greymarchProfHide(); } catch (e3) { this.greymarchProfOn = false; } }
         if (this.greymarchChanceryOn) { try { this.greymarchChanceryHide(); } catch (e4) { this.greymarchChanceryOn = false; } }
+        if (this.greymarchVampMenuOn) { try { this.greymarchVampMenuHide(); } catch (e5) { this.greymarchVampMenuOn = false; } }
     }
     // Why a key press did nothing, to the server log (at most once every 5 seconds, so a held key cannot flood it)
     greymarchChatWhy(text: string): any {
@@ -1700,7 +1929,7 @@ export class GreymarchBridge {
         this.greymarchChatTyping = !!on;
         if (!on) { this.greymarchChatClosedAt = Date.now(); this.greymarchChatReleaseUntil = Date.now() + 1000; }
         if (on) { this.sp.browser.setVisible(true); this.sp.browser.setFocused(true); return; }
-        if (!this.greymarchScreenUp && !this.greymarchAdminOn && !this.greymarchMenuOn) this.sp.browser.setFocused(false);
+        if (!this.greymarchScreenUp && !this.greymarchPanelHasKeys()) this.sp.browser.setFocused(false);
         this.greymarchChatToPage("close", true); // the page layer lets the mouse through again
     }
     greymarchChatSend(data: any): any {

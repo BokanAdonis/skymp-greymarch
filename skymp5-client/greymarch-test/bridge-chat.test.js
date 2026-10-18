@@ -156,7 +156,7 @@ test("the floating names are told who is talking (only real character IDs, nobod
 test("K opens the professions window, the page's questions go to the server as greymarchProf packets, answers go back to the page, Esc or the page closes it", () => {
   const { gm, log, sentPackets } = make();
   const profPage = () => log.js.filter((x) => x.includes("__gmProfSend(")).map((x) => JSON.parse(x.slice(x.lastIndexOf("__gmProfSend(") + 13).replace(/\);$/, "")));
-  gm.greymarchKey({ code: 37, isDown: true });
+  gm.greymarchKey({ code: 37, isDown: true }); gm.greymarchProfPending();
   assert.strictEqual(gm.greymarchProfOn, true);
   assert.deepStrictEqual(profPage().pop(), { fn: "show", arg: true });
   assert.ok(log.js.some((j) => j.includes("greymarch-prof.html")), "the page script loads the professions page");
@@ -164,12 +164,12 @@ test("K opens the professions window, the page's questions go to the server as g
   assert.deepStrictEqual(sentPackets().pop(), { customPacketType: "greymarchProf", rid: 5, op: "pick", args: { combat: "bowman", trades: ["miner"] } });
   gm.greymarchPacket({ customPacketType: "greymarchProfReply", rid: 5, ok: true, locked: true });
   assert.deepStrictEqual(profPage().pop(), { fn: "reply", arg: { customPacketType: "greymarchProfReply", rid: 5, ok: true, locked: true } });
-  gm.greymarchKey({ code: 37, isDown: false }); gm.greymarchKey({ code: 37, isDown: true });
+  gm.greymarchKey({ code: 37, isDown: false }); gm.greymarchKey({ code: 37, isDown: true }); gm.greymarchProfPending();
   assert.strictEqual(gm.greymarchProfOn, true, "K from the game never closes it (the page does, so the key cannot reopen it)");
   gm.greymarchBrowserMessage({ arguments: ["greymarch", JSON.stringify({ type: "prof-close" })] });
   assert.strictEqual(gm.greymarchProfOn, false);
   assert.deepStrictEqual(profPage().pop(), { fn: "hide", arg: true });
-  gm.greymarchKey({ code: 37, isDown: false }); gm.greymarchKey({ code: 37, isDown: true });
+  gm.greymarchKey({ code: 37, isDown: false }); gm.greymarchKey({ code: 37, isDown: true }); gm.greymarchProfPending();
   assert.strictEqual(gm.greymarchProfOn, true);
   gm.greymarchKey({ code: 1, isDown: false }); gm.greymarchKey({ code: 1, isDown: true });
   assert.strictEqual(gm.greymarchProfOn, false, "Esc closes it");
@@ -194,11 +194,11 @@ test("the server's damage multiplier (a weapon above your rank hits weaker) is s
 
 test("K does nothing while typing in the chat, over the character select screen, or over another panel", () => {
   const { gm } = make();
-  gm.greymarchChatTyping = true; gm.greymarchKey({ code: 37, isDown: true });
+  gm.greymarchChatTyping = true; gm.greymarchKey({ code: 37, isDown: true }); gm.greymarchProfPending();
   assert.ok(!gm.greymarchProfOn, "typing"); gm.greymarchChatTyping = false; gm.greymarchKey({ code: 37, isDown: false });
-  gm.greymarchScreenUp = true; gm.greymarchKey({ code: 37, isDown: true });
+  gm.greymarchScreenUp = true; gm.greymarchKey({ code: 37, isDown: true }); gm.greymarchProfPending();
   assert.ok(!gm.greymarchProfOn, "select screen"); gm.greymarchScreenUp = false; gm.greymarchKey({ code: 37, isDown: false });
-  gm.greymarchMenuOn = true; gm.greymarchKey({ code: 37, isDown: true });
+  gm.greymarchMenuOn = true; gm.greymarchKey({ code: 37, isDown: true }); gm.greymarchProfPending();
   assert.ok(!gm.greymarchProfOn, "the X menu is up");
 });
 
@@ -397,4 +397,36 @@ test("HARD RULES: sending a line closes the input on the game side too, even if 
   assert.strictEqual(gm.greymarchChatTyping, false);
   enter(gm);
   assert.strictEqual(gm.greymarchChatTyping, true);
+});
+
+test("K typed into a game menu (the race menu's name box, the console) is a letter: the professions window does not open, the log says why; with the menu gone K opens it", () => {
+  const { gm, log, menus } = make();
+  for (const m of ["RaceSex Menu", "Console"]) {
+    menus.add(m);
+    gm.greymarchKey({ code: 37, isDown: false }); gm.greymarchKey({ code: 37, isDown: true }); gm.greymarchProfPending();
+    assert.ok(!gm.greymarchProfOn, m);
+    menus.delete(m); gm.greymarchChatWhyNext = 0;
+  }
+  assert.ok(log.lines.some((l) => /K ignored: the game says 'RaceSex Menu' is open/.test(l)), "the server log says why");
+  gm.greymarchProfPending();
+  assert.ok(!gm.greymarchProfOn, "a K pressed in the menu does not open the window later, once the menu closes");
+  gm.greymarchKey({ code: 37, isDown: false }); gm.greymarchKey({ code: 37, isDown: true }); gm.greymarchProfPending();
+  assert.strictEqual(gm.greymarchProfOn, true);
+});
+
+test("the chat's keyboard releases (its answer every 2 s, the release after a close, the voice display switching) leave the K window, the chancery and the vampire menu their cursor", () => {
+  for (const flag of ["greymarchProfOn", "greymarchChanceryOn", "greymarchVampMenuOn", "greymarchAdminOn", "greymarchMenuOn"]) {
+    const { gm, log } = make();
+    gm.greymarchChatShow();
+    gm[flag] = true;
+    log.focused.length = 0;
+    gm.greymarchChatSync(false);
+    gm.greymarchChatReleaseUntil = Date.now() + 1000; gm.greymarchChatWatchNext = 0; gm.greymarchChatWatch(Date.now());
+    gm.greymarchVoiceMessage({ hud: true, speaking: [] }); gm.greymarchVoiceMessage({ hud: false, speaking: [] });
+    assert.ok(!log.focused.includes(false), flag + ": the keyboard was not taken away");
+  }
+  const { gm, log } = make();
+  gm.greymarchChatShow(); log.focused.length = 0;
+  gm.greymarchChatSync(false);
+  assert.deepStrictEqual(log.focused, [false], "with nothing open an idle chat still never holds the keyboard");
 });

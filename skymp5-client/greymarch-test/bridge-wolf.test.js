@@ -9,10 +9,10 @@ const ts = require("typescript");
 const src = fs.readFileSync(path.join(__dirname, "..", "src", "greymarch", "bridge.ts"), "utf8");
 const js = ts.transpileModule(src, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2019 } }).outputText;
 
-const BEAST = 0xcdd84, NORD = 0x13746, ALPHA = 0xfe000804, PUP = 0xfe00080a;
+const BEAST = 0xcdd84, NORD = 0x13746, ALPHA = 0xfe000804, PUP = 0xfe00080a, BLACK = 0xfe00085c;
 function make(opts = {}) {
-  const log = { lines: [], idles: [], events: [], races: [], waits: [], sent: [] };
-  const mods = { "../messages": { MsgType: { CustomPacket: 77 } }, "../view/worldViewMisc": { remoteIdToLocalId: (id) => (opts.others || {})[id] || 0 }, "../sync/appearance": {}, "../services/services/remoteServer": { RemoteServer: {} }, "../services/services/singlePlayerService": { SinglePlayerService: {} } };
+  const log = { lines: [], idles: [], events: [], races: [], waits: [], sent: [], applied: [], equipped: [], redraws: 0 };
+  const mods = { "../messages": { MsgType: { CustomPacket: 77 } }, "../view/worldViewMisc": { remoteIdToLocalId: (id) => (opts.others || {})[id] || 0 }, "../sync/appearance": { applyAppearanceToPlayer: (a) => log.applied.push(a) }, "../services/services/remoteServer": { RemoteServer: {} }, "../services/services/singlePlayerService": { SinglePlayerService: {} } };
   const mod = { exports: {} };
   new Function("require", "exports", "module", js)((p) => mods[p], mod.exports, mod);
   const race = (id) => ({ id, getFormID: () => id });
@@ -21,16 +21,21 @@ function make(opts = {}) {
     getRace: () => race(current), setRace: (r) => { current = r.id; log.races.push(r.id); },
     playIdle: (idle) => { log.idles.push(idle.id); return opts.refuseIdle ? false : true; },
     waitForAnimationEvent: (name) => new Promise((resolve) => log.waits.push({ name, resolve })),
-    hasSpell: () => true, hasMagicEffect: () => false, dispelSpell() {}, unequipAll() {}, getBaseObject: () => null,
+    hasSpell: () => true, hasMagicEffect: () => false, dispelSpell() {}, getBaseObject: () => null,
+    unequipAll() { log.unequipped = true; },
+    getWornForm: (mask) => ((opts.worn || {})[mask] ? { getFormID: () => opts.worn[mask] } : null),
+    getEquippedWeapon: (left) => (!left && opts.weapon ? { getFormID: () => opts.weapon } : null), getEquippedShield: () => null,
+    getItemCount: (form) => ((opts.have || []).includes(form.id) ? 1 : 0), equipItem: (form) => log.equipped.push(form.id), queueNiNodeUpdate: () => { log.redraws++; },
   };
   const pass = (f) => (f ? f : null);
   const sp = {
     printConsole() {}, writeLogs: (n, l) => log.lines.push(l),
-    Game: { getPlayer: () => player, getFormEx: (id) => ({ id }), getFormFromFile: (id, file) => (opts.noAlpha || file !== "GreymarchCore.esp" ? null : id === 0x804 ? { getFormID: () => ALPHA } : id === 0x80a ? { getFormID: () => PUP } : null), setBeastForm() {}, enableFastTravel() {}, disablePlayerControls() {}, enablePlayerControls() {}, forceThirdPerson() {}, showFirstPersonGeometry() {} },
+    Game: { getPlayer: () => player, getFormEx: (id) => ({ id }), getFormFromFile: (id, file) => (opts.noAlpha || file !== "GreymarchCore.esp" ? null : id === 0x804 ? { getFormID: () => ALPHA } : id === 0x80a ? { getFormID: () => PUP } : id === 0x85c ? { getFormID: () => BLACK } : null), setBeastForm() {}, enableFastTravel() {}, disablePlayerControls() {}, enablePlayerControls() {}, forceThirdPerson() {}, showFirstPersonGeometry() {} },
     Spell: { from: pass }, MagicEffect: { from: pass }, Race: { from: (f) => race(f.id) }, Actor: { from: (f) => (f && opts.actors && opts.actors[f.id]) || null }, Idle: { from: pass }, FormList: { from: () => null }, ImageSpaceModifier: { from: () => null }, Sound: { from: () => null }, ActorBase: { from: () => null },
     Debug: { sendAnimationEvent: (ref, name) => log.events.push(name), notification() {} },
     Utility: { isInMenuMode: () => menu },
     on() {},
+    storage: {},
   };
   const controller = { on() {}, emitter: { on() {}, emit: (n, m) => { if (n === "sendMessage") log.sent.push(JSON.parse(m.message.contentJsonDump)); } } };
   const gm = new mod.exports.GreymarchBridge(sp, controller);
@@ -40,7 +45,7 @@ function make(opts = {}) {
   const at = (fn) => { Date.now = () => t; try { return fn(); } finally { Date.now = realNow; } };
   const say = (msg) => at(() => gm.greymarchPacket(msg));
   const key = (code, down) => at(() => gm.greymarchKey({ code, isDown: down }));
-  return { gm, log, tick, say, key, race: () => current, setMenu: (v) => { menu = v; } };
+  return { gm, log, sp, tick, say, key, race: () => current, setMenu: (v) => { menu = v; } };
 }
 const flush = () => new Promise((r) => setImmediate(r));
 
@@ -104,6 +109,55 @@ test("R roars only while changed, never mid-transformation or in a menu, and not
   assert.strictEqual(s.log.events.length, 4, "typing in the chat is not a roar");
 });
 
+test("the Bear Blood: the server says bear with the race, the body becomes the werebear; R roars on it; back to the human race at the end", () => {
+  const BEARR = 0x0401e17b;
+  const s = make({ refuseIdle: true });
+  s.say({ customPacketType: "greymarchWolfForm", on: true, alpha: false, pup: false, bear: true, race: BEARR });
+  s.tick();
+  assert.strictEqual(s.race(), BEARR);
+  assert.ok(s.log.lines.some((l) => /changed into the werebear/.test(l)));
+  s.key(19, true); s.tick(); s.tick();
+  assert.deepStrictEqual(s.log.events.slice(-2), ["HowlStart", "HowlRelease"], "the werebear roars");
+  s.say({ customPacketType: "greymarchWolfForm", on: false }); s.tick();
+  assert.strictEqual(s.race(), NORD, "and the person's race comes back, not the bear's");
+});
+
+test("the black bear: the server says bear and black, the body becomes GreymarchCore's black bear race; switched off mid-form it goes back to the werebear", () => {
+  const BEARR = 0x0401e17b;
+  const s = make({ refuseIdle: true });
+  s.say({ customPacketType: "greymarchWolfForm", on: true, alpha: false, pup: false, bear: true, race: BEARR, black: true });
+  s.tick();
+  assert.strictEqual(s.race(), BLACK);
+  s.say({ customPacketType: "greymarchWolfForm", on: true, alpha: false, pup: false, bear: true, race: BEARR, black: false });
+  s.tick(3100);
+  assert.strictEqual(s.race(), BEARR, "the plain werebear again");
+  s.say({ customPacketType: "greymarchWolfForm", on: false }); s.tick();
+  assert.strictEqual(s.race(), NORD);
+});
+
+test("other black bears: the blackbears list puts GreymarchCore's black bear race into __gmWolfRace", () => {
+  const s = make({ others: { 503: 0xff000a03 } });
+  const g = Function("return this")();
+  delete g.__gmWolfRace;
+  s.say({ customPacketType: "greymarchWolfAlphas", actors: [], pups: [], blackbears: [503] });
+  s.tick(1100);
+  assert.deepStrictEqual(g.__gmWolfRace, { 503: BLACK });
+  assert.ok(s.log.lines.some((l) => /1f7 drawn as the black bear/.test(l)));
+  delete g.__gmWolfRace;
+});
+
+test("the roar is a howl the server hears (it calls the pack): one report per roar, none for a human or a roar too soon", () => {
+  const s = make({ refuseIdle: true });
+  const howls = () => s.log.sent.filter((m) => m.customPacketType === "greymarchWolf" && m.op === "howl").length;
+  s.key(19, true); s.key(19, false); s.tick();
+  assert.strictEqual(howls(), 0, "human: R is the game's own key");
+  s.say({ customPacketType: "greymarchWolfForm", on: true }); s.tick();
+  s.key(19, true); s.tick();
+  assert.strictEqual(howls(), 1);
+  s.key(19, false); s.key(19, true); s.tick();
+  assert.strictEqual(howls(), 1, "a roar too soon is not a howl either");
+});
+
 test("the server says the wolf fed: the vanilla feeding animation (SpecialFeeding) plays on the beast body", () => {
   const s = make();
   s.say({ customPacketType: "greymarchWolfForm", on: true });
@@ -150,18 +204,6 @@ test("the Alpha form: staff switch it on or off mid-form and the body follows; w
   assert.ok(n.log.lines.some((l) => /Alpha race is not in GreymarchCore.esp/.test(l)));
 });
 
-test("other players in the Alpha form: one drawn as the normal werewolf gets the Alpha race on this screen, and goes back when the server stops listing them", () => {
-  const races = { 0xff000a01: BEAST, 0xff000a02: NORD };
-  const other = (id) => ({ getRace: () => ({ getFormID: () => races[id] }), setRace: (r) => { races[id] = r.id; } });
-  const s = make({ others: { 501: 0xff000a01, 502: 0xff000a02 }, actors: { 0xff000a01: other(0xff000a01), 0xff000a02: other(0xff000a02) } });
-  s.say({ customPacketType: "greymarchWolfAlphas", actors: [501, 502] });
-  s.tick(1100);
-  assert.strictEqual(races[0xff000a01], ALPHA, "the werewolf is drawn as the Alpha");
-  assert.strictEqual(races[0xff000a02], NORD, "a human (no wolf look) is left alone");
-  s.say({ customPacketType: "greymarchWolfAlphas", actors: [] });
-  s.tick(1100);
-  assert.strictEqual(races[0xff000a01], BEAST, "no longer listed: the normal werewolf again");
-});
 
 test("Z while changed asks the server to change back (the server decides); not mid-transformation, not right after the change, not in a menu or the chat, and not as a human", () => {
   const s = make({ refuseIdle: true });
@@ -210,17 +252,66 @@ test("the pup: the server says pup, the body becomes the pup race from Greymarch
   assert.strictEqual(s.race(), NORD);
 });
 
-test("other players who are pups are drawn as the pup here, Alphas as the Alpha; one taken off the lists goes back to the normal werewolf", () => {
-  const races = { 0xff000a01: BEAST, 0xff000a02: BEAST, 0xff000a03: NORD };
-  const other = (id) => ({ getRace: () => ({ getFormID: () => races[id] }), setRace: (r) => { races[id] = r.id; } });
-  const s = make({ others: { 501: 0xff000a01, 502: 0xff000a02, 503: 0xff000a03 }, actors: { 0xff000a01: other(0xff000a01), 0xff000a02: other(0xff000a02), 0xff000a03: other(0xff000a03) } });
-  s.say({ customPacketType: "greymarchWolfAlphas", actors: [501], pups: [502, 503] });
+
+test("the way back: while changed SkyMP keeps the character's own look aside (storage flag); a second after the race is back the kept look is put on and the gear goes back on", () => {
+  const s = make({ refuseIdle: true, worn: { 4: 0x12eb7, 8: 0x13911 }, weapon: 0x1397e, have: [0x12eb7, 0x13911, 0x1397e] });
+  s.say({ customPacketType: "greymarchWolfForm", on: true });
+  s.tick();
+  assert.strictEqual(s.race(), BEAST);
+  assert.strictEqual(s.sp.storage.greymarchWolfOn, true, "SkyMP keeps a look the server sends aside while changed");
+  assert.ok(s.log.unequipped);
+  s.sp.storage.greymarchPendingAppearance = { raceId: NORD, headpartIds: [1, 2] }; // the server put the human look back; SkyMP kept it aside
+  s.say({ customPacketType: "greymarchWolfForm", on: false }); s.tick();
+  assert.strictEqual(s.race(), NORD);
+  assert.strictEqual(s.sp.storage.greymarchWolfOn, false);
+  assert.ok(s.log.redraws > 0, "the body is redrawn");
+  assert.deepStrictEqual(s.log.applied, [], "not before the person's skeleton is in place");
   s.tick(1100);
-  assert.strictEqual(races[0xff000a01], ALPHA);
-  assert.strictEqual(races[0xff000a02], PUP);
-  assert.strictEqual(races[0xff000a03], NORD, "a human is left alone");
+  assert.deepStrictEqual(s.log.applied, [{ raceId: NORD, headpartIds: [1, 2] }], "the own look put on properly");
+  assert.strictEqual(s.sp.storage.greymarchPendingAppearance, null);
+  assert.deepStrictEqual(s.log.equipped.sort(), [0x12eb7, 0x13911, 0x1397e].sort(), "the armor and the weapon back on");
+  assert.ok(s.log.lines.some((l) => /put 3 of 3 worn items back on/.test(l)));
+  s.tick(1100);
+  assert.strictEqual(s.log.equipped.length, 3, "only once");
+});
+
+test("a new bridge clears a werewolf flag left in storage (a script reload mid-form must not keep the player's look aside forever)", () => {
+  const s = make();
+  assert.strictEqual(s.sp.storage.greymarchWolfOn, false);
+});
+
+test("the way back: gear sold or dropped while changed is not put on; with no kept look nothing is applied", () => {
+  const s = make({ refuseIdle: true, worn: { 4: 0x12eb7 }, have: [] });
+  s.say({ customPacketType: "greymarchWolfForm", on: true }); s.tick();
+  s.say({ customPacketType: "greymarchWolfForm", on: false }); s.tick(); s.tick(1100);
+  assert.deepStrictEqual(s.log.equipped, []);
+  assert.deepStrictEqual(s.log.applied, []);
+  assert.ok(s.log.lines.some((l) => /put 0 of 1 worn items back on/.test(l)));
+});
+
+test("other Alphas and pups: the lists become __gmWolfRace (server id -> the variant's race) for formView.ts to build their NPC with; no SetRace on another player's actor (that crashed the game)", () => {
+  const races = { 0xff000a01: BEAST, 0xff000a02: BEAST };
+  const setRaces = [];
+  const other = (id) => ({ getRace: () => ({ getFormID: () => races[id] }), setRace: (r) => { setRaces.push([id, r.id]); } });
+  const s = make({ others: { 501: 0xff000a01, 502: 0xff000a02 }, actors: { 0xff000a01: other(0xff000a01), 0xff000a02: other(0xff000a02) } });
+  const g = Function("return this")();
+  delete g.__gmWolfRace;
+  s.say({ customPacketType: "greymarchWolfAlphas", actors: [501], pups: [502] });
+  s.tick(1100);
+  assert.deepStrictEqual(g.__gmWolfRace, { 501: ALPHA, 502: PUP });
+  assert.ok(s.log.lines.some((l) => /1f5 drawn as the Alpha/.test(l)) && s.log.lines.some((l) => /1f6 drawn as the pup/.test(l)));
   s.say({ customPacketType: "greymarchWolfAlphas", actors: [502], pups: [] });
   s.tick(1100);
-  assert.strictEqual(races[0xff000a02], ALPHA, "a pup made an Alpha is redrawn");
-  assert.strictEqual(races[0xff000a01], BEAST, "no longer listed: the normal werewolf");
+  assert.deepStrictEqual(g.__gmWolfRace, { 502: ALPHA }, "a pup made an Alpha; one off the lists is the normal werewolf again");
+  assert.ok(s.log.lines.some((l) => /1f5 drawn as the normal beast again/.test(l)));
+  assert.deepStrictEqual(setRaces, [], "never a SetRace on another player's live actor");
+  delete g.__gmWolfRace;
+});
+
+test("formView.ts builds a werewolf variant's NPC with the variant's race (respawned when it changes), only for a werewolf look", () => {
+  const fv = fs.readFileSync(path.join(__dirname, "..", "src", "view", "formView.ts"), "utf8");
+  assert.ok(fv.includes("__gmWolfRace"), "reads the bridge's map");
+  assert.ok(fv.includes("gmMap && ap && !(Array.isArray(ap.headpartIds) && ap.headpartIds.length > 0)"), "only a beast look (no head parts): the werewolf's or the werebear's");
+  assert.ok(fv.includes("this.appearanceBasedBaseId = 0; // built again"), "a change of variant respawns the NPC");
+  assert.ok(fv.includes("{ ...this.appearanceState.appearance, raceId: this.gmWolfRace }"), "built with the variant's race");
 });

@@ -113,6 +113,20 @@ export class FormView {
       }
     }
 
+    // GREYMARCH: a werewolf variant (the Alpha, the pup) is drawn by BUILDING this player's NPC with the variant's race (the bridge's greymarchWolfAlphaOthers fills
+    // __gmWolfRace: server actor id -> race), the same way a changed look respawns it. A SetRace on the live actor rebuilt its skeleton's physics while SkyMP moved it
+    // and crashed the game (keyframed rigid bodies, 2026-10-17).
+    let gmWolfRace = 0;
+    try {
+      const gmMap: any = (Function("return this")() as any).__gmWolfRace;
+      const ap: any = this.appearanceState.appearance;
+      if (gmMap && ap && !(Array.isArray(ap.headpartIds) && ap.headpartIds.length > 0)) gmWolfRace = Number(gmMap[this.getRemoteRefrId()]) || 0;
+    } catch (gmErr) { gmWolfRace = 0; }
+    if (gmWolfRace !== this.gmWolfRace) {
+      this.gmWolfRace = gmWolfRace;
+      this.appearanceBasedBaseId = 0; // built again, so the body is respawned with the variant's race
+    }
+
     const refId =
       model.refrId && model.refrId < 0xff000000 ? model.refrId : undefined;
     if (refId) {
@@ -545,6 +559,17 @@ export class FormView {
       }
     }
 
+    // GREYMARCH: where this player's head is, about 10 times a second, so the launcher can play their voice from there (direction, muffle, floors; see bridge.ts greymarchEarsTick)
+    if (this.refrId && model.appearance?.name && Date.now() >= this.gmEarNext) {
+      this.gmEarNext = Date.now() + 100;
+      try {
+        if (refr.is3DLoaded() && Game.getPlayer()!.getDistance(refr) <= 4500) {
+          const gmHead = "NPC Head [Head]";
+          (SpApiInteractor.getControllerInstance().emitter as any).emit("greymarchEar", { name: model.appearance.name, x: NetImmerse.getNodeWorldPositionX(refr, gmHead, false), y: NetImmerse.getNodeWorldPositionY(refr, gmHead, false), z: NetImmerse.getNodeWorldPositionZ(refr, gmHead, false) });
+        }
+      } catch (gmErr) { /* their voice just stays centred */ }
+    }
+
     if (FormView.isDisplayingNicknames && this.refrId && model.appearance?.name) {
       const headPart = "NPC Head [Head]";
       const maxNicknameDrawDistance = 1000;
@@ -632,7 +657,8 @@ export class FormView {
   private getAppearanceBasedBase(): number {
     const base = ActorBase.from(Game.getFormEx(this.appearanceBasedBaseId));
     if (!base && this.appearanceState.appearance) {
-      this.appearanceBasedBaseId = applyAppearance(this.appearanceState.appearance).getFormID();
+      const gmLook = this.gmWolfRace ? { ...this.appearanceState.appearance, raceId: this.gmWolfRace } : this.appearanceState.appearance; // GREYMARCH: a werewolf variant's race
+      this.appearanceBasedBaseId = applyAppearance(gmLook).getFormID();
     }
     return this.appearanceBasedBaseId;
   }
@@ -704,6 +730,7 @@ export class FormView {
   private appearanceState = this.getDefaultAppearanceState();
   private eqState = this.getDefaultEquipState();
   private appearanceBasedBaseId = 0;
+  private gmWolfRace = 0; // GREYMARCH: the werewolf variant's race this player's NPC was built with (0: none)
   private leveledBaseId = 0;
   private isOnScreen = false;
   private lastPcWorldOrCell = 0;
@@ -715,6 +742,7 @@ export class FormView {
   private textNameId: number | undefined = undefined;
   private textNameShown: string | undefined = undefined;
   private textIdId: number | undefined = undefined; // GREYMARCH: the ID line under an introduced character's name
+  private gmEarNext = 0; // GREYMARCH: when this player's head position is next reported for the voice (see update)
 
 
   public static isDisplayingNicknames: boolean = true;

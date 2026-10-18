@@ -138,11 +138,92 @@ test("blue eyes and fangs: every listed vampire gets the eye part for their glow
     assert.strictEqual(worn.me[0], FANG_F, "fangs");
     assert.deepStrictEqual(worn.them, { 2: 0x222, 0: 0x444 }, "a Khajiit keeps their eyes and teeth (not made yet)");
     look([{ actor: 0xff000001, glow: 0, fangs: false }]);
-    assert.strictEqual(worn.me[2], GM + 0x815, "/eyes off: blue, no glow");
+    assert.strictEqual(worn.me[2], 0x111, "/eyes off: their own eyes");
     assert.strictEqual(worn.me[0], 0x333, "/fangs off: their own teeth");
     look([{ actor: 0xff000001, glow: 2, fangs: true }]);
     assert.strictEqual(worn.me[0], FANG_F);
     look([]);
     assert.deepStrictEqual(worn.me, { 2: 0x111, 0: 0x333 }, "no longer a vampire: their own eyes and teeth");
+  } finally { Date.now = realNow; }
+});
+
+test("a Potion of Blood drunk from the inventory (the equip event) is reported too", () => {
+  const s = make();
+  s.fire("equip", { baseObj: { getFormID: () => DG + 0x18ef3 }, actor: me });
+  s.fire("equip", { baseObj: { getFormID: () => 0x3eadd }, actor: me }); // a healing potion: not ours
+  s.tick();
+  assert.deepStrictEqual(s.log.sent.filter((m) => m.customPacketType === "greymarchVamp"), [{ customPacketType: "greymarchVamp", op: "drank" }]);
+});
+
+test("the vampire window: the server opens it, the page's questions go to the server, the answers come back, Esc and the page close it", () => {
+  const s = make();
+  const js = [];
+  s.gm.sp.browser = { executeJavaScript: (x) => js.push(x), setVisible() {}, setFocused() {} };
+  s.say({ customPacketType: "greymarchVampMenuOpen" });
+  assert.strictEqual(s.gm.greymarchVampMenuOn, true);
+  assert.ok(js.some((x) => x.includes("greymarch-vampire.html") && x.includes('window.__gmVampRun({"fn":"show"')));
+  s.gm.greymarchBrowserMessage({ arguments: ["greymarch", JSON.stringify({ type: "vampire", rid: 3, op: "eyes" })] });
+  assert.deepStrictEqual(s.log.sent.filter((m) => m.customPacketType === "greymarchVampMenu"), [{ customPacketType: "greymarchVampMenu", rid: 3, op: "eyes" }]);
+  s.say({ customPacketType: "greymarchVampMenuReply", rid: 3, ok: true });
+  assert.ok(js.some((x) => x.includes('window.__gmVampRun({"fn":"reply"')));
+  s.gm.greymarchBrowserMessage({ arguments: ["greymarch", JSON.stringify({ type: "vampire-close" })] });
+  assert.strictEqual(s.gm.greymarchVampMenuOn, false);
+});
+
+test("eye colours: each bloodline's colour picks its own eye parts (Volkihar red, glow 4)", () => {
+  const s = make();
+  const sp = s.gm.sp, GM = 0x0a000000;
+  const worn = { 2: 0x111, 0: 0x333 };
+  const part = (id) => ({ getFormID: () => id, getType: () => (id === 0x333 || id === GM + 0x81c ? 0 : 2) });
+  Object.assign(sp.Game.getPlayer(), { getRace: () => ({ getFormID: () => 0x13746 }), getBaseObject: () => ({ sex: 0 }), changeHeadPart: (hp) => { worn[hp.getType()] = hp.getFormID(); } });
+  sp.Game.getFormFromFile = (id, file) => (file === "GreymarchCore.esp" ? { id: GM + id } : null);
+  sp.HeadPart = { from: (f) => (f ? part(f.id) : null) };
+  sp.ActorBase = { from: (b) => (b ? { getSex: () => b.sex, getNumHeadParts: () => 2, getNthHeadPart: (i) => part(worn[i === 0 ? 2 : 0]) } : null) };
+  s.say({ customPacketType: "greymarchGhosts", ghosts: [], me: 0xff000001 });
+  s.say({ customPacketType: "greymarchVampLooks", vampires: [{ actor: 0xff000001, glow: 4, fangs: false, eyes: "red" }] });
+  s.tick();
+  assert.strictEqual(worn[2], GM + 0x81f + 4, "GM_VampEyesMaleRed4");
+});
+
+test("a bloodline change turns the eyes at once; a game that starts with one of our eye parts already on still knows the character's own eyes", () => {
+  const s = make();
+  const sp = s.gm.sp, GM = 0x0a000000;
+  const worn = { 2: GM + 0x80e + 3, 0: 0x333 }; // already wearing our blue glow-3 part (a reload of the game's script)
+  const part = (id) => ({ getFormID: () => id, getType: () => (id === 0x333 ? 0 : 2) });
+  Object.assign(sp.Game.getPlayer(), { getRace: () => ({ getFormID: () => 0x13746 }), getBaseObject: () => ({ sex: 0 }), changeHeadPart: (hp) => { worn[hp.getType()] = hp.getFormID(); } });
+  sp.Game.getFormFromFile = (id, file) => (file === "GreymarchCore.esp" ? { id: GM + id } : null);
+  sp.Game.getFormEx = (id) => ({ id });
+  sp.HeadPart = { from: (f) => (f ? part(f.id) : null) };
+  sp.ActorBase = { from: (b) => (b ? { getSex: () => b.sex, getNumHeadParts: () => 2, getNthHeadPart: (i) => part(worn[i === 0 ? 2 : 0]) } : null) };
+  let t = 7_000_000; const realNow = Date.now; Date.now = () => t;
+  const look = (v) => { s.say({ customPacketType: "greymarchVampLooks", vampires: [Object.assign({ actor: 0xff000001, fangs: false }, v)] }); s.tick(); t += 2500; };
+  try {
+    s.say({ customPacketType: "greymarchGhosts", ghosts: [], me: 0xff000001 });
+    look({ glow: 3, eyes: "blue" });
+    look({ glow: 3, eyes: "red" });
+    assert.strictEqual(worn[2], GM + 0x81f + 3, "Volkihar: red at once");
+    look({ glow: 0, eyes: "red" });
+    assert.strictEqual(worn[2], GM + 0x81f, "no own eyes known yet (ours were on from the start): red without glow rather than nothing");
+    worn[2] = 0x111; // SkyMP puts the character's saved look back: their own eyes
+    look({ glow: 0, eyes: "red" });
+    assert.strictEqual(worn[2], 0x111, "now their own eyes are known and shown while /eyes hides them");
+    look({ glow: 4, eyes: "green" });
+    assert.strictEqual(worn[2], GM + 0x83d + 4);
+    assert.ok(s.log.lines.some((l) => /has green eyes, glow 4/.test(l)));
+  } finally { Date.now = realNow; }
+});
+
+test("a vampire of a race without vampire eyes (khajiit, argonian) keeps their eyes, and the log says why once", () => {
+  const s = make({ others: { 0xff000002: 0x5000 } });
+  const sp = s.gm.sp;
+  const them = { getRace: () => ({ getFormID: () => 0x13745 }), getBaseObject: () => ({}) };
+  sp.Game.getFormEx = (id) => (id === 0x5000 ? them : { id });
+  sp.Actor.from = (f) => f;
+  sp.HeadPart = { from: () => null };
+  let t = 9_000_000; const realNow = Date.now; Date.now = () => t;
+  try {
+    s.say({ customPacketType: "greymarchVampLooks", vampires: [{ actor: 0xff000002, glow: 2, fangs: true, eyes: "red" }] });
+    s.tick(); t += 2500; s.tick();
+    assert.strictEqual(s.log.lines.filter((l) => /keeps their eyes: no vampire eyes for race 13745/.test(l)).length, 1);
   } finally { Date.now = realNow; }
 });
