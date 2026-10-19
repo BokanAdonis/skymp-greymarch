@@ -40,6 +40,7 @@ const VAMP_EYES: any = { blue: { male: 0x80e, female: 0x815 }, red: { male: 0x81
 const VAMP_EYE_RACES = [0x13746, 0x13744, 0x13741, 0x13748, 0x13743, 0x13749, 0x13742, 0x13747]; // Nord, Imperial, Breton, Redguard, High Elf, Wood Elf, Dark Elf, Orc (the human eye shape; khajiit and argonian eyes are not made yet)
 const VAMP_FANGS = { male: 0x81c, female: 0x81d }; // GM_VampFangsMale / GM_VampFangsFemale: the human teeth with the upper canines pulled into fangs
 const VAMP_FANG_RACES = [0x13746, 0x13744, 0x13741, 0x13748, 0x13743, 0x13749, 0x13742]; // the human and elf teeth; orcs keep their tusks
+const VAMP_FANG_ITEM = 0x03cf35; // Dragonborn.esm's DLC2DummyHelmet: GreymarchCore.esp makes it the worn "Vampire Fangs" (the server gives it, greymarchVampFangsWear puts it on)
 const VAMP_OWN_TEETH = { male: 0x51631, female: 0x5150f }; // MaleMouthHumanoidDefault / FemaleMouthHumanoidDefault (Skyrim.esm): the race's teeth, put back for a character with no teeth part of their own
 const CHANCERY_SCRIPT =PROF_SCRIPT.split("__gmProfSend").join("__gmChanceryRun").split("greymarch-prof").join("greymarch-chancery").split("2147483220").join("2147483221"); // the chancery window (/chancery): the same loader, another page
 const EMOTE_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmEmoteRun").split("greymarch-prof").join("greymarch-emote").split("2147483220").join("2147483223").split("e.key==='x'||e.key==='X'").join("e.key==='g'||e.key==='G'"); // the emote wheel (G): the same loader, another page; letting go of G inside the page is a release too
@@ -908,7 +909,8 @@ export class GreymarchBridge {
                 this.greymarchLog("vampire: feeding (" + fd.role + "), the animation " + (played ? "plays" : "was refused by the game"));
             }
         }
-        this.greymarchVampEyes(now); // every vampire's blue eyes, on this screen (the fangs are not made yet)
+        this.greymarchVampFangsWear(now); // the worn fangs the server gave: put on (SkyMP then shows them to everyone)
+        this.greymarchVampEyes(now); // every vampire's blue eyes, on this screen
     }
     // Every vampire in the world (the player included) gets their bloodline's eye part for their glow and, while their fangs show, the fanged teeth, by the server's
     // list (greymarchVampLooks). Only those parts change: the character is not redrawn. Their OWN eyes and teeth are kept and put back while /eyes or /fangs hides
@@ -988,6 +990,20 @@ export class GreymarchBridge {
                 }
             } catch (bErr) { /* gone */ }
         }
+    }
+    // THE WORN FANGS. The server puts "Vampire Fangs" in a vampire's inventory, marked worn, while their fangs show (vampire.js fangsWorn), and takes it away when they
+    // hide. Marked worn is not on: the game equips it here (kept on: it cannot be taken off by hand), and SkyMP sends what the player wears to every other game, which
+    // shows the fangs like any gear. Once a second; nothing is done when the player does not have it.
+    greymarchVampFangsWear(now: number): any {
+        if (now < (this.greymarchVampFangsNext || 0)) return;
+        this.greymarchVampFangsNext = now + 1000;
+        try {
+            var sp = this.sp, player = sp.Game.getPlayer();
+            var f = sp.Game.getFormFromFile(VAMP_FANG_ITEM, "Dragonborn.esm");
+            if (!player || !f || player.getItemCount(f) <= 0 || player.isEquipped(f)) return;
+            player.equipItem(f, true, true); // preventRemoval, silent
+            if (!this.greymarchVampFangsSaid) { this.greymarchVampFangsSaid = true; this.greymarchLog("vampire: the worn fangs put on"); }
+        } catch (err) { /* tried again in a second */ }
     }
     greymarchVampPartSlot(base: any, part: any): number { // where that head part is in the character's list of parts (-1: not there)
         if (!part) return -1;

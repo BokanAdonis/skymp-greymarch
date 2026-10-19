@@ -258,3 +258,21 @@ test("a vampire of a race without vampire eyes (khajiit, argonian) keeps their e
     assert.strictEqual(s.log.lines.filter((l) => /keeps their eyes: no vampire eyes for race 13745/.test(l)).length, 1);
   } finally { Date.now = realNow; }
 });
+
+test("the worn fangs the server gave are put on (kept on), once a second, and only when the player has them", () => {
+  const s = make();
+  const sp = s.gm.sp;
+  const DB = 0x04000000, FANGS = DB + 0x03cf35;
+  let have = 0, on = false; const equips = [];
+  sp.Game.getFormFromFile = (id, file) => (file === "Dragonborn.esm" ? { id: DB + id, getFormID: () => DB + id } : null);
+  Object.assign(sp.Game.getPlayer(), { getItemCount: (f) => (f.id === FANGS ? have : 0), isEquipped: () => on, equipItem: (f, keep, silent) => { equips.push([f.id, keep, silent]); on = true; } });
+  s.gm.greymarchVampFangsWear(1_000);
+  assert.deepStrictEqual(equips, [], "nothing to wear");
+  have = 1;
+  s.gm.greymarchVampFangsWear(1_500);
+  assert.deepStrictEqual(equips, [], "once a second");
+  s.gm.greymarchVampFangsWear(2_100);
+  assert.deepStrictEqual(equips, [[FANGS, true, true]], "on, and kept on");
+  s.gm.greymarchVampFangsWear(3_200);
+  assert.strictEqual(equips.length, 1, "already on");
+});
