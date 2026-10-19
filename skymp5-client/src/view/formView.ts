@@ -1,4 +1,4 @@
-import { Actor, ActorBase, createText, destroyText, Form, FormType, Game, Keyword, NetImmerse, ObjectReference, once, printConsole, setTextColor, setTextPos, setTextSize, setTextString, storage, TESModPlatform, Utility, worldPointToScreenPoint } from "skyrimPlatform";
+import { Actor, ActorBase, Cell, createText, destroyText, Form, FormType, Game, Keyword, NetImmerse, ObjectReference, once, printConsole, setTextColor, setTextPos, setTextSize, setTextString, storage, TESModPlatform, Utility, WorldSpace, worldPointToScreenPoint } from "skyrimPlatform";
 import { setDefaultAnimsDisabled, applyAnimation } from "../sync/animation";
 import { Appearance, applyAppearance } from "../sync/appearance";
 import { isBadMenuShown, applyEquipment } from "../sync/equipment";
@@ -179,8 +179,34 @@ export class FormView {
 
         const player = Game.getPlayer() as Actor;
 
+        // GREYMARCH: a server-made creature (an NPC with no player look) is created AT ITS SPOT, not at the player. placeAtMe gives the new actor the
+        // place it was created as its home (its editor location), and its own wander/sandbox AI keeps it near home: created at the player and only
+        // then moved away, an animal walked (or was moved by the engine) back onto the player who first saw it (horkers in the College of Winterhold,
+        // 2026-10-19). So a hidden marker is put on the spot first (TESModPlatform.moveRefrToPosition is not latent) and the creature is made there.
+        const isServerCreature = (baseForm: Form) => baseForm.getType() === FormType.NPC && !model.appearance;
+        const spawnAtSpot = (baseForm: Form, pos: [number, number, number], rot: [number, number, number]): ObjectReference | null => {
+          try {
+            const worldOrCell = model.movement ? model.movement.worldOrCell : 0;
+            const markerBase = Game.getFormEx(0x3b); // XMarker
+            const marker = markerBase ? (player.placeAtMe(markerBase, 1, false, true) as ObjectReference) : null;
+            if (!marker) return null;
+            if (!worldOrCell) { marker.delete(); return null; }
+            TESModPlatform.moveRefrToPosition(marker, Cell.from(Game.getFormEx(worldOrCell)), WorldSpace.from(Game.getFormEx(worldOrCell)), pos[0], pos[1], pos[2], rot[0], rot[1], rot[2]);
+            const ref = marker.placeAtMe(baseForm, 1, true, true) as ObjectReference;
+            marker.delete();
+            return ref || null;
+          } catch (e) {
+            printConsole("spawnAtSpot failed, creating at the player instead: " + e);
+            return null;
+          }
+        };
+
         const spawnMethodOriginal = {
-          spawn(baseForm: Form, _spawnPosition: [number, number, number], _spawnRotation: [number, number, number]): ObjectReference {
+          spawn(baseForm: Form, spawnPosition: [number, number, number], spawnRotation: [number, number, number]): ObjectReference {
+            if (isServerCreature(baseForm)) {
+              const atSpot = spawnAtSpot(baseForm, spawnPosition, spawnRotation);
+              if (atSpot) return atSpot;
+            }
             return player.placeAtMe(
               baseForm,
               1,

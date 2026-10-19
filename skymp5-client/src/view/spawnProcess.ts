@@ -32,16 +32,24 @@ export class SpawnProcess {
     if (ac && appearance && !beastLook) {
       applyTints(ac, appearance);
     }
-    refr.enable(false).then(() => this.resurrect(refrId));
+    refr.enable(false).then(() => this.resurrect(refrId, beastLook));
   }
 
-  private resurrect(refrId: number) {
+  private resurrect(refrId: number, beastLook = false) {
     const refr = ObjectReference.from(Game.getFormEx(refrId));
     if (!refr || refr.getFormID() !== refrId) {
       return;
     }
 
     const ac = Actor.from(refr);
+    // GREYMARCH: no Resurrect for a beast look (a werewolf, a werebear, a creature form). The actor was just placed, so it is alive; Resurrect resets its 3D, and the
+    // werewolf's animation graph (WerewolfBeastProject, the first load of it in most games) was still being built on a job thread when the reset freed it: every
+    // watching game crashed in a werewolf turn clip (hkbClipGenerator "WW TurnRight60", SkyrimSE.exe+0A8C590) the moment a player was drawn as the werewolf
+    // (2026-10-18 the black bear, 2026-10-19 #YERB in the College). A person's look is resurrected as before.
+    if (ac && beastLook) {
+      this.callback();
+      return;
+    }
     if (ac) {
       return ac.resurrect().then(() => {
         this.callback();
