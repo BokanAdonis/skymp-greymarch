@@ -231,7 +231,7 @@ test("if the fangs never get into the parts list, the head is rebuilt at most 3 
   } finally { Date.now = realNow; }
 });
 
-test("the list says fangs but the face is drawn with their own teeth: those are hidden (shrunk to nothing), reported, and shown again for /fangs off", () => {
+test("the list says fangs but the face is drawn with their own teeth: reported, and nothing is hidden (hiding them left no teeth at all)", () => {
   const s = make();
   const sp = s.gm.sp;
   const GM = 0x0a000000, FANG_M = GM + 0x81c, TEETH = 0x51631;
@@ -248,10 +248,9 @@ test("the list says fangs but the face is drawn with their own teeth: those are 
   const look = (fangs) => { s.say({ customPacketType: "greymarchVampLooks", vampires: [{ actor: 0xff000001, glow: 0, fangs }], me: 0xff000001 }); s.tick(); t += 2500; };
   try {
     look(true); look(true);
-    assert.strictEqual(scales.MaleMouthHumanoidDefault, 0, "their own teeth hidden");
-    assert.strictEqual(s.log.sent.filter((m) => m.op === "fangs").pop().result, "on; drawn: fangs yes, own teeth yes (hidden now)");
+    assert.strictEqual(scales.MaleMouthHumanoidDefault, 1, "their own teeth are not hidden");
+    assert.strictEqual(s.log.sent.filter((m) => m.op === "fangs").pop().result, "on; drawn: fangs yes, own teeth yes");
     look(false);
-    assert.strictEqual(scales.MaleMouthHumanoidDefault, 1, "shown again for /fangs off");
     assert.deepStrictEqual(parts, [0x111, TEETH]);
   } finally { Date.now = realNow; }
 });

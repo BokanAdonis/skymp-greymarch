@@ -991,17 +991,15 @@ export class GreymarchBridge {
                         if (own && fslot >= 0) { if (rec.teethHidden) { try { sp.NetImmerse.setNodeScale(actor, rec.teethHidden, 1, false); } catch (e0) { /* rebuilt anyway */ } rec.teethHidden = ""; } base.setNthHeadPart(own, fslot); actor.regenerateHead(); rec.fangTries = 0; this.greymarchVampFangReport(v.actor, localId, "off", own.getFormID().toString(16)); }
                     }
                     else if (want && has) {
-                        // WHAT IS DRAWN. The list of parts says fangs, but the face itself was seen with the character's own teeth again (something rebuilds the face from the
-                        // look it had): the face's own pieces are named after their head parts, so the drawn face is looked at. Their own teeth, if drawn, are hidden (shrunk
-                        // to nothing), which leaves the fangs; no fangs drawn at all is rebuilt once more (within the 3 tries). Both are reported.
+                        // WHAT IS DRAWN, reported only: the face's own pieces are named after their head parts. (The list said fangs while the face was drawn with the race's
+                        // teeth and no fangs: the rebuilt head left the fang part out. Hiding those teeth left no teeth at all, so nothing is hidden.)
                         var fangName = fp.getPartName ? String(fp.getPartName() || "") : "";
                         var ownPart = sp.HeadPart.from(sp.Game.getFormEx(rec.mouth || (female ? VAMP_OWN_TEETH.female : VAMP_OWN_TEETH.male)));
                         var ownName = ownPart && ownPart.getPartName ? String(ownPart.getPartName() || "") : "";
                         var fangDrawn = !!fangName && !!sp.NetImmerse.hasNode(actor, fangName, false);
                         var ownDrawn = !!ownName && !!sp.NetImmerse.hasNode(actor, ownName, false) && sp.NetImmerse.getNodeScale(actor, ownName, false) > 0;
-                        if (ownDrawn) { sp.NetImmerse.setNodeScale(actor, ownName, 0, false); rec.teethHidden = ownName; }
-                        if (!fangDrawn && (rec.fangTries || 0) < 3) { rec.fangTries = (rec.fangTries || 0) + 1; actor.regenerateHead(); }
-                        this.greymarchVampFangReport(v.actor, localId, "on; drawn: fangs " + (fangDrawn ? "yes" : "NO") + ", own teeth " + (ownDrawn ? "yes (hidden now)" : "no"), "names " + fangName + " / " + ownName + "; Misc parts: " + list0);
+                        if (rec.teethHidden) { try { sp.NetImmerse.setNodeScale(actor, rec.teethHidden, 1, false); } catch (e1) { /* rebuilt anyway */ } rec.teethHidden = ""; }
+                        this.greymarchVampFangReport(v.actor, localId, "on; drawn: fangs " + (fangDrawn ? "yes" : "NO") + ", own teeth " + (ownDrawn ? "yes" : "no"), "names " + fangName + " / " + ownName + "; Misc parts: " + list0);
                     }
                     if (!want) rec.fangTries = 0;
                     rec.fangs = want;
