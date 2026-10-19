@@ -90,23 +90,25 @@ test("the server says no in the middle of the animation: it is stopped and nothi
   assert.strictEqual(s.gm.greymarchWolfOn, false);
 });
 
-test("R roars only while changed, never mid-transformation or in a menu, and not again before the wait is over", () => {
+test("R plays no howl animation (it crashed the watching games); it is the pack call only while changed, never mid-transformation or in a menu, not again before the wait is over", () => {
   const s = make({ refuseIdle: true });
   s.key(19, true); s.key(19, false); s.tick();
   assert.deepStrictEqual(s.log.events, [], "human: R is the game's own key");
   s.say({ customPacketType: "greymarchWolfForm", on: true });
   s.tick();
+  const calls = () => s.log.sent.filter((m) => m.customPacketType === "greymarchWolf" && m.op === "howl").length;
   s.key(19, true); s.tick(); s.tick();
-  assert.deepStrictEqual(s.log.events, ["HowlStart", "HowlRelease"]);
+  assert.strictEqual(calls(), 1);
   s.key(19, false); s.key(19, true); s.tick();
-  assert.deepStrictEqual(s.log.events, ["HowlStart", "HowlRelease"], "too soon");
+  assert.strictEqual(calls(), 1, "too soon");
   s.key(19, false); s.tick(4000);
   s.setMenu(true); s.key(19, true); s.tick();
-  assert.strictEqual(s.log.events.length, 2, "not in a menu");
+  assert.strictEqual(calls(), 1, "not in a menu");
   s.setMenu(false); s.key(19, false); s.key(19, true); s.tick(); s.tick();
-  assert.deepStrictEqual(s.log.events.slice(2), ["HowlStart", "HowlRelease"]);
+  assert.strictEqual(calls(), 2);
   s.gm.greymarchChatTyping = true; s.key(19, false); s.tick(4000); s.key(19, true); s.tick();
-  assert.strictEqual(s.log.events.length, 4, "typing in the chat is not a roar");
+  assert.strictEqual(calls(), 2, "typing in the chat is not a call");
+  assert.ok(!s.log.events.some((e) => /^howl/i.test(e)), "never a howl event into the graph");
 });
 
 test("the Bear Blood: the server says bear with the race, the body becomes the werebear; R does not roar (the howl crashed a werebear's game); back to the human race at the end", () => {
@@ -181,7 +183,8 @@ test("the Alpha form: the server says alpha, the body becomes the Alpha race fro
   assert.strictEqual(s.race(), ALPHA);
   assert.ok(s.log.lines.some((l) => /changed into the Alpha beast/.test(l)));
   s.key(19, true); s.tick(); s.tick();
-  assert.deepStrictEqual(s.log.events, ["HowlStart", "HowlRelease"], "the Alpha roars");
+  assert.ok(!s.log.events.some((e) => /^howl/i.test(e)), "no howl animation");
+  assert.ok(s.log.sent.some((m) => m.customPacketType === "greymarchWolf" && m.op === "howl"), "the Alpha calls the pack");
   s.say({ customPacketType: "greymarchWolfFeed" }); s.tick();
   assert.deepStrictEqual(s.log.idles.slice(-1), [0xd23b7], "and feeds");
   s.say({ customPacketType: "greymarchWolfForm", on: false }); s.tick();

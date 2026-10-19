@@ -644,7 +644,9 @@ export class GreymarchBridge {
                     this.greymarchWolfReport(false);
                 }
             }
-            // R: the roar (the vanilla howl animation of the beast body, with its own sound). Only while changed, not mid-transformation, not in a menu, once every WOLF_ROAR_MS.
+            // R: the pack call. Only while changed, not mid-transformation, not in a menu, once every WOLF_ROAR_MS. NO HOWL ANIMATION (2026-10-19): HowlStart / HowlRelease
+            // sent straight into the beast's graph (not through the game's howl shout) crashed the player's game as a werebear, and SkyMP passes the event on, so every
+            // watching game played the howl clip into its NPC of that player and crashed ("WW Howl.hkx", SkyrimSE.exe+0A8C590), even one that loaded in later.
             var roarAt = this.greymarchWolfRoarAt;
             if (roarAt) {
                 this.greymarchWolfRoarAt = 0;
@@ -654,15 +656,12 @@ export class GreymarchBridge {
                 if (this.greymarchWolfBearRace) { if (now - (this.greymarchWolfBearRoarSaid || 0) > 5000) { this.greymarchWolfBearRoarSaid = now; this.greymarchLog("wolf: no roar for a werebear"); } }
                 else if (this.greymarchWolfOn && !this.greymarchWolfMorph && this.greymarchWolfIsBeast(raceId) && !inMenu && now - roarAt < 1000 && now >= (this.greymarchWolfRoarNext || 0)) {
                     this.greymarchWolfRoarNext = now + WOLF_ROAR_MS;
-                    sp.Debug.sendAnimationEvent(player, "HowlStart");
-                    this.greymarchWolfRoarRelease = now + 200; // released at once: a short howl, as a quick tap of the shout key does it
-                    this.greymarchLog("wolf: roar");
+                    this.greymarchLog("wolf: pack call (R)");
                     // the howl calls the pack: the server tells every online packmate where it came from (werewolf.js howl; it keeps its own wait between calls)
                     var howlMsg = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchWolf", op: "howl" }) };
                     this.controller.emitter.emit("sendMessage", { message: howlMsg, reliability: "reliable" });
                 }
             }
-            if (this.greymarchWolfRoarRelease && now >= this.greymarchWolfRoarRelease) { this.greymarchWolfRoarRelease = 0; if (this.greymarchWolfOn) sp.Debug.sendAnimationEvent(player, "HowlRelease"); }
             // the server says the wolf fed (a kill or a corpse): the vanilla feeding animation (PlayerWerewolfChangeScript.Feed plays the idle SpecialFeeding)
             var feedAt = this.greymarchWolfFeedAt;
             if (feedAt && this.greymarchWolfOn && !this.greymarchWolfMorph && this.greymarchWolfIsBeast(raceId)) {

@@ -539,7 +539,8 @@ export class FormView {
 
     if (refr.is3DLoaded()) {
       if (model.animation) {
-        if (gmBeastLook && (this.animState.useAnimOverrides || Date.now() - this.spawnMoment < 3000)) this.animState.lastNumChanges = model.animation.numChanges;
+        // and never a howl on a beast: played into a remote beast's graph without the howl shout behind it, "WW Howl.hkx" crashed the watching game (2026-10-19 #SZGE)
+        if (gmBeastLook && (this.animState.useAnimOverrides || Date.now() - this.spawnMoment < 3000 || String(model.animation.animEventName || "").toLowerCase().startsWith("howl"))) this.animState.lastNumChanges = model.animation.numChanges;
         else applyAnimation(refr, model.animation, this.animState);
       }
       // Use them only once, for spawning actors with correct animations
