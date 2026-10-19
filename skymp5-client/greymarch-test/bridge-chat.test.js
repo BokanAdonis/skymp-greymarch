@@ -12,7 +12,7 @@ const js = ts.transpileModule(src, { compilerOptions: { module: ts.ModuleKind.Co
 function make() {
   const log = { js: [], visible: [], focused: [], sent: [], lines: [] };
   const misc = { remoteIdToLocalId: (id) => id, localIdToRemoteId: (id) => id, getViewFromStorage: () => null };
-  const mods = { "../messages": { MsgType: { CustomPacket: 77 } }, "../view/worldViewMisc": misc, "../sync/appearance": {}, "../services/services/remoteServer": { RemoteServer: {} }, "../services/services/singlePlayerService": { SinglePlayerService: {} } };
+  const mods = { "../messages": { MsgType: { CustomPacket: 77 } }, "./launchGuard": { launchGuard: { refused: "", joinedWith: null }, TITLE: "", HINT: "" }, "../view/worldViewMisc": misc, "../sync/appearance": {}, "../services/services/remoteServer": { RemoteServer: {} }, "../services/services/singlePlayerService": { SinglePlayerService: {} } };
   const mod = { exports: {} };
   new Function("require", "exports", "module", js)((p) => mods[p], mod.exports, mod);
   const menus = new Set();

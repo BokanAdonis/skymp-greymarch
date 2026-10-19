@@ -74,7 +74,7 @@ test("networkingService keeps our own body while held and passes everyone else's
 
 test("the bridge: greymarchHold arms the hold and answers the server; select and entered are reported; the body goes out on tick", () => {
   const hold = new BodyHold();
-  const mods = { "../messages": { MsgType: { CustomPacket: 77 } }, "../view/worldViewMisc": { remoteIdToLocalId: () => 0, localIdToRemoteId: (id) => id }, "../sync/appearance": { applyAppearanceToPlayer() {} }, "../services/services/remoteServer": { RemoteServer: {} }, "../services/services/singlePlayerService": { SinglePlayerService: {} }, "../services/services/loadGameService": { LoadGameService: function () {} }, "./bodyHold": { bodyHold: hold } };
+  const mods = { "../messages": { MsgType: { CustomPacket: 77 } }, "./launchGuard": { launchGuard: { refused: "", joinedWith: null }, TITLE: "", HINT: "" }, "../view/worldViewMisc": { remoteIdToLocalId: () => 0, localIdToRemoteId: (id) => id }, "../sync/appearance": { applyAppearanceToPlayer() {} }, "../services/services/remoteServer": { RemoteServer: {} }, "../services/services/singlePlayerService": { SinglePlayerService: {} }, "../services/services/loadGameService": { LoadGameService: function () {} }, "./bodyHold": { bodyHold: hold } };
   const { GreymarchBridge } = load("greymarch/bridge.ts", mods);
   const sent = [], emitted = [];
   const sp = { printConsole() {}, writeLogs() {}, storage: {}, on() {}, browser: { executeJavaScript() {}, setVisible() {}, setFocused() {}, isFocused: () => true } };

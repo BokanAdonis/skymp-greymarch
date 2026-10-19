@@ -3,6 +3,7 @@
 // Ported from the old text patches (tools/patch-client.js in the launcher repo). Loosely typed on purpose for the first port.
 // Hooks into SkyMP are small and marked "GREYMARCH" in authService.ts, formView.ts, activationService.ts, remoteServer.ts, loadGameService.ts, singlePlayerService.ts.
 import { MsgType } from "../messages";
+import { launchGuard, TITLE as LAUNCH_TITLE, HINT as LAUNCH_HINT } from "./launchGuard";
 import * as misc from "../view/worldViewMisc";
 import * as appearanceMod from "../sync/appearance";
 import * as moveGetMod from "../sync/movementGet";
@@ -93,6 +94,15 @@ export class GreymarchBridge {
     greymarchConnectCover(now: number): any {
         var c = this.greymarchConnect;
         if (c && c.done) return;
+        if (launchGuard.refused) {
+            // not started with the launcher's Play (launchGuard.ts): the game will not join, so say what to do instead of "connecting"
+            if (c && now < c.next) return;
+            this.greymarchConnect = { at: (c && c.at) || now, next: now + 1000, done: false, failed: true };
+            try { this.sp.browser.setVisible(true); this.sp.browser.setFocused(true); } catch (bErr) { /* the browser is not up yet: next second */ }
+            this.greymarchScreenUp = true;
+            this.greymarchToPage("connecting", { on: true, failed: true, title: LAUNCH_TITLE, hint: LAUNCH_HINT });
+            return;
+        }
         if (!c) {
             var cfg: any = {};
             try { cfg = (this.sp.settings && this.sp.settings["skymp5-client"]) || {}; } catch (cfgErr) { cfg = {}; }
@@ -253,6 +263,8 @@ export class GreymarchBridge {
             for (var i = 0; i < G.getModCount(); i++) full.push(String(G.getModName(i)));
             var nl = 0; try { nl = G.getLightModCount(); } catch (e0) { nl = 0; }
             for (var j = 0; j < nl; j++) light.push(String(G.getLightModName(j)));
+            // the server compares it with its own and tells the player (and disconnects them) when it differs: gamemode/src/loadorder.js
+            this.controller.emitter.emit("sendMessage", { message: { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchLoadOrder", full: full, light: light }) }, reliability: "reliable" });
             var text = "full " + full.length + ": " + full.join(" | ") + " || light " + light.length + ": " + light.join(" | ");
             var parts = Math.ceil(text.length / 700);
             for (var k = 0; k < parts; k++) this.greymarchLog("loadorder " + (k + 1) + "/" + parts + ": " + text.substr(k * 700, 700));
