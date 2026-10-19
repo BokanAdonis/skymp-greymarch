@@ -271,6 +271,16 @@ test("a fang change rebuilds the head now and again one second later (the first 
   assert.strictEqual(rebuilt, 1, "once");
 });
 
+test("the player's own head is rebuilt alone; another player's character gets the full model refresh (rebuilding only their head drew nothing)", () => {
+  const s = make();
+  const calls = [];
+  const me = { regenerateHead: () => calls.push("me: head"), queueNiNodeUpdate: () => calls.push("me: model") };
+  const them = { regenerateHead: () => calls.push("them: head"), queueNiNodeUpdate: () => calls.push("them: model") };
+  s.gm.greymarchVampRebuild(me, 0x14);
+  s.gm.greymarchVampRebuild(them, 0xff000021);
+  assert.deepStrictEqual(calls, ["me: head", "them: model"]);
+});
+
 test("a Potion of Blood drunk from the inventory (the equip event) is reported too", () => {
   const s = make();
   s.fire("equip", { baseObj: { getFormID: () => DG + 0x18ef3 }, actor: me });
