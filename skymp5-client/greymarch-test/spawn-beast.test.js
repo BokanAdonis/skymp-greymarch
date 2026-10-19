@@ -49,6 +49,13 @@ test("a beast look is not resurrected (its 3D reset freed the werewolf's half-bu
   assert.strictEqual(spawn.resurrected.length, 1, "SkyMP's own NPCs as before");
 });
 
+test("formView.ts: a beast look gets no full model refresh when it comes on screen, and its gear only 3 seconds after the spawn (both rebuilt the half-built werewolf graph)", () => {
+  const fv = fs.readFileSync(path.join(__dirname, "..", "src", "view", "formView.ts"), "utf8");
+  assert.ok(fv.includes("const gmBeastLook = !!model.appearance && !(Array.isArray(model.appearance.headpartIds) && model.appearance.headpartIds.length > 0);"));
+  assert.ok(fv.includes("if (isOnScreen && !gmBeastLook) {"), "no redraw of a beast's tints");
+  assert.ok(fv.includes("(!gmBeastLook || Date.now() - this.spawnMoment > 3000)"), "a beast's gear waits for its graph");
+});
+
 test("no look (SkyMP's own NPCs) is spawned as before", async () => {
   assert.deepStrictEqual(await spawn(null), []);
 });

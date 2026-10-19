@@ -522,6 +522,12 @@ export class FormView {
     }
 
 
+    // GREYMARCH: a beast look (a werewolf, a werebear, a creature form: no head parts) gets no full model refresh (queueNiNodeUpdate) when it comes on screen and its
+    // gear is applied only 3 seconds after it was spawned. Right after a player is drawn as the beast the NPC is respawned, its head is off screen for a frame, and the
+    // "redraw tints" below rebuilt its whole model the next frame, while its werewolf animation graph (WerewolfBeastProject) was still being built: every watching game
+    // crashed (werewolf turn clips at SkyrimSE.exe+0A8C590, the graph's clip handling at +0C28F84; 2026-10-18 and 2026-10-19). A beast has no face tints to redraw.
+    const gmBeastLook = !!model.appearance && !(Array.isArray(model.appearance.headpartIds) && model.appearance.headpartIds.length > 0);
+
     if (model.appearance) {
       const actor = Actor.from(refr);
       if (actor && !PlayerCharacterDataHolder.isInJumpState()) {
@@ -551,7 +557,7 @@ export class FormView {
           screenPoint[2] < 1;
         if (isOnScreen != this.isOnScreen) {
           this.isOnScreen = isOnScreen;
-          if (isOnScreen) {
+          if (isOnScreen && !gmBeastLook) {
             actor.queueNiNodeUpdate();
             (Game.getPlayer() as Actor).queueNiNodeUpdate();
           }
@@ -571,7 +577,8 @@ export class FormView {
           !isBadMenuShown() &&
           Date.now() - this.eqState.lastEqMoment > 500 &&
           Date.now() - this.spawnMoment > -1 &&
-          this.spawnMoment > 0
+          this.spawnMoment > 0 &&
+          (!gmBeastLook || Date.now() - this.spawnMoment > 3000)
         ) {
           //if (this.spawnMoment > 0 && Date.now() - this.spawnMoment > 5000) {
           if (applyEquipment(ac, model.equipment)) {
