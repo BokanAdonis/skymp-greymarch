@@ -11,9 +11,9 @@ const src = fs.readFileSync(path.join(__dirname, "..", "src", "view", "spawnProc
 const js = ts.transpileModule(src, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2019 } }).outputText;
 
 async function spawn(appearance) {
-  const tinted = [];
+  const tinted = [], resurrected = [];
   const refr = { getFormID: () => 0xff000ac8, setPosition: () => Promise.resolve(), enable: () => Promise.resolve(), getBaseObject: () => ({}) , setMotionType: () => Promise.resolve() };
-  const actor = { resurrect: () => Promise.resolve() };
+  const actor = { resurrect: () => { resurrected.push(appearance); return Promise.resolve(); } };
   const mods = {
     skyrimPlatform: { ObjectReference: { from: () => refr }, Game: { getFormEx: () => refr }, Actor: { from: () => actor }, MotionType: { Keyframed: 4 } },
     "../sync/appearance": { applyTints: (ac, a) => tinted.push(a) },
@@ -25,6 +25,7 @@ async function spawn(appearance) {
   let done; const finished = new Promise((r) => { done = r; });
   new mod.exports.SpawnProcess(appearance, [0, 0, 0], 0xff000ac8, () => done());
   await finished;
+  spawn.resurrected = resurrected;
   return tinted;
 }
 
@@ -36,6 +37,16 @@ test("a person's look gets its tints as before", async () => {
 test("a werewolf's or creature's look (no head parts) is not given applyTints, so its base never claims the player's form ID", async () => {
   assert.deepStrictEqual(await spawn({ raceId: 0xcdd84, headpartIds: [], tints: [] }), []);
   assert.deepStrictEqual(await spawn({ raceId: 0x131e8, headpartIds: [], tints: [] }), [], "a creature form too");
+});
+
+test("a beast look is not resurrected (its 3D reset freed the werewolf's half-built animation graph and crashed the watching games); a person's look still is", async () => {
+  await spawn({ raceId: 0xcdd84, headpartIds: [], tints: [] });
+  assert.deepStrictEqual(spawn.resurrected, [], "the werewolf is enabled and done");
+  const human = { raceId: 0x13746, headpartIds: [1], tints: [] };
+  await spawn(human);
+  assert.deepStrictEqual(spawn.resurrected, [human]);
+  await spawn(null);
+  assert.strictEqual(spawn.resurrected.length, 1, "SkyMP's own NPCs as before");
 });
 
 test("no look (SkyMP's own NPCs) is spawned as before", async () => {
