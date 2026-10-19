@@ -647,7 +647,10 @@ export class GreymarchBridge {
             if (roarAt) {
                 this.greymarchWolfRoarAt = 0;
                 var inMenu = false; try { inMenu = !!sp.Utility.isInMenuMode(); } catch (mErr) { inMenu = false; }
-                if (this.greymarchWolfOn && !this.greymarchWolfMorph && this.greymarchWolfIsBeast(raceId) && !inMenu && now - roarAt < 1000 && now >= (this.greymarchWolfRoarNext || 0)) {
+                // NOT FOR A WEREBEAR: its body shares the werewolf's animation graph but not its howl, and the howl events sent into it crashed the player's game
+                // (2026-10-19, #GNQS pressed R as a werebear). A werebear has no pack to call either.
+                if (this.greymarchWolfBearRace) { if (now - (this.greymarchWolfBearRoarSaid || 0) > 5000) { this.greymarchWolfBearRoarSaid = now; this.greymarchLog("wolf: no roar for a werebear"); } }
+                else if (this.greymarchWolfOn && !this.greymarchWolfMorph && this.greymarchWolfIsBeast(raceId) && !inMenu && now - roarAt < 1000 && now >= (this.greymarchWolfRoarNext || 0)) {
                     this.greymarchWolfRoarNext = now + WOLF_ROAR_MS;
                     sp.Debug.sendAnimationEvent(player, "HowlStart");
                     this.greymarchWolfRoarRelease = now + 200; // released at once: a short howl, as a quick tap of the shout key does it

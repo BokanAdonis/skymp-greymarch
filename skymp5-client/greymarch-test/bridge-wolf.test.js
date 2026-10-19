@@ -109,7 +109,7 @@ test("R roars only while changed, never mid-transformation or in a menu, and not
   assert.strictEqual(s.log.events.length, 4, "typing in the chat is not a roar");
 });
 
-test("the Bear Blood: the server says bear with the race, the body becomes the werebear; R roars on it; back to the human race at the end", () => {
+test("the Bear Blood: the server says bear with the race, the body becomes the werebear; R does not roar (the howl crashed a werebear's game); back to the human race at the end", () => {
   const BEARR = 0x0401e17b;
   const s = make({ refuseIdle: true });
   s.say({ customPacketType: "greymarchWolfForm", on: true, alpha: false, pup: false, bear: true, race: BEARR });
@@ -117,7 +117,9 @@ test("the Bear Blood: the server says bear with the race, the body becomes the w
   assert.strictEqual(s.race(), BEARR);
   assert.ok(s.log.lines.some((l) => /changed into the werebear/.test(l)));
   s.key(19, true); s.tick(); s.tick();
-  assert.deepStrictEqual(s.log.events.slice(-2), ["HowlStart", "HowlRelease"], "the werebear roars");
+  assert.ok(!s.log.events.includes("HowlStart") && !s.log.events.includes("HowlRelease"), "no howl events into a werebear's graph");
+  assert.ok(!s.log.sent.some((m) => m.customPacketType === "greymarchWolf" && m.op === "howl"), "no pack call either");
+  assert.ok(s.log.lines.some((l) => /no roar for a werebear/.test(l)));
   s.say({ customPacketType: "greymarchWolfForm", on: false }); s.tick();
   assert.strictEqual(s.race(), NORD, "and the person's race comes back, not the bear's");
 });
