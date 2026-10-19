@@ -43,8 +43,12 @@ export class ObjectReferenceEx {
     // See also modelApplyUtils.ts
     const caveGSecretDoor01 = 0x6f703;
 
-    // You can also block for t === FormType.Flora || t === FormType.Tree, but I don't think it's necessary.
+    // GREYMARCH: plants and crops (Flora, Tree) are blocked too. Unblocked, the game harvested them on the spot, before the server could say no
+    // (gathering is the Harvester's work, professions.js): the item showed up and was taken away again at the next inventory sync. Blocked, the press
+    // only asks the server; an allowed harvest comes back as SendOpenContainer and is played with refr.activate(player, true) (remoteServer.ts).
     if (t === FormType.Furniture
+      || t === FormType.Flora
+      || t === FormType.Tree
       || t === FormType.Activator
       || t === FormType.Container
       || isItem
