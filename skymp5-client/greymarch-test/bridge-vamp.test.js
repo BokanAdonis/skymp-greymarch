@@ -204,10 +204,10 @@ test("only the teeth are swapped: another Misc part (a KS Hairdo's hairstyle bri
   const look = (fangs) => { s.say({ customPacketType: "greymarchVampLooks", vampires: [{ actor: 0xff000001, glow: 0, fangs }], me: 0xff000001 }); s.tick(); t += 2500; };
   try {
     look(true); look(true); look(true);
-    assert.strictEqual(rebuilt, 1, "the race's teeth swapped once and the head rebuilt once, not every check");
+    assert.strictEqual(rebuilt, 2, "the race's teeth swapped once and the head rebuilt twice (now and a second later), not every check");
     assert.deepStrictEqual(parts, [0x111, KS, FANG_M]);
     look(false);
-    assert.strictEqual(rebuilt, 2, "rebuilt again for /fangs off");
+    assert.strictEqual(rebuilt, 3, "rebuilt again for /fangs off (its second rebuild comes a second later)");
     assert.deepStrictEqual(parts, [0x111, KS, TEETH]);
   } finally { Date.now = realNow; }
 });
@@ -226,7 +226,7 @@ test("if the fangs never get into the parts list, the head is rebuilt at most 3 
   let t = 5_000_000; const realNow = Date.now; Date.now = () => t;
   try {
     for (let i = 0; i < 8; i++) { s.say({ customPacketType: "greymarchVampLooks", vampires: [{ actor: 0xff000001, glow: 0, fangs: true }], me: 0xff000001 }); s.tick(); t += 2500; }
-    assert.strictEqual(rebuilt, 3);
+    assert.strictEqual(rebuilt, 6, "3 tries, each rebuilt now and a second later");
     assert.match(s.log.sent.filter((m) => m.op === "fangs").pop().result, /^gave up/);
   } finally { Date.now = realNow; }
 });
@@ -253,6 +253,22 @@ test("the list says fangs but the face is drawn with their own teeth: reported, 
     look(false);
     assert.deepStrictEqual(parts, [0x111, TEETH]);
   } finally { Date.now = realNow; }
+});
+
+test("a fang change rebuilds the head now and again one second later (the first rebuild drew the look from before the change)", () => {
+  const s = make();
+  let rebuilt = 0;
+  Object.assign(s.gm.sp.Game.getPlayer(), { regenerateHead: () => { rebuilt++; } });
+  let t = 1_000_000;
+  s.gm.greymarchVampRebuildLater(0x14);
+  const realNow = Date.now; Date.now = () => t;
+  try { s.gm.greymarchVampRebuildLater(0x14); } finally { Date.now = realNow; }
+  s.gm.greymarchVampRebuildTick(t + 500);
+  assert.strictEqual(rebuilt, 0, "not yet");
+  s.gm.greymarchVampRebuildTick(t + 1000);
+  assert.strictEqual(rebuilt, 1);
+  s.gm.greymarchVampRebuildTick(t + 5000);
+  assert.strictEqual(rebuilt, 1, "once");
 });
 
 test("a Potion of Blood drunk from the inventory (the equip event) is reported too", () => {

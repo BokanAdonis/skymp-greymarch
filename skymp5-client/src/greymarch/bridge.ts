@@ -908,6 +908,7 @@ export class GreymarchBridge {
                 this.greymarchLog("vampire: feeding (" + fd.role + "), the animation " + (played ? "plays" : "was refused by the game"));
             }
         }
+        this.greymarchVampRebuildTick(now); // the second head rebuild after a fang change
         this.greymarchVampEyes(now); // every vampire's blue eyes, on this screen (the fangs are not made yet)
     }
     // Every vampire in the world (the player included) gets their bloodline's eye part for their glow and, while their fangs show, the fanged teeth, by the server's
@@ -981,14 +982,14 @@ export class GreymarchBridge {
                         if (rec.fangTries <= 3) {
                             var slot = this.greymarchVampPartSlot(base, teeth);
                             if (slot >= 0) base.setNthHeadPart(fp, slot); else actor.changeHeadPart(fp);
-                            actor.regenerateHead();
+                            actor.regenerateHead(); this.greymarchVampRebuildLater(localId);
                             this.greymarchVampFangReport(v.actor, localId, "swapped in (try " + rec.fangTries + ")", (teeth ? teeth.getFormID().toString(16) + " at " + slot : "no teeth part") + " -> " + fpId.toString(16) + "; Misc parts before: " + list0);
                         } else this.greymarchVampFangReport(v.actor, localId, "gave up: the fangs are not in the parts list after 3 tries", "Misc parts: " + list0);
                     }
                     else if (!want && has) {
                         var own = sp.HeadPart.from(sp.Game.getFormEx(rec.mouth || (female ? VAMP_OWN_TEETH.female : VAMP_OWN_TEETH.male))); // their own teeth, or the race's when they had none of their own
                         var fslot = this.greymarchVampPartSlot(base, fp);
-                        if (own && fslot >= 0) { if (rec.teethHidden) { try { sp.NetImmerse.setNodeScale(actor, rec.teethHidden, 1, false); } catch (e0) { /* rebuilt anyway */ } rec.teethHidden = ""; } base.setNthHeadPart(own, fslot); actor.regenerateHead(); rec.fangTries = 0; this.greymarchVampFangReport(v.actor, localId, "off", own.getFormID().toString(16)); }
+                        if (own && fslot >= 0) { if (rec.teethHidden) { try { sp.NetImmerse.setNodeScale(actor, rec.teethHidden, 1, false); } catch (e0) { /* rebuilt anyway */ } rec.teethHidden = ""; } base.setNthHeadPart(own, fslot); actor.regenerateHead(); this.greymarchVampRebuildLater(localId); rec.fangTries = 0; this.greymarchVampFangReport(v.actor, localId, "off", own.getFormID().toString(16)); }
                     }
                     else if (want && has) {
                         // WHAT IS DRAWN, reported only: the face's own pieces are named after their head parts. (The list said fangs while the face was drawn with the race's
@@ -1018,9 +1019,21 @@ export class GreymarchBridge {
                     var fang2 = sp.HeadPart.from(sp.Game.getFormFromFile(female2 ? VAMP_FANGS.female : VAMP_FANGS.male, "GreymarchCore.esp"));
                     var teeth2 = sp.HeadPart.from(sp.Game.getFormEx(back.mouth || (female2 ? VAMP_OWN_TEETH.female : VAMP_OWN_TEETH.male)));
                     var slot2 = base2 && fang2 ? this.greymarchVampPartSlot(base2, fang2) : -1;
-                    if (slot2 >= 0 && teeth2) { base2.setNthHeadPart(teeth2, slot2); a2.regenerateHead(); }
+                    if (slot2 >= 0 && teeth2) { base2.setNthHeadPart(teeth2, slot2); a2.regenerateHead(); this.greymarchVampRebuildLater(Number(k)); }
                 }
             } catch (bErr) { /* gone */ }
+        }
+    }
+    // THE SECOND REBUILD. A head rebuilt right after its list of parts changed was drawn with the look from before the change, one step behind (in game: the fangs
+    // showed after /fangs hid them, the teeth after they went on; the reports said the list was right). So every fang change rebuilds the head again a second later.
+    greymarchVampRebuildLater(localId: number): any { (this.greymarchVampRebuilds || (this.greymarchVampRebuilds = {}))[localId] = Date.now() + 1000; }
+    greymarchVampRebuildTick(now: number): any {
+        var due = this.greymarchVampRebuilds;
+        if (!due) return;
+        for (var k in due) {
+            if (now < due[k]) continue;
+            delete due[k];
+            try { var id = Number(k), a = id === 0x14 ? this.sp.Game.getPlayer() : this.sp.Actor.from(this.sp.Game.getFormEx(id)); if (a) a.regenerateHead(); } catch (e) { /* gone: their next look rebuilds it */ }
         }
     }
     greymarchVampPartSlot(base: any, part: any): number { // where that head part is in the character's list of parts (-1: not there)
