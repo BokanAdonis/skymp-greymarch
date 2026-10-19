@@ -295,6 +295,7 @@ export class GreymarchBridge {
         this.greymarchProfPending();
         this.greymarchEmoteTick(Date.now()); // the emote wheel (G): opening it, playing and stopping an emote (Skyrim functions: the update phase)
         this.greymarchChatWatch(Date.now());
+        this.greymarchFovTick(); // the field of view from the chatbox's Settings
         this.greymarchWorldViewGuard(Date.now()); // other players are drawn only while SkyMP's world view is on: see greymarchWorldViewGuard
         if (this.greymarchChatOn && Date.now() >= (this.greymarchChatNext || 0)) { this.greymarchChatNext = Date.now() + 2000; this.greymarchChatToPage("show", true); }
         if (this.greymarchMenuEscAt && Date.now() - this.greymarchMenuEscAt > 700) { this.greymarchMenuEscAt = 0; this.greymarchMenuHide(); } // Esc, and the menu page did not close itself
@@ -444,6 +445,7 @@ export class GreymarchBridge {
         if (data && data.type === "chat") { this.greymarchChatSend(data); return; } // the chatbox sends a line, or asks what this player may use (the SERVER decides)
         if (data && data.type === "chat-focus") { this.greymarchChatFocus(data.on); return; }
         if (data && data.type === "chat-sync") { this.greymarchChatSync(!!data.typing); return; }
+        if (data && data.type === "chat-settings") { this.greymarchFovWanted(data); return; } // the chatbox's Settings: the field of view (applied from the update phase)
         if (data && data.type === "menu") { this.greymarchMenuSend(data); return; } // the X menu asks the server for something (the SERVER decides)
         if (data && data.type === "menu-close") { this.greymarchMenuHide(); return; }
         if (data && data.type === "prof") { this.greymarchProfSend(data); return; } // the professions window asks the server (the SERVER decides)
@@ -2096,6 +2098,37 @@ export class GreymarchBridge {
     // so movement can never stay locked behind a chat that is not open. (An input opened less than a second ago is left alone: the answer may have been sent before it.)
     // The windows that hold the keyboard (and the mouse cursor) while they are open. The chat's keyboard releases leave them alone: releasing it every 2 s took the K window's cursor away (2026-10-18).
     greymarchPanelHasKeys(): any { return !!(this.greymarchAdminOn || this.greymarchMenuOn || this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchEmoteOn); }
+    // ---- THE FIELD OF VIEW (the chatbox's Settings). Skyrim Platform has no FOV function, so the game's own settings are changed (fDefaultWorldFOV and
+    // fDefault1stPersonFOV, the same ones Skyrim.ini uses), and the camera, which reads them when the view changes, switches to the other view and back once.
+    // Only for this player's own screen; nothing is sent to the server. The page remembers the value and sends it again each time the game starts.
+    greymarchFovWanted(data: any): any {
+        var fov = Number(data && data.fov);
+        if (!isFinite(fov)) return;
+        this.greymarchFovWant = { fov: Math.max(60, Math.min(120, Math.round(fov))), refresh: !!(data && data.refresh) };
+    }
+    greymarchFovTick(): any {
+        if (this.greymarchFovBack) { // the second half of the view switch, a few frames later
+            if (Date.now() < this.greymarchFovBack.at) return;
+            var back = this.greymarchFovBack.to; this.greymarchFovBack = null;
+            try { if (back === "first") this.sp.Game.forceFirstPerson(); else this.sp.Game.forceThirdPerson(); } catch (e) { /* the camera stays where it is */ }
+            return;
+        }
+        var w = this.greymarchFovWant;
+        if (!w) return;
+        this.greymarchFovWant = null;
+        try {
+            this.sp.Utility.setINIFloat("fDefaultWorldFOV:Display", w.fov);
+            this.sp.Utility.setINIFloat("fDefault1stPersonFOV:Display", w.fov);
+        } catch (e1) { this.greymarchLog("fov: the game would not take the setting (" + e1 + ")"); return; }
+        if (!w.refresh || this.greymarchScreenUp || this.greymarchInMenu()) return;
+        // first person (0) goes to third and back; third person (8, 9) to first and back; any other camera (furniture, horse, a menu) is left alone
+        var state = -1;
+        try { state = this.sp.Game.getCameraState(); } catch (e2) { state = -1; }
+        try {
+            if (state === 0) { this.sp.Game.forceThirdPerson(); this.greymarchFovBack = { to: "first", at: Date.now() + 120 }; }
+            else if (state === 8 || state === 9) { this.sp.Game.forceFirstPerson(); this.greymarchFovBack = { to: "third", at: Date.now() + 120 }; }
+        } catch (e3) { /* the new value applies at the next change of view */ }
+    }
     greymarchChatSync(pageTyping: boolean): any {
         if (this.greymarchChatTyping && !pageTyping) {
             if (Date.now() - (this.greymarchChatOpenedAt || 0) < 1000) return;
