@@ -513,9 +513,16 @@ export class FormView {
       }
     }
 
+    // GREYMARCH: a beast look (no head parts) is given no animation for its first 3 seconds: the event SkyMP replays when an NPC is spawned (the player's last one, from
+    // the human body's transformation) and any that arrive meanwhile are taken as seen, not played. Played into the werewolf animation graph while it was still being
+    // built, they left it a clip generator with a broken vtable and the watching game crashed in its clip handling (SkyrimSE.exe+0C28F84, the same address every time,
+    // 2026-10-19 #GNQS). Its attacks, roars and the rest after that play as before.
+    const gmBeastLook = !!model.appearance && !(Array.isArray(model.appearance.headpartIds) && model.appearance.headpartIds.length > 0);
+
     if (refr.is3DLoaded()) {
       if (model.animation) {
-        applyAnimation(refr, model.animation, this.animState);
+        if (gmBeastLook && (this.animState.useAnimOverrides || Date.now() - this.spawnMoment < 3000)) this.animState.lastNumChanges = model.animation.numChanges;
+        else applyAnimation(refr, model.animation, this.animState);
       }
       // Use them only once, for spawning actors with correct animations
       this.animState.useAnimOverrides = false;
@@ -526,7 +533,7 @@ export class FormView {
     // gear is applied only 3 seconds after it was spawned. Right after a player is drawn as the beast the NPC is respawned, its head is off screen for a frame, and the
     // "redraw tints" below rebuilt its whole model the next frame, while its werewolf animation graph (WerewolfBeastProject) was still being built: every watching game
     // crashed (werewolf turn clips at SkyrimSE.exe+0A8C590, the graph's clip handling at +0C28F84; 2026-10-18 and 2026-10-19). A beast has no face tints to redraw.
-    const gmBeastLook = !!model.appearance && !(Array.isArray(model.appearance.headpartIds) && model.appearance.headpartIds.length > 0);
+    // (gmBeastLook is set above, before the animations.)
 
     if (model.appearance) {
       const actor = Actor.from(refr);

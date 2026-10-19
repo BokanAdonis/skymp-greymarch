@@ -54,6 +54,8 @@ test("formView.ts: a beast look gets no full model refresh when it comes on scre
   assert.ok(fv.includes("const gmBeastLook = !!model.appearance && !(Array.isArray(model.appearance.headpartIds) && model.appearance.headpartIds.length > 0);"));
   assert.ok(fv.includes("if (isOnScreen && !gmBeastLook) {"), "no redraw of a beast's tints");
   assert.ok(fv.includes("(!gmBeastLook || Date.now() - this.spawnMoment > 3000)"), "a beast's gear waits for its graph");
+  assert.ok(fv.includes("if (gmBeastLook && (this.animState.useAnimOverrides || Date.now() - this.spawnMoment < 3000)) this.animState.lastNumChanges = model.animation.numChanges;"), "no replayed or early animation for a fresh beast");
+  assert.ok(fv.indexOf("const gmBeastLook") < fv.indexOf("applyAnimation(refr, model.animation"), "known before the animations");
 });
 
 test("no look (SkyMP's own NPCs) is spawned as before", async () => {
