@@ -315,9 +315,11 @@ export class FormView {
         }
 
         if (refr) {
+          const gmBeastSpawn = !!model.appearance && !(Array.isArray(model.appearance.headpartIds) && model.appearance.headpartIds.length > 0); // GREYMARCH: see destroy()
           spawnMethod.triggerSpawnProcess(refr, spawnPos, model.appearance || null, () => {
             this.ready = true;
             this.spawnMoment = Date.now();
+            this.gmSpawnedBeast = gmBeastSpawn;
           });
         } else {
           printConsole("Unable to triggerSpawnProcess for null refr");
@@ -355,7 +357,23 @@ export class FormView {
     this.isOnScreen = false;
     this.spawnMoment = 0;
     const refrId = this.refrId;
+    // GREYMARCH: an NPC spawned with a beast look (a werewolf, a werebear, a creature form) is disabled first and deleted once that is done, and is not given
+    // setWeaponDrawnMode afterwards. Deleted while still enabled, with its ragdoll and keyframed bodies in the physics world, the watching games crashed in that physics
+    // (hkpKeyframedRigidMotion, SkyrimSE.exe+0A883CE) the moment the player changed back (2026-10-19 #GNQS). A person's NPC is removed as before.
+    const gmBeast = this.gmSpawnedBeast;
+    this.gmSpawnedBeast = false;
     once("update", () => {
+      if (refrId >= 0xff000000 && gmBeast) {
+        const refr = ObjectReference.from(Game.getFormEx(refrId));
+        if (refr) {
+          refr.disable(false).then(() => {
+            const gone = ObjectReference.from(Game.getFormEx(refrId));
+            if (gone) gone.delete();
+          });
+        }
+        SpApiInteractor.getControllerInstance().lookupListener(WorldCleanerService).modWcProtection(refrId, -1);
+        return;
+      }
       if (refrId >= 0xff000000) {
         const refr = ObjectReference.from(Game.getFormEx(refrId));
         if (refr) {
@@ -776,6 +794,7 @@ export class FormView {
   private lastPcWorldOrCell = 0;
   private lastWorldOrCell = 0;
   private spawnMoment = 0;
+  private gmSpawnedBeast = false; // GREYMARCH: this NPC was spawned with a beast look (destroy() disables it before the delete)
   private wasHostedByOther: boolean | undefined = undefined;
   private state = {};
   private localImmortal = false;
