@@ -9,7 +9,7 @@ const ts = require("typescript");
 const src = fs.readFileSync(path.join(__dirname, "..", "src", "greymarch", "bridge.ts"), "utf8");
 const js = ts.transpileModule(src, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2019 } }).outputText;
 
-const BEAST = 0xcdd84, NORD = 0x13746, ALPHA = 0xfe000804, PUP = 0xfe00080a, BLACK = 0xfe00085c;
+const BEAST = 0xcdd84, NORD = 0x13746, ALPHA = 0xfe000804, PUP = 0xfe00080a, BLACK = 0xfe00085c, POLAR = 0xfe000861;
 function make(opts = {}) {
   const log = { lines: [], idles: [], events: [], races: [], waits: [], sent: [], applied: [], equipped: [], sounds: [], redraws: 0 };
   const mods = { "../messages": { MsgType: { CustomPacket: 77 } }, "../view/worldViewMisc": { remoteIdToLocalId: (id) => (opts.others || {})[id] || 0 }, "../sync/appearance": { applyAppearanceToPlayer: (a) => log.applied.push(a) }, "../services/services/remoteServer": { RemoteServer: {} }, "../services/services/singlePlayerService": { SinglePlayerService: {} } };
@@ -31,7 +31,7 @@ function make(opts = {}) {
   const pass = (f) => (f ? f : null);
   const sp = {
     printConsole() {}, writeLogs: (n, l) => log.lines.push(l),
-    Game: { getPlayer: () => player, getFormEx: (id) => ({ id }), getFormFromFile: (id, file) => (opts.noAlpha || file !== "GreymarchCore.esp" ? null : id === 0x804 ? { getFormID: () => ALPHA } : id === 0x80a ? { getFormID: () => PUP } : id === 0x85c ? { getFormID: () => BLACK } : null), setBeastForm() {}, enableFastTravel() {}, disablePlayerControls() {}, enablePlayerControls() {}, forceThirdPerson() {}, showFirstPersonGeometry() {} },
+    Game: { getPlayer: () => player, getFormEx: (id) => ({ id }), getFormFromFile: (id, file) => (opts.noAlpha || file !== "GreymarchCore.esp" ? null : id === 0x804 ? { getFormID: () => ALPHA } : id === 0x80a ? { getFormID: () => PUP } : id === 0x85c ? { getFormID: () => BLACK } : id === 0x861 ? { getFormID: () => POLAR } : null), setBeastForm() {}, enableFastTravel() {}, disablePlayerControls() {}, enablePlayerControls() {}, forceThirdPerson() {}, showFirstPersonGeometry() {} },
     Spell: { from: pass }, MagicEffect: { from: pass }, Race: { from: (f) => race(f.id) }, Actor: { from: (f) => (f && opts.actors && opts.actors[f.id]) || null }, Idle: { from: pass }, FormList: { from: () => null }, ImageSpaceModifier: { from: () => null }, Sound: { from: (f) => (f ? { play: (at) => { log.sounds.push([f.id, at && at.id !== undefined ? at.id : "player"]); return 1; } } : null) }, ObjectReference: { from: (f) => (f ? { id: f.id } : null) }, ActorBase: { from: () => null },
     Debug: { sendAnimationEvent: (ref, name) => log.events.push(name), notification() {} },
     Utility: { isInMenuMode: () => menu },
@@ -171,6 +171,23 @@ test("the black bear: the server says bear and black, the body becomes Greymarch
   assert.strictEqual(s.race(), BEARR, "the plain werebear again");
   s.say({ customPacketType: "greymarchWolfForm", on: false }); s.tick();
   assert.strictEqual(s.race(), NORD);
+});
+
+test("the polar bear: the server says bear and polar, the body becomes GreymarchCore's polar bear race; other polar bears are drawn with it", () => {
+  const BEARR = 0x0401e17b;
+  const s = make({ refuseIdle: true, others: { 604: 0xff000c04 } });
+  s.say({ customPacketType: "greymarchWolfForm", on: true, alpha: false, pup: false, bear: true, race: BEARR, black: false, polar: true });
+  s.tick();
+  assert.strictEqual(s.race(), POLAR);
+  s.say({ customPacketType: "greymarchWolfForm", on: false }); s.tick();
+  assert.strictEqual(s.race(), NORD);
+  const g = Function("return this")();
+  delete g.__gmWolfRace;
+  s.say({ customPacketType: "greymarchWolfAlphas", actors: [], pups: [], blackbears: [], polarbears: [604] });
+  s.tick(1100);
+  assert.deepStrictEqual(g.__gmWolfRace, { 604: POLAR });
+  assert.ok(s.log.lines.some((l) => /25c drawn as the polar bear/.test(l)));
+  delete g.__gmWolfRace;
 });
 
 test("other black bears: the blackbears list puts GreymarchCore's black bear race into __gmWolfRace", () => {
