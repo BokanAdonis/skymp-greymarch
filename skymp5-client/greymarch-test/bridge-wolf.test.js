@@ -25,6 +25,7 @@ function make(opts = {}) {
     unequipAll() { log.unequipped = true; },
     getWornForm: (mask) => ((opts.worn || {})[mask] ? { getFormID: () => opts.worn[mask] } : null),
     getEquippedWeapon: (left) => (!left && opts.weapon ? { getFormID: () => opts.weapon } : null), getEquippedShield: () => null,
+    getEquippedSpell: (slot) => (slot === 2 && opts.slotted !== false ? { getFormID: () => 0x92c48 } : null),
     getItemCount: (form) => ((opts.have || []).includes(form.id) ? 1 : 0), equipItem: (form) => log.equipped.push(form.id), queueNiNodeUpdate: () => { log.redraws++; },
   };
   const pass = (f) => (f ? f : null);
@@ -109,6 +110,28 @@ test("R plays no howl animation (it crashed the watching games); it is the pack 
   s.gm.greymarchChatTyping = true; s.key(19, false); s.tick(4000); s.key(19, true); s.tick();
   assert.strictEqual(calls(), 2, "typing in the chat is not a call");
   assert.ok(!s.log.events.some((e) => /^howl/i.test(e)), "never a howl event into the graph");
+});
+
+test("Z with Beast Form in the power slot and no cast seen (the game's own lock): the press is reported to the server once; not when the game casts it, not without the power slotted, not in a menu", () => {
+  const games = (s) => s.log.sent.filter((m) => m.customPacketType === "greymarchWolf" && m.op === "game").length;
+  const s = make({ refuseIdle: true });
+  s.key(44, true); s.tick(100); s.key(44, false); s.tick(100);
+  assert.strictEqual(games(s), 0, "the game gets its moment to cast it");
+  s.tick(600);
+  assert.strictEqual(games(s), 1, "no cast seen: the press is the use");
+  assert.ok(s.log.lines.some((l) => /no cast seen/.test(l)));
+  s.tick(300); s.tick(300);
+  assert.ok(games(s) >= 1);
+  const c = make({ refuseIdle: true });
+  c.key(44, true); c.gm.greymarchWolfSignal("spellCast"); c.tick(100); c.tick(700); c.tick(300);
+  assert.strictEqual(c.log.lines.filter((l) => /no cast seen/.test(l)).length, 0, "the game cast it: the cast is the use");
+  assert.strictEqual(games(c), 1);
+  const n = make({ refuseIdle: true, slotted: false });
+  n.key(44, true); n.tick(100); n.tick(700); n.tick(300);
+  assert.strictEqual(games(n), 0, "Z without Beast Form slotted is the player's other power or shout");
+  const m = make({ refuseIdle: true });
+  m.setMenu(true); m.key(44, true); m.tick(100); m.tick(700);
+  assert.strictEqual(games(m), 0, "not from a menu");
 });
 
 test("the Bear Blood: the server says bear with the race, the body becomes the werebear; R does not roar (the howl crashed a werebear's game); back to the human race at the end", () => {

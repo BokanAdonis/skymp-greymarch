@@ -24,6 +24,7 @@ const MENU_SCRIPT = "(function(){if(window.__gmMenuSend)return;var f=document.cr
 const PROF_SCRIPT = "(function(){if(window.__gmProfSend)return;var f=document.createElement('iframe');f.id='greymarch-prof-frame';f.src='greymarch-prof.html';f.style.cssText='position:fixed;left:0;top:0;width:100%;height:100%;border:0;z-index:2147483220;background:transparent;display:block;pointer-events:none';f.setAttribute('allowtransparency','true');var ready=false,queue=[];window.addEventListener('message',function(e){if(e.source!==f.contentWindow)return;var d=e.data;if(!d)return;if(d.greymarchReady){ready=true;queue.forEach(function(q){f.contentWindow.postMessage({greymarchIn:q},'*')});queue=[]}else if(d.greymarchOut&&window.skyrimPlatform){window.skyrimPlatform.sendMessage('greymarch',JSON.stringify(d.greymarchOut))}});window.__gmProfSend=function(m){if(m.fn==='show'){f.style.pointerEvents='auto';try{f.focus()}catch(x){}}else if(m.fn==='hide')f.style.pointerEvents='none';if(ready)f.contentWindow.postMessage({greymarchIn:m},'*');else queue.push(m)};document.body.appendChild(f);document.addEventListener('keyup',function(e){if(e.key==='x'||e.key==='X'){try{f.contentWindow.postMessage({greymarchIn:{fn:'release'}},'*')}catch(x){}}});document.addEventListener('keydown',function(e){if(e.key==='Escape'){try{f.contentWindow.postMessage({greymarchIn:{fn:'escape'}},'*')}catch(x){}}})})();";
 const CONNECT_FAIL_MS = 90000; // the connecting screen over the main menu: this long without the character select, it says what to do (greymarchConnectCover)
 const WOLF_MORPH_MS = 4300; // the werewolf transformation: the race changes at the animation's "SetRace" cue, or after this long if the cue is not seen (the cue is about 4.0 s in, animationdatasinglefile.txt)
+const WOLF_KEY_WAIT_MS = 600; // Z with Beast Form equipped: how long the game gets to cast it before the press itself is reported (greymarchWolfTick)
 const SHAPE_REST_MS = 800, SHAPE_POWER_REST_MS = 1600; // a creature's attacks: the rest after a normal and after a power attack (the server allows the same pace)
 const SHAPE_LAND_MS = 450; // a creature's swing is reported this long after it starts (about when it lands)
 const SHAPE_NPC_READY_MS = 8000; // a creature NPC that is not ready this long after it was placed is placed again
@@ -544,7 +545,7 @@ export class GreymarchBridge {
     greymarchKey(e: any): any {
         if (this.greymarchEmoteNow && this.greymarchEmoteNow.kind === "loop" && (e.code === 17 || e.code === 30 || e.code === 31 || e.code === 32 || e.code === 57)) { var mvDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (mvDown && e.isUp !== true) this.greymarchEmoteStopWanted = Date.now(); } // W A S D or Space ends an emote that lasts (greymarchEmoteTick)
         if (e.code === 19) { var rDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (e.isUp === true) rDown = false; if (rDown && !this.greymarchKey19 && this.greymarchWolfOn && !this.greymarchChatTyping) this.greymarchWolfRoarAt = Date.now(); this.greymarchKey19 = rDown; return; } // R: the werewolf roars (greymarchWolfTick; only while changed)
-        if (e.code === 44) { var zDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (e.isUp === true) zDown = false; if (zDown && !this.greymarchKey44 && this.greymarchWolfOn && !this.greymarchChatTyping) this.greymarchWolfBackAt = Date.now(); this.greymarchKey44 = zDown; return; } // Z while changed: ask the server to change back (greymarchWolfTick)
+        if (e.code === 44) { var zDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (e.isUp === true) zDown = false; if (zDown && !this.greymarchKey44 && !this.greymarchChatTyping) { if (this.greymarchWolfOn) this.greymarchWolfBackAt = Date.now(); else this.greymarchWolfKeyAt = Date.now(); } this.greymarchKey44 = zDown; return; } // Z while changed: ask the server to change back (greymarchWolfTick)
         if (e.code === 256 || e.code === 257) { var mDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (e.isUp === true) mDown = false; if (mDown && !this["greymarchKey" + e.code]) this.greymarchShapeButton(e.code === 257); this["greymarchKey" + e.code] = mDown; return; } // mouse buttons: a creature's attacks (greymarchShapeTick)
         if (e.code !== 65 && e.code !== 66 && e.code !== 1 && e.code !== 45 && e.code !== 28 && e.code !== 37 && e.code !== 34) return;
         var down = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true);
@@ -603,6 +604,17 @@ export class GreymarchBridge {
                 if (fxOn && !this.greymarchWolfFxWas) { this.greymarchWolfSignal("effect seen on the player"); var pw2 = sp.Spell.from(sp.Game.getFormEx(0x92c48)); if (pw2) player.dispelSpell(pw2); } // dispelled so the next use is a new one
                 this.greymarchWolfFxWas = fxOn;
             } catch (fxErr) { /* the events still work */ }
+            // Z WITH BEAST FORM IN THE POWER SLOT, AND THE GAME DID NOT CAST IT. The game can keep its own lock on the power and answer Z with the "not ready yet" sound
+            // (2026-10-20: players heard it and the server never heard of the use). The SERVER owns the cooldown, so the press itself is reported when no cast is seen within
+            // WOLF_KEY_WAIT_MS; the server still decides (the blood, its cooldown) and says yes or no as for a cast.
+            var keyAt = this.greymarchWolfKeyAt;
+            if (keyAt && (this.greymarchWolfOn || this.greymarchWolfUsed || now - keyAt > 3000)) this.greymarchWolfKeyAt = 0;
+            else if (keyAt && now - keyAt >= WOLF_KEY_WAIT_MS) {
+                this.greymarchWolfKeyAt = 0;
+                var inMenuK = false; try { inMenuK = !!sp.Utility.isInMenuMode(); } catch (kmErr) { inMenuK = false; }
+                var slotted = false; try { var eq = player.getEquippedSpell(2); slotted = !!eq && eq.getFormID() === 0x92c48; } catch (eqErr) { slotted = false; }
+                if (slotted && !inMenuK) { this.greymarchLog("wolf: Z with Beast Form in the power slot and no cast seen (the game's own lock?): the use is reported to the server"); this.greymarchWolfSignal("Z with Beast Form equipped"); }
+            }
             var used = this.greymarchWolfUsed;
             if (used) {
                 if (!used.logged) { used.logged = true; this.greymarchLog("wolf: the Beast Form power was used (" + used.why + ")"); }
