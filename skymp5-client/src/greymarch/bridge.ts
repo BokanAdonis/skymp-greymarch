@@ -33,7 +33,8 @@ const WOLF_BACK_GRACE_MS = 2000; // Z changes back, but not in the first 2 secon
 const LIP_STEP_MS = 110; // a talking mouth changes shape this often
 const LIP_OPEN = [[0, 0.55], [1, 0.45], [6, 0.6], [11, 0.5], [5, 0.45], [8, 0.5]]; // [phoneme, strength]: Aah, BigAah, Eh, Oh, Eee, I
 const LIP_CLOSED = [[2, 0.55], [4, 0.4], [10, 0.4]]; // BMP, DST, N: the lips meet or nearly
-const WOLF_ROAR_MS = 4000;  // R: one roar every this long (the howl animation lasts about 2.8 s)
+const WOLF_ROAR_MS = 10000; // R: one roar every this long (the server keeps the same wait: werewolf.js TUNE.howlCooldownMs)
+const WOLF_ROAR_SOUND = 0x101008, BEAR_ROAR_SOUND = 0x10200e; // NPCWerewolfShout (the werewolf's howl) and NPCBearAttackPowerStanding (a bear's standing roar), Skyrim.esm
 // vampires (gamemode vampire.js): the game's own records, inside Dawnguard.esm (read from the game files); the real IDs are looked up with Game.getFormFromFile
 const VAMP_FORMS = { mist: 0x38ba, lord: 0x283b, potionFx: 0x18ef4, potion: 0x18ef3, feedIdle: 0xe6a8 }; // DLC1VampireMistform, DLC1VampireChange, DLC1BloodPotionEffect, DLC1BloodPotion, IdleVampireStandingFeedFront_Loose
 // a vampire's eyes, one colour per bloodline (GreymarchCore.esp, made by tools/vampire-eyes.js in the launcher repo): GM_VampEyes{Male,Female}{Colour}0..6, glow 0 (none) to 6 (a Lord)
@@ -138,6 +139,7 @@ export class GreymarchBridge {
         if (type === "greymarchFaceOf") { this.greymarchFaceOf(msg); return; } // another player's face from the emote wheel (gamemode faces.js; put on in greymarchFaceTick)
         if (type === "greymarchShapeAnim") { if (typeof msg.ev === "string" && msg.ev.length < 64 && Number(msg.actor) > 0) (this.greymarchShapeAnimQueue || (this.greymarchShapeAnimQueue = [])).push({ actor: Number(msg.actor), ev: msg.ev }); return; } // another player's creature attacked (played in greymarchShapeDrive) // a creature form (staff): greymarchShapeTick changes the body
         if (type === "greymarchWolfForm") { if (this.greymarchWolfWant !== !!msg.on) this.greymarchLog("wolf: the server says " + (msg.on ? "changed" : "no (change back)")); this.greymarchWolfWant = !!msg.on; if (msg.on) { this.greymarchWolfWordAt = Date.now(); this.greymarchWolfAlpha = !!msg.alpha; this.greymarchWolfPup = !msg.alpha && !!msg.pup; this.greymarchWolfBearRace = msg.bear && Number(msg.race) > 0 ? Number(msg.race) >>> 0 : 0; if (this.greymarchWolfBearRace) this.greymarchWolfBearSeen = this.greymarchWolfBearRace; this.greymarchWolfBlack = !!this.greymarchWolfBearRace && !!msg.black; } return; } // (logged only when it changes: the server repeats it every 5 seconds) // the werewolf form (greymarchWolfTick)
+        if (type === "greymarchWolfRoar") { if (Number(msg.actor) > 0) (this.greymarchWolfRoarQueue || (this.greymarchWolfRoarQueue = [])).push({ actor: Number(msg.actor), bear: !!msg.bear }); return; } // another player roared nearby: the sound on their NPC (greymarchWolfTick)
         if (type === "greymarchWolfAlphas") { this.greymarchWolfAlphaList = Array.isArray(msg.actors) ? msg.actors : []; this.greymarchWolfPupList = Array.isArray(msg.pups) ? msg.pups : []; this.greymarchWolfBlackList = Array.isArray(msg.blackbears) ? msg.blackbears : []; return; } // the other players in the Alpha form: drawn white (greymarchWolfAlphaOthers)
         if (type === "greymarchVampire") { this.greymarchVampWant = msg.on ? msg : null; this.greymarchHudToPage("blood", { on: !!msg.on, blood: msg.blood, empty: !!msg.empty }); return; } // a vampire's state: the blood drop and what the game applies (greymarchVampTick)
         if (type === "greymarchVampLooks") { this.greymarchVampLookList = Array.isArray(msg.vampires) ? msg.vampires : []; if (Number(msg.me) > 0) this.greymarchMeActor = Number(msg.me) >>> 0; return; } // (me: which of them is this player: the ghosts and effects packets that also say so may not have come yet, and without it the player's own eyes and fangs were never put on) // how every vampire in the world looks (eyes and fangs)
@@ -580,6 +582,7 @@ export class GreymarchBridge {
     //      change is done here (greymarchWolfChange). While changed, R roars and { customPacketType: "greymarchWolfFeed" } plays the feeding animation. The server repeats it
     //      every 5 seconds while the form lasts; with no word for 20 seconds (the server restarted) the player is changed back.
     //   3. on: false (refused, hunger, death, the server ended it): changed back here (greymarchWolfUnbecome) and the next use of the power is reported afresh.
+    greymarchWolfRoarSound(at: any, bear: boolean): any { try { var snd = this.sp.Sound.from(this.sp.Game.getFormEx(bear ? BEAR_ROAR_SOUND : WOLF_ROAR_SOUND)); if (snd && at) snd.play(at); } catch (sErr) { /* a sound is a nicety */ } }
     greymarchWolfSignal(why: string): any { // called from game event handlers: only remembers it (Skyrim functions are used in the update phase)
         if (!this.greymarchWolfUsed) this.greymarchWolfUsed = { at: Date.now(), why: why };
     }
@@ -656,22 +659,29 @@ export class GreymarchBridge {
                     this.greymarchWolfReport(false);
                 }
             }
-            // R: the pack call. Only while changed, not mid-transformation, not in a menu, once every WOLF_ROAR_MS. NO HOWL ANIMATION (2026-10-19): HowlStart / HowlRelease
-            // sent straight into the beast's graph (not through the game's howl shout) crashed the player's game as a werebear, and SkyMP passes the event on, so every
-            // watching game played the howl clip into its NPC of that player and crashed ("WW Howl.hkx", SkyrimSE.exe+0A8C590), even one that loaded in later.
+            // R: THE ROAR, A SOUND ONLY (2026-10-20). Only while changed, not mid-transformation, not in a menu, once every WOLF_ROAR_MS: the werewolf's howl or a bear's roar
+            // is played on the player's own body, and reported; the server sends it to every player near enough, whose games play it on this player's NPC. NO HOWL ANIMATION:
+            // HowlStart / HowlRelease sent straight into the beast's graph (not through the game's howl shout) crashed the player's game as a werebear, and SkyMP passes the
+            // event on, so every watching game played the howl clip into its NPC of that player and crashed ("WW Howl.hkx", SkyrimSE.exe+0A8C590), even one that loaded in later.
             var roarAt = this.greymarchWolfRoarAt;
             if (roarAt) {
                 this.greymarchWolfRoarAt = 0;
                 var inMenu = false; try { inMenu = !!sp.Utility.isInMenuMode(); } catch (mErr) { inMenu = false; }
-                // NOT FOR A WEREBEAR: its body shares the werewolf's animation graph but not its howl, and the howl events sent into it crashed the player's game
-                // (2026-10-19, #GNQS pressed R as a werebear). A werebear has no pack to call either.
-                if (this.greymarchWolfBearRace) { if (now - (this.greymarchWolfBearRoarSaid || 0) > 5000) { this.greymarchWolfBearRoarSaid = now; this.greymarchLog("wolf: no roar for a werebear"); } }
-                else if (this.greymarchWolfOn && !this.greymarchWolfMorph && this.greymarchWolfIsBeast(raceId) && !inMenu && now - roarAt < 1000 && now >= (this.greymarchWolfRoarNext || 0)) {
+                if (this.greymarchWolfOn && !this.greymarchWolfMorph && this.greymarchWolfIsBeast(raceId) && !inMenu && now - roarAt < 1000 && now >= (this.greymarchWolfRoarNext || 0)) {
                     this.greymarchWolfRoarNext = now + WOLF_ROAR_MS;
-                    this.greymarchLog("wolf: pack call (R)");
-                    // the howl calls the pack: the server tells every online packmate where it came from (werewolf.js howl; it keeps its own wait between calls)
+                    this.greymarchWolfRoarSound(player, !!this.greymarchWolfBearRace);
+                    this.greymarchLog("wolf: roar (R, the sound only)");
+                    // reported: the server sends it to every player near enough to hear it (werewolf.js howl; it keeps the same wait)
                     var howlMsg = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchWolf", op: "howl" }) };
                     this.controller.emitter.emit("sendMessage", { message: howlMsg, reliability: "reliable" });
+                }
+            }
+            // other players' roars: the sound on their NPC here (never an animation)
+            var roars = this.greymarchWolfRoarQueue;
+            if (roars && roars.length) {
+                this.greymarchWolfRoarQueue = [];
+                for (var ri = 0; ri < roars.length && ri < 8; ri++) {
+                    try { var rl = misc.remoteIdToLocalId(roars[ri].actor); var who = rl ? sp.ObjectReference.from(sp.Game.getFormEx(rl)) : null; if (who) this.greymarchWolfRoarSound(who, roars[ri].bear); } catch (rErr) { /* not drawn here: not heard */ }
                 }
             }
             // the server says the wolf fed (a kill or a corpse): the vanilla feeding animation (PlayerWerewolfChangeScript.Feed plays the idle SpecialFeeding)

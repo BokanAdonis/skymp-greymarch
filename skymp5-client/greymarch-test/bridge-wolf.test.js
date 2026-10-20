@@ -11,7 +11,7 @@ const js = ts.transpileModule(src, { compilerOptions: { module: ts.ModuleKind.Co
 
 const BEAST = 0xcdd84, NORD = 0x13746, ALPHA = 0xfe000804, PUP = 0xfe00080a, BLACK = 0xfe00085c;
 function make(opts = {}) {
-  const log = { lines: [], idles: [], events: [], races: [], waits: [], sent: [], applied: [], equipped: [], redraws: 0 };
+  const log = { lines: [], idles: [], events: [], races: [], waits: [], sent: [], applied: [], equipped: [], sounds: [], redraws: 0 };
   const mods = { "../messages": { MsgType: { CustomPacket: 77 } }, "../view/worldViewMisc": { remoteIdToLocalId: (id) => (opts.others || {})[id] || 0 }, "../sync/appearance": { applyAppearanceToPlayer: (a) => log.applied.push(a) }, "../services/services/remoteServer": { RemoteServer: {} }, "../services/services/singlePlayerService": { SinglePlayerService: {} } };
   const mod = { exports: {} };
   new Function("require", "exports", "module", js)((p) => mods[p], mod.exports, mod);
@@ -32,7 +32,7 @@ function make(opts = {}) {
   const sp = {
     printConsole() {}, writeLogs: (n, l) => log.lines.push(l),
     Game: { getPlayer: () => player, getFormEx: (id) => ({ id }), getFormFromFile: (id, file) => (opts.noAlpha || file !== "GreymarchCore.esp" ? null : id === 0x804 ? { getFormID: () => ALPHA } : id === 0x80a ? { getFormID: () => PUP } : id === 0x85c ? { getFormID: () => BLACK } : null), setBeastForm() {}, enableFastTravel() {}, disablePlayerControls() {}, enablePlayerControls() {}, forceThirdPerson() {}, showFirstPersonGeometry() {} },
-    Spell: { from: pass }, MagicEffect: { from: pass }, Race: { from: (f) => race(f.id) }, Actor: { from: (f) => (f && opts.actors && opts.actors[f.id]) || null }, Idle: { from: pass }, FormList: { from: () => null }, ImageSpaceModifier: { from: () => null }, Sound: { from: () => null }, ActorBase: { from: () => null },
+    Spell: { from: pass }, MagicEffect: { from: pass }, Race: { from: (f) => race(f.id) }, Actor: { from: (f) => (f && opts.actors && opts.actors[f.id]) || null }, Idle: { from: pass }, FormList: { from: () => null }, ImageSpaceModifier: { from: () => null }, Sound: { from: (f) => (f ? { play: (at) => { log.sounds.push([f.id, at && at.id !== undefined ? at.id : "player"]); return 1; } } : null) }, ObjectReference: { from: (f) => (f ? { id: f.id } : null) }, ActorBase: { from: () => null },
     Debug: { sendAnimationEvent: (ref, name) => log.events.push(name), notification() {} },
     Utility: { isInMenuMode: () => menu },
     on() {},
@@ -91,7 +91,7 @@ test("the server says no in the middle of the animation: it is stopped and nothi
   assert.strictEqual(s.gm.greymarchWolfOn, false);
 });
 
-test("R plays no howl animation (it crashed the watching games); it is the pack call only while changed, never mid-transformation or in a menu, not again before the wait is over", () => {
+test("R is the roar, a sound only: the werewolf's howl on the player's own body and a report for the server; only while changed, never in a menu, not again before the wait is over; never a howl event into the graph", () => {
   const s = make({ refuseIdle: true });
   s.key(19, true); s.key(19, false); s.tick();
   assert.deepStrictEqual(s.log.events, [], "human: R is the game's own key");
@@ -102,13 +102,14 @@ test("R plays no howl animation (it crashed the watching games); it is the pack 
   assert.strictEqual(calls(), 1);
   s.key(19, false); s.key(19, true); s.tick();
   assert.strictEqual(calls(), 1, "too soon");
-  s.key(19, false); s.tick(4000);
+  s.key(19, false); s.tick(10500);
   s.setMenu(true); s.key(19, true); s.tick();
   assert.strictEqual(calls(), 1, "not in a menu");
   s.setMenu(false); s.key(19, false); s.key(19, true); s.tick(); s.tick();
   assert.strictEqual(calls(), 2);
-  s.gm.greymarchChatTyping = true; s.key(19, false); s.tick(4000); s.key(19, true); s.tick();
+  s.gm.greymarchChatTyping = true; s.key(19, false); s.tick(10500); s.key(19, true); s.tick();
   assert.strictEqual(calls(), 2, "typing in the chat is not a call");
+  assert.deepStrictEqual(s.log.sounds.filter((x) => x[0] === 0x101008 || x[0] === 0x10200e), [[0x101008, "player"], [0x101008, "player"]], "the werewolf's howl (NPCWerewolfShout), once per roar, on the player");
   assert.ok(!s.log.events.some((e) => /^howl/i.test(e)), "never a howl event into the graph");
 });
 
@@ -134,7 +135,17 @@ test("Z with Beast Form in the power slot and no cast seen (the game's own lock)
   assert.strictEqual(games(m), 0, "not from a menu");
 });
 
-test("the Bear Blood: the server says bear with the race, the body becomes the werebear; R does not roar (the howl crashed a werebear's game); back to the human race at the end", () => {
+test("another player's roar: the server's greymarchWolfRoar plays the sound on that player's NPC here (a bear's for a bear); nothing for a player not drawn here", () => {
+  const s = make({ others: { 601: 0xff000c01, 602: 0xff000c02 } });
+  s.say({ customPacketType: "greymarchWolfRoar", actor: 601, bear: false });
+  s.say({ customPacketType: "greymarchWolfRoar", actor: 602, bear: true });
+  s.say({ customPacketType: "greymarchWolfRoar", actor: 999, bear: false });
+  s.tick();
+  assert.deepStrictEqual(s.log.sounds, [[0x101008, 0xff000c01], [0x10200e, 0xff000c02]]);
+  assert.ok(!s.log.events.some((e) => /^howl/i.test(e)), "no animation");
+});
+
+test("the Bear Blood: the server says bear with the race, the body becomes the werebear; R roars with a bear's sound (no howl events); back to the human race at the end", () => {
   const BEARR = 0x0401e17b;
   const s = make({ refuseIdle: true });
   s.say({ customPacketType: "greymarchWolfForm", on: true, alpha: false, pup: false, bear: true, race: BEARR });
@@ -143,8 +154,8 @@ test("the Bear Blood: the server says bear with the race, the body becomes the w
   assert.ok(s.log.lines.some((l) => /changed into the werebear/.test(l)));
   s.key(19, true); s.tick(); s.tick();
   assert.ok(!s.log.events.includes("HowlStart") && !s.log.events.includes("HowlRelease"), "no howl events into a werebear's graph");
-  assert.ok(!s.log.sent.some((m) => m.customPacketType === "greymarchWolf" && m.op === "howl"), "no pack call either");
-  assert.ok(s.log.lines.some((l) => /no roar for a werebear/.test(l)));
+  assert.deepStrictEqual(s.log.sounds.filter((x) => x[0] === 0x101008 || x[0] === 0x10200e), [[0x10200e, "player"]], "a bear's standing roar (NPCBearAttackPowerStanding)");
+  assert.ok(s.log.sent.some((m) => m.customPacketType === "greymarchWolf" && m.op === "howl"), "reported, so others hear it");
   s.say({ customPacketType: "greymarchWolfForm", on: false }); s.tick();
   assert.strictEqual(s.race(), NORD, "and the person's race comes back, not the bear's");
 });
