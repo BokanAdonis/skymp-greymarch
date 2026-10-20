@@ -374,14 +374,18 @@ export class FormView {
     if (refrId >= 0xff000000) gmCrumb("remove " + gmHex(refrId) + (gmBeast ? " beast (disable first)" : ""));
     once("update", () => {
       if (refrId >= 0xff000000 && gmBeast) {
+        // The world cleaner's protection is dropped only AFTER the delete (2026-10-20). Dropped at once, the NPC was unprotected and not yet disabled for the frames
+        // the disable takes, and the world cleaner (one random nearby actor a frame) could pick it and disable and delete it too: a second delete of the same actor,
+        // the crash of a watching game the moment a beast player changed back.
+        const unprotect = () => SpApiInteractor.getControllerInstance().lookupListener(WorldCleanerService).modWcProtection(refrId, -1);
         const refr = ObjectReference.from(Game.getFormEx(refrId));
-        if (refr) {
-          refr.disable(false).then(() => {
-            const gone = ObjectReference.from(Game.getFormEx(refrId));
-            if (gone) gone.delete();
-          });
-        }
-        SpApiInteractor.getControllerInstance().lookupListener(WorldCleanerService).modWcProtection(refrId, -1);
+        if (!refr) { unprotect(); return; }
+        refr.disable(false).then(() => {
+          const gone = ObjectReference.from(Game.getFormEx(refrId));
+          if (gone) gone.delete();
+          gmCrumb("removed " + gmHex(refrId) + " beast");
+          unprotect();
+        });
         return;
       }
       if (refrId >= 0xff000000) {
