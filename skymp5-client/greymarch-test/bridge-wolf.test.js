@@ -91,7 +91,7 @@ test("the server says no in the middle of the animation: it is stopped and nothi
   assert.strictEqual(s.gm.greymarchWolfOn, false);
 });
 
-test("R is the roar, a sound only: the werewolf's howl on the player's own body and a report for the server; only while changed, never in a menu, not again before the wait is over; never a howl event into the graph", () => {
+test("R is the roar: a werewolf howls on its own body (HowlStart, HowlRelease) and it is reported; only while changed, never in a menu, not again before the wait is over", () => {
   const s = make({ refuseIdle: true });
   s.key(19, true); s.key(19, false); s.tick();
   assert.deepStrictEqual(s.log.events, [], "human: R is the game's own key");
@@ -109,8 +109,8 @@ test("R is the roar, a sound only: the werewolf's howl on the player's own body 
   assert.strictEqual(calls(), 2);
   s.gm.greymarchChatTyping = true; s.key(19, false); s.tick(10500); s.key(19, true); s.tick();
   assert.strictEqual(calls(), 2, "typing in the chat is not a call");
-  assert.deepStrictEqual(s.log.sounds.filter((x) => x[0] === 0x101008 || x[0] === 0x10200e), [[0x101008, "player"], [0x101008, "player"]], "the werewolf's howl (NPCWerewolfShout), once per roar, on the player");
-  assert.ok(!s.log.events.some((e) => /^howl/i.test(e)), "never a howl event into the graph");
+  assert.deepStrictEqual(s.log.events.filter((e) => /^howl/i.test(e)), ["HowlStart", "HowlRelease", "HowlStart", "HowlRelease"], "the vanilla howl, once per roar");
+  assert.deepStrictEqual(s.log.sounds.filter((x) => x[0] === 0x101008 || x[0] === 0x0f95bb), [], "the howl brings its own sound here");
 });
 
 test("Z with Beast Form in the power slot and no cast seen (the game's own lock): the press is reported to the server once; not when the game casts it, not without the power slotted, not in a menu", () => {
@@ -141,11 +141,11 @@ test("another player's roar: the server's greymarchWolfRoar plays the sound on t
   s.say({ customPacketType: "greymarchWolfRoar", actor: 602, bear: true });
   s.say({ customPacketType: "greymarchWolfRoar", actor: 999, bear: false });
   s.tick();
-  assert.deepStrictEqual(s.log.sounds, [[0x101008, 0xff000c01], [0x10200e, 0xff000c02]]);
-  assert.ok(!s.log.events.some((e) => /^howl/i.test(e)), "no animation");
+  assert.deepStrictEqual(s.log.sounds, [[0x101008, 0xff000c01], [0x0f95bb, 0xff000c02]]);
+  assert.ok(!s.log.events.some((e) => /^howl/i.test(e)), "no animation on another player's NPC");
 });
 
-test("the Bear Blood: the server says bear with the race, the body becomes the werebear; R roars with a bear's sound (no howl events); back to the human race at the end", () => {
+test("the Bear Blood: the server says bear with the race, the body becomes the werebear; R roars with a bear's sound only (the howl events crashed a werebear's game); back to the human race at the end", () => {
   const BEARR = 0x0401e17b;
   const s = make({ refuseIdle: true });
   s.say({ customPacketType: "greymarchWolfForm", on: true, alpha: false, pup: false, bear: true, race: BEARR });
@@ -154,7 +154,7 @@ test("the Bear Blood: the server says bear with the race, the body becomes the w
   assert.ok(s.log.lines.some((l) => /changed into the werebear/.test(l)));
   s.key(19, true); s.tick(); s.tick();
   assert.ok(!s.log.events.includes("HowlStart") && !s.log.events.includes("HowlRelease"), "no howl events into a werebear's graph");
-  assert.deepStrictEqual(s.log.sounds.filter((x) => x[0] === 0x101008 || x[0] === 0x10200e), [[0x10200e, "player"]], "a bear's standing roar (NPCBearAttackPowerStanding)");
+  assert.deepStrictEqual(s.log.sounds.filter((x) => x[0] === 0x101008 || x[0] === 0x0f95bb), [[0x0f95bb, "player"]], "a bear's warning roar (NPCBearAggroWarning01)");
   assert.ok(s.log.sent.some((m) => m.customPacketType === "greymarchWolf" && m.op === "howl"), "reported, so others hear it");
   s.say({ customPacketType: "greymarchWolfForm", on: false }); s.tick();
   assert.strictEqual(s.race(), NORD, "and the person's race comes back, not the bear's");
@@ -217,7 +217,7 @@ test("the Alpha form: the server says alpha, the body becomes the Alpha race fro
   assert.strictEqual(s.race(), ALPHA);
   assert.ok(s.log.lines.some((l) => /changed into the Alpha beast/.test(l)));
   s.key(19, true); s.tick(); s.tick();
-  assert.ok(!s.log.events.some((e) => /^howl/i.test(e)), "no howl animation");
+  assert.deepStrictEqual(s.log.events.filter((e) => /^howl/i.test(e)), ["HowlStart", "HowlRelease"], "the Alpha howls");
   assert.ok(s.log.sent.some((m) => m.customPacketType === "greymarchWolf" && m.op === "howl"), "the Alpha calls the pack");
   s.say({ customPacketType: "greymarchWolfFeed" }); s.tick();
   assert.deepStrictEqual(s.log.idles.slice(-1), [0xd23b7], "and feeds");
