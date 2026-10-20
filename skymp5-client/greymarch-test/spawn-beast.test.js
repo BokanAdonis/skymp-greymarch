@@ -58,7 +58,18 @@ test("formView.ts: a beast look gets no full model refresh when it comes on scre
   assert.ok(fv.indexOf("const gmBeastLook") < fv.indexOf("applyAnimation(refr, model.animation"), "known before the animations");
   assert.ok(fv.includes('String(model.animation.animEventName || "").toLowerCase().startsWith("howl")'), "never a relayed howl on a beast");
   assert.ok(fv.includes("this.gmSpawnedBeast = gmBeastSpawn;"), "the spawn remembers a beast");
+  assert.ok(fv.includes("if (gmBeastMove) { try { const gmAc = Actor.from(refr); if (gmAc) forcedWeapDrawn = gmAc.isWeaponDrawn(); }"), "a beast's NPC is never ordered to draw (ActionDraw played WerewolfDraw and crashed the watching game)");
+  assert.ok(fv.indexOf("forcedWeapDrawn = gmAc.isWeaponDrawn()") < fv.indexOf("applyMovement(refr, model.movement"), "decided before the movement is applied");
+  assert.ok(fv.includes("/^skympfake/i.test("), "nor given SkyMP's fake equip");
   assert.ok(/if \(refrId >= 0xff000000 && gmBeast\) \{[\s\S]{0,200}refr\.disable\(false\)\.then\(\(\) => \{[\s\S]{0,120}gone\.delete\(\);[\s\S]{0,200}return;/.test(fv), "a beast NPC is disabled, then deleted, and given nothing after");
+});
+
+test("crash breadcrumbs: formView.ts writes a flushed line before each risky step on another NPC (spawn, remove, model refresh, gear, an idle or a beast animation)", () => {
+  const fv = fs.readFileSync(path.join(__dirname, "..", "src", "view", "formView.ts"), "utf8");
+  assert.ok(fv.includes("writeLogs(\"greymarch-crumbs\""), "its own file, greymarch-crumbs-logs.txt");
+  for (const step of ["gmCrumb(\"spawn \"", "gmCrumb(\"spawned \"", "gmCrumb(\"remove \"", "gmCrumb(\"model refresh \"", "gmCrumb(\"gear \"", "gmCrumb(\"anim \""]) assert.ok(fv.includes(step), step);
+  assert.ok(fv.indexOf("gmCrumb(\"spawn \"") < fv.indexOf("spawnMethod.triggerSpawnProcess(refr"), "written BEFORE the spawn");
+  assert.ok(fv.indexOf("gmCrumb(\"model refresh \"") < fv.indexOf("actor.queueNiNodeUpdate();"), "and before the refresh");
 });
 
 test("no look (SkyMP's own NPCs) is spawned as before", async () => {

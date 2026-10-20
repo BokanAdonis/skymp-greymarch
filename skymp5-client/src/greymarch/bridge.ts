@@ -206,6 +206,9 @@ export class GreymarchBridge {
         }
     }
     // Our own log file: Data/Platform/Logs/greymarch-logs.txt (SkyrimPlatform writes it). The game's normal log does not keep printConsole lines.
+    // CRASH BREADCRUMBS (see formView.ts gmCrumb): this game's own risky steps, in the same flushed file
+    greymarchCrumb(text: string): any { try { this.sp.writeLogs("greymarch-crumbs", ((Date.now() - (this.greymarchCrumbStart || (this.greymarchCrumbStart = Date.now()))) / 1000).toFixed(1) + "s " + text); } catch (e) { /* a breadcrumb is a nicety */ } }
+    greymarchCrumbEvery(key: string, ms: number, text: string): any { var at = this.greymarchCrumbAt || (this.greymarchCrumbAt = {}); var n = Date.now(); if (n - (at[key] || 0) < ms) return; at[key] = n; this.greymarchCrumb(text); }
     greymarchLog(text: any): any {
         var line = "[" + new Date().toISOString().substr(11, 12) + "] " + text;
         try { this.sp.writeLogs("greymarch", line); } catch (err) { this.sp.printConsole("[greymarch] " + text); }
@@ -671,7 +674,7 @@ export class GreymarchBridge {
                 if (this.greymarchWolfOn && !this.greymarchWolfMorph && this.greymarchWolfIsBeast(raceId) && !inMenu && now - roarAt < 1000 && now >= (this.greymarchWolfRoarNext || 0)) {
                     this.greymarchWolfRoarNext = now + WOLF_ROAR_MS;
                     if (this.greymarchWolfBearRace) { this.greymarchWolfRoarSound(player, true); this.greymarchLog("wolf: roar (R, a werebear: the sound only)"); }
-                    else { sp.Debug.sendAnimationEvent(player, "HowlStart"); this.greymarchWolfRoarRelease = now + 200; this.greymarchLog("wolf: roar (R, the howl)"); } // released at once: a short howl, as a quick tap of the shout key does it
+                    else { this.greymarchCrumb("beast: howl"); sp.Debug.sendAnimationEvent(player, "HowlStart"); this.greymarchWolfRoarRelease = now + 200; this.greymarchLog("wolf: roar (R, the howl)"); } // released at once: a short howl, as a quick tap of the shout key does it
                     // reported: the server sends it to every player near enough to hear it (werewolf.js howl; it keeps the same wait)
                     var howlMsg = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchWolf", op: "howl" }) };
                     this.controller.emitter.emit("sendMessage", { message: howlMsg, reliability: "reliable" });
@@ -703,6 +706,7 @@ export class GreymarchBridge {
     // waitForAnimationEvent (not a Papyrus event, so SkyMP does not block it); WOLF_MORPH_MS is the fallback if it never comes. greymarchWolfTick then calls greymarchWolfChange.
     // SkyMP sends the player's animation events to the other games, so other players see the transformation too.
     greymarchWolfBecome(player: any): any {
+        this.greymarchCrumb("beast: change starts");
         var sp = this.sp;
         this.greymarchWolfOn = true;
         // while changed, SkyMP keeps the character's own look aside instead of writing it onto the beast's body halfway (remoteServer.ts); it is put on properly after the way back
@@ -740,6 +744,7 @@ export class GreymarchBridge {
     }
     // The way back, as the vanilla ActuallyShiftBackIfNecessary does it.
     greymarchWolfUnbecome(player: any): any {
+        this.greymarchCrumb("beast: change back");
         var sp = this.sp;
         this.greymarchWolfOn = false;
         this.greymarchWolfRoarRelease = 0;
@@ -1254,6 +1259,7 @@ export class GreymarchBridge {
     // sprint, sneak, combat stance), with collision off so it never pushes the player, and the camera follows it. The player's own body is invisible. So the creature on this
     // screen is exactly the NPC everyone else sees, with no SetRace on the player (a creature's animation graph is not made for player control: static or stretched bodies).
     greymarchShapeNpcBecome(player: any, want: any): any {
+        this.greymarchCrumb("creature form: " + (want && want.name ? want.name : "?"));
         var sp = this.sp;
         var step = "start";
         try {
@@ -1997,6 +2003,7 @@ export class GreymarchBridge {
             if (this.greymarchEmoteNow && this.greymarchEmoteNow.kind === "walk" && em.kind !== "once") this.greymarchEmoteEnd("another emote"); // a carry ends before a new pose starts (a serve or a throw keeps it)
             try { sp.Game.forceThirdPerson(); } catch (tpErr) { /* the emote still plays */ }
             var idle = sp.Idle.from(sp.Game.getFormEx(em.idle));
+            this.greymarchCrumb("emote " + em.id + " idle " + (Number(em.idle) >>> 0).toString(16));
             ok = !!idle && !!player.playIdle(idle);
         } catch (err) { ok = false; }
         var n = this.greymarchEmoteLogged = (this.greymarchEmoteLogged || 0) + 1;
@@ -2021,6 +2028,7 @@ export class GreymarchBridge {
         if ((this.greymarchEmoteLogged = (this.greymarchEmoteLogged || 0) + 1) <= 20) this.greymarchLog("emote: face " + (em ? em.id : "off"));
     }
     greymarchFaceApply(actor: any, face: any, fresh: boolean): any {
+        try { this.greymarchCrumbEvery("face" + actor.getFormID(), 2000, "face " + (actor.getFormID() >>> 0).toString(16) + (face ? "" : " off")); } catch (cErr) { /* not important */ }
         try {
             if (fresh) { actor.clearExpressionOverride(); actor.resetExpressionOverrides(); for (var p0 = 0; p0 < 16; p0++) actor.setExpressionPhoneme(p0, 0); } // every mouth shape off too: the last face's (Open mouth ...) stayed under the next one
             if (!face) return;
@@ -2074,6 +2082,7 @@ export class GreymarchBridge {
         var moving = this.greymarchLipOn || (this.greymarchLipOn = {});
         if (!Object.keys(want).length && !Object.keys(moving).length) return;
         var step = this.greymarchLipStep = (this.greymarchLipStep || 0) + 1;
+        this.greymarchCrumbEvery("lips", 2000, "moving mouths: " + Object.keys(want).length + " talking");
         for (var key in want) {
             var id = Number(key), ac: any = null;
             try { ac = id === 0x14 ? sp.Game.getPlayer() : sp.Actor.from(sp.Game.getFormEx(id)); } catch (e) { ac = null; }
@@ -2104,6 +2113,7 @@ export class GreymarchBridge {
         var sp = this.sp, cur = this.greymarchEmoteNow;
         this.greymarchEmoteNow = null;
         if (!cur) return;
+        this.greymarchCrumb("emote end " + cur.id + " (" + why + ")");
         try {
             var player = sp.Game.getPlayer();
             var idle = sp.Idle.from(sp.Game.getFormEx(cur.stop));

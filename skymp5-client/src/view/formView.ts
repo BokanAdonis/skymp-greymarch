@@ -1,4 +1,4 @@
-import { Actor, ActorBase, Cell, createText, destroyText, Form, FormType, Game, Keyword, NetImmerse, ObjectReference, once, printConsole, setTextColor, setTextPos, setTextSize, setTextString, storage, TESModPlatform, Utility, WorldSpace, worldPointToScreenPoint } from "skyrimPlatform";
+import { Actor, ActorBase, Cell, createText, destroyText, Form, FormType, Game, Keyword, NetImmerse, ObjectReference, once, printConsole, setTextColor, setTextPos, setTextSize, setTextString, storage, TESModPlatform, Utility, WorldSpace, worldPointToScreenPoint, writeLogs } from "skyrimPlatform";
 import { setDefaultAnimsDisabled, applyAnimation } from "../sync/animation";
 import { Appearance, applyAppearance } from "../sync/appearance";
 import { isBadMenuShown, applyEquipment } from "../sync/equipment";
@@ -15,6 +15,13 @@ import { localIdToRemoteId } from "./worldViewMisc";
 import { SpApiInteractor } from "../services/spApiInteractor";
 import { WorldCleanerService } from "../services/services/worldCleanerService";
 import { GamemodeUpdateService } from "../services/services/gamemodeUpdateService";
+
+// GREYMARCH: CRASH BREADCRUMBS (2026-10-20). One line in Data\Platform\Logs\greymarch-crumbs-logs.txt just BEFORE each step that touches another player's or a creature's
+// NPC in a way that has crashed games (spawning, removing, a model refresh, gear, an idle or a beast's animation). Every line is flushed (SkyrimPlatform's writeLogs ends
+// it with std::endl), so after a crash the last lines say what this game was doing. The launcher keeps the previous session's file and puts both in the support file.
+const gmCrumbStart = Date.now();
+export const gmCrumb = (text: string): void => { try { writeLogs("greymarch-crumbs", ((Date.now() - gmCrumbStart) / 1000).toFixed(1) + "s " + text); } catch (e) { /* a breadcrumb is a nicety */ } };
+const gmHex = (n: any): string => (Number(n) >>> 0).toString(16);
 
 export interface ScreenResolution {
   width: number;
@@ -316,10 +323,12 @@ export class FormView {
 
         if (refr) {
           const gmBeastSpawn = !!model.appearance && !(Array.isArray(model.appearance.headpartIds) && model.appearance.headpartIds.length > 0); // GREYMARCH: see destroy()
+          gmCrumb("spawn " + gmHex(this.getRemoteRefrId()) + " as " + gmHex(refr.getFormID()) + " base " + gmHex(base.getFormID()) + " race " + gmHex(this.gmWolfRace || (model.appearance ? model.appearance.raceId : 0)) + (gmBeastSpawn ? " beast" : ""));
           spawnMethod.triggerSpawnProcess(refr, spawnPos, model.appearance || null, () => {
             this.ready = true;
             this.spawnMoment = Date.now();
             this.gmSpawnedBeast = gmBeastSpawn;
+            gmCrumb("spawned " + gmHex(this.refrId));
           });
         } else {
           printConsole("Unable to triggerSpawnProcess for null refr");
@@ -362,6 +371,7 @@ export class FormView {
     // (hkpKeyframedRigidMotion, SkyrimSE.exe+0A883CE) the moment the player changed back (2026-10-19 #GNQS). A person's NPC is removed as before.
     const gmBeast = this.gmSpawnedBeast;
     this.gmSpawnedBeast = false;
+    if (refrId >= 0xff000000) gmCrumb("remove " + gmHex(refrId) + (gmBeast ? " beast (disable first)" : ""));
     once("update", () => {
       if (refrId >= 0xff000000 && gmBeast) {
         const refr = ObjectReference.from(Game.getFormEx(refrId));
@@ -482,6 +492,12 @@ export class FormView {
       ) {
         this.movState.lastApply = Date.now();
         if (model.isHostedByOther || !this.movState.everApplied) {
+          // GREYMARCH: NO WEAPON DRAW FOR A BEAST (2026-10-20). A changed werewolf or werebear player counts as "weapon drawn", so SkyMP gave its NPC here
+          // setWeaponDrawnMode(1): the game ran ActionDraw, played the idle WerewolfDraw into the beast's animation graph and the watching game crashed in its clip
+          // handling (SkyrimSE.exe+0A8C590, the crash of every beast observer case; this one's stack showed ActionDraw, WeapEquip, WerewolfDraw and SetWeaponDrawnMode).
+          // A beast has no weapon: its NPC keeps the drawn state it has, so no draw or sheathe is ever ordered.
+          const gmBeastMove = !!model.appearance && !(Array.isArray(model.appearance.headpartIds) && model.appearance.headpartIds.length > 0);
+          if (gmBeastMove) { try { const gmAc = Actor.from(refr); if (gmAc) forcedWeapDrawn = gmAc.isWeaponDrawn(); } catch (e) { /* left as SkyMP has it */ } }
           const backup = model.movement.isWeapDrawn;
           if (forcedWeapDrawn === true || forcedWeapDrawn === false) {
             model.movement.isWeapDrawn = forcedWeapDrawn;
@@ -540,8 +556,11 @@ export class FormView {
     if (refr.is3DLoaded()) {
       if (model.animation) {
         // and never a howl on a beast: played into a remote beast's graph without the howl shout behind it, "WW Howl.hkx" crashed the watching game (2026-10-19 #SZGE)
-        if (gmBeastLook && (this.animState.useAnimOverrides || Date.now() - this.spawnMoment < 3000 || String(model.animation.animEventName || "").toLowerCase().startsWith("howl"))) this.animState.lastNumChanges = model.animation.numChanges;
-        else applyAnimation(refr, model.animation, this.animState);
+        if (gmBeastLook && (this.animState.useAnimOverrides || Date.now() - this.spawnMoment < 3000 || String(model.animation.animEventName || "").toLowerCase().startsWith("howl") || /^skympfake/i.test(String(model.animation.animEventName || "")))) this.animState.lastNumChanges = model.animation.numChanges; // and never SkyMP's equip / unequip (it draws the weapon: see "NO WEAPON DRAW" above)
+        else {
+          if (this.animState.lastNumChanges !== model.animation.numChanges && (gmBeastLook || /^idle/i.test(String(model.animation.animEventName || "")))) gmCrumb("anim " + gmHex(refr.getFormID()) + " " + String(model.animation.animEventName).slice(0, 40) + (gmBeastLook ? " beast" : ""));
+          applyAnimation(refr, model.animation, this.animState);
+        }
       }
       // Use them only once, for spawning actors with correct animations
       this.animState.useAnimOverrides = false;
@@ -584,6 +603,7 @@ export class FormView {
         if (isOnScreen != this.isOnScreen) {
           this.isOnScreen = isOnScreen;
           if (isOnScreen && !gmBeastLook) {
+            gmCrumb("model refresh " + gmHex(actor.getFormID()) + " (came on screen)");
             actor.queueNiNodeUpdate();
             (Game.getPlayer() as Actor).queueNiNodeUpdate();
           }
@@ -607,6 +627,7 @@ export class FormView {
           (!gmBeastLook || Date.now() - this.spawnMoment > 3000)
         ) {
           //if (this.spawnMoment > 0 && Date.now() - this.spawnMoment > 5000) {
+          gmCrumb("gear " + gmHex(ac.getFormID()) + (gmBeastLook ? " beast" : ""));
           if (applyEquipment(ac, model.equipment)) {
             this.eqState.lastNumChanges = model.equipment.numChanges;
           }

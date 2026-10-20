@@ -135,6 +135,15 @@ test("Z with Beast Form in the power slot and no cast seen (the game's own lock)
   assert.strictEqual(games(m), 0, "not from a menu");
 });
 
+test("crash breadcrumbs: the change, the howl and the change back each write a line first (greymarch-crumbs)", () => {
+  const s = make({ refuseIdle: true });
+  s.say({ customPacketType: "greymarchWolfForm", on: true }); s.tick();
+  s.key(19, true); s.tick(); s.tick();
+  s.say({ customPacketType: "greymarchWolfForm", on: false }); s.tick();
+  const crumbs = s.log.lines.filter((l) => /^\d+\.\ds (beast|creature form):/.test(l)).map((l) => l.replace(/^\d+\.\ds /, ""));
+  assert.deepStrictEqual(crumbs, ["beast: change starts", "beast: howl", "beast: change back"]);
+});
+
 test("another player's roar: the server's greymarchWolfRoar plays the sound on that player's NPC here (a bear's for a bear); nothing for a player not drawn here", () => {
   const s = make({ others: { 601: 0xff000c01, 602: 0xff000c02 } });
   s.say({ customPacketType: "greymarchWolfRoar", actor: 601, bear: false });
