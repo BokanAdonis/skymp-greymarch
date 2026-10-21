@@ -58,6 +58,8 @@ test("formView.ts: a beast look gets no full model refresh when it comes on scre
   assert.ok(fv.indexOf("const gmBeastLook") < fv.indexOf("applyAnimation(refr, model.animation"), "known before the animations");
   assert.ok(fv.includes('String(model.animation.animEventName || "").toLowerCase().startsWith("howl")'), "never a relayed howl on a beast");
   assert.ok(fv.includes("this.gmSpawnedBeast = gmBeastSpawn;"), "the spawn remembers a beast");
+  assert.ok(fv.includes("const gmHoldStill = this.gmSpawnedBeast && Date.now() - this.spawnMoment < 3000;"), "a fresh beast is held still for 3 seconds");
+  assert.ok(/!gmHoldStill && \(\s*\+\(model\.numMovementChanges as number\)/.test(fv), "SkyMP's movement waits for it (the movement controller crashed the half-built graph)");
   const removal = fv.slice(fv.indexOf("if (refrId >= 0xff000000 && gmBeast) {"), fv.indexOf("if (refrId >= 0xff000000 && gmBeast) {") + 1400);
   assert.ok(/gone\.delete\(\);[\s\S]{0,120}unprotect\(\);\s*\}\);/.test(removal), "the world cleaner's protection is dropped only after the delete (a second delete by the cleaner crashed the watching game)");
   assert.ok(!/modWcProtection\(refrId, -1\);\s*return;/.test(removal), "not at once any more");

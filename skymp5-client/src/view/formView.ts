@@ -489,10 +489,18 @@ export class FormView {
         }
       }
 
+      // GREYMARCH: A FRESH BEAST STANDS STILL FOR ITS FIRST 3 SECONDS (2026-10-21). SkyMP moves an NPC (keepOffsetFromActor, translateTo) from the frame it is
+      // spawned; for a beast that started the movement controller's animation-driven motion while the werewolf graph was still initialising, and the watching game
+      // crashed in its clip handling (MovementControllerNPC -> MovementTweenerAgentAnimationDriven -> ClipAddingFunctor, SkyrimSE.exe+0ADE8BD / +0C28F84; #GNQS as a
+      // polar bear, 2026-10-21 05:46). It stays where it was placed; SkyMP's movement applies after that (the next change, or its 2-second repeat).
+      const gmHoldStill = this.gmSpawnedBeast && Date.now() - this.spawnMoment < 3000;
+      if (gmHoldStill && !this.gmHeldSaid) { this.gmHeldSaid = true; gmCrumb("hold still " + gmHex(refr.getFormID()) + " beast (fresh)"); }
+      if (!gmHoldStill) this.gmHeldSaid = false;
       if (
+        !gmHoldStill && (
         +(model.numMovementChanges as number) !==
         this.movState.lastNumChanges ||
-        Date.now() - this.movState.lastApply > 2000
+        Date.now() - this.movState.lastApply > 2000)
       ) {
         this.movState.lastApply = Date.now();
         if (model.isHostedByOther || !this.movState.everApplied) {
@@ -820,7 +828,8 @@ export class FormView {
   private lastPcWorldOrCell = 0;
   private lastWorldOrCell = 0;
   private spawnMoment = 0;
-  private gmSpawnedBeast = false; // GREYMARCH: this NPC was spawned with a beast look (destroy() disables it before the delete)
+  private gmSpawnedBeast = false;
+  private gmHeldSaid = false; // GREYMARCH: the "hold still" breadcrumb was written for this spawn // GREYMARCH: this NPC was spawned with a beast look (destroy() disables it before the delete)
   private wasHostedByOther: boolean | undefined = undefined;
   private state = {};
   private localImmortal = false;
