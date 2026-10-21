@@ -12,7 +12,7 @@ const js = ts.transpileModule(src, { compilerOptions: { module: ts.ModuleKind.Co
 
 async function spawn(appearance) {
   const tinted = [], resurrected = [];
-  const refr = { getFormID: () => 0xff000ac8, setPosition: () => Promise.resolve(), enable: () => Promise.resolve(), getBaseObject: () => ({}) , setMotionType: () => Promise.resolve() };
+  const refr = { getFormID: () => 0xff000ac8, setPosition: () => Promise.resolve(), enable: () => { (spawn.calls || (spawn.calls = [])).push("enable"); return Promise.resolve(); }, disable: () => { spawn.calls.push("disable"); return Promise.resolve(); }, delete: () => spawn.calls.push("delete"), getBaseObject: () => ({}) , setMotionType: () => Promise.resolve() };
   const actor = { resurrect: () => { resurrected.push(appearance); return Promise.resolve(); } };
   const mods = {
     skyrimPlatform: { ObjectReference: { from: () => refr }, Game: { getFormEx: () => refr }, Actor: { from: () => actor }, MotionType: { Keyframed: 4 } },
@@ -23,6 +23,8 @@ async function spawn(appearance) {
   const mod = { exports: {} };
   new Function("require", "exports", "module", js)((p) => mods[p], mod.exports, mod);
   let done; const finished = new Promise((r) => { done = r; });
+  spawn.calls = []; spawn.mod = mod;
+  if (spawn.abandonBefore) { mod.exports.gmAbandonedSpawns.set(0xff000ac8, () => spawn.calls.push("unprotect")); spawn.abandonBefore = false; new mod.exports.SpawnProcess(appearance, [0, 0, 0], 0xff000ac8, () => spawn.calls.push("callback")); await new Promise((r) => setTimeout(r, 20)); return tinted; }
   new mod.exports.SpawnProcess(appearance, [0, 0, 0], 0xff000ac8, () => done());
   await finished;
   spawn.resurrected = resurrected;
@@ -75,6 +77,22 @@ test("crash breadcrumbs: formView.ts writes a flushed line before each risky ste
   for (const step of ["gmCrumb(\"spawn \"", "gmCrumb(\"spawned \"", "gmCrumb(\"remove \"", "gmCrumb(\"model refresh \"", "gmCrumb(\"gear \"", "gmCrumb(\"anim \""]) assert.ok(fv.includes(step), step);
   assert.ok(fv.indexOf("gmCrumb(\"spawn \"") < fv.indexOf("spawnMethod.triggerSpawnProcess(refr"), "written BEFORE the spawn");
   assert.ok(fv.indexOf("gmCrumb(\"model refresh \"") < fv.indexOf("actor.queueNiNodeUpdate();"), "and before the refresh");
+});
+
+test("a spawn its FormView removed midway is never enabled: the spawn disables and deletes it itself, drops the protection after, and does not call back (the damageable 'clone' others saw)", async () => {
+  spawn.abandonBefore = true;
+  await spawn({ raceId: 0x13746, headpartIds: [1], tints: [] });
+  assert.deepStrictEqual(spawn.calls, ["disable", "delete", "unprotect"]);
+  assert.ok(!spawn.calls.includes("enable") && !spawn.calls.includes("callback"));
+  await spawn({ raceId: 0x13746, headpartIds: [1], tints: [] });
+  assert.ok(spawn.calls.includes("enable"), "the next spawn of the same id is normal again");
+});
+
+test("formView.ts: a removal during a spawn is handed to the spawn; a late spawn's callback does not touch the view", () => {
+  const fv = fs.readFileSync(path.join(__dirname, "..", "src", "view", "formView.ts"), "utf8");
+  assert.ok(fv.includes("const gmMidSpawn = refrId >= 0xff000000 && this.gmSpawningId === refrId;"));
+  assert.ok(fv.includes("gmAbandonedSpawns.set(refrId,"));
+  assert.ok(fv.includes("if (this.gmSpawningId !== gmSpawnId) return;"));
 });
 
 test("no look (SkyMP's own NPCs) is spawned as before", async () => {

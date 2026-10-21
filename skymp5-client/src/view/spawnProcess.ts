@@ -3,6 +3,27 @@ import { Appearance, applyTints } from "../sync/appearance";
 import { NiPoint3 } from "../sync/movement";
 import { ObjectReferenceEx } from "../extensions/objectReferenceEx";
 
+// GREYMARCH: SPAWNS ABANDONED MIDWAY (2026-10-21). A spawn runs in steps (placed disabled, moved, enabled, resurrected), and its FormView can remove the actor before it
+// is done, when the look changes again at once (a werewolf change brings several look changes in a row). Its delete then ran on the half-made actor and the spawn
+// enabled it afterwards anyway: an NPC nobody owned, a damageable copy of the player that never went away (the "clone" other players saw when someone changed). The
+// FormView now marks such a spawn here instead of deleting it; the spawn sees the mark before it enables or resurrects, and disables and deletes the actor itself
+// (then calls onGone, which drops the world cleaner's protection). The callback is not called for it.
+export const gmAbandonedSpawns = new Map<number, () => void>();
+const gmAbandon = (refrId: number): boolean => {
+  const onGone = gmAbandonedSpawns.get(refrId);
+  if (!onGone) return false;
+  gmAbandonedSpawns.delete(refrId);
+  const done = () => { try { onGone(); } catch (e) { /* the protection is a nicety here */ } };
+  const refr = ObjectReference.from(Game.getFormEx(refrId));
+  if (!refr) { done(); return true; }
+  refr.disable(false).then(() => {
+    const gone = ObjectReference.from(Game.getFormEx(refrId));
+    if (gone) gone.delete();
+    done();
+  });
+  return true;
+};
+
 export class SpawnProcess {
   constructor(
     appearance: Appearance | null,
@@ -23,6 +44,7 @@ export class SpawnProcess {
     if (!refr || refr.getFormID() !== refrId) {
       return;
     }
+    if (gmAbandon(refrId)) return; // GREYMARCH: removed by its FormView meanwhile: never enabled
 
     const ac = Actor.from(refr);
     // GREYMARCH: not for a look with no head parts (a werewolf or a creature form): it has no tints, and applyTints ends by giving the actor's base the PLAYER's form ID,
@@ -40,6 +62,7 @@ export class SpawnProcess {
     if (!refr || refr.getFormID() !== refrId) {
       return;
     }
+    if (gmAbandon(refrId)) return; // GREYMARCH: removed by its FormView while it was being enabled
 
     const ac = Actor.from(refr);
     // GREYMARCH: no Resurrect for a beast look (a werewolf, a werebear, a creature form). The actor was just placed, so it is alive; Resurrect resets its 3D, and the

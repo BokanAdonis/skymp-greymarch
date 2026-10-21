@@ -5,7 +5,7 @@ import { isBadMenuShown, applyEquipment } from "../sync/equipment";
 import { RespawnNeededError } from "../lib/errors";
 import { FormModel } from "./model";
 import { applyMovement } from "../sync/movementApply";
-import { SpawnProcess } from "./spawnProcess";
+import { SpawnProcess, gmAbandonedSpawns } from "./spawnProcess";
 import { ObjectReferenceEx } from "../extensions/objectReferenceEx";
 import { PlayerCharacterDataHolder } from "./playerCharacterDataHolder";
 import { getMovement } from "../sync/movementGet";
@@ -324,7 +324,12 @@ export class FormView {
         if (refr) {
           const gmBeastSpawn = !!model.appearance && !(Array.isArray(model.appearance.headpartIds) && model.appearance.headpartIds.length > 0); // GREYMARCH: see destroy()
           gmCrumb("spawn " + gmHex(this.getRemoteRefrId()) + " as " + gmHex(refr.getFormID()) + " base " + gmHex(base.getFormID()) + " race " + gmHex(this.gmWolfRace || (model.appearance ? model.appearance.raceId : 0)) + (gmBeastSpawn ? " beast" : ""));
+          const gmSpawnId = refr.getFormID();
+          this.gmSpawningId = gmSpawnId; // GREYMARCH: the spawn in progress (destroy() hands it back to the spawn instead of deleting it)
+          gmAbandonedSpawns.delete(gmSpawnId); // a mark left by an older spawn that never got that far must not throw this new one away (actor ids are reused)
           spawnMethod.triggerSpawnProcess(refr, spawnPos, model.appearance || null, () => {
+            if (this.gmSpawningId !== gmSpawnId) return; // GREYMARCH: an older spawn finishing late: not this view's actor any more
+            this.gmSpawningId = 0;
             this.ready = true;
             this.spawnMoment = Date.now();
             this.gmSpawnedBeast = gmBeastSpawn;
@@ -371,6 +376,16 @@ export class FormView {
     // (hkpKeyframedRigidMotion, SkyrimSE.exe+0A883CE) the moment the player changed back (2026-10-19 #GNQS). A person's NPC is removed as before.
     const gmBeast = this.gmSpawnedBeast;
     this.gmSpawnedBeast = false;
+    // GREYMARCH: still being spawned: the spawn itself disables and deletes it (see gmAbandonedSpawns in spawnProcess.ts); deleting it here left a copy it then enabled
+    const gmMidSpawn = refrId >= 0xff000000 && this.gmSpawningId === refrId;
+    this.gmSpawningId = 0;
+    if (gmMidSpawn) {
+      gmCrumb("remove " + gmHex(refrId) + " (mid-spawn: the spawn removes it)");
+      gmAbandonedSpawns.set(refrId, () => SpApiInteractor.getControllerInstance().lookupListener(WorldCleanerService).modWcProtection(refrId, -1));
+      this.localImmortal = false;
+      this.removeNickname();
+      return;
+    }
     if (refrId >= 0xff000000) gmCrumb("remove " + gmHex(refrId) + (gmBeast ? " beast (disable first)" : ""));
     once("update", () => {
       if (refrId >= 0xff000000 && gmBeast) {
@@ -829,7 +844,8 @@ export class FormView {
   private lastWorldOrCell = 0;
   private spawnMoment = 0;
   private gmSpawnedBeast = false;
-  private gmHeldSaid = false; // GREYMARCH: the "hold still" breadcrumb was written for this spawn // GREYMARCH: this NPC was spawned with a beast look (destroy() disables it before the delete)
+  private gmHeldSaid = false;
+  private gmSpawningId = 0; // GREYMARCH: the actor this view is spawning right now (0: none); see destroy() // GREYMARCH: the "hold still" breadcrumb was written for this spawn // GREYMARCH: this NPC was spawned with a beast look (destroy() disables it before the delete)
   private wasHostedByOther: boolean | undefined = undefined;
   private state = {};
   private localImmortal = false;
