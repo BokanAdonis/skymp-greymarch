@@ -2152,36 +2152,25 @@ export class GreymarchBridge {
     // so movement can never stay locked behind a chat that is not open. (An input opened less than a second ago is left alone: the answer may have been sent before it.)
     // The windows that hold the keyboard (and the mouse cursor) while they are open. The chat's keyboard releases leave them alone: releasing it every 2 s took the K window's cursor away (2026-10-18).
     greymarchPanelHasKeys(): any { return !!(this.greymarchAdminOn || this.greymarchMenuOn || this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchEmoteOn); }
-    // ---- THE FIELD OF VIEW (the chatbox's Settings). Skyrim Platform has no FOV function, so the game's own settings are changed (fDefaultWorldFOV and
-    // fDefault1stPersonFOV, the same ones Skyrim.ini uses), and the camera, which reads them when the view changes, switches to the other view and back once.
-    // Only for this player's own screen; nothing is sent to the server. The page remembers the value and sends it again each time the game starts.
+    // ---- THE FIELD OF VIEW (the chatbox's Settings). Skyrim Platform cannot reach the camera's field of view and the camera never reads the game's settings
+    // again, so the value goes into fDefaultWorldFOV / fDefault1stPersonFOV (the Skyrim.ini ones) and Greymarch's SKSE plugin GreymarchCamera.dll (in the game
+    // files; launcher repo skse/GreymarchCamera) sees the change within a quarter of a second and puts it on the camera, in any view. (Switching the view and
+    // back, the old way, did not make the camera take it.) Only for this player's own screen; nothing is sent to the server. The page remembers the value and
+    // sends it again each time the game starts.
     greymarchFovWanted(data: any): any {
         var fov = Number(data && data.fov);
         if (!isFinite(fov)) return;
-        this.greymarchFovWant = { fov: Math.max(60, Math.min(120, Math.round(fov))), refresh: !!(data && data.refresh) };
+        this.greymarchFovWant = { fov: Math.max(60, Math.min(120, Math.round(fov))) };
     }
     greymarchFovTick(): any {
-        if (this.greymarchFovBack) { // the second half of the view switch, a few frames later
-            if (Date.now() < this.greymarchFovBack.at) return;
-            var back = this.greymarchFovBack.to; this.greymarchFovBack = null;
-            try { if (back === "first") this.sp.Game.forceFirstPerson(); else this.sp.Game.forceThirdPerson(); } catch (e) { /* the camera stays where it is */ }
-            return;
-        }
         var w = this.greymarchFovWant;
         if (!w) return;
         this.greymarchFovWant = null;
         try {
             this.sp.Utility.setINIFloat("fDefaultWorldFOV:Display", w.fov);
             this.sp.Utility.setINIFloat("fDefault1stPersonFOV:Display", w.fov);
-        } catch (e1) { this.greymarchLog("fov: the game would not take the setting (" + e1 + ")"); return; }
-        if (!w.refresh || this.greymarchScreenUp || this.greymarchInMenu()) return;
-        // first person (0) goes to third and back; third person (8, 9) to first and back; any other camera (furniture, horse, a menu) is left alone
-        var state = -1;
-        try { state = this.sp.Game.getCameraState(); } catch (e2) { state = -1; }
-        try {
-            if (state === 0) { this.sp.Game.forceThirdPerson(); this.greymarchFovBack = { to: "first", at: Date.now() + 120 }; }
-            else if (state === 8 || state === 9) { this.sp.Game.forceFirstPerson(); this.greymarchFovBack = { to: "third", at: Date.now() + 120 }; }
-        } catch (e3) { /* the new value applies at the next change of view */ }
+            this.greymarchLog("fov: " + w.fov + " (GreymarchCamera.dll puts it on the camera)");
+        } catch (e1) { this.greymarchLog("fov: the game would not take the setting (" + e1 + ")"); }
     }
     greymarchChatSync(pageTyping: boolean): any {
         if (this.greymarchChatTyping && !pageTyping) {
