@@ -91,7 +91,7 @@ test("the server says no in the middle of the animation: it is stopped and nothi
   assert.strictEqual(s.gm.greymarchWolfOn, false);
 });
 
-test("R is the roar: a werewolf howls on its own body (HowlStart, HowlRelease) and it is reported; only while changed, never in a menu, not again before the wait is over", () => {
+test("R is the roar: a werewolf howls on its own body (HowlStart, HowlRelease) and it is reported; only while changed, never in a menu; no wait, one roar per press", () => {
   const s = make({ refuseIdle: true });
   s.key(19, true); s.key(19, false); s.tick();
   assert.deepStrictEqual(s.log.events, [], "human: R is the game's own key");
@@ -100,15 +100,15 @@ test("R is the roar: a werewolf howls on its own body (HowlStart, HowlRelease) a
   const calls = () => s.log.sent.filter((m) => m.customPacketType === "greymarchWolf" && m.op === "howl").length;
   s.key(19, true); s.tick(); s.tick();
   assert.strictEqual(calls(), 1);
-  s.key(19, false); s.key(19, true); s.tick();
-  assert.strictEqual(calls(), 1, "too soon");
-  s.key(19, false); s.tick(10500);
-  s.setMenu(true); s.key(19, true); s.tick();
-  assert.strictEqual(calls(), 1, "not in a menu");
-  s.setMenu(false); s.key(19, false); s.key(19, true); s.tick(); s.tick();
-  assert.strictEqual(calls(), 2);
-  s.gm.greymarchChatTyping = true; s.key(19, false); s.tick(10500); s.key(19, true); s.tick();
-  assert.strictEqual(calls(), 2, "typing in the chat is not a call");
+  s.key(19, true); s.tick();
+  assert.strictEqual(calls(), 1, "holding R is one roar");
+  s.key(19, false); s.key(19, true); s.tick(); s.tick();
+  assert.strictEqual(calls(), 2, "no wait: the next press roars at once");
+  s.setMenu(true); s.key(19, false); s.key(19, true); s.tick();
+  assert.strictEqual(calls(), 2, "not in a menu");
+  s.setMenu(false);
+  s.gm.greymarchChatTyping = true; s.key(19, false); s.key(19, true); s.tick();
+  assert.strictEqual(calls(), 2, "typing in the chat is not a roar");
   assert.deepStrictEqual(s.log.events.filter((e) => /^howl/i.test(e)), ["HowlStart", "HowlRelease", "HowlStart", "HowlRelease"], "the vanilla howl, once per roar");
   assert.deepStrictEqual(s.log.sounds.filter((x) => x[0] === 0x101008 || x[0] === 0x0f95bb), [], "the howl brings its own sound here");
 });
@@ -154,7 +154,7 @@ test("another player's roar: the server's greymarchWolfRoar plays the sound on t
   assert.ok(!s.log.events.some((e) => /^howl/i.test(e)), "no animation on another player's NPC");
 });
 
-test("the Bear Blood: the server says bear with the race, the body becomes the werebear; R roars with a bear's sound only (the howl events crashed a werebear's game); back to the human race at the end", () => {
+test("the Bear Blood: the server says bear with the race, the body becomes the werebear; R howls on the werebear's body and adds a bear's roar; back to the human race at the end", () => {
   const BEARR = 0x0401e17b;
   const s = make({ refuseIdle: true });
   s.say({ customPacketType: "greymarchWolfForm", on: true, alpha: false, pup: false, bear: true, race: BEARR });
@@ -162,7 +162,7 @@ test("the Bear Blood: the server says bear with the race, the body becomes the w
   assert.strictEqual(s.race(), BEARR);
   assert.ok(s.log.lines.some((l) => /changed into the werebear/.test(l)));
   s.key(19, true); s.tick(); s.tick();
-  assert.ok(!s.log.events.includes("HowlStart") && !s.log.events.includes("HowlRelease"), "no howl events into a werebear's graph");
+  assert.deepStrictEqual(s.log.events.filter((e) => /^howl/i.test(e)), ["HowlStart", "HowlRelease"], "the howl on the werebear's own body (back on the owner's call)");
   assert.deepStrictEqual(s.log.sounds.filter((x) => x[0] === 0x101008 || x[0] === 0x0f95bb), [[0x0f95bb, "player"]], "a bear's warning roar (NPCBearAggroWarning01)");
   assert.ok(s.log.sent.some((m) => m.customPacketType === "greymarchWolf" && m.op === "howl"), "reported, so others hear it");
   s.say({ customPacketType: "greymarchWolfForm", on: false }); s.tick();
@@ -210,7 +210,7 @@ test("other black bears: the blackbears list puts GreymarchCore's black bear rac
   delete g.__gmWolfRace;
 });
 
-test("the roar is a howl the server hears (it calls the pack): one report per roar, none for a human or a roar too soon", () => {
+test("the roar is a howl the server hears: one report per press, none for a human; no wait between presses", () => {
   const s = make({ refuseIdle: true });
   const howls = () => s.log.sent.filter((m) => m.customPacketType === "greymarchWolf" && m.op === "howl").length;
   s.key(19, true); s.key(19, false); s.tick();
@@ -219,7 +219,7 @@ test("the roar is a howl the server hears (it calls the pack): one report per ro
   s.key(19, true); s.tick();
   assert.strictEqual(howls(), 1);
   s.key(19, false); s.key(19, true); s.tick();
-  assert.strictEqual(howls(), 1, "a roar too soon is not a howl either");
+  assert.strictEqual(howls(), 2, "the next press is reported at once");
 });
 
 test("the server says the wolf fed: the vanilla feeding animation (SpecialFeeding) plays on the beast body", () => {

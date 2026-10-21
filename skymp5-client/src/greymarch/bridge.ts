@@ -33,7 +33,7 @@ const WOLF_BACK_GRACE_MS = 2000; // Z changes back, but not in the first 2 secon
 const LIP_STEP_MS = 110; // a talking mouth changes shape this often
 const LIP_OPEN = [[0, 0.55], [1, 0.45], [6, 0.6], [11, 0.5], [5, 0.45], [8, 0.5]]; // [phoneme, strength]: Aah, BigAah, Eh, Oh, Eee, I
 const LIP_CLOSED = [[2, 0.55], [4, 0.4], [10, 0.4]]; // BMP, DST, N: the lips meet or nearly
-const WOLF_ROAR_MS = 10000; // R: one roar every this long (the server keeps the same wait: werewolf.js TUNE.howlCooldownMs)
+const WOLF_ROAR_MS = 0; // R: no wait between roars (2026-10-21, the owner's call; the server has none either: werewolf.js TUNE.howlCooldownMs). One roar per press of R.
 const WOLF_ROAR_SOUND = 0x101008, BEAR_ROAR_SOUND = 0x0f95bb; // NPCWerewolfShout (the werewolf's howl) and NPCBearAggroWarning01 (a bear's warning roar), Skyrim.esm
 // vampires (gamemode vampire.js): the game's own records, inside Dawnguard.esm (read from the game files); the real IDs are looked up with Game.getFormFromFile
 const VAMP_FORMS = { mist: 0x38ba, lord: 0x283b, potionFx: 0x18ef4, potion: 0x18ef3, feedIdle: 0xe6a8 }; // DLC1VampireMistform, DLC1VampireChange, DLC1BloodPotionEffect, DLC1BloodPotion, IdleVampireStandingFeedFront_Loose
@@ -662,9 +662,9 @@ export class GreymarchBridge {
                     this.greymarchWolfReport(false);
                 }
             }
-            // R: THE ROAR. Only while changed, not mid-transformation, not in a menu, once every WOLF_ROAR_MS. A WEREWOLF plays the vanilla howl on its OWN body
-            // (HowlStart / HowlRelease, with its own sound), as it did 2026-10-16 to 10-19 without crashing its own game. A WEREBEAR gets a bear's roar as a sound only: the
-            // howl events sent into the werebear's graph (the werewolf's, without its howl) crashed that player's game. Either way it is reported, and the server sends it to
+            // R: THE ROAR. Only while changed, not mid-transformation, not in a menu, once per press (no wait since 2026-10-21). A WEREWOLF and a WEREBEAR play the vanilla
+            // howl on their OWN body (HowlStart / HowlRelease, with its own sound), and a werebear also a bear's roar sound. (The werebear's howl was taken away on 2026-10-19
+            // after it crashed that player's game once, before the Havok memory and other crash fixes; it is back on the owner's call.) It is reported, and the server sends it to
             // every player near enough, whose games play the SOUND on this player's NPC; they never play a howl event on a beast (formView.ts drops it: SkyMP passes the
             // event on, and played into the watching game's NPC the howl clip crashed it, "WW Howl.hkx", SkyrimSE.exe+0A8C590).
             var roarAt = this.greymarchWolfRoarAt;
@@ -673,14 +673,15 @@ export class GreymarchBridge {
                 var inMenu = false; try { inMenu = !!sp.Utility.isInMenuMode(); } catch (mErr) { inMenu = false; }
                 if (this.greymarchWolfOn && !this.greymarchWolfMorph && this.greymarchWolfIsBeast(raceId) && !inMenu && now - roarAt < 1000 && now >= (this.greymarchWolfRoarNext || 0)) {
                     this.greymarchWolfRoarNext = now + WOLF_ROAR_MS;
-                    if (this.greymarchWolfBearRace) { this.greymarchWolfRoarSound(player, true); this.greymarchLog("wolf: roar (R, a werebear: the sound only)"); }
-                    else { this.greymarchCrumb("beast: howl"); sp.Debug.sendAnimationEvent(player, "HowlStart"); this.greymarchWolfRoarRelease = now + 200; this.greymarchLog("wolf: roar (R, the howl)"); } // released at once: a short howl, as a quick tap of the shout key does it
+                    this.greymarchCrumb("beast: howl"); sp.Debug.sendAnimationEvent(player, "HowlStart"); this.greymarchWolfRoarRelease = now + 200; // released at once: a short howl, as a quick tap of the shout key does it
+                    if (this.greymarchWolfBearRace) { this.greymarchWolfRoarSound(player, true); this.greymarchLog("wolf: roar (R, the werebear's howl and roar)"); }
+                    else this.greymarchLog("wolf: roar (R, the howl)");
                     // reported: the server sends it to every player near enough to hear it (werewolf.js howl; it keeps the same wait)
                     var howlMsg = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchWolf", op: "howl" }) };
                     this.controller.emitter.emit("sendMessage", { message: howlMsg, reliability: "reliable" });
                 }
             }
-            if (this.greymarchWolfRoarRelease && now >= this.greymarchWolfRoarRelease) { this.greymarchWolfRoarRelease = 0; if (this.greymarchWolfOn && !this.greymarchWolfBearRace) sp.Debug.sendAnimationEvent(player, "HowlRelease"); }
+            if (this.greymarchWolfRoarRelease && now >= this.greymarchWolfRoarRelease) { this.greymarchWolfRoarRelease = 0; if (this.greymarchWolfOn) sp.Debug.sendAnimationEvent(player, "HowlRelease"); }
             // other players' roars: the sound on their NPC here (never an animation)
             var roars = this.greymarchWolfRoarQueue;
             if (roars && roars.length) {
