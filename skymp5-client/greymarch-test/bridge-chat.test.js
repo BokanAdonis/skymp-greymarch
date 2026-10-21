@@ -431,31 +431,26 @@ test("the chat's keyboard releases (its answer every 2 s, the release after a cl
   assert.deepStrictEqual(log.focused, [false], "with nothing open an idle chat still never holds the keyboard");
 });
 
-test("the chatbox's field of view: the game's two FOV settings are changed from the update phase, clamped to 60-120, and the view switches once and back so the camera takes it", async () => {
+test("the chatbox's field of view: the game's two FOV settings are changed from the update phase, clamped to 60-120 (GreymarchCamera.dll puts them on the camera); the view is never switched", async () => {
   const { gm } = make();
-  const ini = []; const cam = []; let state = 9; // third person
+  const ini = []; const cam = [];
   gm.sp.Utility = { setINIFloat: (k, v) => ini.push([k, v]) };
-  Object.assign(gm.sp.Game, { getCameraState: () => state, forceFirstPerson: () => cam.push("first"), forceThirdPerson: () => cam.push("third") });
+  Object.assign(gm.sp.Game, { getCameraState: () => 9, forceFirstPerson: () => cam.push("first"), forceThirdPerson: () => cam.push("third") });
   gm.greymarchBrowserMessage({ arguments: ["greymarch", JSON.stringify({ type: "chat-settings", fov: 95, refresh: true })] });
   assert.deepStrictEqual(ini, [], "nothing happens outside the update phase");
   gm.greymarchFovTick();
   assert.deepStrictEqual(ini, [["fDefaultWorldFOV:Display", 95], ["fDefault1stPersonFOV:Display", 95]]);
-  assert.deepStrictEqual(cam, ["first"], "third person: to first person ...");
   gm.greymarchFovTick();
-  assert.deepStrictEqual(cam, ["first"], "... and not back in the same moment");
-  gm.greymarchFovBack.at = 0; gm.greymarchFovTick();
-  assert.deepStrictEqual(cam, ["first", "third"], "... and back to third person a few frames later");
-  // first person goes the other way; too wide or too narrow is clamped; nonsense is ignored
-  ini.length = 0; cam.length = 0; state = 0;
+  assert.strictEqual(ini.length, 2, "once per change");
+  // too wide or too narrow is clamped; nonsense is ignored
+  ini.length = 0;
   gm.greymarchFovWanted({ fov: 400, refresh: true }); gm.greymarchFovTick();
-  assert.deepStrictEqual(ini[0], ["fDefaultWorldFOV:Display", 120]); assert.deepStrictEqual(cam, ["third"]);
-  gm.greymarchFovBack = null; ini.length = 0; cam.length = 0;
+  assert.deepStrictEqual(ini[0], ["fDefaultWorldFOV:Display", 120]);
+  ini.length = 0;
   gm.greymarchFovWanted({ fov: 10 }); gm.greymarchFovTick();
-  assert.deepStrictEqual(ini[0], ["fDefaultWorldFOV:Display", 60]); assert.deepStrictEqual(cam, [], "the value sent at start-up does not switch the view");
+  assert.deepStrictEqual(ini[0], ["fDefaultWorldFOV:Display", 60]);
   ini.length = 0;
   gm.greymarchFovWanted({ fov: "wide" }); gm.greymarchFovTick();
   assert.deepStrictEqual(ini, []);
-  // on a horse, in furniture or in a menu the camera is left alone
-  state = 10; gm.greymarchFovWanted({ fov: 80, refresh: true }); gm.greymarchFovTick();
-  assert.deepStrictEqual(cam, []);
+  assert.deepStrictEqual(cam, [], "the camera's view is never switched (the old way, which did not work)");
 });
