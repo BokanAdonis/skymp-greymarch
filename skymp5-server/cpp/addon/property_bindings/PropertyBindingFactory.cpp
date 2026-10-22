@@ -7,6 +7,7 @@
 #include "ConsoleCommandsAllowedBinding.h"
 #include "CustomPropertyBinding.h"
 #include "EquipmentBinding.h"
+#include "GreymarchBalanceBinding.h"
 #include "IdxBinding.h"
 #include "InventoryBinding.h"
 #include "IsDeadBinding.h"
@@ -44,6 +45,9 @@ PropertyBindingFactory::CreateStandardPropertyBindings()
   result["isOpen"] = std::make_shared<IsOpenBinding>();
   result["locationalData"] = std::make_shared<LocationalDataBinding>();
   result["maxVitals"] = std::make_shared<MaxVitalsBinding>(); // GREYMARCH
+  result["damageMult"] = std::make_shared<DamageMultBinding>(); // GREYMARCH
+  result["greymarchBalance"] =
+    std::make_shared<GreymarchBalanceBinding>(); // GREYMARCH
   result["neighbors"] = std::make_shared<NeighborsBinding>();
   result["onlinePlayers"] = std::make_shared<OnlinePlayersBinding>();
   result["percentages"] = std::make_shared<PercentagesBinding>();

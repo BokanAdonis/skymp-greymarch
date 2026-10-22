@@ -53,6 +53,7 @@ struct MpActor::Impl
   bool isRespawning = false;
   bool isBlockActive = false;
   MpActor::MaxVitalsOverride maxVitalsOverride; // GREYMARCH
+  float greymarchDamageMult = 1.f;              // GREYMARCH
   std::chrono::steady_clock::time_point lastAttributesUpdateTimePoint;
   std::vector<std::pair<uint32_t, std::chrono::steady_clock::time_point>>
     lastHitTimesLRU;
@@ -1753,6 +1754,16 @@ void MpActor::SetMaxVitalsOverride(const MaxVitalsOverride& maxVitals)
 const MpActor::MaxVitalsOverride& MpActor::GetMaxVitalsOverride() const
 {
   return pImpl->maxVitalsOverride;
+}
+
+void MpActor::SetGreymarchDamageMult(float mult) noexcept
+{
+  pImpl->greymarchDamageMult = mult;
+}
+
+float MpActor::GetGreymarchDamageMult() const noexcept
+{
+  return pImpl->greymarchDamageMult;
 }
 
 const float kAngleToRadians = std::acos(-1.f) / 180.f;
