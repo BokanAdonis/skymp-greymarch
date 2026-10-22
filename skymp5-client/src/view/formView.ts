@@ -551,7 +551,11 @@ export class FormView {
         Date.now() - this.movState.lastApply > 2000)
       ) {
         this.movState.lastApply = Date.now();
-        if (model.isHostedByOther || !this.movState.everApplied) {
+        // GREYMARCH: AN NPC NOBODY HOSTS YET STAYS WHERE THE SERVER HAS IT (2026-10-23). SkyMP let every game that does not host an NPC run its own copy with
+        // its own AI until the server picked a host, so the copies wandered apart (one deer in different places on different screens) and the server's
+        // position went stale (the wildlife's resync had to move animals back to the player fighting them). Now only the host's game runs the AI: every
+        // other game keeps playing the server's movement, and asks to host it (below) while nobody does.
+        if (model.isHostedByOther || !this.movState.everApplied || !alreadyHosted) {
           // GREYMARCH: NO WEAPON DRAW FOR A BEAST (2026-10-20). A changed werewolf or werebear player counts as "weapon drawn", so SkyMP gave its NPC here
           // setWeaponDrawnMode(1): the game ran ActionDraw, played the idle WerewolfDraw into the beast's animation graph and the watching game crashed in its clip
           // handling (SkyrimSE.exe+0A8C590, the crash of every beast observer case; this one's stack showed ActionDraw, WeapEquip, WerewolfDraw and SetWeaponDrawnMode).
@@ -579,6 +583,13 @@ export class FormView {
 
           this.movState.lastNumChanges = +(model.numMovementChanges as number);
           this.movState.everApplied = true;
+
+          // GREYMARCH: nobody hosts it: ask (the server gives it to the first game that asks; tryHostIfNeed asks at most once a second)
+          if (!model.isHostedByOther && !alreadyHosted) {
+            const gmAc = Actor.from(refr);
+            const gmRemote = this.remoteRefrId;
+            if (gmAc && gmRemote && gmAc.is3DLoaded()) this.tryHostIfNeed(gmAc, gmRemote as number);
+          }
         } else {
           const remoteId = this.remoteRefrId;
           if (ac && remoteId && ac.is3DLoaded()) {
