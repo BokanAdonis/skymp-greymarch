@@ -119,6 +119,7 @@ test("formView.ts turns a fresh beast's AI back on once it has settled, and not 
   assert.ok(fv.includes("this.gmBeastAiOff = gmBeastSpawn;"), "marked when the beast is spawned");
   assert.ok(fv.includes("if (!gmHoldStill && this.gmBeastAiOff) {"), "only when the hold (GM_BEAST_SETTLE_MS) is over");
   assert.ok(fv.includes("gmAc.enableAI(true)"));
+  assert.ok(fv.includes("if (gmHoldStill && this.gmBeastAiOff) {") && fv.includes("if (gmHeld && gmHeld.isAIEnabled()) { gmHeld.enableAI(false);"), "while held, AI found on is switched off every frame (and the crumbs say so)");
 });
 
 test("no look (SkyMP's own NPCs) is spawned as before", async () => {

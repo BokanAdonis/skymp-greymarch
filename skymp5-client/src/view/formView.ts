@@ -535,6 +535,15 @@ export class FormView {
       // polar bear, 2026-10-21 05:46). It stays where it was placed; SkyMP's movement applies after that (the next change, or its 2-second repeat).
       const gmHoldStill = this.gmSpawnedBeast && Date.now() - this.spawnMoment < GM_BEAST_SETTLE_MS;
       if (gmHoldStill && !this.gmHeldSaid) { this.gmHeldSaid = true; gmCrumb("hold still " + gmHex(refr.getFormID()) + " beast (fresh)"); }
+      // GREYMARCH (2026-10-22 12:43): the AI switched off before the NPC was enabled (spawnProcess.ts) may not hold: the engine gives the actor its AI process only
+      // once it is in the world, and #HXBA's watching game crashed again in the movement update. So while it is held, every frame: AI found on is switched off (and the
+      // crumbs say so, to see whether that was the case at a crash).
+      if (gmHoldStill && this.gmBeastAiOff) {
+        try {
+          const gmHeld = Actor.from(refr);
+          if (gmHeld && gmHeld.isAIEnabled()) { gmHeld.enableAI(false); gmCrumb("ai off " + gmHex(refr.getFormID()) + " beast (it was on" + (gmHeld.is3DLoaded() ? ", 3D loaded" : "") + ")"); }
+        } catch (e) { /* the hold still applies */ }
+      }
       if (!gmHoldStill) this.gmHeldSaid = false;
       if (!gmHoldStill && this.gmBeastAiOff) { // the beast has settled: its AI (and with it the engine's movement update) on, so SkyMP can move it again
         this.gmBeastAiOff = false;
