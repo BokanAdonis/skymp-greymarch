@@ -145,6 +145,8 @@ export class GreymarchBridge {
         if (type === "greymarchGmAlert") { this.greymarchChatToPage("alert", msg); return; } // a player typed /gm (the server only sends it to Trial GM and up)
         if (type === "greymarchMenuReply") { this.greymarchMenuToPage("reply", msg); return; }
         if (type === "greymarchShape") { this.greymarchShapeMsg(msg); return; }
+        if (type === "greymarchStagger") { if (Number(msg.actor) > 0) (this.greymarchStaggerQueue || (this.greymarchStaggerQueue = [])).push({ actor: Number(msg.actor), self: msg.self === true }); return; } // a starving character staggers (gamemode hunger.js; played in greymarchHungerDrive, for everyone near)
+        if (type === "greymarchHungerFx") { this.greymarchHungerRegen = msg.regen !== false; return; } // starving: no health or stamina regeneration (greymarchHungerDrive)
         if (type === "greymarchFaceOf") { this.greymarchFaceOf(msg); return; } // another player's face from the emote wheel (gamemode faces.js; put on in greymarchFaceTick)
         if (type === "greymarchBeast") { this.greymarchBeastFrames(msg); return; } // a server-driven animal moved (gamemode wildlifebrain.js): played by formView (gmPuppetMove)
         if (type === "greymarchShapeAnim") { if (typeof msg.ev === "string" && msg.ev.length < 64 && Number(msg.actor) > 0) (this.greymarchShapeAnimQueue || (this.greymarchShapeAnimQueue = [])).push({ actor: Number(msg.actor), ev: msg.ev }); return; } // another player's creature attacked (played in greymarchShapeDrive) // a creature form (staff): greymarchShapeTick changes the body
@@ -318,6 +320,7 @@ export class GreymarchBridge {
         if (this.greymarchMenuEscAt && Date.now() - this.greymarchMenuEscAt > 700) { this.greymarchMenuEscAt = 0; this.greymarchMenuHide(); } // Esc, and the menu page did not close itself
         this.greymarchToastTick(Date.now());
         this.greymarchEffects(); // staff effects: noclip, speed, frozen, ghosts (cheap: does real work every 400 ms)
+        this.greymarchHungerDrive(); // hunger: the stagger, regeneration off while starving
         this.greymarchShapeDrive(); // a creature form as an NPC: moved every frame like SkyMP moves other players; other players' creature attacks
         this.greymarchShapeTick(); // a creature form staff put the player in (a goat, a giant ...): the server decides, the body is changed here
         this.greymarchWolfTick(); // the werewolf form: the game's Beast Form power is the trigger, the server decides, the change is done here
@@ -1366,6 +1369,39 @@ export class GreymarchBridge {
     }
     // Every frame (greymarchTick): the NPC follows the player's movement exactly as SkyMP moves other players; a respawn is needed after a door or a long way (SkyMP's own rule).
     // The animations other players' creatures should play (their attacks) are played here too.
+    // HUNGER (gamemode hunger.js). A starving character staggers now and then: the server sends greymarchStagger to them (self) and to everyone near, and each game plays
+    // it on that character (their own player, or the copy of the other player). Regeneration: while starving the server says regen false and the player's HealRate
+    // and StaminaRate are set to 0 (put back as they were when it says true); the server also undoes any rise that looks like regeneration.
+    greymarchHungerDrive(): any {
+        var q = this.greymarchStaggerQueue;
+        if (q && q.length) {
+            this.greymarchStaggerQueue = [];
+            for (var i = 0; i < q.length; i++) {
+                try {
+                    if (q[i].self) { this.sp.Debug.sendAnimationEvent(this.sp.Game.getPlayer(), "staggerStart"); continue; }
+                    var localId = misc.remoteIdToLocalId(q[i].actor);
+                    var ref = localId ? this.sp.ObjectReference.from(this.sp.Game.getFormEx(localId)) : null;
+                    if (ref) animMod.applyAnimation(ref, { animEventName: "staggerStart", numChanges: 1 }, { lastNumChanges: 0, useAnimOverrides: false });
+                } catch (sErr) { /* that player is not drawn here */ }
+            }
+        }
+        var want = this.greymarchHungerRegen !== false;
+        var had = this.greymarchHungerRegenApplied !== false;
+        if (want === had) return;
+        try {
+            var player = this.sp.Game.getPlayer();
+            if (!player) return;
+            if (!want) {
+                this.greymarchHungerSaved = { heal: player.getActorValue("HealRate"), stamina: player.getActorValue("StaminaRate") };
+                player.setActorValue("HealRate", 0); player.setActorValue("StaminaRate", 0);
+            } else {
+                var saved = this.greymarchHungerSaved || {};
+                player.setActorValue("HealRate", Number.isFinite(saved.heal) && saved.heal > 0 ? saved.heal : player.getBaseActorValue("HealRate"));
+                player.setActorValue("StaminaRate", Number.isFinite(saved.stamina) && saved.stamina > 0 ? saved.stamina : player.getBaseActorValue("StaminaRate"));
+            }
+            this.greymarchHungerRegenApplied = want;
+        } catch (rErr) { /* tried again next frame */ }
+    }
     greymarchShapeDrive(): any {
         var q = this.greymarchShapeAnimQueue;
         if (q && q.length) {

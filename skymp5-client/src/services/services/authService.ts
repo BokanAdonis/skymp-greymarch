@@ -217,6 +217,8 @@ export class AuthService extends ClientListener {
       case 'greymarchProgress':
       case 'greymarchShape':
       case 'greymarchShapeAnim':
+      case 'greymarchStagger': // a starving character staggers (gamemode hunger.js)
+      case 'greymarchHungerFx': // starving: regeneration off
       case 'greymarchBeast':
       case 'greymarchFaceOf': // another player's face from the emote wheel (gamemode faces.js)
       case 'greymarchWolfFeed':
