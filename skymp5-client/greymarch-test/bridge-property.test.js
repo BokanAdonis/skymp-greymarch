@@ -51,7 +51,7 @@ test("hold X on a door or a chest opens the menu about THAT object (the page is 
     look(0x1300, type);
     press(gm);
     assert.ok(!gm.greymarchMenuOn, what);
-    assert.deepStrictEqual(log.notes, ["Look at a player, a door or a chest and hold X"], what);
+    assert.deepStrictEqual(log.notes, ["Look at a player, a door, a chest or a body and hold X"], what);
   }
 });
 

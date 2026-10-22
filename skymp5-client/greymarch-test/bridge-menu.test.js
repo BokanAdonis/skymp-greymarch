@@ -69,7 +69,7 @@ test("nothing opens when you are not looking at a player (a hint is shown), over
   a.gm.greymarchOthers = [BIT + 5];
   a.gm.greymarchKey({ code: 45, isDown: true }); // no crosshair target
   assert.ok(!a.gm.greymarchMenuOn);
-  assert.deepStrictEqual(a.log.notes, ["Look at a player, a door or a chest and hold X"]);
+  assert.deepStrictEqual(a.log.notes, ["Look at a player, a door, a chest or a body and hold X"]);
   const a2 = make();
   a2.gm.greymarchOthers = [BIT + 5];
   a2.setCrosshair({ getFormID: () => 0x777 }); // something that is not a player

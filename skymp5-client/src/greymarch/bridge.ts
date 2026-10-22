@@ -165,6 +165,7 @@ export class GreymarchBridge {
         if (type === "greymarchVampMenuOpen") { this.greymarchVampMenuShow(); return; }
         if (type === "greymarchProfReply") { this.greymarchLog("prof: the server's answer arrived (rid " + msg.rid + ", ok " + msg.ok + ")"); this.greymarchProfToPage("reply", msg); return; } // the professions window (K)
         if (type === "greymarchCombatMod") { var cm = Number(msg.mult); this.greymarchCombatWant = cm >= 0.1 && cm <= 3 ? cm : 1; return; } // the damage multiplier for what is in hand (professions: a weapon above your rank hits weaker, a Brawler's fists hit harder)
+        if (type === "greymarchMenuEvent" && msg.type === "body" && Number(msg.looking) > 0 && !this.greymarchMenuOn) { this.greymarchMenuShow({ mode: "open", looking: Number(msg.looking) }); return; } // E on the body of a dead wild animal (gamemode wildlifesystem.js): the menu opens on it to take what is on it
         if (type === "greymarchMenuEvent") { if ((msg.type === "trade_invite" || msg.type === "trade" || msg.type === "feed_invite" || msg.type === "frisk_invite" || msg.type === "guard_view") && !this.greymarchMenuOn) this.greymarchMenuShow({ mode: "invite", looking: 0 }); /* a trade, a vampire's request to feed, a guard's request to frisk or what the frisk found opens the menu by itself */ this.greymarchMenuToPage("event", msg); return; }
         if (type === "greymarchFx") { this.greymarchFxWant = { noclip: !!msg.noclip, speed: Number(msg.speed) || 100, frozen: !!msg.frozen, god: !!msg.god }; if (msg.me) this.greymarchMeActor = msg.me; return; }
         if (type === "greymarchGhosts") { this.greymarchGhostList = Array.isArray(msg.ghosts) ? msg.ghosts : []; if (msg.me) this.greymarchMeActor = msg.me; this.greymarchOthers = Array.isArray(msg.others) ? msg.others : []; if (msg.stats !== undefined) this.greymarchStatsWant = msg.stats && typeof msg.stats === "object" ? msg.stats : null; var inv = Array.isArray(msg.invisible) ? msg.invisible : []; this.greymarchInvisList = inv; var invMap = {}; for (var q = 0; q < inv.length; q++) if (inv[q] !== msg.me) invMap[inv[q]] = true; try { Function("return this")().__gmInvisible = invMap; } catch (gErr) { /* names stay visible */ } return; }
@@ -1797,15 +1798,18 @@ export class GreymarchBridge {
             if (ref) {
                 looking = misc.localIdToRemoteId(ref.getFormID()) || 0;
                 if (looking && (this.greymarchOthers || []).indexOf(looking) < 0) {
-                    // not a player: a door (form type 29) or a storage (28) can be managed from the same menu (the SERVER checks what it really is)
+                    // not a player: a door (form type 29) or a storage (28) can be managed from the same menu (the SERVER checks what it really is),
+                    // and a dead body is looked at like a player (the server shows what can be taken from a dead wild animal, or says no)
                     var kind = 0;
                     try { var base = ref.getBaseObject(); kind = base ? base.getType() : 0; } catch (e1) { kind = 0; }
-                    if (kind === 29 || kind === 28) isObject = true; else looking = 0;
+                    var body = false;
+                    try { var ac = this.sp.Actor.from(ref); body = !!ac && ac.isDead(); } catch (e3) { body = false; }
+                    if (kind === 29 || kind === 28) isObject = true; else if (!body) looking = 0;
                 }
             }
         } catch (e) { looking = 0; isObject = false; }
         if (!looking) {
-            try { this.sp.Debug.notification("Look at a player, a door or a chest and hold X"); } catch (e2) { /* a hint is a nicety */ }
+            try { this.sp.Debug.notification("Look at a player, a door, a chest or a body and hold X"); } catch (e2) { /* a hint is a nicety */ }
             return;
         }
         this.greymarchMenuShow({ mode: "hold", looking: looking, object: isObject });
