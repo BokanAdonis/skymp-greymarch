@@ -1,5 +1,6 @@
 #include "TES5DamageFormula.h"
 
+#include "GreymarchBalance.h"
 #include "HitData.h"
 #include "MpActor.h"
 #include "SpellCastData.h"
@@ -40,6 +41,7 @@ private:
   [[nodiscard]] float DetermineDamageFromSource(uint32_t source) const;
   [[nodiscard]] float CalcUnarmedDamage() const;
   [[nodiscard]] float CalcArmorDamagePenalty() const;
+  [[nodiscard]] bool TargetHasShield() const;
 };
 
 TES5DamageFormulaImpl::TES5DamageFormulaImpl(const MpActor& aggressor_,
@@ -54,6 +56,11 @@ TES5DamageFormulaImpl::TES5DamageFormulaImpl(const MpActor& aggressor_,
 
 float TES5DamageFormulaImpl::GetBaseWeaponDamage() const
 {
+  // GREYMARCH: the live balance table (the F7 Balance tab) wins over the plugin
+  const auto& balance = GreymarchBalance::Get().weaponDamage;
+  if (auto it = balance.find(hitData.source); it != balance.end()) {
+    return it->second;
+  }
   const auto weapData =
     espm::GetData<espm::WEAP>(hitData.source, espmProvider);
   if (!weapData.weapData) {
@@ -91,7 +98,12 @@ float TES5DamageFormulaImpl::CalcArmorRatingComponent(
     const auto armorData =
       espm::GetData<espm::ARMO>(opponentEquipmentEntry.baseId, espmProvider);
     // TODO(#458): take other components into account
-    auto ac = static_cast<float>(armorData.baseRatingX100) / 100;
+    // GREYMARCH: the live balance table (the F7 Balance tab) wins over the plugin
+    const auto& balance = GreymarchBalance::Get().armorRating;
+    auto it = balance.find(opponentEquipmentEntry.baseId);
+    float ac = it != balance.end()
+      ? it->second
+      : static_cast<float>(armorData.baseRatingX100) / 100;
     if (armorData.enchantmentFormId) {
       // TODO(#632) refactor this effect with actor effect system
       const auto enchantmentData =
@@ -129,39 +141,68 @@ float TES5DamageFormulaImpl::CalcArmorDamagePenalty() const
 {
   // TODO(#457): weapon rating is probably not only component of incomingDamage
   // Replace this with another issue reference upon investigation
-  const float maxArmorRating =
-    espm::GetData<espm::GMST>(espm::GMST::kFMaxArmorRating, espmProvider)
-      .value;
-  const float armorScalingFactor =
-    espm::GetData<espm::GMST>(espm::GMST::kFArmorScalingFactor, espmProvider)
-      .value;
+  // GREYMARCH: the live balance table (the F7 Balance tab) wins over the game settings
+  const auto& balance = GreymarchBalance::Get();
+  const float maxArmorRating = balance.maxArmor.has_value()
+    ? *balance.maxArmor
+    : espm::GetData<espm::GMST>(espm::GMST::kFMaxArmorRating, espmProvider)
+        .value;
+  const float armorScalingFactor = balance.armorScaling.has_value()
+    ? *balance.armorScaling
+    : espm::GetData<espm::GMST>(espm::GMST::kFArmorScalingFactor,
+                                espmProvider)
+        .value;
   return 0.01f *
     (100.f -
      std::min<float>(CalcOpponentArmorRating() * armorScalingFactor,
                      maxArmorRating));
 }
 
+// GREYMARCH: whether the target wears a shield (a block with one can stop
+// more than a block with a weapon)
+bool TES5DamageFormulaImpl::TargetHasShield() const
+{
+  for (const auto& entry : target.GetEquipment().inv.entries) {
+    if (entry.GetWorn() == Inventory::Worn::None ||
+        espm::GetRecordType(entry.baseId, espmProvider) != espm::ARMO::kType) {
+      continue;
+    }
+    if (espm::GetData<espm::ARMO>(entry.baseId, espmProvider).equipSlotId >
+        0) {
+      return true;
+    }
+  }
+  return false;
+}
+
 float TES5DamageFormulaImpl::CalculateDamage() const
 {
+  const auto& balance = GreymarchBalance::Get();
   const float incomingDamage = DetermineDamageFromSource(hitData.source);
 
   // TODO(#461): add difficulty multiplier
-  // TODO(#463): add sneak modifier
   float damage = incomingDamage * CalcArmorDamagePenalty();
 
   if (hitData.isPowerAttack) {
-    damage *= 2.f;
+    damage *= balance.powerAttack.value_or(2.f);
   }
 
   if (hitData.isHitBlocked) {
-    // TODO(#460): implement correct block formula
-    damage *= 0.1f;
+    // GREYMARCH: what gets through a block comes from the balance table,
+    // apart for a shield and a weapon (0.1 = the old placeholder)
+    const auto& through =
+      TargetHasShield() ? balance.shieldBlock : balance.weaponBlock;
+    damage *= through.value_or(0.1f);
   }
 
   if (hitData.isSneakAttack) {
-    // TODO(GM-613): get from GameSettings
-    damage *= 1.3f;
+    damage *= balance.sneak.value_or(1.3f);
   }
+
+  // GREYMARCH: the attacker's own multiplier, set by the gamemode (a weapon
+  // above their rank or not of their skill, the werewolf form, a Brawler's
+  // fists): mp.set(actorId, "damageMult", x). 1 when nothing was set.
+  damage *= aggressor.GetGreymarchDamageMult();
 
   return damage;
 }

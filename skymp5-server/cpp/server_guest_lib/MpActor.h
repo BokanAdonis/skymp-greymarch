@@ -182,6 +182,11 @@ public:
   };
   void SetMaxVitalsOverride(const MaxVitalsOverride& maxVitals);
   const MaxVitalsOverride& GetMaxVitalsOverride() const;
+  // GREYMARCH: a multiplier on every weapon or fist hit this actor lands, set
+  // by the gamemode (professions: rank and skill, the werewolf form, the
+  // Brawler). 1 = no change. Not saved: the gamemode sets it again.
+  void SetGreymarchDamageMult(float mult) noexcept;
+  float GetGreymarchDamageMult() const noexcept;
   NiPoint3 GetViewDirection() const;
   void IncreaseBlockCount() noexcept;
   void ResetBlockCount() noexcept;
