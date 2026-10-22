@@ -350,6 +350,7 @@ export class FormView {
             this.ready = true;
             this.spawnMoment = Date.now();
             this.gmSpawnedBeast = gmBeastSpawn;
+            this.gmBeastAiOff = gmBeastSpawn; // spawnProcess.ts enabled it with its AI off; turned on below once it has settled
             gmCrumb("spawned " + gmHex(this.refrId));
           });
         } else {
@@ -393,6 +394,7 @@ export class FormView {
     // (hkpKeyframedRigidMotion, SkyrimSE.exe+0A883CE) the moment the player changed back (2026-10-19 #GNQS). A person's NPC is removed as before.
     const gmBeast = this.gmSpawnedBeast;
     this.gmSpawnedBeast = false;
+    this.gmBeastAiOff = false;
     // GREYMARCH: still being spawned: the spawn itself disables and deletes it (see gmAbandonedSpawns in spawnProcess.ts); deleting it here left a copy it then enabled
     const gmMidSpawn = refrId >= 0xff000000 && this.gmSpawningId === refrId;
     this.gmSpawningId = 0;
@@ -534,6 +536,10 @@ export class FormView {
       const gmHoldStill = this.gmSpawnedBeast && Date.now() - this.spawnMoment < GM_BEAST_SETTLE_MS;
       if (gmHoldStill && !this.gmHeldSaid) { this.gmHeldSaid = true; gmCrumb("hold still " + gmHex(refr.getFormID()) + " beast (fresh)"); }
       if (!gmHoldStill) this.gmHeldSaid = false;
+      if (!gmHoldStill && this.gmBeastAiOff) { // the beast has settled: its AI (and with it the engine's movement update) on, so SkyMP can move it again
+        this.gmBeastAiOff = false;
+        try { const gmAc = Actor.from(refr); if (gmAc) gmAc.enableAI(true); gmCrumb("ai on " + gmHex(refr.getFormID()) + " beast (settled)"); } catch (e) { /* it stays where it is */ }
+      }
       if (
         !gmHoldStill && (
         +(model.numMovementChanges as number) !==
@@ -913,6 +919,7 @@ export class FormView {
   private spawnMoment = 0;
   private gmSpawnedBeast = false;
   private gmHeldSaid = false;
+  private gmBeastAiOff = false; // GREYMARCH: a fresh beast whose AI is still off (spawnProcess.ts); see the settle rule in update()
   private gmWolfRacePending = 0; // GREYMARCH: a new race from __gmWolfRace not built yet, and since when (see the settle rule)
   private gmWolfRacePendingAt = 0;
   private gmSpawningId = 0; // GREYMARCH: the actor this view is spawning right now (0: none); see destroy() // GREYMARCH: the "hold still" breadcrumb was written for this spawn // GREYMARCH: this NPC was spawned with a beast look (destroy() disables it before the delete)

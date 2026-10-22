@@ -13,7 +13,7 @@ const js = ts.transpileModule(src, { compilerOptions: { module: ts.ModuleKind.Co
 async function spawn(appearance) {
   const tinted = [], resurrected = [];
   const refr = { getFormID: () => 0xff000ac8, setPosition: () => Promise.resolve(), enable: () => { (spawn.calls || (spawn.calls = [])).push("enable"); return Promise.resolve(); }, disable: () => { spawn.calls.push("disable"); return Promise.resolve(); }, delete: () => spawn.calls.push("delete"), getBaseObject: () => ({}) , setMotionType: () => Promise.resolve() };
-  const actor = { resurrect: () => { resurrected.push(appearance); return Promise.resolve(); } };
+  const actor = { resurrect: () => { resurrected.push(appearance); return Promise.resolve(); }, enableAI: (on) => spawn.calls.push("ai " + (on ? "on" : "off")) };
   const mods = {
     skyrimPlatform: { ObjectReference: { from: () => refr }, Game: { getFormEx: () => refr }, Actor: { from: () => actor }, MotionType: { Keyframed: 4 } },
     "../sync/appearance": { applyTints: (ac, a) => tinted.push(a) },
@@ -105,6 +105,20 @@ test("formView.ts: a werewolf form switch rebuilds the NPC only once it has sett
   const block = fv.slice(fv.indexOf("if (gmWolfRace !== this.gmWolfRace) {"), fv.indexOf("} else this.gmWolfRacePending = gmWolfRace;"));
   assert.ok(/if \(gmBuildingAnyway \|\| gmSettled\) \{[\s\S]*this\.appearanceBasedBaseId = 0;/.test(block), "the rebuild is behind the settle rule");
   assert.strictEqual((block.match(/appearanceBasedBaseId = 0/g) || []).length, 1, "no other rebuild in the block");
+});
+
+test("a beast look is enabled with its AI off (the engine's movement update asked the loading werewolf graph for clips and crashed the watching game); a person's look keeps its AI", async () => {
+  await spawn({ raceId: 0xcdd84, headpartIds: [], tints: [] });
+  assert.deepStrictEqual(spawn.calls.filter((c) => c === "ai off" || c === "enable"), ["ai off", "enable"], "AI off before it is enabled");
+  await spawn({ raceId: 0x13746, headpartIds: [1], tints: [] });
+  assert.ok(!spawn.calls.some((c) => c.startsWith("ai ")), "a person: no AI change");
+});
+
+test("formView.ts turns a fresh beast's AI back on once it has settled, and not before", () => {
+  const fv = fs.readFileSync(path.join(__dirname, "..", "src", "view", "formView.ts"), "utf8");
+  assert.ok(fv.includes("this.gmBeastAiOff = gmBeastSpawn;"), "marked when the beast is spawned");
+  assert.ok(fv.includes("if (!gmHoldStill && this.gmBeastAiOff) {"), "only when the hold (GM_BEAST_SETTLE_MS) is over");
+  assert.ok(fv.includes("gmAc.enableAI(true)"));
 });
 
 test("no look (SkyMP's own NPCs) is spawned as before", async () => {

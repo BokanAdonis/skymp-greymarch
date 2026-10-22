@@ -54,6 +54,11 @@ export class SpawnProcess {
     if (ac && appearance && !beastLook) {
       applyTints(ac, appearance);
     }
+    // GREYMARCH: A BEAST IS ENABLED WITH ITS AI OFF (2026-10-22); formView.ts turns it on when the beast has settled (GM_BEAST_SETTLE_MS). The engine's own movement
+    // update (Actor::UpdateMovement -> MovementControllerNPC -> animation-driven tweener) runs on every NPC with AI from its first frame and asked the werewolf graph,
+    // still loading, for its clips: a watching game crashed in ClipAddingFunctor on a null clip the second a player was drawn as the beast (2026-10-22 12:27, #HXBA as
+    // the Elder Alpha; 2026-10-21 18:29 #F78D). Holding SkyMP's own movement back (formView.ts) did not stop that update.
+    if (ac && beastLook) { try { ac.enableAI(false); } catch (e) { /* drawn as before */ } }
     refr.enable(false).then(() => this.resurrect(refrId, beastLook));
   }
 
