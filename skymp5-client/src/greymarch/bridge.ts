@@ -86,6 +86,7 @@ export class GreymarchBridge {
         this.controller.on("tick", () => this.greymarchBodyTick(Date.now())); // select before the world: the held body is let go once a character is chosen ("tick": "update" does not run at the main menu) // a held Play / Create goes out once the world has loaded (greymarchChoiceTick) // the connecting screen: "tick", because "update" does not run at the main menu (it only uses the browser)
         try { this.controller.on("spellCast", (e: any) => { try { if (e && e.spell && e.spell.getFormID() === 0x92c48 && e.caster && e.caster.getFormID() === 0x14) this.greymarchWolfSignal("spellCast"); } catch (x) { /* not ours */ } }); } catch (scErr) { /* the effect checks still see it */ } // the werewolf power (greymarchWolfTick)
         try { this.controller.on("effectStart", (e: any) => { try { if (e && e.effect && e.effect.getFormID() === 0x92c45 && e.target && e.target.getFormID() === 0x14) this.greymarchWolfSignal("effectStart"); } catch (x) { /* not ours */ } }); } catch (esErr) { /* the other signals still see it */ }
+        try { this.controller.on("magicEffectApply", (e: any) => { try { if (e && e.effect && e.activeEffect && this.greymarchMagicBlock && this.greymarchMagicBlock[e.effect.getFormID() >>> 0]) (this.greymarchMagicBlockQueue || (this.greymarchMagicBlockQueue = [])).push({ active: e.activeEffect, effect: e.effect.getFormID() >>> 0, caster: e.caster ? e.caster.getFormID() >>> 0 : 0 }); } catch (x) { /* not ours */ } }); } catch (mbErr) { /* no effect events: NPC raise-the-dead and summons are not stopped */ } // an NPC raising the dead or summoning (gamemode magicblock.js): ended in greymarchMagicBlockDrive
         try { this.controller.on("magicEffectApply", (e: any) => { try { if (e && e.effect && e.effect.getFormID() === 0x92c45 && e.target && e.target.getFormID() === 0x14) this.greymarchWolfSignal("magicEffectApply"); } catch (x) { /* not ours */ } }); } catch (maErr) { /* the other signals still see it */ }
         try { this.controller.on("spellCast", (e: any) => { try { if (e && e.spell && e.caster && e.caster.getFormID() === 0x14) this.greymarchVampSignal("cast", e.spell.getFormID()); } catch (x) { /* not ours */ } }); } catch (vcErr) { /* no cast events: the powers are not reported */ } // a vampire's Mist Form or Vampire Lord (greymarchVampTick)
         try { this.controller.on("spellCast", (e: any) => { try { if (e && e.spell && e.caster && e.caster.getFormID() === 0x14) this.greymarchCastSend(e.spell.getFormID()); } catch (x) { /* not ours */ } }); } catch (hcErr) { /* no cast events: healing spells are not reported */ } // every cast of the player's own spells goes to the server, which applies the healing ones (healing.js); it never applies spell effects itself
@@ -146,6 +147,7 @@ export class GreymarchBridge {
         if (type === "greymarchMenuReply") { this.greymarchMenuToPage("reply", msg); return; }
         if (type === "greymarchShape") { this.greymarchShapeMsg(msg); return; }
         if (type === "greymarchStagger") { if (Number(msg.actor) > 0) (this.greymarchStaggerQueue || (this.greymarchStaggerQueue = [])).push({ actor: Number(msg.actor), self: msg.self === true }); return; } // a starving character staggers (gamemode hunger.js; played in greymarchHungerDrive, for everyone near)
+        if (type === "greymarchMagicBlock") { var mb: any = {}; if (Array.isArray(msg.effects)) for (var mi = 0; mi < msg.effects.length && mi < 5000; mi++) mb[Number(msg.effects[mi]) >>> 0] = true; this.greymarchMagicBlock = mb; return; } // the raise-the-dead and summon effects to end when an NPC casts them (gamemode magicblock.js)
         if (type === "greymarchHunger") { this.greymarchHudToPage("hunger", { stage: String(msg.stage || "fed") }); return; } // the hunger bowl on the HUD (right, level with the voice display; gamemode hunger.js)
         if (type === "greymarchHungerFx") { this.greymarchHungerRegen = msg.regen !== false; return; } // starving: no health or stamina regeneration (greymarchHungerDrive)
         if (type === "greymarchFaceOf") { this.greymarchFaceOf(msg); return; } // another player's face from the emote wheel (gamemode faces.js; put on in greymarchFaceTick)
@@ -322,6 +324,7 @@ export class GreymarchBridge {
         this.greymarchToastTick(Date.now());
         this.greymarchEffects(); // staff effects: noclip, speed, frozen, ghosts (cheap: does real work every 400 ms)
         this.greymarchHungerDrive(); // hunger: the stagger, regeneration off while starving
+        this.greymarchMagicBlockDrive(); // NPC raise-the-dead and summons: ended at once
         this.greymarchShapeDrive(); // a creature form as an NPC: moved every frame like SkyMP moves other players; other players' creature attacks
         this.greymarchShapeTick(); // a creature form staff put the player in (a goat, a giant ...): the server decides, the body is changed here
         this.greymarchWolfTick(); // the werewolf form: the game's Beast Form power is the trigger, the server decides, the change is done here
@@ -1373,6 +1376,26 @@ export class GreymarchBridge {
     // HUNGER (gamemode hunger.js). A starving character staggers now and then: the server sends greymarchStagger to them (self) and to everyone near, and each game plays
     // it on that character (their own player, or the copy of the other player). Regeneration: while starving the server says regen false and the player's HealRate
     // and StaminaRate are set to 0 (put back as they were when it says true); the server also undoes any rise that looks like regeneration.
+    // RAISING THE DEAD AND SUMMONING BY NPCs (gamemode magicblock.js). Every game runs an NPC's spell by itself and the server never knows, so a necromancer's
+    // Reanimate raised a corpse in one game only (the server still has it dead) and a conjurer's atronach existed in one game only; a skeleton mage's Reanimate
+    // Corpse came one second before a crash on test (2026-10-22). Such an effect is ended the frame after it starts when an NPC cast it: the caster's base is a
+    // real record of the plugins (another player's copy has a base made at runtime, 0xFF...; this player is 0x14), so players keep their own summons.
+    greymarchMagicBlockDrive(): any {
+        var q = this.greymarchMagicBlockQueue;
+        if (!q || !q.length) return;
+        this.greymarchMagicBlockQueue = [];
+        for (var i = 0; i < q.length && i < 32; i++) {
+            try {
+                if (q[i].caster === 0x14) continue;
+                var caster = this.sp.Actor.from(this.sp.Game.getFormEx(q[i].caster));
+                var base = caster ? caster.getLeveledActorBase() || caster.getBaseObject() : null;
+                var baseId = base ? base.getFormID() >>> 0 : 0;
+                if (!baseId || baseId >= 0xff000000) continue; // a player (their copy here) or unknown: left alone
+                q[i].active.dispel();
+                this.greymarchCrumb("magic block: ended effect " + q[i].effect.toString(16) + " of NPC " + q[i].caster.toString(16));
+            } catch (dErr) { /* it ended by itself */ }
+        }
+    }
     greymarchHungerDrive(): any {
         var q = this.greymarchStaggerQueue;
         if (q && q.length) {
