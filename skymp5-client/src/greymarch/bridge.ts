@@ -1595,12 +1595,13 @@ export class GreymarchBridge {
             if (want) {
                 if (want.noclip !== have.noclip) { sp.Debug.toggleCollisions(); have.noclip = want.noclip; this.greymarchLog("staff: noclip " + (want.noclip ? "on" : "off")); }
                 if (want.speed !== have.speed) { player.setActorValue("SpeedMult", want.speed); have.speed = want.speed; this.greymarchLog("staff: speed " + want.speed + "%"); }
-                if (!!want.god !== have.god) { try { player.setGhost(!!want.god); } catch (gErr) { this.greymarchLog("staff: setGhost is not available (" + gErr + "), god mode relies on refilling"); } have.god = !!want.god; try { (sp.storage as any)["greymarchNoHost"] = have.god; if (have.god) sp.storage["hosted"] = []; } catch (hErr) { /* hosting stays as SkyMP has it */ } /* god mode: this game drops the NPCs it runs and hosts none (their AI would ignore a ghost and everyone else); another game nearby takes them over within 2 s */ this.greymarchLog("staff: god " + (want.god ? "on" : "off")); } if (want.god) { try { player.restoreActorValue("health", 100000); player.restoreActorValue("stamina", 100000); player.restoreActorValue("magicka", 100000); } catch (rErr) { /* the invulnerable flag still protects */ } } 
+                if (!!want.god !== have.god) { try { player.setGhost(!!want.god); } catch (gErr) { this.greymarchLog("staff: setGhost is not available (" + gErr + "), god mode relies on refilling"); } have.god = !!want.god; this.greymarchLog("staff: god " + (want.god ? "on" : "off")); } if (want.god) { try { player.restoreActorValue("health", 100000); player.restoreActorValue("stamina", 100000); player.restoreActorValue("magicka", 100000); } catch (rErr) { /* the invulnerable flag still protects */ } } 
                 if (want.frozen !== have.frozen) {
                     if (want.frozen) sp.Game.disablePlayerControls(true, true, true, true, true, true, true, true, 0); else sp.Game.enablePlayerControls(true, true, true, true, true, true, true, true, 0);
                     have.frozen = want.frozen;
                 }
             }
+            this.greymarchNoHostApply(now, player, !!have.god);
             this.greymarchGhostApply(now, ghosts || []); this.greymarchNamesApply(now); this.greymarchInvisApply(now); this.greymarchSeenLog(now); this.greymarchStatsApply(player); this.greymarchCombatApply(player);
         } catch (err) {
             if (!this.greymarchFxErr) { this.greymarchFxErr = true; this.greymarchLog("staff effects error (shown once): " + err); }
@@ -1764,6 +1765,38 @@ export class GreymarchBridge {
             parts.push(s + lid.toString(16) + " 3D=" + l3 + " disabled=" + dis + " distance=" + d + " cell=" + cellOf(a));
         }
         this.greymarchLog("staff: seen others (my cell " + cellOf(player) + "; characters the server has sent me: [" + known.join(",") + "]): " + parts.join("; "));
+    }
+    // NPC HOSTING IN GOD MODE (2026-10-22). God mode makes this player a ghost, and an NPC whose AI runs in a ghost's game ignores the ghost and every other player,
+    // so it stood still for everyone (a GM in a dungeon). So while god mode is on AND another player (not a staff ghost) is within two cells, this game drops the
+    // NPCs it runs and asks for none (storage greymarchNoHost: sendInputsService.ts, remoteServer.ts); the other game takes them over within 2 s. Alone, a god-mode
+    // game runs its NPCs as usual: nobody else would, and NPCs nobody runs walk through the ground and the sky (the same day, alone in god mode).
+    greymarchNoHostApply(now: any, player: any, god: any): any {
+        var want = false;
+        if (god) {
+            if (now - (this.greymarchNoHostCheckAt || 0) < 1500) return;
+            this.greymarchNoHostCheckAt = now;
+            want = this.greymarchOtherHostNear(player);
+        }
+        if (want === !!this.greymarchNoHostOn) return;
+        this.greymarchNoHostOn = want;
+        try { (this.sp.storage as any)["greymarchNoHost"] = want; if (want) this.sp.storage["hosted"] = []; } catch (e) { /* hosting stays as SkyMP has it */ }
+        this.greymarchLog("staff: " + (want ? "god mode with another player near: this game hands its NPCs over" : "this game runs NPCs again"));
+    }
+    // another player who could run NPCs instead of this one: online (greymarchOthers), not a staff ghost, loaded in this game and within two cells
+    greymarchOtherHostNear(player: any): any {
+        var others = this.greymarchOthers || [];
+        var ghosts = (this.greymarchGhostList || []).map(function (g: any) { return g && g.actor; });
+        for (var i = 0; i < others.length; i++) {
+            if (ghosts.indexOf(others[i]) >= 0) continue;
+            try {
+                var localId = misc.remoteIdToLocalId(others[i]);
+                var actor = localId ? this.sp.Actor.from(this.sp.Game.getFormEx(localId)) : null;
+                if (!actor || !actor.is3DLoaded()) continue;
+                var dx = actor.getPositionX() - player.getPositionX(), dy = actor.getPositionY() - player.getPositionY();
+                if (dx * dx + dy * dy <= 8192 * 8192) return true;
+            } catch (e) { /* not here */ }
+        }
+        return false;
     }
     // INVISIBLE: done on every game's own screen (alpha 0), NOT by switching the body off on the server, which disconnects the owner. The name over their head is hidden too (see hide-invisible-name).
     greymarchIsInvisible(actorId: any, isMe: any): any {
