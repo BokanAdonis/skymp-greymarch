@@ -29,3 +29,9 @@ test("the hunger bowl: greymarchHunger is let through and handed to the HUD page
   assert.match(auth, /case 'greymarchHunger':/);
   assert.match(src, /if \(type === "greymarchHunger"\) \{ this\.greymarchHudToPage\("hunger", \{ stage: String\(msg\.stage \|\| "fed"\) \}\); return; \}/);
 });
+
+test("the stagger on another player's copy is let past the death service's stagger block for a moment", () => {
+  const death = fs.readFileSync(path.join(__dirname, "..", "src", "services", "services", "deathService.ts"), "utf8");
+  assert.match(death, /const allow = \(Function\("return this"\)\(\) as any\)\.__gmStaggerAllow; if \(allow && allow\[ctx\.selfId\] > Date\.now\(\)\) return;/);
+  assert.match(src, /allow\[localId\] = Date\.now\(\) \+ 1000;/);
+});

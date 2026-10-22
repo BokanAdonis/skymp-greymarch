@@ -46,6 +46,8 @@ export class DeathService extends ClientListener {
     this.sp.hooks.sendAnimationEvent.add(
       {
         enter(ctx) {
+          // GREYMARCH: a stagger the server sent for this actor (a starving player, gamemode hunger.js) is let through for a moment (bridge.ts greymarchHungerDrive)
+          try { const allow = (Function("return this")() as any).__gmStaggerAllow; if (allow && allow[ctx.selfId] > Date.now()) return; } catch (e) { /* blocked as before */ }
           ctx.animEventName = "";
         },
         leave() { },

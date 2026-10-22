@@ -1405,7 +1405,10 @@ export class GreymarchBridge {
                     if (q[i].self) { this.sp.Debug.sendAnimationEvent(this.sp.Game.getPlayer(), "staggerStart"); continue; }
                     var localId = misc.remoteIdToLocalId(q[i].actor);
                     var ref = localId ? this.sp.ObjectReference.from(this.sp.Game.getFormEx(localId)) : null;
-                    if (ref) animMod.applyAnimation(ref, { animEventName: "staggerStart", numChanges: 1 }, { lastNumChanges: 0, useAnimOverrides: false });
+                    if (ref) {
+                        var g: any = Function("return this")(); var allow = g.__gmStaggerAllow || (g.__gmStaggerAllow = {}); allow[localId] = Date.now() + 1000; // the death service blocks staggers on other players' copies: this one is the server's (deathService.ts)
+                        animMod.applyAnimation(ref, { animEventName: "staggerStart", numChanges: 1 }, { lastNumChanges: 0, useAnimOverrides: false });
+                    }
                 } catch (sErr) { /* that player is not drawn here */ }
             }
         }
