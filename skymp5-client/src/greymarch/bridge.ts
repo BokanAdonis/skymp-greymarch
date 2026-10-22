@@ -145,6 +145,7 @@ export class GreymarchBridge {
         if (type === "greymarchMenuReply") { this.greymarchMenuToPage("reply", msg); return; }
         if (type === "greymarchShape") { this.greymarchShapeMsg(msg); return; }
         if (type === "greymarchFaceOf") { this.greymarchFaceOf(msg); return; } // another player's face from the emote wheel (gamemode faces.js; put on in greymarchFaceTick)
+        if (type === "greymarchBeast") { this.greymarchBeastFrames(msg); return; } // a server-driven animal moved (gamemode wildlifebrain.js): played by formView (gmPuppetMove)
         if (type === "greymarchShapeAnim") { if (typeof msg.ev === "string" && msg.ev.length < 64 && Number(msg.actor) > 0) (this.greymarchShapeAnimQueue || (this.greymarchShapeAnimQueue = [])).push({ actor: Number(msg.actor), ev: msg.ev }); return; } // another player's creature attacked (played in greymarchShapeDrive) // a creature form (staff): greymarchShapeTick changes the body
         if (type === "greymarchWolfForm") { if (this.greymarchWolfWant !== !!msg.on) this.greymarchLog("wolf: the server says " + (msg.on ? "changed" : "no (change back)")); this.greymarchWolfWant = !!msg.on; if (msg.on) { this.greymarchWolfWordAt = Date.now(); this.greymarchWolfAlpha = !!msg.alpha; this.greymarchWolfPup = !msg.alpha && !!msg.pup; this.greymarchWolfKind = msg.kind && GM_WOLF_FORMS[msg.kind] && msg.kind !== "black" && msg.kind !== "polar" ? String(msg.kind) : this.greymarchWolfAlpha ? "alpha" : this.greymarchWolfPup ? "pup" : ""; this.greymarchWolfBearRace = msg.bear && Number(msg.race) > 0 ? Number(msg.race) >>> 0 : 0; if (this.greymarchWolfBearRace) this.greymarchWolfBearSeen = this.greymarchWolfBearRace; this.greymarchWolfBlack = !!this.greymarchWolfBearRace && !!msg.black; this.greymarchWolfPolar = !!this.greymarchWolfBearRace && !!msg.polar; } return; } // (logged only when it changes: the server repeats it every 5 seconds) // the werewolf form (greymarchWolfTick)
         if (type === "greymarchWolfRoar") { if (Number(msg.actor) > 0) (this.greymarchWolfRoarQueue || (this.greymarchWolfRoarQueue = [])).push({ actor: Number(msg.actor), bear: !!msg.bear }); return; } // another player roared nearby: the sound on their NPC (greymarchWolfTick)
@@ -1724,6 +1725,26 @@ export class GreymarchBridge {
             if (old.passes === 0 && now - old.at >= 600) { if (gone) { try { gone.setAlpha(1, false); } catch (e4) { /* fine */ } } old.passes = 1; }
             else if (old.passes === 1 && now - old.at >= 2500) { if (gone) { try { gone.setAlpha(1, false); } catch (e5) { /* fine */ } } delete applied[key]; }
         }
+    }
+    // SERVER-DRIVEN ANIMALS (gamemode wildlifebrain.js, switch wildlife-brain.on): their frames { f: [[id, x, y, z, heading, speed, anim], ...] } are kept by the
+    // animal's server id in storage["greymarchBeastFrames"], where formView reads them (gmPuppetMove). Old ones are dropped after a minute.
+    greymarchBeastFrames(msg: any): any {
+        try {
+            if (!msg || !Array.isArray(msg.f)) return;
+            const st: any = this.sp.storage as any;
+            const frames: any = st["greymarchBeastFrames"] || (st["greymarchBeastFrames"] = {});
+            const now = Date.now();
+            for (const f of msg.f.slice(0, 200)) {
+                if (!Array.isArray(f) || f.length < 7) continue;
+                const id = Number(f[0]);
+                if (!(id > 0) || ![f[1], f[2], f[3], f[4], f[5]].every((n: any) => typeof n === "number" && isFinite(n))) continue;
+                frames[String(id)] = { pos: [f[1], f[2], f[3]], heading: f[4], speed: f[5], anim: String(f[6]).slice(0, 12), at: now };
+            }
+            if ((this.greymarchBeastSweepAt || 0) < now - 10000) {
+                this.greymarchBeastSweepAt = now;
+                for (const k of Object.keys(frames)) if (now - frames[k].at > 60000) delete frames[k];
+            }
+        } catch (err) { /* a lost frame: the next one comes within a second */ }
     }
     // Combat history: this game reports the hits it is part of (it hit someone, or was hit). The server only records a hit between two players when BOTH games report it.
     greymarchHit(e: any): any {

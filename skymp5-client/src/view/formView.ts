@@ -1,10 +1,11 @@
-import { Actor, ActorBase, Cell, createText, destroyText, Form, FormType, Game, Keyword, NetImmerse, ObjectReference, once, printConsole, setTextColor, setTextPos, setTextSize, setTextString, storage, TESModPlatform, Utility, WorldSpace, worldPointToScreenPoint, writeLogs } from "skyrimPlatform";
+import { Actor, ActorBase, Cell, createText, Debug, destroyText, Form, FormType, Game, Keyword, NetImmerse, ObjectReference, once, printConsole, setTextColor, setTextPos, setTextSize, setTextString, storage, TESModPlatform, Utility, WorldSpace, worldPointToScreenPoint, writeLogs } from "skyrimPlatform";
 import { setDefaultAnimsDisabled, applyAnimation } from "../sync/animation";
 import { Appearance, applyAppearance } from "../sync/appearance";
 import { isBadMenuShown, applyEquipment } from "../sync/equipment";
 import { RespawnNeededError } from "../lib/errors";
 import { FormModel } from "./model";
 import { applyMovement } from "../sync/movementApply";
+import { Movement } from "../sync/movement";
 import { SpawnProcess, gmAbandonedSpawns } from "./spawnProcess";
 import { ObjectReferenceEx } from "../extensions/objectReferenceEx";
 import { PlayerCharacterDataHolder } from "./playerCharacterDataHolder";
@@ -504,7 +505,13 @@ export class FormView {
       Actor.from(refr)?.clearKeepOffsetFromActor();
     }
 
-    if (model.movement) {
+    // GREYMARCH: A SERVER-DRIVEN ANIMAL (gamemode wildlifebrain.js; the server sets the custom property greymarchPuppet). The server decides where it goes and
+    // when it attacks, so this game never hosts it and never lets it fight on its own: it plays the server's frames (gmPuppetMove) the way SkyMP plays another
+    // player's movement (applyMovement: translateTo for the place, keepOffsetFromActor for the walk or run).
+    const gmPuppet = (model as any).greymarchPuppet === true;
+    if (gmPuppet) {
+      if (this.gmPuppetMove(refr, model) === "respawn") return;
+    } else if (model.movement) {
       let ac = Actor.from(refr);
       if (
         this.movState.lastApply &&
@@ -816,6 +823,51 @@ export class FormView {
   private getDefaultAnimState() {
     return { lastNumChanges: 0, useAnimOverrides: true };
   };
+
+  // a server-driven animal: its newest frame from the server, or where the server placed it until the first one comes. "respawn" when it must be made again.
+  private gmPuppetMove(refr: ObjectReference, model: FormModel): string {
+    const ac = Actor.from(refr);
+    if (!ac || !model.movement) return "";
+    if (!this.gmPuppetReady) {
+      this.gmPuppetReady = true;
+      try { ac.setActorValue("Aggression", 0); ac.setActorValue("AttackDamageMult", 0); } catch (e) { /* the server still decides every hit */ } // never a fight of its own, never local damage
+    }
+    try { if (ac.isInCombat()) ac.stopCombat(); } catch (e) { /* next frame */ }
+    const frames = (storage["greymarchBeastFrames"] || {}) as Record<string, { pos: number[]; heading: number; speed: number; anim: string; at: number }>;
+    const f = frames[String(this.remoteRefrId)];
+    const now = Date.now();
+    let m: Movement | null = null;
+    if (!f) {
+      if (this.movState.everApplied) return "";
+      m = model.movement;
+    } else {
+      if (f.at === this.gmPuppetAt && now - this.movState.lastApply < 1000) return "";
+      this.gmPuppetAt = f.at;
+      m = { ...model.movement, pos: [f.pos[0], f.pos[1], f.pos[2]], rot: [0, 0, f.heading], runMode: f.anim === "run" ? "Running" : f.anim === "walk" ? "Walking" : "Standing", direction: 0, speed: f.speed, isInJumpState: false, isSneaking: false, isBlocking: false, isWeapDrawn: false };
+    }
+    this.movState.lastApply = now;
+    try {
+      applyMovement(refr, m as Movement, false);
+      this.movState.everApplied = true;
+    } catch (e) {
+      if (e instanceof RespawnNeededError) {
+        this.lastWorldOrCell = (m as Movement).worldOrCell;
+        this.destroy();
+        this.refrId = 0;
+        this.appearanceBasedBaseId = 0;
+        return "respawn";
+      }
+      throw e;
+    }
+    if (f && f.anim === "attack" && f.at !== this.gmPuppetAttackAt) {
+      this.gmPuppetAttackAt = f.at;
+      try { Debug.sendAnimationEvent(ac, "attackStart"); } catch (e) { /* the server already counted the bite */ }
+    }
+    return "";
+  }
+  private gmPuppetReady = false;
+  private gmPuppetAt = 0;
+  private gmPuppetAttackAt = 0;
 
   private tryHostIfNeed(ac: Actor, remoteId: number) {
     const last = lastTryHost[remoteId];
