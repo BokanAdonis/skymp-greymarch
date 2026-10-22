@@ -59,11 +59,9 @@ export class SpawnProcess {
     if (ac && appearance && !beastLook) {
       applyTints(ac, appearance);
     }
-    // GREYMARCH: A BEAST IS ENABLED WITH ITS AI OFF (2026-10-22); formView.ts turns it on when the beast has settled (GM_BEAST_SETTLE_MS). The engine's own movement
-    // update (Actor::UpdateMovement -> MovementControllerNPC -> animation-driven tweener) runs on every NPC with AI from its first frame and asked the werewolf graph,
-    // still loading, for its clips: a watching game crashed in ClipAddingFunctor on a null clip the second a player was drawn as the beast (2026-10-22 12:27, #HXBA as
-    // the Elder Alpha; 2026-10-21 18:29 #F78D). Holding SkyMP's own movement back (formView.ts) did not stop that update.
-    if (ac && beastLook) { try { ac.enableAI(false); } catch (e) { /* drawn as before */ } }
+    // GREYMARCH: NO AI SWITCHING FOR A BEAST (2026-10-22, v172 to v174, taken out again). A beast enabled with its AI off never started its animations (other players
+    // saw it T-posed in the air) and the watching game crashed in the animation update the moment its AI was switched back on (13:26, #HXBA as the Elder Alpha,
+    // SkyrimSE.exe+0A8C5B8). What stopped the crash at the spawn itself was making it at its spot (formView.ts, gmSpawnedAtSpot).
     refr.enable(false).then(() => this.resurrect(refrId, beastLook));
   }
 

@@ -108,19 +108,13 @@ test("formView.ts: a werewolf form switch rebuilds the NPC only once it has sett
   assert.strictEqual((block.match(/appearanceBasedBaseId = 0/g) || []).length, 1, "no other rebuild in the block");
 });
 
-test("a beast look is enabled with its AI off (the engine's movement update asked the loading werewolf graph for clips and crashed the watching game); a person's look keeps its AI", async () => {
+test("no AI switching for anyone (a beast with its AI off never started its animations, T-posed, and crashed the watching game when it came back on, 2026-10-22 13:26)", async () => {
   await spawn({ raceId: 0xcdd84, headpartIds: [], tints: [] });
-  assert.deepStrictEqual(spawn.calls.filter((c) => c === "ai off" || c === "enable"), ["ai off", "enable"], "AI off before it is enabled");
+  assert.ok(!spawn.calls.some((c) => c.startsWith("ai ")), "a beast: no AI change");
   await spawn({ raceId: 0x13746, headpartIds: [1], tints: [] });
   assert.ok(!spawn.calls.some((c) => c.startsWith("ai ")), "a person: no AI change");
-});
-
-test("formView.ts turns a fresh beast's AI back on once it has settled, and not before", () => {
   const fv = fs.readFileSync(path.join(__dirname, "..", "src", "view", "formView.ts"), "utf8");
-  assert.ok(fv.includes("this.gmBeastAiOff = gmBeastSpawn;"), "marked when the beast is spawned");
-  assert.ok(fv.includes("if (!gmHoldStill && this.gmBeastAiOff) {"), "only when the hold (GM_BEAST_SETTLE_MS) is over");
-  assert.ok(fv.includes("gmAc.enableAI(true)"));
-  assert.ok(fv.includes("if (gmHoldStill && this.gmBeastAiOff) {") && fv.includes("if (gmHeld && gmHeld.isAIEnabled()) { gmHeld.enableAI(false);"), "while held, AI found on is switched off every frame (and the crumbs say so)");
+  assert.ok(!fv.includes("enableAI("), "formView.ts switches no AI");
 });
 
 test("an actor made at its spot (a beast look, formView.ts) is not moved before it is enabled; everything else still is", async () => {
