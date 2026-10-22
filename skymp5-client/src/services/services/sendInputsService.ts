@@ -289,6 +289,11 @@ export class SendInputsService extends ClientListener {
         if (!remoteId) {
           return;
         }
+        // GREYMARCH: a game in staff god mode never runs an NPC's AI (greymarch/bridge.ts sets greymarchNoHost): the NPC would ignore the ghost and every
+        // other player, standing still for all of them (a GM in a dungeon, 2026-10-22). Another game nearby hosts it instead.
+        if ((this.sp.storage as any)["greymarchNoHost"] === true) {
+          return;
+        }
 
         this.controller.emitter.emit("sendMessage", {
             message: {

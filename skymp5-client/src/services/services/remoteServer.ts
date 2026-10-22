@@ -130,6 +130,7 @@ export class RemoteServer extends ClientListener {
   private onHostStartMessage(event: ConnectionMessage<HostStartMessage>) {
     const msg = event.message;
     const target = msg.target;
+    if ((storage as any)["greymarchNoHost"] === true) return; // GREYMARCH: staff god mode hosts no NPC (see sendInputsService.ts sendHostAttempts)
 
     let hosted = storage['hosted'];
     if (typeof hosted !== typeof []) {
