@@ -24,6 +24,10 @@ const gmAbandon = (refrId: number): boolean => {
   return true;
 };
 
+// GREYMARCH: actors formView.ts made at their spot already (a beast look, 2026-10-22): no setPosition before they are enabled, so the engine's movement tweener
+// has no move to ease them through while their werewolf graph is still loading (see formView.ts, "A BEAST LOOK IS ALSO MADE AT ITS SPOT").
+export const gmSpawnedAtSpot = new Set<number>();
+
 export class SpawnProcess {
   constructor(
     appearance: Appearance | null,
@@ -36,6 +40,7 @@ export class SpawnProcess {
       return;
     }
 
+    if (gmSpawnedAtSpot.delete(refrId)) { this.enable(appearance, refrId); return; } // GREYMARCH: made at its spot: not moved
     refr.setPosition(...pos).then(() => this.enable(appearance, refrId));
   }
 

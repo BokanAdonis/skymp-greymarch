@@ -6,7 +6,7 @@ import { RespawnNeededError } from "../lib/errors";
 import { FormModel } from "./model";
 import { applyMovement } from "../sync/movementApply";
 import { Movement } from "../sync/movement";
-import { SpawnProcess, gmAbandonedSpawns } from "./spawnProcess";
+import { SpawnProcess, gmAbandonedSpawns, gmSpawnedAtSpot } from "./spawnProcess";
 import { ObjectReferenceEx } from "../extensions/objectReferenceEx";
 import { PlayerCharacterDataHolder } from "./playerCharacterDataHolder";
 import { getMovement } from "../sync/movementGet";
@@ -208,6 +208,7 @@ export class FormView {
         // then moved away, an animal walked (or was moved by the engine) back onto the player who first saw it (horkers in the College of Winterhold,
         // 2026-10-19). So a hidden marker is put on the spot first (TESModPlatform.moveRefrToPosition is not latent) and the creature is made there.
         const isServerCreature = (baseForm: Form) => baseForm.getType() === FormType.NPC && !model.appearance;
+        const gmBeastLookNow = !!model.appearance && !(Array.isArray(model.appearance.headpartIds) && model.appearance.headpartIds.length > 0); // a werewolf or werebear look
         const spawnAtSpot = (baseForm: Form, pos: [number, number, number], rot: [number, number, number]): ObjectReference | null => {
           try {
             const worldOrCell = model.movement ? model.movement.worldOrCell : 0;
@@ -230,6 +231,15 @@ export class FormView {
             if (isServerCreature(baseForm)) {
               const atSpot = spawnAtSpot(baseForm, spawnPosition, spawnRotation);
               if (atSpot) return atSpot;
+            }
+            // GREYMARCH: A BEAST LOOK IS ALSO MADE AT ITS SPOT (2026-10-22), and is not moved after (spawnProcess.ts skips its setPosition). Made at the watching
+            // player and then moved, the werewolf's first movement update was the engine's movement tweener easing it into its new place; a werewolf's
+            // movement comes from its animations (MovementTweenerAgentAnimationDriven), so the tweener asked the graph, still loading, for its clips and the
+            // watching game crashed on a null clip (ClipAddingFunctor) the second the player was drawn as the beast: 3 of 3 times on one staff game on
+            // 2026-10-22 (#HXBA as the Elder Alpha, 12:27, 12:43, 12:53). If the spot cannot be used it is made at the player as before.
+            if (gmBeastLookNow) {
+              const atSpot = spawnAtSpot(baseForm, spawnPosition, spawnRotation);
+              if (atSpot) { gmSpawnedAtSpot.add(atSpot.getFormID()); gmCrumb("at spot " + gmHex(atSpot.getFormID()) + " beast"); return atSpot; }
             }
             return player.placeAtMe(
               baseForm,

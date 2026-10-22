@@ -12,7 +12,7 @@ const js = ts.transpileModule(src, { compilerOptions: { module: ts.ModuleKind.Co
 
 async function spawn(appearance) {
   const tinted = [], resurrected = [];
-  const refr = { getFormID: () => 0xff000ac8, setPosition: () => Promise.resolve(), enable: () => { (spawn.calls || (spawn.calls = [])).push("enable"); return Promise.resolve(); }, disable: () => { spawn.calls.push("disable"); return Promise.resolve(); }, delete: () => spawn.calls.push("delete"), getBaseObject: () => ({}) , setMotionType: () => Promise.resolve() };
+  const refr = { getFormID: () => 0xff000ac8, setPosition: () => { (spawn.calls || (spawn.calls = [])).push("setPosition"); return Promise.resolve(); }, enable: () => { (spawn.calls || (spawn.calls = [])).push("enable"); return Promise.resolve(); }, disable: () => { spawn.calls.push("disable"); return Promise.resolve(); }, delete: () => spawn.calls.push("delete"), getBaseObject: () => ({}) , setMotionType: () => Promise.resolve() };
   const actor = { resurrect: () => { resurrected.push(appearance); return Promise.resolve(); }, enableAI: (on) => spawn.calls.push("ai " + (on ? "on" : "off")) };
   const mods = {
     skyrimPlatform: { ObjectReference: { from: () => refr }, Game: { getFormEx: () => refr }, Actor: { from: () => actor }, MotionType: { Keyframed: 4 } },
@@ -24,6 +24,7 @@ async function spawn(appearance) {
   new Function("require", "exports", "module", js)((p) => mods[p], mod.exports, mod);
   let done; const finished = new Promise((r) => { done = r; });
   spawn.calls = []; spawn.mod = mod;
+  if (spawn.atSpot) { mod.exports.gmSpawnedAtSpot.add(0xff000ac8); spawn.atSpot = false; }
   if (spawn.abandonBefore) { mod.exports.gmAbandonedSpawns.set(0xff000ac8, () => spawn.calls.push("unprotect")); spawn.abandonBefore = false; new mod.exports.SpawnProcess(appearance, [0, 0, 0], 0xff000ac8, () => spawn.calls.push("callback")); await new Promise((r) => setTimeout(r, 20)); return tinted; }
   new mod.exports.SpawnProcess(appearance, [0, 0, 0], 0xff000ac8, () => done());
   await finished;
@@ -83,7 +84,7 @@ test("crash breadcrumbs: formView.ts writes a flushed line before each risky ste
 test("a spawn its FormView removed midway is never enabled: the spawn disables and deletes it itself, drops the protection after, and does not call back (the damageable 'clone' others saw)", async () => {
   spawn.abandonBefore = true;
   await spawn({ raceId: 0x13746, headpartIds: [1], tints: [] });
-  assert.deepStrictEqual(spawn.calls, ["disable", "delete", "unprotect"]);
+  assert.deepStrictEqual(spawn.calls.filter((c) => c !== "setPosition"), ["disable", "delete", "unprotect"]);
   assert.ok(!spawn.calls.includes("enable") && !spawn.calls.includes("callback"));
   await spawn({ raceId: 0x13746, headpartIds: [1], tints: [] });
   assert.ok(spawn.calls.includes("enable"), "the next spawn of the same id is normal again");
@@ -120,6 +121,24 @@ test("formView.ts turns a fresh beast's AI back on once it has settled, and not 
   assert.ok(fv.includes("if (!gmHoldStill && this.gmBeastAiOff) {"), "only when the hold (GM_BEAST_SETTLE_MS) is over");
   assert.ok(fv.includes("gmAc.enableAI(true)"));
   assert.ok(fv.includes("if (gmHoldStill && this.gmBeastAiOff) {") && fv.includes("if (gmHeld && gmHeld.isAIEnabled()) { gmHeld.enableAI(false);"), "while held, AI found on is switched off every frame (and the crumbs say so)");
+});
+
+test("an actor made at its spot (a beast look, formView.ts) is not moved before it is enabled; everything else still is", async () => {
+  spawn.atSpot = true;
+  await spawn({ raceId: 0xcdd84, headpartIds: [], tints: [] });
+  assert.ok(!spawn.calls.includes("setPosition"), "at its spot: no setPosition, so the engine's tweener has no move to ease");
+  assert.ok(spawn.calls.includes("enable"));
+  assert.strictEqual(spawn.mod.exports.gmSpawnedAtSpot.size, 0, "the mark is used once");
+  await spawn({ raceId: 0xcdd84, headpartIds: [], tints: [] });
+  assert.ok(spawn.calls.indexOf("setPosition") >= 0 && spawn.calls.indexOf("setPosition") < spawn.calls.indexOf("enable"), "not made at its spot: moved first, as before");
+});
+
+test("formView.ts makes a beast look at its spot (the hidden marker) and falls back to the player", () => {
+  const fv = fs.readFileSync(path.join(__dirname, "..", "src", "view", "formView.ts"), "utf8");
+  assert.ok(fv.includes("const gmBeastLookNow = !!model.appearance && !(Array.isArray(model.appearance.headpartIds) && model.appearance.headpartIds.length > 0);"));
+  assert.ok(fv.includes("if (gmBeastLookNow) {") && fv.includes("if (atSpot) { gmSpawnedAtSpot.add(atSpot.getFormID());"), "marked for spawnProcess.ts");
+  const i = fv.indexOf("if (gmBeastLookNow) {"), j = fv.indexOf("return player.placeAtMe(", i);
+  assert.ok(i > 0 && j > i, "the player is still the fallback");
 });
 
 test("no look (SkyMP's own NPCs) is spawned as before", async () => {
