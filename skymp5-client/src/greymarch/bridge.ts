@@ -146,6 +146,7 @@ export class GreymarchBridge {
         if (type === "greymarchMenuReply") { this.greymarchMenuToPage("reply", msg); return; }
         if (type === "greymarchShape") { this.greymarchShapeMsg(msg); return; }
         if (type === "greymarchStagger") { if (Number(msg.actor) > 0) (this.greymarchStaggerQueue || (this.greymarchStaggerQueue = [])).push({ actor: Number(msg.actor), self: msg.self === true }); return; } // a starving character staggers (gamemode hunger.js; played in greymarchHungerDrive, for everyone near)
+        if (type === "greymarchHunger") { this.greymarchHudToPage("hunger", { stage: String(msg.stage || "fed") }); return; } // the hunger bowl on the HUD (right, level with the voice display; gamemode hunger.js)
         if (type === "greymarchHungerFx") { this.greymarchHungerRegen = msg.regen !== false; return; } // starving: no health or stamina regeneration (greymarchHungerDrive)
         if (type === "greymarchFaceOf") { this.greymarchFaceOf(msg); return; } // another player's face from the emote wheel (gamemode faces.js; put on in greymarchFaceTick)
         if (type === "greymarchBeast") { this.greymarchBeastFrames(msg); return; } // a server-driven animal moved (gamemode wildlifebrain.js): played by formView (gmPuppetMove)

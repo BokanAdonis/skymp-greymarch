@@ -24,3 +24,8 @@ test("regeneration: HealRate and StaminaRate to 0 while starving, put back after
   assert.match(src, /player\.setActorValue\("HealRate", 0\); player\.setActorValue\("StaminaRate", 0\);/);
   assert.match(src, /player\.setActorValue\("HealRate", Number\.isFinite\(saved\.heal\)/);
 });
+
+test("the hunger bowl: greymarchHunger is let through and handed to the HUD page", () => {
+  assert.match(auth, /case 'greymarchHunger':/);
+  assert.match(src, /if \(type === "greymarchHunger"\) \{ this\.greymarchHudToPage\("hunger", \{ stage: String\(msg\.stage \|\| "fed"\) \}\); return; \}/);
+});
