@@ -16,6 +16,11 @@ import { SpApiInteractor } from "../services/spApiInteractor";
 import { WorldCleanerService } from "../services/services/worldCleanerService";
 import { GamemodeUpdateService } from "../services/services/gamemodeUpdateService";
 
+// GREYMARCH: how long a freshly built beast (a werewolf or werebear look) is left alone: no movement, no animation, no gear (see update()); and how long a
+// new werewolf form (__gmWolfRace) must stay the same before the NPC is built again with it
+const GM_BEAST_SETTLE_MS = 6000;
+const GM_WOLF_RACE_SETTLE_MS = 4000;
+
 // GREYMARCH: CRASH BREADCRUMBS (2026-10-20). One line in Data\Platform\Logs\greymarch-crumbs-logs.txt just BEFORE each step that touches another player's or a creature's
 // NPC in a way that has crashed games (spawning, removing, a model refresh, gear, an idle or a beast's animation). Every line is flushed (SkyrimPlatform's writeLogs ends
 // it with std::endl), so after a crash the last lines say what this game was doing. The launcher keeps the previous session's file and puts both in the support file.
@@ -129,10 +134,21 @@ export class FormView {
       const ap: any = this.appearanceState.appearance;
       if (gmMap && ap && !(Array.isArray(ap.headpartIds) && ap.headpartIds.length > 0)) gmWolfRace = Number(gmMap[this.getRemoteRefrId()]) || 0;
     } catch (gmErr) { gmWolfRace = 0; }
+    // GREYMARCH: A FORM SWITCH WAITS UNTIL IT SETTLES (2026-10-22). Every new race meant throwing this NPC away and building it again, and staff clicking through the
+    // forms (Frost Wolf, Rabid Wolf, ...) did that on every watching game several times in a row; a beast built that soon after the last crashed a watching game in
+    // its clip handling (2026-10-21 18:29, #F78D, ClipAddingFunctor under MovementControllerNPC). A new race is taken at once only when the body is being built
+    // anyway (its look just changed, e.g. human to werewolf: one build with the right race); otherwise only when it has stayed the same for GM_WOLF_RACE_SETTLE_MS
+    // and the last build has settled (GM_BEAST_SETTLE_MS).
     if (gmWolfRace !== this.gmWolfRace) {
-      this.gmWolfRace = gmWolfRace;
-      this.appearanceBasedBaseId = 0; // built again, so the body is respawned with the variant's race
-    }
+      if (gmWolfRace !== this.gmWolfRacePending) { this.gmWolfRacePending = gmWolfRace; this.gmWolfRacePendingAt = Date.now(); }
+      const gmBuildingAnyway = this.appearanceBasedBaseId === 0;
+      const gmSettled = Date.now() - this.gmWolfRacePendingAt >= GM_WOLF_RACE_SETTLE_MS && !(this.gmSpawnedBeast && Date.now() - this.spawnMoment < GM_BEAST_SETTLE_MS);
+      if (gmBuildingAnyway || gmSettled) {
+        gmCrumb("race " + gmHex(this.getRemoteRefrId() || 0) + " -> " + gmHex(gmWolfRace) + (gmBuildingAnyway ? " (with the new look)" : " (settled)"));
+        this.gmWolfRace = gmWolfRace;
+        this.appearanceBasedBaseId = 0; // built again, so the body is respawned with the variant's race
+      }
+    } else this.gmWolfRacePending = gmWolfRace;
 
     const refId =
       model.refrId && model.refrId < 0xff000000 ? model.refrId : undefined;
@@ -504,11 +520,11 @@ export class FormView {
         }
       }
 
-      // GREYMARCH: A FRESH BEAST STANDS STILL FOR ITS FIRST 3 SECONDS (2026-10-21). SkyMP moves an NPC (keepOffsetFromActor, translateTo) from the frame it is
+      // GREYMARCH: A FRESH BEAST STANDS STILL FOR ITS FIRST GM_BEAST_SETTLE_MS (2026-10-21: 3 seconds; 6 since 2026-10-22, a crash at the same step 18:29). SkyMP moves an NPC (keepOffsetFromActor, translateTo) from the frame it is
       // spawned; for a beast that started the movement controller's animation-driven motion while the werewolf graph was still initialising, and the watching game
       // crashed in its clip handling (MovementControllerNPC -> MovementTweenerAgentAnimationDriven -> ClipAddingFunctor, SkyrimSE.exe+0ADE8BD / +0C28F84; #GNQS as a
       // polar bear, 2026-10-21 05:46). It stays where it was placed; SkyMP's movement applies after that (the next change, or its 2-second repeat).
-      const gmHoldStill = this.gmSpawnedBeast && Date.now() - this.spawnMoment < 3000;
+      const gmHoldStill = this.gmSpawnedBeast && Date.now() - this.spawnMoment < GM_BEAST_SETTLE_MS;
       if (gmHoldStill && !this.gmHeldSaid) { this.gmHeldSaid = true; gmCrumb("hold still " + gmHex(refr.getFormID()) + " beast (fresh)"); }
       if (!gmHoldStill) this.gmHeldSaid = false;
       if (
@@ -583,7 +599,7 @@ export class FormView {
     if (refr.is3DLoaded()) {
       if (model.animation) {
         // and never a howl on a beast: played into a remote beast's graph without the howl shout behind it, "WW Howl.hkx" crashed the watching game (2026-10-19 #SZGE)
-        if (gmBeastLook && (this.animState.useAnimOverrides || Date.now() - this.spawnMoment < 3000 || String(model.animation.animEventName || "").toLowerCase().startsWith("howl") || /^skympfake/i.test(String(model.animation.animEventName || "")))) this.animState.lastNumChanges = model.animation.numChanges; // and never SkyMP's equip / unequip (it draws the weapon: see "NO WEAPON DRAW" above)
+        if (gmBeastLook && (this.animState.useAnimOverrides || Date.now() - this.spawnMoment < GM_BEAST_SETTLE_MS || String(model.animation.animEventName || "").toLowerCase().startsWith("howl") || /^skympfake/i.test(String(model.animation.animEventName || "")))) this.animState.lastNumChanges = model.animation.numChanges; // and never SkyMP's equip / unequip (it draws the weapon: see "NO WEAPON DRAW" above)
         else {
           if (this.animState.lastNumChanges !== model.animation.numChanges && (gmBeastLook || /^idle/i.test(String(model.animation.animEventName || "")))) gmCrumb("anim " + gmHex(refr.getFormID()) + " " + String(model.animation.animEventName).slice(0, 40) + (gmBeastLook ? " beast" : ""));
           applyAnimation(refr, model.animation, this.animState);
@@ -651,7 +667,7 @@ export class FormView {
           Date.now() - this.eqState.lastEqMoment > 500 &&
           Date.now() - this.spawnMoment > -1 &&
           this.spawnMoment > 0 &&
-          (!gmBeastLook || Date.now() - this.spawnMoment > 3000)
+          (!gmBeastLook || Date.now() - this.spawnMoment > GM_BEAST_SETTLE_MS)
         ) {
           //if (this.spawnMoment > 0 && Date.now() - this.spawnMoment > 5000) {
           gmCrumb("gear " + gmHex(ac.getFormID()) + (gmBeastLook ? " beast" : ""));
@@ -845,6 +861,8 @@ export class FormView {
   private spawnMoment = 0;
   private gmSpawnedBeast = false;
   private gmHeldSaid = false;
+  private gmWolfRacePending = 0; // GREYMARCH: a new race from __gmWolfRace not built yet, and since when (see the settle rule)
+  private gmWolfRacePendingAt = 0;
   private gmSpawningId = 0; // GREYMARCH: the actor this view is spawning right now (0: none); see destroy() // GREYMARCH: the "hold still" breadcrumb was written for this spawn // GREYMARCH: this NPC was spawned with a beast look (destroy() disables it before the delete)
   private wasHostedByOther: boolean | undefined = undefined;
   private state = {};
