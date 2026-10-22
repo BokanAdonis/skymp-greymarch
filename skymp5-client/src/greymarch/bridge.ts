@@ -88,6 +88,7 @@ export class GreymarchBridge {
         try { this.controller.on("effectStart", (e: any) => { try { if (e && e.effect && e.effect.getFormID() === 0x92c45 && e.target && e.target.getFormID() === 0x14) this.greymarchWolfSignal("effectStart"); } catch (x) { /* not ours */ } }); } catch (esErr) { /* the other signals still see it */ }
         try { this.controller.on("magicEffectApply", (e: any) => { try { if (e && e.effect && e.effect.getFormID() === 0x92c45 && e.target && e.target.getFormID() === 0x14) this.greymarchWolfSignal("magicEffectApply"); } catch (x) { /* not ours */ } }); } catch (maErr) { /* the other signals still see it */ }
         try { this.controller.on("spellCast", (e: any) => { try { if (e && e.spell && e.caster && e.caster.getFormID() === 0x14) this.greymarchVampSignal("cast", e.spell.getFormID()); } catch (x) { /* not ours */ } }); } catch (vcErr) { /* no cast events: the powers are not reported */ } // a vampire's Mist Form or Vampire Lord (greymarchVampTick)
+        try { this.controller.on("spellCast", (e: any) => { try { if (e && e.spell && e.caster && e.caster.getFormID() === 0x14) this.greymarchCastSend(e.spell.getFormID()); } catch (x) { /* not ours */ } }); } catch (hcErr) { /* no cast events: healing spells are not reported */ } // every cast of the player's own spells goes to the server, which applies the healing ones (healing.js); it never applies spell effects itself
         try { this.controller.on("magicEffectApply", (e: any) => { try { if (e && e.effect && e.target && e.target.getFormID() === 0x14) this.greymarchVampSignal("effect", e.effect.getFormID()); } catch (x) { /* not ours */ } }); } catch (veErr) { /* no effect events: a Potion of Blood is not reported */ } // a Potion of Blood drunk
         try { this.controller.on("equip", (e: any) => { try { if (e && e.baseObj && e.actor && e.actor.getFormID() === 0x14) this.greymarchVampSignal("equip", e.baseObj.getFormID()); } catch (x) { /* not ours */ } }); } catch (vqErr) { /* the effect event still sees it */ } // a potion is "equipped" when it is drunk
         this.controller.emitter.on("greymarchStage", (text: string) => this.greymarchLog(text)); // other services report where the game is, for the server log
@@ -886,6 +887,11 @@ export class GreymarchBridge {
         if (said[localId] === result) return;
         said[localId] = result;
         this.greymarchVampSend({ op: "fangs", actor: actor, self: localId === 0x14, result: result, detail: detail || "" });
+    }
+    // a spell the player cast: the server heals for the healing ones once it has seen the magicka spent (gamemode healing.js)
+    greymarchCastSend(spell: number): any {
+        var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchCast", spell: spell >>> 0 }) };
+        this.controller.emitter.emit("sendMessage", { message: message, reliability: "reliable" });
     }
     greymarchVampSend(msg: any): any {
         var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify(Object.assign({ customPacketType: "greymarchVamp" }, msg)) };
