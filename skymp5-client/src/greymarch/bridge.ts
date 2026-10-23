@@ -1158,8 +1158,63 @@ export class GreymarchBridge {
         }
         this.greymarchChainsDraw(now);
     }
-    // the chains on the HUD: each end where the hand is on screen (0..1 from the top left), about 30 times a second while one is in sight; nothing is sent while nothing changes
+    // THE CHAIN IN THE WORLD (since 2026-10-23; before, a line drawn on the HUD). Pieces of Skyrim's own iron chain (GreymarchCore.esp GM_PrisonerChain 0x878, the
+    // model tools/chain-link.js cuts from the ship's anchor chain: 34 units long along +Y, no collision) are placed in this game only and laid end to end, every
+    // frame, from the prisoner's right hand to the holder's left hand along a sagging curve: the chain is CHAIN_SLACK longer than the gap (at least CHAIN_EXTRA),
+    // so it hangs by about sqrt(3 * gap * (length - gap) / 8) in the middle. Without the record (old game files) the HUD line is drawn as before.
+    greymarchChain3D(now: number): boolean {
+        var sp = this.sp, self = this;
+        if (this.greymarchChainBase === undefined) { try { this.greymarchChainBase = sp.Game.getFormFromFile(0x878, "GreymarchCore.esp") || null; } catch (e) { this.greymarchChainBase = null; } }
+        var base = this.greymarchChainBase;
+        if (!base) return false;
+        var PIECE = 34, CHAIN_SLACK = 1.15, CHAIN_EXTRA = 40, MAX_PIECES = 40;
+        var pools = this.greymarchChainPools || (this.greymarchChainPools = {});
+        var list = this.greymarchChainList || [], seen: any = {};
+        var player = sp.Game.getPlayer();
+        var refOf = function (id: number) { if (self.greymarchMeActor && id === self.greymarchMeActor) return player; var l = misc.remoteIdToLocalId(id); return l ? sp.Actor.from(sp.Game.getFormEx(l)) : null; };
+        var hand = function (a: any, node: string) {
+            var q = [sp.NetImmerse.getNodeWorldPositionX(a, node, false), sp.NetImmerse.getNodeWorldPositionY(a, node, false), sp.NetImmerse.getNodeWorldPositionZ(a, node, false)];
+            if (!q.every(function (n: any) { return isFinite(n); }) || (q[0] === 0 && q[1] === 0 && q[2] === 0)) q = [a.getPositionX(), a.getPositionY(), a.getPositionZ() + 90];
+            return q;
+        };
+        for (var i = 0; i < list.length; i++) {
+            var key = String(list[i].from) + ">" + String(list[i].to);
+            try {
+                var a = refOf(Number(list[i].from)), b = refOf(Number(list[i].to));
+                if (!a || !b || !a.is3DLoaded() || !b.is3DLoaded() || (player.getDistance(a) > 6000 && player.getDistance(b) > 6000)) continue;
+                var A = hand(a, "NPC R Hand [RHnd]"), B = hand(b, "NPC L Hand [LHnd]");
+                var gap = Math.hypot(B[0] - A[0], B[1] - A[1], B[2] - A[2]);
+                if (!(gap > 1) || gap > PIECE * MAX_PIECES) continue;
+                seen[key] = true;
+                var pool = pools[key] || (pools[key] = { refs: [], at: "" });
+                var sig = A.concat(B).map(function (n: number) { return Math.round(n / 2); }).join(",");
+                if (sig === pool.at) continue; // nothing moved
+                pool.at = sig;
+                var length = Math.max(gap * CHAIN_SLACK, gap + CHAIN_EXTRA);
+                var sag = Math.sqrt(3 * gap * (length - gap) / 8);
+                var n = Math.min(MAX_PIECES, Math.max(1, Math.ceil(length / PIECE)));
+                var at = function (t: number) { return [A[0] + (B[0] - A[0]) * t, A[1] + (B[1] - A[1]) * t, A[2] + (B[2] - A[2]) * t - sag * 4 * t * (1 - t)]; };
+                while (pool.refs.length < n) { var r = player.placeAtMe(base, 1, false, false); if (!r) break; pool.refs.push(r); }
+                while (pool.refs.length > n) { var old = pool.refs.pop(); try { old.disable(false); old.delete(); } catch (dErr) { /* gone */ } }
+                for (var k = 0; k < pool.refs.length; k++) {
+                    var p0 = at(k / n), p1 = at((k + 1) / n);
+                    var dx = p1[0] - p0[0], dy = p1[1] - p0[1], dz = p1[2] - p0[2];
+                    var heading = Math.atan2(dx, dy) * 180 / Math.PI, pitch = -Math.atan2(dz, Math.hypot(dx, dy)) * 180 / Math.PI; // +Y of the piece along the chain (X angle: positive tips it down)
+                    pool.refs[k].setPosition(p0[0], p0[1], p0[2]);
+                    pool.refs[k].setAngle(pitch, 0, heading);
+                }
+            } catch (err) { if (pools[key]) { for (var x = 0; x < pools[key].refs.length; x++) { try { pools[key].refs[x].delete(); } catch (xErr) { /* gone */ } } delete pools[key]; } } // a piece went with a cell change: built again next frame
+        }
+        for (var key2 in pools) {
+            if (seen[key2]) continue;
+            for (var j = 0; j < pools[key2].refs.length; j++) { try { pools[key2].refs[j].disable(false); pools[key2].refs[j].delete(); } catch (dErr2) { /* gone */ } }
+            delete pools[key2];
+        }
+        return true;
+    }
+    // the chains on the HUD (only without the chain record): each end where the hand is on screen (0..1 from the top left), about 30 times a second while one is in sight
     greymarchChainsDraw(now: number): any {
+        if (this.greymarchChain3D(now)) { if (this.greymarchChainsShown) { this.greymarchChainsKey = "[]"; this.greymarchChainsShown = false; this.greymarchGuardsHudCheck(); this.greymarchHudToPage("chains", { list: [] }); } return; }
         var list = this.greymarchChainList || [], out = [];
         if (list.length) {
             if (now < (this.greymarchChainsNext || 0)) return;
