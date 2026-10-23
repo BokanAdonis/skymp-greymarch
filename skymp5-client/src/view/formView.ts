@@ -12,7 +12,8 @@ import { PlayerCharacterDataHolder } from "./playerCharacterDataHolder";
 import { getMovement } from "../sync/movementGet";
 import { lastTryHost, tryHost } from "./hostAttempts";
 import { ModelApplyUtils } from "./modelApplyUtils";
-import { localIdToRemoteId } from "./worldViewMisc";
+import { localIdToRemoteId, getViewFromStorage } from "./worldViewMisc";
+import { CHECK_EVERY_MS as GM_HOST_CHECK_MS, shouldRelease, pickTarget, markReleased, isReleased, withoutHosted } from "../greymarch/npcHosting";
 import { SpApiInteractor } from "../services/spApiInteractor";
 import { WorldCleanerService } from "../services/services/worldCleanerService";
 import { GamemodeUpdateService } from "../services/services/gamemodeUpdateService";
@@ -510,6 +511,13 @@ export class FormView {
         alreadyHosted = true;
       }
     }
+    // GREYMARCH: hosting follows the players (greymarch/npcHosting.ts): once a second, an NPC this game runs is handed on to a clearly closer player, or made to
+    // fight another player it detects while it fights nobody
+    this.gmIsPlayerLook = !!model.appearance && (model as any).greymarchPuppet !== true;
+    if (alreadyHosted && refr.is3DLoaded() && Date.now() - this.gmHostCheckAt >= GM_HOST_CHECK_MS) {
+      this.gmHostCheckAt = Date.now();
+      if (this.gmHostedTick(refr) === "released") alreadyHosted = false;
+    }
     setDefaultAnimsDisabled(this.refrId, alreadyHosted ? false : true);
 
     if (alreadyHosted) {
@@ -894,11 +902,52 @@ export class FormView {
     }
     return "";
   }
+  // GREYMARCH: an NPC this game hosts, checked once a second (greymarch/npcHosting.ts). "released" when it was handed on.
+  private gmHostedTick(refr: ObjectReference): string {
+    try {
+      const npc = Actor.from(refr);
+      const me = Game.getPlayer();
+      if (!npc || !me || npc.isDead()) return "";
+      const placeOf = (a: Actor): number => { const w = a.getWorldSpace() || a.getParentCell(); return w ? w.getFormID() : 0; };
+      const myPlace = placeOf(me);
+      const others: Actor[] = [];
+      const arr = getViewFromStorage()?.getFormViews();
+      const n = arr ? arr.getFormViewsArrayLength() : 0;
+      for (let i = 0; i < n; i++) {
+        const fv = arr!.getNthFormView(i);
+        if (!fv || fv === this || !fv.gmIsPlayerLook) continue;
+        const ac = Actor.from(Game.getFormEx(fv.getLocalRefrId()));
+        if (!ac || ac.isDead() || !ac.is3DLoaded() || placeOf(ac) !== myPlace) continue;
+        others.push(ac);
+      }
+      if (!others.length) return "";
+      const remoteId = this.remoteRefrId as number;
+      const dMe = npc.getDistance(me);
+      const dist = others.map((o) => npc.getDistance(o));
+      if (shouldRelease(dMe, dist)) {
+        storage["hosted"] = withoutHosted(storage["hosted"], remoteId);
+        markReleased(remoteId, Date.now());
+        gmCrumb("handoff " + gmHex(remoteId) + ": a player is " + Math.round(Math.min(...dist)) + " away, mine " + Math.round(dMe));
+        return "released";
+      }
+      if (npc.getCombatState() === 0 && npc.isHostileToActor(me)) {
+        const pick = pickTarget(others.map((o, k) => ({ d: dist[k], detected: o.isDetectedBy(npc) })));
+        if (pick >= 0) {
+          npc.startCombat(others[pick]);
+          gmCrumb("engage " + gmHex(remoteId) + " -> " + gmHex(others[pick].getFormID()) + " at " + Math.round(dist[pick]));
+        }
+      }
+    } catch (e) { /* the NPC stays as it is */ }
+    return "";
+  }
+  public gmIsPlayerLook = false; // GREYMARCH: this view draws a player (another player's character), not an NPC
+  private gmHostCheckAt = 0;
   private gmPuppetReady = false;
   private gmPuppetAt = 0;
   private gmPuppetAttackAt = 0;
 
   private tryHostIfNeed(ac: Actor, remoteId: number) {
+    if (isReleased(remoteId, Date.now())) return false; // GREYMARCH: this game handed it to a closer player a moment ago (greymarch/npcHosting.ts)
     const last = lastTryHost[remoteId];
     if (!last || Date.now() - last >= 1000) {
       lastTryHost[remoteId] = Date.now();

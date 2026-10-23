@@ -704,7 +704,7 @@ void ActionListener::OnHostAttempt(const RawMessageData& rawMsgData,
   if (hoster == 0 || !lastRemoteUpdate ||
       std::chrono::system_clock::now() - *lastRemoteUpdate >
         hostResetTimeout) {
-    partOne.GetLogger().info("Hoster changed from {0:x} to {0:x}", prevHoster,
+    partOne.GetLogger().info("Hoster changed from {0:x} to {1:x}", prevHoster,
                              me->GetFormId());
     hoster = me->GetFormId();
     remote.UpdateHoster(hoster);

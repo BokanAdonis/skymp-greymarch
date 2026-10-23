@@ -1,0 +1,54 @@
+"use strict";
+// NPC hosting that follows the players (src/greymarch/npcHosting.ts and its use in src/view/formView.ts): the host's game hands an NPC to a clearly closer player,
+// does not ask for it back for a while, and makes a hostile NPC that fights nobody go for another player it detects (2026-10-23: dungeon NPCs stood still).
+const test = require("node:test");
+const assert = require("node:assert");
+const fs = require("node:fs");
+const path = require("node:path");
+const ts = require("typescript");
+
+const src = fs.readFileSync(path.join(__dirname, "..", "src", "greymarch", "npcHosting.ts"), "utf8");
+const js = ts.transpileModule(src, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2019 } }).outputText;
+const mod = { exports: {} };
+new Function("require", "exports", "module", js)(() => ({}), mod.exports, mod);
+const H = mod.exports;
+const formView = fs.readFileSync(path.join(__dirname, "..", "src", "view", "formView.ts"), "utf8");
+
+test("hand-off: only when the host's player is far AND another player is clearly closer", () => {
+  assert.strictEqual(H.shouldRelease(4000, [500]), true, "the newcomer is next to it, the host across the dungeon");
+  assert.strictEqual(H.shouldRelease(1200, [100]), false, "the host's player is still close: it keeps it");
+  assert.strictEqual(H.shouldRelease(2000, [1600]), false, "not clearly closer (a margin, so two players at a similar distance do not pass it back and forth)");
+  assert.strictEqual(H.shouldRelease(2000, [1300]), true);
+  assert.strictEqual(H.shouldRelease(5000, []), false, "nobody else: it stays");
+  assert.strictEqual(H.shouldRelease(5000, [NaN, Infinity]), false);
+  assert.strictEqual(H.shouldRelease(NaN, [10]), false);
+});
+
+test("a game that let an NPC go does not ask for it again for 8 s; the hosted list loses both spellings of its id", () => {
+  H.markReleased(0xff000123, 1000);
+  assert.strictEqual(H.isReleased(0xff000123, 1000 + 7999), true);
+  assert.strictEqual(H.isReleased(0xff000123, 1000 + 8000), false);
+  assert.strictEqual(H.isReleased(0xff000123, 1000 + 100), false, "forgotten once it ran out");
+  assert.deepStrictEqual(H.withoutHosted([0xff000123, 5, 0x100012345], 0xff000123), [5, 0x100012345]);
+  assert.deepStrictEqual(H.withoutHosted([0x12345 + 0x100000000, 7], 0x12345), [7], "a game record's NPC is kept as id + 0x100000000");
+  assert.deepStrictEqual(H.withoutHosted(undefined, 1), []);
+});
+
+test("a hostile NPC fighting nobody goes for the nearest other player it DETECTS, within reach", () => {
+  assert.strictEqual(H.pickTarget([{ d: 900, detected: true }, { d: 400, detected: true }]), 1);
+  assert.strictEqual(H.pickTarget([{ d: 400, detected: false }, { d: 900, detected: true }]), 1, "a sneaking player it has not noticed is left alone");
+  assert.strictEqual(H.pickTarget([{ d: 4000, detected: true }]), -1, "too far");
+  assert.strictEqual(H.pickTarget([]), -1);
+});
+
+test("formView: the check runs once a second for NPCs this game hosts; a released NPC is no longer treated as hosted; tryHostIfNeed respects the release", () => {
+  const upd = formView.slice(formView.indexOf("this.gmIsPlayerLook = !!model.appearance"), formView.indexOf("setDefaultAnimsDisabled(this.refrId, alreadyHosted ? false : true);"));
+  assert.ok(upd.includes("alreadyHosted && refr.is3DLoaded()") && upd.includes("GM_HOST_CHECK_MS"), "only for what this game hosts, once a second");
+  assert.ok(upd.includes('=== "released") alreadyHosted = false'), "let go at once (default animations back off, no movement sent)");
+  const tryHost = formView.slice(formView.indexOf("private tryHostIfNeed("), formView.indexOf("private tryHostIfNeed(") + 400);
+  assert.ok(tryHost.indexOf("isReleased(remoteId") > 0 && tryHost.indexOf("isReleased(remoteId") < tryHost.indexOf("lastTryHost[remoteId]"), "checked first");
+  const tick = formView.slice(formView.indexOf("private gmHostedTick("), formView.indexOf("public gmIsPlayerLook"));
+  assert.ok(tick.includes('storage["hosted"] = withoutHosted(') && tick.includes("markReleased("), "the hand-off drops it from the hosted list and remembers it");
+  assert.ok(tick.includes("npc.getCombatState() === 0 && npc.isHostileToActor(me)") && tick.includes("isDetectedBy(npc)") && tick.includes("npc.startCombat("), "engage only when hostile, idle and detected");
+  assert.ok(tick.includes("placeOf(ac) !== myPlace"), "only players in the same cell or worldspace");
+});
