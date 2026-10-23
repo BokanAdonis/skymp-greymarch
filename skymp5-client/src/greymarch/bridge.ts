@@ -693,6 +693,10 @@ export class GreymarchBridge {
                 var inMenu = false; try { inMenu = !!sp.Utility.isInMenuMode(); } catch (mErr) { inMenu = false; }
                 if (this.greymarchWolfOn && !this.greymarchWolfMorph && this.greymarchWolfIsBeast(raceId) && !inMenu && now - roarAt < 1000 && now >= (this.greymarchWolfRoarNext || 0)) {
                     this.greymarchWolfRoarNext = now + WOLF_ROAR_MS;
+                    // the howl is the werewolf's voice: after one, the game keeps the voice recovering and drops the next HowlStart (the roar played once, then only
+                    // its sound, 2026-10-23). Roars have no wait here (WOLF_ROAR_MS), so the recovery is cleared first.
+                    var gmVoiceWas = -1; try { gmVoiceWas = player.getVoiceRecoveryTime(); player.setVoiceRecoveryTime(0); } catch (vErr) { /* the howl as before */ }
+                    if ((this.greymarchRoarLogged = (this.greymarchRoarLogged || 0) + 1) <= 10) this.greymarchLog("wolf: roar: the voice was recovering for " + (Math.round(gmVoiceWas * 10) / 10) + " s (cleared)");
                     this.greymarchCrumb("beast: howl"); sp.Debug.sendAnimationEvent(player, "HowlStart"); this.greymarchWolfRoarRelease = now + 200; // released at once: a short howl, as a quick tap of the shout key does it
                     if (this.greymarchWolfBearRace) { this.greymarchWolfRoarSound(player, true); this.greymarchLog("wolf: roar (R, the werebear's howl and roar)"); }
                     else this.greymarchLog("wolf: roar (R, the howl)");
@@ -700,6 +704,12 @@ export class GreymarchBridge {
                     var howlMsg = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchWolf", op: "howl" }) };
                     this.controller.emitter.emit("sendMessage", { message: howlMsg, reliability: "reliable" });
                 }
+            }
+            // DIAGNOSTIC (2026-10-23, other players saw a werewolf slide instead of walk): every 2 s, at most 40 times, what this werewolf body reports; SkyMP's
+            // movement (movementGet.ts) takes the run mode from SpeedSampled and isSprinting/isRunning
+            if (this.greymarchWolfOn && !this.greymarchWolfMorph && now >= (this.greymarchWalkDiagNext || 0) && (this.greymarchWalkDiagLeft === undefined ? (this.greymarchWalkDiagLeft = 40) : this.greymarchWalkDiagLeft) > 0) {
+                this.greymarchWalkDiagNext = now + 2000; this.greymarchWalkDiagLeft--;
+                try { this.greymarchLog("wolf walk (mine): SpeedSampled " + Math.round(player.getAnimationVariableFloat("SpeedSampled")) + ", Speed " + Math.round(player.getAnimationVariableFloat("Speed")) + ", Direction " + (Math.round(player.getAnimationVariableFloat("Direction") * 100) / 100) + ", sprinting " + player.isSprinting() + ", running " + player.isRunning() + ", weapon drawn " + player.isWeaponDrawn() + ", animation driven " + player.getAnimationVariableBool("bAnimationDriven")); } catch (dErr) { /* diagnostics only */ }
             }
             if (this.greymarchWolfRoarRelease && now >= this.greymarchWolfRoarRelease) { this.greymarchWolfRoarRelease = 0; if (this.greymarchWolfOn) sp.Debug.sendAnimationEvent(player, "HowlRelease"); }
             // other players' roars: the sound on their NPC here (never an animation)

@@ -431,3 +431,23 @@ test("a beast body gets no face, no moving mouth and no human pose: a were-race 
   s.gm.greymarchFaceApply(body(NORD, 7), { mood: 2, strength: 80, phonemes: [[0, 0.5]] }, true);
   assert.ok(calls.includes("mood") && calls.includes("phoneme"), "a person's face as before");
 });
+
+test("each roar clears the voice's recovery before HowlStart, so the howl animation plays on every press (the game dropped it while the voice recovered)", () => {
+  const s = make({ refuseIdle: true });
+  const p = s.sp.Game.getPlayer();
+  const order = [];
+  let recovery = 30;
+  p.getVoiceRecoveryTime = () => recovery;
+  p.setVoiceRecoveryTime = (t) => { recovery = t; order.push("recovery " + t); };
+  const send = s.sp.Debug.sendAnimationEvent;
+  s.sp.Debug.sendAnimationEvent = (ref, name) => { order.push(name); send(ref, name); };
+  s.say({ customPacketType: "greymarchWolfForm", on: true }); s.tick();
+  order.length = 0;
+  s.key(19, true); s.tick(); s.tick(300);
+  const at = order.indexOf("HowlStart");
+  assert.ok(at > 0 && order[at - 1] === "recovery 0", "the recovery cleared just before the howl");
+  assert.ok(s.log.lines.some((l) => /the voice was recovering for 30 s \(cleared\)/.test(l)), "logged (the first 10)");
+  recovery = 25; order.length = 0;
+  s.key(19, false); s.key(19, true); s.tick();
+  assert.ok(order.indexOf("recovery 0") >= 0 && order.indexOf("HowlStart") > order.indexOf("recovery 0"), "again on the next press");
+});

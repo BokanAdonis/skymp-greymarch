@@ -10,6 +10,7 @@ import { SpawnProcess, gmAbandonedSpawns, gmSpawnedAtSpot } from "./spawnProcess
 import { BeastSwitchState, GM_STANDIN_RACE, beastDone, beastHeld, beastKept, beastSpawned, beastSwitchStep, isWereRace } from "./beastSwitch";
 // GREYMARCH: is this look a werewolf's or werebear's (the stand-in path, beastSwitch.ts)? The werebear's race id is looked up once in this load order.
 let gmWerebearRace = -1;
+let gmWalkDiagNext = 0, gmWalkDiagLeft = 60; // the beast walk diagnostic (see update())
 const gmWereLook = (ap: any, formRace: number): boolean => {
   if (!ap || (Array.isArray(ap.headpartIds) && ap.headpartIds.length > 0)) return false;
   if (gmWerebearRace < 0) { try { const f = Game.getFormFromFile(0x1e17b, "Dragonborn.esm"); gmWerebearRace = f ? f.getFormID() : 0; } catch (e) { gmWerebearRace = 0; } }
@@ -608,6 +609,17 @@ export class FormView {
         }
       }
       const gmHoldStill = this.gmSpawnedBeast && beastHeld(this.gmBeast, Date.now());
+      // DIAGNOSTIC (2026-10-23, a werewolf slid instead of walking on other players' screens): every 2 s, at most 60 lines a game, for a beast NPC: what SkyMP was
+      // told (run mode, speed) and what the NPC's own graph and AI do with it. Goes to the server log (greymarchStage).
+      if (this.gmSpawnedBeast && model.movement && Date.now() >= gmWalkDiagNext && gmWalkDiagLeft > 0) {
+        gmWalkDiagNext = Date.now() + 2000; gmWalkDiagLeft--;
+        try {
+          const d = Actor.from(refr);
+          const m = model.movement;
+          const off = Math.round(Math.hypot(m.pos[0] - refr.getPositionX(), m.pos[1] - refr.getPositionY()));
+          if (d) (SpApiInteractor.getControllerInstance().emitter as any).emit("greymarchStage", "wolf walk (theirs " + gmHex(this.getRemoteRefrId()) + " as " + gmHex(refr.getFormID()) + "): told " + m.runMode + " speed " + Math.round(m.speed || 0) + " dir " + Math.round(m.direction || 0) + ", " + off + " units off | NPC: SpeedSampled " + Math.round(d.getAnimationVariableFloat("SpeedSampled")) + ", Speed " + Math.round(d.getAnimationVariableFloat("Speed")) + ", AI " + d.isAIEnabled() + ", combat " + d.isInCombat() + ", weapon drawn " + d.isWeaponDrawn() + ", animation driven " + d.getAnimationVariableBool("bAnimationDriven") + ", race " + gmHex(d.getRace() ? d.getRace()!.getFormID() : 0) + ", held " + gmHoldStill);
+        } catch (e) { /* diagnostics only */ }
+      }
       if (gmHoldStill && !this.gmHeldSaid) { this.gmHeldSaid = true; gmCrumb("hold still " + gmHex(refr.getFormID()) + " beast (fresh)"); }
       if (!gmHoldStill) this.gmHeldSaid = false;
       if (
