@@ -7,7 +7,7 @@ import { FormModel } from "./model";
 import { applyMovement } from "../sync/movementApply";
 import { Movement } from "../sync/movement";
 import { SpawnProcess, gmAbandonedSpawns, gmSpawnedAtSpot } from "./spawnProcess";
-import { BeastSwitchState, GM_STANDIN_RACE, beastHeld, beastSpawned, beastSwitchStep, isWereRace } from "./beastSwitch";
+import { BeastSwitchState, GM_STANDIN_RACE, beastDone, beastHeld, beastKept, beastSpawned, beastSwitchStep, isWereRace } from "./beastSwitch";
 // GREYMARCH: is this look a werewolf's or werebear's (the stand-in path, beastSwitch.ts)? The werebear's race id is looked up once in this load order.
 let gmWerebearRace = -1;
 const gmWereLook = (ap: any, formRace: number): boolean => {
@@ -116,13 +116,32 @@ export class FormView {
           stateAppearanceCopy.name = "";
           const equalWithoutNames = JSON.stringify(modelAppearanceCopy) === JSON.stringify(stateAppearanceCopy);
 
+          // GREYMARCH: THE SAME BODY (beastSwitch.ts beastKept). A person who changes into a werewolf or werebear while this game shows them keeps
+          // the NPC that played their transformation: no rebuild (the base and its look stay), the engine switches its race in update(). On the way back
+          // the same look returns and the same NPC is switched back. Only a game that did not show them as a person builds the stand-in.
+          const gmKeepRefr = ObjectReference.from(Game.getFormEx(this.refrId));
+          const gmKeepAc = gmKeepRefr ? Actor.from(gmKeepRefr) : null;
+          const gmStateAp: any = this.appearanceState.appearance;
+          const gmToWere = gmWereLook(model.appearance, 0) && !!gmStateAp && Array.isArray(gmStateAp.headpartIds) && gmStateAp.headpartIds.length > 0;
+          const gmKeptCopy = this.gmKeptLook ? JSON.parse(JSON.stringify(this.gmKeptLook)) : null;
+          if (gmKeptCopy) gmKeptCopy.name = "";
+          const gmBackToKept = !!gmKeptCopy && !gmWereLook(model.appearance, 0) && JSON.stringify(modelAppearanceCopy) === JSON.stringify(gmKeptCopy);
           if (equalWithoutNames) {
             // Change name inplace
             const refr = ObjectReference.from(Game.getFormEx(this.refrId));
             refr?.getBaseObject()?.setName(model.appearance.name);
             refr?.setDisplayName(model.appearance.name, true);
             //printConsole("Appearance updated, changing name inplace");
+          } else if (gmToWere && !this.gmBeast && this.ready && !!gmKeepAc && gmKeepAc.is3DLoaded()) {
+            this.gmKeptLook = gmStateAp;
+            this.gmBeast = beastKept(Date.now(), Number(gmStateAp.raceId) || 0);
+            this.gmSpawnedBeast = true; // a beast body from now on (held, no model refresh, disabled before delete)
+            this.gmLookJustChanged = true; // the form's race is taken at once (the __gmWolfRace settle rule)
+            gmCrumb("keep body " + gmHex(this.refrId) + " (a person turning into a beast)");
+          } else if (gmBackToKept && this.gmBeast) {
+            gmCrumb("back to person " + gmHex(this.refrId) + " (the same body)");
           } else {
+            this.gmKeptLook = null;
             // Force re-apply appearance on the next getAppearanceBasedBase call
             this.appearanceBasedBaseId = 0;
             //printConsole("Appearance updated");
@@ -154,13 +173,14 @@ export class FormView {
     // and the last build has settled (GM_BEAST_SETTLE_MS).
     if (gmWolfRace !== this.gmWolfRace) {
       if (gmWolfRace !== this.gmWolfRacePending) { this.gmWolfRacePending = gmWolfRace; this.gmWolfRacePendingAt = Date.now(); }
-      const gmBuildingAnyway = this.appearanceBasedBaseId === 0;
+      const gmBuildingAnyway = this.appearanceBasedBaseId === 0 || this.gmLookJustChanged;
       const gmSettled = Date.now() - this.gmWolfRacePendingAt >= GM_WOLF_RACE_SETTLE_MS && !(this.gmSpawnedBeast && beastHeld(this.gmBeast, Date.now()));
       if (gmBuildingAnyway || gmSettled) {
         gmCrumb("race " + gmHex(this.getRemoteRefrId() || 0) + " -> " + gmHex(gmWolfRace) + (gmBuildingAnyway ? " (with the new look)" : " (settled)"));
         this.gmWolfRace = gmWolfRace; // the race the stand-in is switched to (update(): A BEAST IS NEVER BUILT AS A BEAST); no rebuild
       }
     } else this.gmWolfRacePending = gmWolfRace;
+    this.gmLookJustChanged = false;
 
     const refId =
       model.refrId && model.refrId < 0xff000000 ? model.refrId : undefined;
@@ -417,7 +437,7 @@ export class FormView {
     // (hkpKeyframedRigidMotion, SkyrimSE.exe+0A883CE) the moment the player changed back (2026-10-19 #GNQS). A person's NPC is removed as before.
     const gmBeast = this.gmSpawnedBeast;
     this.gmSpawnedBeast = false;
-    this.gmBeast = null;
+    this.gmBeast = null; this.gmKeptLook = null;
     // GREYMARCH: still being spawned: the spawn itself disables and deletes it (see gmAbandonedSpawns in spawnProcess.ts); deleting it here left a copy it then enabled
     const gmMidSpawn = refrId >= 0xff000000 && this.gmSpawningId === refrId;
     this.gmSpawningId = 0;
@@ -566,17 +586,25 @@ export class FormView {
       // GREYMARCH: A BEAST IS NEVER BUILT AS A BEAST (beastSwitch.ts): the hidden stand-in is switched to its race by the engine (SetRace), then shown
       if (this.gmBeast) {
         const gmApW: any = this.appearanceState.appearance;
-        const gmWanted = this.gmWolfRace || (gmApW ? Number(gmApW.raceId) || 0 : 0);
+        const gmWereNow = gmWereLook(gmApW, this.gmWolfRace);
+        const gmPersonRace = this.gmKeptLook ? Number(this.gmKeptLook.raceId) || 0 : 0;
+        const gmWanted = gmWereNow ? (this.gmWolfRace || (gmApW ? Number(gmApW.raceId) || 0 : 0)) : gmPersonRace; // on the way back: the person's own race
         const gmSwAc = Actor.from(refr);
         const gmLoaded = !!gmSwAc && gmSwAc.is3DLoaded();
         const gmRace = gmWanted ? Race.from(Game.getFormEx(gmWanted)) : null;
         const gmDo = gmSwAc && gmRace ? beastSwitchStep(this.gmBeast, Date.now(), gmWanted, gmLoaded) : {};
         if (gmDo.setRace && gmSwAc && gmRace) {
           gmCrumb("setrace " + gmHex(refr.getFormID()) + " -> " + gmHex(gmDo.setRace) + (gmDo.first ? " (stand-in" + (gmLoaded ? ", 3D in)" : ", 3D not in)") : " (form switch)"));
+          // a live body SkyMP was moving: its moves are stopped first (a SetRace during a move crashed in the physics rebuild, 2026-10-17)
+          if (!gmDo.first) { try { gmSwAc.stopTranslation(); gmSwAc.clearKeepOffsetFromActor(); } catch (e) { /* not moving */ } }
           try { gmSwAc.setRace(gmRace); } catch (e) { gmCrumb("setrace failed " + gmHex(refr.getFormID()) + ": " + e); }
         }
         if (gmDo.show && gmSwAc) {
           try { gmSwAc.setAlpha(1, false); gmCrumb("shown " + gmHex(refr.getFormID()) + " beast"); } catch (e) { /* stays hidden */ }
+        }
+        if (!gmWereNow && beastDone(this.gmBeast, Date.now(), gmPersonRace)) { // back in the person's own race and settled: an ordinary NPC again
+          gmCrumb("person again " + gmHex(refr.getFormID()));
+          this.gmBeast = null; this.gmKeptLook = null; this.gmSpawnedBeast = false;
         }
       }
       const gmHoldStill = this.gmSpawnedBeast && beastHeld(this.gmBeast, Date.now());
@@ -667,7 +695,8 @@ export class FormView {
     // the human body's transformation) and any that arrive meanwhile are taken as seen, not played. Played into the werewolf animation graph while it was still being
     // built, they left it a clip generator with a broken vtable and the watching game crashed in its clip handling (SkyrimSE.exe+0C28F84, the same address every time,
     // 2026-10-19 #GNQS). Its attacks, roars and the rest after that play as before.
-    const gmBeastLook = !!model.appearance && !(Array.isArray(model.appearance.headpartIds) && model.appearance.headpartIds.length > 0);
+    // a beast look, or a body still switching (the same body on its way back is still the beast until its race is switched back)
+    const gmBeastLook = (!!model.appearance && !(Array.isArray(model.appearance.headpartIds) && model.appearance.headpartIds.length > 0)) || !!this.gmBeast;
 
     if (refr.is3DLoaded()) {
       if (model.animation) {
@@ -1013,6 +1042,8 @@ export class FormView {
   private appearanceState = this.getDefaultAppearanceState();
   private eqState = this.getDefaultEquipState();
   private appearanceBasedBaseId = 0;
+  private gmKeptLook: any = null; // GREYMARCH: the person look of a body kept through its change (THE SAME BODY)
+  private gmLookJustChanged = false;
   private gmBeast: BeastSwitchState | null = null; // GREYMARCH: a beast look's NPC: its stand-in and switch state (beastSwitch.ts)
   private gmWolfRace = 0; // GREYMARCH: the werewolf variant's race this player's NPC was built with (0: none)
   private leveledBaseId = 0;

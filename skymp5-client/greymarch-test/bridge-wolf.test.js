@@ -413,5 +413,21 @@ test("formView.ts gives a werewolf variant's NPC the variant's race (by SetRace 
   const fv = fs.readFileSync(path.join(__dirname, "..", "src", "view", "formView.ts"), "utf8");
   assert.ok(fv.includes("__gmWolfRace"), "reads the bridge's map");
   assert.ok(fv.includes("gmMap && ap && !(Array.isArray(ap.headpartIds) && ap.headpartIds.length > 0)"), "only a beast look (no head parts): the werewolf's or the werebear's");
-  assert.ok(fv.includes("const gmWanted = this.gmWolfRace || (gmApW ? Number(gmApW.raceId) || 0 : 0);"), "the variant's race is the one the stand-in is switched to");
+  assert.ok(fv.includes("const gmWanted = gmWereNow ? (this.gmWolfRace || (gmApW ? Number(gmApW.raceId) || 0 : 0)) : gmPersonRace;"), "the variant's race is the one the NPC is switched to");
+});
+
+test("a beast body gets no face, no moving mouth and no human pose: a were-race (the werewolf, a form's race), or a body with no head parts (a stand-in, a creature form)", () => {
+  const s = make();
+  const calls = [];
+  const body = (raceId, headParts) => ({ getFormID: () => 0xff000a01, getRace: () => ({ getFormID: () => raceId }), getBaseObject: () => ({ headParts }),
+    clearExpressionOverride: () => calls.push("clear"), resetExpressionOverrides() {}, setExpressionPhoneme: () => calls.push("phoneme"), setExpressionOverride: () => calls.push("mood") });
+  s.sp.ActorBase.from = (b) => (b ? { getNumHeadParts: () => b.headParts } : null);
+  assert.strictEqual(s.gm.greymarchIsBeastBody(body(BEAST, 0)), true, "the werewolf");
+  assert.strictEqual(s.gm.greymarchIsBeastBody(body(ALPHA, 0)), true, "a form's race");
+  assert.strictEqual(s.gm.greymarchIsBeastBody(body(NORD, 0)), true, "a stand-in (no head parts)");
+  assert.strictEqual(s.gm.greymarchIsBeastBody(body(NORD, 7)), false, "a person");
+  s.gm.greymarchFaceApply(body(BEAST, 0), { mood: 2, strength: 80, phonemes: [[0, 0.5]] }, true);
+  assert.deepStrictEqual(calls, [], "no face on the werewolf");
+  s.gm.greymarchFaceApply(body(NORD, 7), { mood: 2, strength: 80, phonemes: [[0, 0.5]] }, true);
+  assert.ok(calls.includes("mood") && calls.includes("phoneme"), "a person's face as before");
 });

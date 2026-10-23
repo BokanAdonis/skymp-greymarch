@@ -1128,7 +1128,7 @@ export class GreymarchBridge {
                 if (!lid) continue;
                 still[lid] = true;
                 if (posed[lid] && now - posed[lid] < 10000) continue;
-                try { var a = sp.Actor.from(sp.Game.getFormEx(lid)); if (a) { sp.Debug.sendAnimationEvent(a, "OffsetBoundStandingStart"); posed[lid] = now; } } catch (aErr) { /* tried again */ }
+                try { var a = sp.Actor.from(sp.Game.getFormEx(lid)); if (a && !this.greymarchIsBeastBody(a)) { sp.Debug.sendAnimationEvent(a, "OffsetBoundStandingStart"); posed[lid] = now; } } catch (aErr) { /* tried again */ }
             }
             for (var k in posed) {
                 if (still[k]) continue;
@@ -2173,7 +2173,24 @@ export class GreymarchBridge {
         this.controller.emitter.emit("sendMessage", { message: message, reliability: "reliable" });
         if ((this.greymarchEmoteLogged = (this.greymarchEmoteLogged || 0) + 1) <= 20) this.greymarchLog("emote: face " + (em ? em.id : "off"));
     }
+    // GREYMARCH: A BEAST BODY (2026-10-23): a werewolf, werebear or one of their forms, or a body with no head parts (a beast look, its stand-in, a creature form).
+    // It has no human face (no facial animation data), and the faces, the moving mouths and the human poses below are never put on it: they wrote into a
+    // face and a graph a beast does not have, the same mistake as SkyMP's cast and animation-variable replay (remoteServer.ts greymarchIsBeastCopy).
+    greymarchIsBeastBody(actor: any): boolean {
+        try {
+            var race = actor.getRace();
+            if (race && this.greymarchWolfIsBeast(race.getFormID())) return true;
+            if (race) {
+                if (this.greymarchWerebearRaceId === undefined) { var wb = this.sp.Game.getFormFromFile(0x1e17b, "Dragonborn.esm"); this.greymarchWerebearRaceId = wb ? wb.getFormID() : 0; }
+                if (this.greymarchWerebearRaceId && race.getFormID() === this.greymarchWerebearRaceId) return true;
+            }
+            var base = this.sp.ActorBase.from(actor.getBaseObject());
+            if (base && base.getNumHeadParts() === 0) return true;
+        } catch (e) { return false; }
+        return false;
+    }
     greymarchFaceApply(actor: any, face: any, fresh: boolean): any {
+        if (this.greymarchIsBeastBody(actor)) return; // no face on a beast body (see greymarchIsBeastBody)
         try { this.greymarchCrumbEvery("face" + actor.getFormID(), 2000, "face " + (actor.getFormID() >>> 0).toString(16) + (face ? "" : " off")); } catch (cErr) { /* not important */ }
         try {
             if (fresh) { actor.clearExpressionOverride(); actor.resetExpressionOverrides(); for (var p0 = 0; p0 < 16; p0++) actor.setExpressionPhoneme(p0, 0); } // every mouth shape off too: the last face's (Open mouth ...) stayed under the next one
@@ -2233,6 +2250,7 @@ export class GreymarchBridge {
             var id = Number(key), ac: any = null;
             try { ac = id === 0x14 ? sp.Game.getPlayer() : sp.Actor.from(sp.Game.getFormEx(id)); } catch (e) { ac = null; }
             if (!ac) continue;
+            if (this.greymarchIsBeastBody(ac)) continue; // no moving mouth on a beast body (greymarchIsBeastBody)
             var prev = moving[key];
             var pool = (step + id) % 3 === 0 ? LIP_CLOSED : LIP_OPEN; // every third step or so the lips meet (B, D, N)
             var shape = pool[Math.floor(Math.random() * pool.length)];

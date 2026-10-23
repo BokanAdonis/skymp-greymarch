@@ -60,6 +60,37 @@ test("formView.ts builds a beast look as the stand-in, hides it, switches it wit
   assert.ok(!fv.includes("{ ...this.appearanceState.appearance, raceId: this.gmWolfRace }"), "the variant's race is not built in any more");
 });
 
+test("THE SAME BODY: a person watched while they change keeps their NPC: switched at once, never hidden, held 2.5 s; switched back on the way back; done when settled", () => {
+  const NORD = B.GM_STANDIN_RACE, IMPERIAL = 0x13744;
+  for (const person of [NORD, IMPERIAL]) { // a Nord's race is the stand-in's: it must not be taken for a stand-in
+    const st = B.beastKept(1000, person);
+    assert.ok(!B.beastHeld(st, 1000), "not held before the switch: the transformation plays and SkyMP moves it as usual");
+    assert.deepStrictEqual(B.beastSwitchStep(st, 1000, ELDER, true), { setRace: ELDER, first: false }, "switched at once, no reveal (it was never hidden)");
+    assert.ok(B.beastHeld(st, 1000 + B.GM_KEPT_SETTLE_MS - 1) && !B.beastHeld(st, 1000 + B.GM_KEPT_SETTLE_MS), "held 2.5 s, not 6");
+    assert.ok(!B.beastDone(st, 5000, person), "not done while a beast");
+    assert.deepStrictEqual(B.beastSwitchStep(st, 20000, person, true), { setRace: person, first: false }, "back to the person's own race");
+    assert.ok(!B.beastDone(st, 20000 + B.GM_KEPT_SETTLE_MS - 1, person), "not done while it settles");
+    assert.ok(B.beastDone(st, 20000 + B.GM_KEPT_SETTLE_MS, person), "done once back and settled");
+  }
+  const quick = B.beastKept(0, IMPERIAL);
+  B.beastSwitchStep(quick, 0, WOLF, true);
+  assert.deepStrictEqual(B.beastSwitchStep(quick, 1000, IMPERIAL, true), {}, "changing back right away waits for the first switch to settle");
+  assert.deepStrictEqual(B.beastSwitchStep(quick, B.GM_KEPT_SETTLE_MS, IMPERIAL, true), { setRace: IMPERIAL, first: false });
+  assert.ok(!B.beastDone(B.beastSpawned(0), 99999, NORD), "a stand-in is never 'done' as a person");
+});
+
+test("formView.ts keeps the body of a person turning into a beast (no rebuild), stops SkyMP's moves before a live switch, and treats the body as a beast until it is a person again", () => {
+  const fv = fs.readFileSync(path.join(__dirname, "..", "src", "view", "formView.ts"), "utf8");
+  const keep = fv.indexOf("} else if (gmToWere && !this.gmBeast && this.ready && !!gmKeepAc && gmKeepAc.is3DLoaded()) {");
+  const reset = fv.indexOf("this.appearanceBasedBaseId = 0;", keep);
+  assert.ok(keep > 0 && fv.indexOf("this.gmBeast = beastKept(", keep) < reset, "kept before the rebuild branch");
+  assert.ok(fv.indexOf("} else if (gmBackToKept && this.gmBeast) {", keep) < reset, "the way back keeps it too");
+  assert.ok(fv.includes("if (!gmDo.first) { try { gmSwAc.stopTranslation(); gmSwAc.clearKeepOffsetFromActor(); }"), "SkyMP's moves stopped before a live switch");
+  assert.ok(fv.includes("const gmWanted = gmWereNow ? (this.gmWolfRace || (gmApW ? Number(gmApW.raceId) || 0 : 0)) : gmPersonRace;"), "on the way back: the person's own race");
+  assert.ok(fv.includes("|| !!this.gmBeast;"), "the body counts as a beast (no model refresh, no gear, no animation replay) until it is a person again");
+  assert.ok(fv.includes("const gmBuildingAnyway = this.appearanceBasedBaseId === 0 || this.gmLookJustChanged;"), "the form's race is taken at once with the change, not 4 s later");
+});
+
 test("only the were-races take the stand-in path: the werewolf, the werebear (its id in this load order) and the forms' races; a creature form does not", () => {
   const BEAR = 0x0401e17b, POLAR = 0xfe000861, HORKER = 0x13200;
   assert.ok(B.isWereRace(WOLF, BEAR, []), "the vanilla werewolf");

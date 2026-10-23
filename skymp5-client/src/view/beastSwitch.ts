@@ -11,13 +11,16 @@ export const GM_STANDIN_RACE = 0x13746; // NordRace
 export const GM_STANDIN_MS = 1000; // the stand-in's 3D must be in for this long before its first switch
 export const GM_STANDIN_GIVE_UP_MS = 10000; // the first switch is made even if the 3D never reports loaded
 export const GM_SHOW_AFTER_MS = 1500; // the stand-in is shown this long after its first switch
-export const GM_BEAST_SETTLE_MS = 6000; // held this long after every switch
+export const GM_BEAST_SETTLE_MS = 6000; // held this long after every switch of a stand-in (a body built for the beast)
+export const GM_KEPT_SETTLE_MS = 2500; // a body kept through its change: its race switch reloads a body that was already in the world, so it is held for less
 
 export interface BeastSwitchState {
   raceApplied: number; // GM_STANDIN_RACE: not switched yet; otherwise the race it was last switched to
   spawnMoment: number;
   freshUntil: number; // held (no SkyMP movement, animation or gear) until this time
   showAt: number; // 0: nothing to show
+  standIn: boolean; // a hidden stand-in not switched yet (its first switch reveals it)
+  settleMs: number; // held this long after each switch
 }
 
 export interface BeastSwitchAction {
@@ -27,12 +30,20 @@ export interface BeastSwitchAction {
 }
 
 // a freshly spawned beast-look NPC: a hidden stand-in, held until it has been switched and has settled
-export const beastSpawned = (now: number): BeastSwitchState => ({ raceApplied: GM_STANDIN_RACE, spawnMoment: now, freshUntil: Number.MAX_SAFE_INTEGER, showAt: 0 });
+export const beastSpawned = (now: number): BeastSwitchState => ({ raceApplied: GM_STANDIN_RACE, spawnMoment: now, freshUntil: Number.MAX_SAFE_INTEGER, showAt: 0, standIn: true, settleMs: GM_BEAST_SETTLE_MS });
+
+// THE SAME BODY (2026-10-23): a player who changes while this game shows them keeps the NPC that played their transformation. It is switched to the
+// beast's race at once (the server swaps the look at the animation's own race-change point) and, on the way back, to its own race again: watchers see
+// one body change, nothing is hidden or rebuilt. personRace is the race of the look it had (a Nord's is the stand-in's race too: hence standIn, not the race).
+export const beastKept = (now: number, personRace: number): BeastSwitchState => ({ raceApplied: personRace, spawnMoment: now, freshUntil: 0, showAt: 0, standIn: false, settleMs: GM_KEPT_SETTLE_MS });
+
+// the change is over: the NPC is back in the person's race and has settled (formView.ts then forgets the switch state)
+export const beastDone = (st: BeastSwitchState | null, now: number, personRace: number): boolean => !!st && !st.standIn && !!personRace && st.raceApplied === personRace && now >= st.freshUntil;
 
 // one update: wanted is the race the player's look asks for (their form's race), loaded whether the NPC's 3D is in
 export function beastSwitchStep(st: BeastSwitchState, now: number, wanted: number, loaded: boolean): BeastSwitchAction {
   const out: BeastSwitchAction = {};
-  const first = st.raceApplied === GM_STANDIN_RACE;
+  const first = st.standIn;
   const canSwitch = first
     ? (loaded && now - st.spawnMoment >= GM_STANDIN_MS) || now - st.spawnMoment >= GM_STANDIN_GIVE_UP_MS
     : now >= st.freshUntil;
@@ -40,8 +51,8 @@ export function beastSwitchStep(st: BeastSwitchState, now: number, wanted: numbe
     out.setRace = wanted;
     out.first = first;
     st.raceApplied = wanted;
-    st.freshUntil = now + GM_BEAST_SETTLE_MS;
-    if (first) st.showAt = now + GM_SHOW_AFTER_MS;
+    st.freshUntil = now + st.settleMs;
+    if (first) { st.showAt = now + GM_SHOW_AFTER_MS; st.standIn = false; }
   }
   if (st.showAt && now >= st.showAt) {
     st.showAt = 0;
