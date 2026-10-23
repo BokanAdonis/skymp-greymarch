@@ -26,6 +26,7 @@ const GM_WOLF_RACE_SETTLE_MS = 4000;
 // NPC in a way that has crashed games (spawning, removing, a model refresh, gear, an idle or a beast's animation). Every line is flushed (SkyrimPlatform's writeLogs ends
 // it with std::endl), so after a crash the last lines say what this game was doing. The launcher keeps the previous session's file and puts both in the support file.
 const gmCrumbStart = Date.now();
+const GM_HOLD_MAX_MS = 3000; // GREYMARCH: an NPC nobody hosts is held where the server has it for at most this long (see the movement branch)
 export const gmCrumb = (text: string): void => { try { writeLogs("greymarch-crumbs", ((Date.now() - gmCrumbStart) / 1000).toFixed(1) + "s " + text); } catch (e) { /* a breadcrumb is a nicety */ } };
 const gmHex = (n: any): string => (Number(n) >>> 0).toString(16);
 
@@ -555,7 +556,14 @@ export class FormView {
         // its own AI until the server picked a host, so the copies wandered apart (one deer in different places on different screens) and the server's
         // position went stale (the wildlife's resync had to move animals back to the player fighting them). Now only the host's game runs the AI: every
         // other game keeps playing the server's movement, and asks to host it (below) while nobody does.
-        if (model.isHostedByOther || !this.movState.everApplied || !alreadyHosted) {
+        // A FALLBACK (2026-10-23): an NPC held this way for GM_HOLD_MAX_MS without becoming this game's (the deer standing still on test) is run here as before,
+        // so an NPC never freezes; the breadcrumbs file says which NPCs that happened to, and which this game became the host of.
+        const gmNobody = !model.isHostedByOther && !alreadyHosted;
+        if (!gmNobody) { if (this.gmHoldSince && alreadyHosted) gmCrumb("host " + gmHex(this.refrId) + " after " + (Date.now() - this.gmHoldSince) + " ms"); this.gmHoldSince = 0; this.gmHoldGaveUp = false; }
+        else if (!this.gmHoldSince) this.gmHoldSince = Date.now();
+        const gmGiveUp = gmNobody && Date.now() - this.gmHoldSince > GM_HOLD_MAX_MS;
+        if (gmGiveUp && !this.gmHoldGaveUp) { this.gmHoldGaveUp = true; gmCrumb("no host " + gmHex(this.refrId) + " (remote " + gmHex(this.remoteRefrId as number) + ") after " + GM_HOLD_MAX_MS + " ms: this game runs it"); }
+        if (model.isHostedByOther || !this.movState.everApplied || (gmNobody && !gmGiveUp)) {
           // GREYMARCH: NO WEAPON DRAW FOR A BEAST (2026-10-20). A changed werewolf or werebear player counts as "weapon drawn", so SkyMP gave its NPC here
           // setWeaponDrawnMode(1): the game ran ActionDraw, played the idle WerewolfDraw into the beast's animation graph and the watching game crashed in its clip
           // handling (SkyrimSE.exe+0A8C590, the crash of every beast observer case; this one's stack showed ActionDraw, WeapEquip, WerewolfDraw and SetWeaponDrawnMode).
@@ -934,6 +942,8 @@ export class FormView {
   private spawnMoment = 0;
   private gmSpawnedBeast = false;
   private gmHeldSaid = false;
+  private gmHoldSince = 0; // GREYMARCH: since when nobody hosts this NPC (0: someone does)
+  private gmHoldGaveUp = false;
   private gmWolfRacePending = 0; // GREYMARCH: a new race from __gmWolfRace not built yet, and since when (see the settle rule)
   private gmWolfRacePendingAt = 0;
   private gmSpawningId = 0; // GREYMARCH: the actor this view is spawning right now (0: none); see destroy() // GREYMARCH: the "hold still" breadcrumb was written for this spawn // GREYMARCH: this NPC was spawned with a beast look (destroy() disables it before the delete)
