@@ -42,6 +42,12 @@ const GM_WOLF_FORMS: { [kind: string]: [number, string] } = {
 // the lists in the server's greymarchWolfAlphas packet, by kind
 const GM_WOLF_LISTS: { [kind: string]: string } = { alpha: "actors", pup: "pups", black: "blackbears", polar: "polarbears", frost: "frosts", rabid: "rabids", moonborn: "moonborns", elder: "elders" };
 const WOLF_ROAR_MS = 0; // R: no wait between roars (2026-10-21, the owner's call; the server has none either: werewolf.js TUNE.howlCooldownMs). One roar per press of R.
+// GREYMARCH: THE HOWL SHOUT (2026-10-23). The vanilla howl is the werewolf's voice: PlayerWerewolfChangeScript puts a howl shout in the voice slot, and the graph's
+// howl (HowlStart) casts it (BeginCastVoice). With none there the howl state had nothing to cast and stalled: the roar played once, then only its sound. A
+// changed player's body is given this one while changed (their own voice put back after), and other players' werewolf NPCs here get it for their roar.
+// HowlWerewolfDetectLife (Skyrim.esm): its effect only shows the living, so roaring (no wait between roars) changes nothing in play. HowlWerewolfFear
+// (0x0CF790, Howl of Terror, the vanilla first howl) would make the NPCs near the roarer flee at every roar.
+const WOLF_HOWL_SHOUT = 0x0ce218;
 const WOLF_ROAR_SOUND = 0x101008, BEAR_ROAR_SOUND = 0x0f95bb; // NPCWerewolfShout (the werewolf's howl) and NPCBearAggroWarning01 (a bear's warning roar), Skyrim.esm
 // vampires (gamemode vampire.js): the game's own records, inside Dawnguard.esm (read from the game files); the real IDs are looked up with Game.getFormFromFile
 const VAMP_FORMS = { mist: 0x38ba, lord: 0x283b, potionFx: 0x18ef4, potion: 0x18ef3, feedIdle: 0xe6a8 }; // DLC1VampireMistform, DLC1VampireChange, DLC1BloodPotionEffect, DLC1BloodPotion, IdleVampireStandingFeedFront_Loose
@@ -711,13 +717,15 @@ export class GreymarchBridge {
                 this.greymarchWalkDiagNext = now + 2000; this.greymarchWalkDiagLeft--;
                 try { this.greymarchLog("wolf walk (mine): SpeedSampled " + Math.round(player.getAnimationVariableFloat("SpeedSampled")) + ", Speed " + Math.round(player.getAnimationVariableFloat("Speed")) + ", Direction " + (Math.round(player.getAnimationVariableFloat("Direction") * 100) / 100) + ", sprinting " + player.isSprinting() + ", running " + player.isRunning() + ", weapon drawn " + player.isWeaponDrawn() + ", animation driven " + player.getAnimationVariableBool("bAnimationDriven")); } catch (dErr) { /* diagnostics only */ }
             }
+            var otherRel = this.greymarchWolfOtherRelease;
+            if (otherRel) for (var orl in otherRel) { if (now >= otherRel[orl]) { delete otherRel[orl]; try { var oa = sp.Actor.from(sp.Game.getFormEx(Number(orl))); if (oa) sp.Debug.sendAnimationEvent(oa, "HowlRelease"); } catch (oErr) { /* gone */ } } }
             if (this.greymarchWolfRoarRelease && now >= this.greymarchWolfRoarRelease) { this.greymarchWolfRoarRelease = 0; if (this.greymarchWolfOn) sp.Debug.sendAnimationEvent(player, "HowlRelease"); }
             // other players' roars: the sound on their NPC here (never an animation)
             var roars = this.greymarchWolfRoarQueue;
             if (roars && roars.length) {
                 this.greymarchWolfRoarQueue = [];
                 for (var ri = 0; ri < roars.length && ri < 8; ri++) {
-                    try { var rl = misc.remoteIdToLocalId(roars[ri].actor); var who = rl ? sp.ObjectReference.from(sp.Game.getFormEx(rl)) : null; if (who) this.greymarchWolfRoarSound(who, roars[ri].bear); } catch (rErr) { /* not drawn here: not heard */ }
+                    try { var rl = misc.remoteIdToLocalId(roars[ri].actor); var who = rl ? sp.ObjectReference.from(sp.Game.getFormEx(rl)) : null; if (who) { this.greymarchWolfRoarSound(who, roars[ri].bear); this.greymarchWolfHowlOther(rl, now); } } catch (rErr) { /* not drawn here: not heard */ }
                 }
             }
             // the server says the wolf fed (a kill or a corpse): the vanilla feeding animation (PlayerWerewolfChangeScript.Feed plays the idle SpecialFeeding)
@@ -768,6 +776,7 @@ export class GreymarchBridge {
             step = "race"; var wr = this.greymarchWolfRace(); if (!wr) throw new Error("the werewolf race was not found");
             player.setRace(wr);
             step = "check"; var r = player.getRace();
+            this.greymarchWolfHowlOn(player);
             this.greymarchLog("wolf: changed into the " + (this.greymarchWolfBearRace ? "werebear" : (this.greymarchWolfKind ? GM_WOLF_FORMS[this.greymarchWolfKind][1] + " " : "") + "beast") + " (race now " + (r ? r.getFormID().toString(16) : "none") + ", will change back to " + (this.greymarchWolfHumanRace || 0).toString(16) + ")");
         } catch (bErr) {
             this.greymarchLog("wolf: the change failed at step '" + step + "': " + bErr);
@@ -804,6 +813,7 @@ export class GreymarchBridge {
             try { (sp.storage as any)["greymarchWolfOn"] = false; } catch (stErr) { /* nothing was set */ }
             this.greymarchWolfWearAt = Date.now() + 1000; // the character's own look (kept aside by SkyMP) and the gear, a moment later: the person's skeleton must be in place first
             var r = player.getRace();
+            this.greymarchWolfHowlOff(player);
             this.greymarchLog("wolf: changed back (race now " + (r ? r.getFormID().toString(16) : "none") + ")");
         } catch (uErr) {
             this.greymarchLog("wolf: changing back failed at step '" + step + "': " + uErr);
@@ -2186,6 +2196,42 @@ export class GreymarchBridge {
     // GREYMARCH: A BEAST BODY (2026-10-23): a werewolf, werebear or one of their forms, or a body with no head parts (a beast look, its stand-in, a creature form).
     // It has no human face (no facial animation data), and the faces, the moving mouths and the human poses below are never put on it: they wrote into a
     // face and a graph a beast does not have, the same mistake as SkyMP's cast and animation-variable replay (remoteServer.ts greymarchIsBeastCopy).
+    // THE HOWL SHOUT on this player's body while changed (see WOLF_HOWL_SHOUT); the voice they had is kept and put back
+    greymarchWolfHowlOn(player: any): any {
+        try {
+            var howl = this.sp.Shout.from(this.sp.Game.getFormEx(WOLF_HOWL_SHOUT));
+            if (!howl) return;
+            var had = player.getEquippedShout();
+            this.greymarchWolfVoiceBefore = had && had.getFormID() !== WOLF_HOWL_SHOUT ? had.getFormID() : (this.greymarchWolfVoiceBefore || 0);
+            this.greymarchWolfHowlAdded = player.addShout(howl) || this.greymarchWolfHowlAdded; // true when they did not know it: taken away again after
+            player.equipShout(howl);
+            this.greymarchLog("wolf: the howl is in the voice slot" + (this.greymarchWolfVoiceBefore ? " (their voice " + this.greymarchWolfVoiceBefore.toString(16) + " is put back after)" : ""));
+        } catch (e) { this.greymarchLog("wolf: the howl could not be put in the voice slot: " + e); }
+    }
+    greymarchWolfHowlOff(player: any): any {
+        try {
+            var howl = this.sp.Shout.from(this.sp.Game.getFormEx(WOLF_HOWL_SHOUT));
+            if (howl) { player.unequipShout(howl); if (this.greymarchWolfHowlAdded) player.removeShout(howl); }
+            var before = this.greymarchWolfVoiceBefore ? this.sp.Shout.from(this.sp.Game.getFormEx(this.greymarchWolfVoiceBefore)) : null;
+            if (before) player.equipShout(before);
+            this.greymarchWolfHowlAdded = false; this.greymarchWolfVoiceBefore = 0;
+        } catch (e) { /* their voice slot stays as it is */ }
+    }
+    // another player roared: their werewolf NPC here howls too (HowlStart, HowlRelease 200 ms later), with the howl shout in its voice slot so the graph has a voice
+    // to cast, and only once that NPC has settled after its race switch (__gmBeastHeld, formView.ts). SkyMP's own relay of the howl stays dropped (formView.ts).
+    greymarchWolfHowlOther(localId: number, now: number): any {
+        var held: any = (Function("return this")() as any).__gmBeastHeld || {};
+        if (held[localId]) { this.greymarchLog("wolf: a roar from " + (localId >>> 0).toString(16) + ": the sound only (its body is still settling)"); return; }
+        var ac = this.sp.Actor.from(this.sp.Game.getFormEx(localId));
+        if (!ac || !this.greymarchIsBeastBody(ac)) return;
+        var howl = this.sp.Shout.from(this.sp.Game.getFormEx(WOLF_HOWL_SHOUT));
+        if (!howl) return;
+        var cur = ac.getEquippedShout();
+        if (!cur || cur.getFormID() !== WOLF_HOWL_SHOUT) { ac.addShout(howl); ac.equipShout(howl); }
+        this.greymarchCrumb("beast: howl on " + (localId >>> 0).toString(16));
+        this.sp.Debug.sendAnimationEvent(ac, "HowlStart");
+        (this.greymarchWolfOtherRelease || (this.greymarchWolfOtherRelease = {}))[localId] = now + 200;
+    }
     greymarchIsBeastBody(actor: any): boolean {
         try {
             var race = actor.getRace();

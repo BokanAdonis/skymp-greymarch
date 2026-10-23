@@ -609,6 +609,11 @@ export class FormView {
         }
       }
       const gmHoldStill = this.gmSpawnedBeast && beastHeld(this.gmBeast, Date.now());
+      // GREYMARCH: which beast NPCs are still settling, for the bridge's howl on other players' werewolves (greymarchWolfHowlOther)
+      try { const gmHeldMap: any = (Function("return this")() as any).__gmBeastHeld || ((Function("return this")() as any).__gmBeastHeld = {}); if (gmHoldStill) gmHeldMap[refr.getFormID()] = true; else delete gmHeldMap[refr.getFormID()]; } catch (e) { /* the howl waits */ }
+      // GREYMARCH: NO COMBAT ON A BEAST COPY (2026-10-23). Another player's werewolf here was in combat the whole time (measured): its combat AI then steers it and
+      // fights SkyMP's follow movement (the walk). It is a copy: what it does comes from its player's game (movement, attacks as animation events).
+      if (this.gmSpawnedBeast && !gmHoldStill) { try { const gmCb = Actor.from(refr); if (gmCb && gmCb.isInCombat()) gmCb.stopCombat(); } catch (e) { /* next update */ } }
       // DIAGNOSTIC (2026-10-23, a werewolf slid instead of walking on other players' screens): every 2 s, at most 60 lines a game, for a beast NPC: what SkyMP was
       // told (run mode, speed) and what the NPC's own graph and AI do with it. Goes to the server log (greymarchStage).
       if (this.gmSpawnedBeast && model.movement && Date.now() >= gmWalkDiagNext && gmWalkDiagLeft > 0) {

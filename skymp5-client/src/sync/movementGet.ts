@@ -102,7 +102,9 @@ const getRunMode = (ac: Actor): RunMode => {
     return "Sprinting";
   }
 
-  const speed = ac.getAnimationVariableFloat("SpeedSampled");
+  // GREYMARCH: the werewolf's graph has SpeedSampled but never sets it (0 while it walks and runs, measured 2026-10-23), so a werewolf was sent as Standing
+  // and every other game slid it along without its walk. Its Speed is set; a person's graph sets both, so for them nothing changes.
+  const speed = ac.getAnimationVariableFloat("SpeedSampled") || ac.getAnimationVariableFloat("Speed");
   if (!speed) {
     return "Standing";
   }

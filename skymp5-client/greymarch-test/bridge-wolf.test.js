@@ -451,3 +451,48 @@ test("each roar clears the voice's recovery before HowlStart, so the howl animat
   s.key(19, false); s.key(19, true); s.tick();
   assert.ok(order.indexOf("recovery 0") >= 0 && order.indexOf("HowlStart") > order.indexOf("recovery 0"), "again on the next press");
 });
+
+test("the howl shout: while changed the body has the vanilla werewolf howl in its voice slot (the graph's howl casts it), and its own voice is put back after", () => {
+  const s = make({ refuseIdle: true });
+  const p = s.sp.Game.getPlayer();
+  const SHOUT = 0x0ce218, MINE = 0x13e07;
+  let equipped = { id: MINE }; const known = new Set([MINE]); const did = [];
+  s.sp.Shout = { from: (f) => (f ? { id: f.id, getFormID: () => f.id } : null) };
+  p.getEquippedShout = () => (equipped ? { getFormID: () => equipped.id } : null);
+  p.addShout = (sh) => { const fresh = !known.has(sh.id); known.add(sh.id); did.push("add " + sh.id.toString(16)); return fresh; };
+  p.equipShout = (sh) => { equipped = { id: sh.id }; did.push("equip " + sh.id.toString(16)); };
+  p.unequipShout = (sh) => { if (equipped && equipped.id === sh.id) equipped = null; did.push("unequip " + sh.id.toString(16)); };
+  p.removeShout = (sh) => { known.delete(sh.id); did.push("remove " + sh.id.toString(16)); return true; };
+  s.say({ customPacketType: "greymarchWolfForm", on: true }); s.tick();
+  assert.strictEqual(equipped.id, SHOUT, "the howl is in the voice slot while changed");
+  s.say({ customPacketType: "greymarchWolfForm", on: false }); s.tick();
+  assert.strictEqual(equipped.id, MINE, "their own voice back");
+  assert.ok(!known.has(SHOUT), "a howl they did not know is taken away again");
+  assert.ok(s.log.lines.some((l) => /the howl is in the voice slot \(their voice 13e07 is put back after\)/.test(l)));
+});
+
+test("another player's roar: the sound, and the howl on their werewolf NPC here once it has settled (the howl shout in its voice slot); a settling one gets the sound only", () => {
+  const s = make({ others: { 501: 0xff000a01 }, actors: {} });
+  const events = [], shouts = [];
+  const npc = { id: 0xff000a01, getFormID: () => 0xff000a01, getRace: () => ({ getFormID: () => BEAST }), getBaseObject: () => null, getEquippedShout: () => null, addShout: (sh) => shouts.push("add " + sh.id.toString(16)), equipShout: (sh) => shouts.push("equip " + sh.id.toString(16)) };
+  s.sp.Actor.from = (f) => (f && f.id === 0xff000a01 ? npc : null);
+  s.sp.Shout = { from: (f) => (f ? { id: f.id, getFormID: () => f.id } : null) };
+  const send = s.sp.Debug.sendAnimationEvent; s.sp.Debug.sendAnimationEvent = (ref, name) => { if (ref === npc) events.push(name); send(ref, name); };
+  const g = Function("return this")();
+  g.__gmBeastHeld = { [0xff000a01]: true };
+  s.say({ customPacketType: "greymarchWolfRoar", actor: 501, bear: false }); s.tick();
+  assert.deepStrictEqual(events, [], "still settling: the sound only");
+  assert.ok(s.log.lines.some((l) => /the sound only \(its body is still settling\)/.test(l)));
+  g.__gmBeastHeld = {};
+  s.say({ customPacketType: "greymarchWolfRoar", actor: 501, bear: false }); s.tick(); s.tick(300);
+  assert.deepStrictEqual(events, ["HowlStart", "HowlRelease"], "settled: the howl plays on it");
+  assert.deepStrictEqual(shouts, ["add ce218", "equip ce218"], "with the howl shout in its voice slot");
+  delete g.__gmBeastHeld;
+});
+
+test("the walk: the run mode falls back to the graph's Speed (the werewolf graph never sets SpeedSampled); a copy of a beast is ended out of combat", () => {
+  const mg = fs.readFileSync(path.join(__dirname, "..", "src", "sync", "movementGet.ts"), "utf8");
+  assert.ok(mg.includes('const speed = ac.getAnimationVariableFloat("SpeedSampled") || ac.getAnimationVariableFloat("Speed");'));
+  const fv = fs.readFileSync(path.join(__dirname, "..", "src", "view", "formView.ts"), "utf8");
+  assert.ok(fv.includes("if (this.gmSpawnedBeast && !gmHoldStill) { try { const gmCb = Actor.from(refr); if (gmCb && gmCb.isInCombat()) gmCb.stopCombat(); }"));
+});
