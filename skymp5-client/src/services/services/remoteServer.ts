@@ -350,6 +350,20 @@ export class RemoteServer extends ClientListener {
 
     logTrace(this, "Create actor");
 
+    // GREYMARCH: a create for an object this game already shows replaces it. SkyMP gave it a SECOND slot: the old slot kept its form and its FormView,
+    // which no message reached any more (every later one goes to the new slot, a later removal frees only the new one), so a frozen copy with its
+    // own floating name stood where the player had been: the "clones" of 2026-10-23. The old slot is now cleared first, as a removal would.
+    const known = this.getIdManager().getId(msg.idx);
+    if (known >= 0) {
+      this.worldModel.forms[known] = undefined;
+      getViewFromStorage()?.syncFormArray(this.worldModel);
+      this.getIdManager().freeIdFor(msg.idx);
+      this.greymarchDoubleCreates++;
+      if (this.greymarchDoubleCreates <= 5) {
+        try { (this.controller.emitter as any).emit("greymarchStage", "clones: the server sent " + (msg.refrId || 0).toString(16) + " again while it was still shown; the old copy was removed (" + this.greymarchDoubleCreates + " this session)"); } catch (e) { /* diagnostics only */ }
+      }
+    }
+
     const i = this.getIdManager().allocateIdFor(msg.idx);
     if (this.worldModel.forms.length <= i) {
       this.worldModel.forms.length = i + 1;
@@ -1055,6 +1069,7 @@ export class RemoteServer extends ClientListener {
     try { (this.controller.emitter as any).emit("greymarchStage", text); } catch (e) { /* diagnostics only */ }
   }
   private greymarchMagicDiagLeft = 40;
+  private greymarchDoubleCreates = 0;
   private greymarchLastCastAt = new Map<string, number>();
 
   private onUpdateAnimVariablesMessage(event: ConnectionMessage<UpdateAnimVariablesMessage>): void {
