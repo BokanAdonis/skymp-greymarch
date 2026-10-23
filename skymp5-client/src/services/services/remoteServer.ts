@@ -62,6 +62,7 @@ import { logTrace, logError } from '../../logging';
 
 import { SpellCastMessage } from '../messages/spellCastMessage';
 import { UpdateAnimVariablesMessage } from '../messages/updateAnimVariablesMessage';
+import { isWereRace } from '../../view/beastSwitch';
 import { MsgType } from '../../messages';
 
 export const getPcInventory = (): Inventory | undefined => {
@@ -993,6 +994,12 @@ export class RemoteServer extends ClientListener {
 
       const castKey = `${msg.data.caster}:${msg.data.castingSource}`;
 
+      // GREYMARCH: never on a werewolf, werebear or creature form (see greymarchIsBeastCopy)
+      if (this.greymarchIsBeastCopy(msg.data.caster, ac)) {
+        this.greymarchMagicDiag(`magic: ${msg.data.caster.toString(16)} ${msg.data.interruptCast ? "end" : "cast"} ${msg.data.spell.toString(16)} hand ${msg.data.castingSource}: not replayed (a beast or creature copy)`);
+        return;
+      }
+
       if (msg.data.interruptCast) {
         this.greymarchHeldSpells.delete(castKey);
         interruptCast(ac.getFormID(), msg.data.castingSource, actorAnimationVariables);
@@ -1044,6 +1051,35 @@ export class RemoteServer extends ClientListener {
     });
   }
 
+  // GREYMARCH: IS THIS COPY A BEAST (2026-10-23)? SkyMP replays another player's spell casts on this game's copy of them (castSpellImmediate,
+  // interruptCast) and copies their animation variables onto it (applyAnimationVariablesToActor), raw arrays by index into the graph's variables.
+  // On a werewolf or werebear copy that wrote the caster's variables into the werewolf graph (its own graph, or the human one while the copy was still
+  // a stand-in, or the other way round): a watching game crashed in the voice-cast step (BeginCastVoiceEvaluator, garbage pointer, 2026-10-22 17:28,
+  // a polar bear) and the moment a werewolf roared (2026-10-23 17:02, the Elder Alpha: R casts the howl voice in the roarer's own game). A beast casts
+  // nothing a watching game must show (the roar reaches it as greymarchWolfRoar, a sound), so nothing is replayed onto it. The copy is a beast when its
+  // race is a were-race, or when the server's look for it has no head parts (a beast look, the stand-in included, or a creature form).
+  private greymarchIsBeastCopy(remoteId: number, ac: Actor): boolean {
+    try {
+      const race = ac.getRace();
+      if (race) {
+        if (this.greymarchWerebearRace < 0) { const f = Game.getFormFromFile(0x1e17b, "Dragonborn.esm"); this.greymarchWerebearRace = f ? f.getFormID() : 0; }
+        const m: any = (Function("return this")() as any).__gmWolfRace;
+        const formRaces = m ? Object.keys(m).map((k) => Number(m[k]) || 0) : [];
+        if (isWereRace(race.getFormID(), this.greymarchWerebearRace, formRaces)) return true;
+      }
+      const forms = this.getWorldModel().forms;
+      for (let i = 0; i < forms.length; i++) {
+        const f = forms[i];
+        if (f && f.refrId === remoteId) {
+          const ap: any = f.appearance;
+          return !!ap && !(Array.isArray(ap.headpartIds) && ap.headpartIds.length > 0);
+        }
+      }
+    } catch (e) { /* not known: replayed as before */ }
+    return false;
+  }
+  private greymarchWerebearRace = -1;
+
   private greymarchIsHeld(spell: Spell): boolean {
     try { const effect = spell.getNthEffectMagicEffect(0); return !!effect && effect.getCastingType() === 2; } catch (e) { return false; }
   }
@@ -1086,6 +1122,8 @@ export class RemoteServer extends ClientListener {
         floats: new Uint8Array(msg.data.actorAnimationVariables.floats),
         integers: new Uint8Array(msg.data.actorAnimationVariables.integers)
       };
+
+      if (this.greymarchIsBeastCopy(msg.data.actorRemoteId, ac)) return; // GREYMARCH: never into a werewolf, werebear or creature form's graph (greymarchIsBeastCopy)
 
       const isApplyed = applyAnimationVariablesToActor(ac.getFormID(), actorAnimationVariables);
 
