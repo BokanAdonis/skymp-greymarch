@@ -409,10 +409,9 @@ test("other players in the forms of 2026-10-21: the lists (frosts, rabids, moonb
   delete g.__gmWolfRace;
 });
 
-test("formView.ts builds a werewolf variant's NPC with the variant's race (respawned when it changes), only for a werewolf look", () => {
+test("formView.ts gives a werewolf variant's NPC the variant's race (by SetRace on its stand-in, beast-switch.test.js), only for a werewolf look", () => {
   const fv = fs.readFileSync(path.join(__dirname, "..", "src", "view", "formView.ts"), "utf8");
   assert.ok(fv.includes("__gmWolfRace"), "reads the bridge's map");
   assert.ok(fv.includes("gmMap && ap && !(Array.isArray(ap.headpartIds) && ap.headpartIds.length > 0)"), "only a beast look (no head parts): the werewolf's or the werebear's");
-  assert.ok(fv.includes("this.appearanceBasedBaseId = 0; // built again"), "a change of variant respawns the NPC");
-  assert.ok(fv.includes("{ ...this.appearanceState.appearance, raceId: this.gmWolfRace }"), "built with the variant's race");
+  assert.ok(fv.includes("const gmWanted = this.gmWolfRace || (gmApW ? Number(gmApW.raceId) || 0 : 0);"), "the variant's race is the one the stand-in is switched to");
 });

@@ -56,13 +56,12 @@ test("formView.ts: a beast look gets no full model refresh when it comes on scre
   const fv = fs.readFileSync(path.join(__dirname, "..", "src", "view", "formView.ts"), "utf8");
   assert.ok(fv.includes("const gmBeastLook = !!model.appearance && !(Array.isArray(model.appearance.headpartIds) && model.appearance.headpartIds.length > 0);"));
   assert.ok(fv.includes("if (isOnScreen && !gmBeastLook) {"), "no redraw of a beast's tints");
-  assert.ok(fv.includes("const GM_BEAST_SETTLE_MS = 6000;"), "a fresh beast is left alone for 6 seconds (3 until 2026-10-22)");
-  assert.ok(fv.includes("(!gmBeastLook || Date.now() - this.spawnMoment > GM_BEAST_SETTLE_MS)"), "a beast's gear waits for its graph");
-  assert.ok(fv.includes("if (gmBeastLook && (this.animState.useAnimOverrides || Date.now() - this.spawnMoment < GM_BEAST_SETTLE_MS || "), "no replayed or early animation for a fresh beast");
+  assert.ok(fv.includes("(!gmBeastLook || (!!this.gmBeast && !beastHeld(this.gmBeast, Date.now())))"), "a beast's gear waits until it has settled after its race switch");
+  assert.ok(fv.includes("if (gmBeastLook && (this.animState.useAnimOverrides || beastHeld(this.gmBeast, Date.now()) || "), "no replayed or early animation for a fresh beast");
   assert.ok(fv.indexOf("const gmBeastLook") < fv.indexOf("applyAnimation(refr, model.animation"), "known before the animations");
   assert.ok(fv.includes('String(model.animation.animEventName || "").toLowerCase().startsWith("howl")'), "never a relayed howl on a beast");
   assert.ok(fv.includes("this.gmSpawnedBeast = gmBeastSpawn;"), "the spawn remembers a beast");
-  assert.ok(fv.includes("const gmHoldStill = this.gmSpawnedBeast && Date.now() - this.spawnMoment < GM_BEAST_SETTLE_MS;"), "a fresh beast is held still while it settles");
+  assert.ok(fv.includes("const gmHoldStill = this.gmSpawnedBeast && beastHeld(this.gmBeast, Date.now());"), "a fresh beast is held still while it settles");
   assert.ok(/!gmHoldStill && \(\s*\+\(model\.numMovementChanges as number\)/.test(fv), "SkyMP's movement waits for it (the movement controller crashed the half-built graph)");
   const removal = fv.slice(fv.indexOf("if (refrId >= 0xff000000 && gmBeast) {"), fv.indexOf("if (refrId >= 0xff000000 && gmBeast) {") + 1400);
   assert.ok(/gone\.delete\(\);[\s\S]{0,120}unprotect\(\);\s*\}\);/.test(removal), "the world cleaner's protection is dropped only after the delete (a second delete by the cleaner crashed the watching game)");
@@ -97,15 +96,15 @@ test("formView.ts: a removal during a spawn is handed to the spawn; a late spawn
   assert.ok(fv.includes("if (this.gmSpawningId !== gmSpawnId) return;"));
 });
 
-test("formView.ts: a werewolf form switch rebuilds the NPC only once it has settled (4 s unchanged, the last build settled), or at once with a new look; never once per click", () => {
+test("formView.ts: a werewolf form switch is taken only once it has settled (4 s unchanged, the last switch settled), or at once with a new look; never once per click, and never a rebuild", () => {
   const fv = fs.readFileSync(path.join(__dirname, "..", "src", "view", "formView.ts"), "utf8");
   assert.ok(fv.includes("const GM_WOLF_RACE_SETTLE_MS = 4000;"));
   assert.ok(fv.includes("if (gmWolfRace !== this.gmWolfRacePending) { this.gmWolfRacePending = gmWolfRace; this.gmWolfRacePendingAt = Date.now(); }"), "each new race restarts the wait");
   assert.ok(fv.includes("const gmBuildingAnyway = this.appearanceBasedBaseId === 0;"), "with a new look (human to werewolf) the race goes in with that build");
-  assert.ok(fv.includes("const gmSettled = Date.now() - this.gmWolfRacePendingAt >= GM_WOLF_RACE_SETTLE_MS && !(this.gmSpawnedBeast && Date.now() - this.spawnMoment < GM_BEAST_SETTLE_MS);"), "otherwise only when settled");
+  assert.ok(fv.includes("const gmSettled = Date.now() - this.gmWolfRacePendingAt >= GM_WOLF_RACE_SETTLE_MS && !(this.gmSpawnedBeast && beastHeld(this.gmBeast, Date.now()));"), "otherwise only when settled");
   const block = fv.slice(fv.indexOf("if (gmWolfRace !== this.gmWolfRace) {"), fv.indexOf("} else this.gmWolfRacePending = gmWolfRace;"));
-  assert.ok(/if \(gmBuildingAnyway \|\| gmSettled\) \{[\s\S]*this\.appearanceBasedBaseId = 0;/.test(block), "the rebuild is behind the settle rule");
-  assert.strictEqual((block.match(/appearanceBasedBaseId = 0/g) || []).length, 1, "no other rebuild in the block");
+  assert.ok(/if \(gmBuildingAnyway \|\| gmSettled\) \{[\s\S]*this\.gmWolfRace = gmWolfRace;/.test(block), "the new race is behind the settle rule");
+  assert.strictEqual((block.match(/appearanceBasedBaseId = 0/g) || []).length, 0, "and the NPC is never rebuilt for it (the stand-in is switched with SetRace)");
 });
 
 test("no AI switching for anyone (a beast with its AI off never started its animations, T-posed, and crashed the watching game when it came back on, 2026-10-22 13:26)", async () => {
