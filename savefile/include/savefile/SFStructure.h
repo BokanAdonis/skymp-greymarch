@@ -111,6 +111,10 @@ struct ChangeForm
 
   bool Is_NPC_Type() { return ((this->type & 0b00111111) == 9); };
   bool Is_ACHR_Type() { return ((this->type & 0b00111111) == 1); };
+
+  // Bytes this form takes in the file: refID, flags, type, version, the two
+  // lengths (1, 2 or 4 bytes each, by the upper 2 bits of type) and data
+  size_t GetSizeInFile() const;
 };
 
 struct GlobalData
@@ -204,7 +208,18 @@ struct SaveFile
   ChangeForm* GetChangeFormByRefID(RefID refID, const uint8_t& type);
   GlobalVariables::GlobalVariable* GetGlobalvariableByRefID(RefID& refID);
   int64_t FindIndexInFormIdArray(uint32_t refID);
+
+  // Also moves every formIDArray entry to its plugin's index in the new list
+  // (an entry whose plugin is not in the new list becomes 0), so a form keeps
+  // pointing to the same plugin when the order changes
   void OverwritePluginInfo(std::vector<std::string>& newPlaginNames);
+
+  // Drops every change form except the player's (ACHR 0x14 and its NPC base
+  // 0x7) and fixes changeFormCount and the offsets of the tables after them.
+  // A save made in a played game otherwise keeps that game's world state:
+  // moved objects, quest stages, cleared locations. Returns how many were
+  // dropped
+  size_t RemoveChangeFormsExceptPlayer();
 };
 
 struct MiscStats
