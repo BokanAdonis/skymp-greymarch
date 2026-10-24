@@ -14,6 +14,7 @@ import { SinglePlayerService } from "../services/services/singlePlayerService";
 import { LoadGameService } from "../services/services/loadGameService";
 import * as holdMod from "./bodyHold";
 import * as emoteMod from "./emotes";
+import * as templateFixMod from "./templateFix";
 
 // Runs inside SkyMP's browser page (once). Each shows a page from Platform/UI in an iframe and relays its messages.
 const PAGE_SCRIPT = "(function(){if(window.__gmSend)return;var f=document.createElement('iframe');f.id='greymarch-frame';f.src='greymarch-select.html';f.style.cssText='position:fixed;left:0;top:0;width:100%;height:100%;border:0;z-index:2147483647;background:#05080d;display:none';var ready=false,queue=[];window.addEventListener('message',function(e){if(e.source!==f.contentWindow)return;var d=e.data;if(!d)return;if(d.greymarchReady){ready=true;queue.forEach(function(q){f.contentWindow.postMessage({greymarchIn:q},'*')});queue=[]}else if(d.greymarchOut&&window.skyrimPlatform){window.skyrimPlatform.sendMessage('greymarch',JSON.stringify(d.greymarchOut))}});window.__gmSend=function(m){f.style.display=m.fn==='hide'?'none':'block';if(ready)f.contentWindow.postMessage({greymarchIn:m},'*');else queue.push(m)};document.body.appendChild(f)})();";
@@ -314,6 +315,33 @@ export class GreymarchBridge {
             if (this.greymarchSelectRefocused <= 3) this.greymarchLog("stage: the select screen lost the keyboard and mouse (SkyMP loaded the world or Esc), took them back");
         } catch (e) { /* the next tick tries again */ }
     }
+    // OBJECTS THE START SAVE PINS (templateFix.ts): four times a second a slice of the list is looked at; anything moved goes to the server log (the first 30 in a session)
+    greymarchTemplateFixTick(now: any): any {
+        if (now < (this.greymarchTemplateFixNext || 0)) return;
+        this.greymarchTemplateFixNext = now + 250;
+        try {
+            if (!this.greymarchTemplateFix) this.greymarchTemplateFix = new templateFixMod.TemplateFix();
+            var sp = this.sp;
+            var moved = this.greymarchTemplateFix.tick({
+                look: function (id: number) {
+                    var r = sp.ObjectReference.from(sp.Game.getFormEx(id));
+                    if (!r) return null;
+                    return { x: r.getPositionX(), y: r.getPositionY(), z: r.getPositionZ(), loaded: !!r.is3DLoaded(), actor: !!sp.Actor.from(r) };
+                },
+                move: function (id: number) {
+                    var r = sp.ObjectReference.from(sp.Game.getFormEx(id));
+                    if (r) Promise.resolve(r.moveToMyEditorLocation()).catch(function () { /* left where it is */ });
+                },
+            });
+            for (var i = 0; i < moved.length; i++) {
+                this.greymarchTemplateFixSaid = (this.greymarchTemplateFixSaid || 0) + 1;
+                if (this.greymarchTemplateFixSaid <= 30) this.greymarchLog("world: " + moved[i].toString(16) + " was at the start save's old spot; moved to where the plugins put it");
+            }
+        } catch (e) {
+            if (!this.greymarchTemplateFixErr) { this.greymarchTemplateFixErr = true; this.greymarchLog("world: the start-save fix stopped: " + e); }
+            this.greymarchTemplateFixNext = now + 60000;
+        }
+    }
     greymarchTick(): any {
         this.greymarchRebaseAfterLoad(Date.now()); // "update" runs only once the world is loaded
         this.greymarchSelectFocusGuard(Date.now());
@@ -321,6 +349,7 @@ export class GreymarchBridge {
         this.greymarchDoorPrompt(Date.now());
         this.greymarchChatPending();
         this.greymarchProfPending();
+        this.greymarchTemplateFixTick(Date.now()); // objects the start save pins to their unmodded spot go back where the plugins put them (templateFix.ts)
         this.greymarchEmoteTick(Date.now()); // the emote wheel (G): opening it, playing and stopping an emote (Skyrim functions: the update phase)
         this.greymarchChatWatch(Date.now());
         this.greymarchFovTick(); // the field of view from the chatbox's Settings
