@@ -319,6 +319,37 @@ export class GreymarchBridge {
         } catch (e) { /* the next tick tries again */ }
     }
     // OBJECTS THE START SAVE PINS (templateFix.ts): four times a second a slice of the list is looked at; anything moved goes to the server log (the first 30 in a session)
+    // STUCK KEYS (2026-10-24). While one of our pages has the keyboard (chat, K, F7, the X menu ...), SkyrimPlatform gives the game none of the keyboard's
+    // events, key releases included. A key held when a page took the keyboard (W while walking, then Enter for the chat) and let go there stayed held in
+    // the game: the character walked on and the game's text boxes repeated the letter. Every frame: when a page takes the keyboard, the keys held right
+    // then are noted (the game saw them go down); when it lets go, each of those no longer held is released in the game (SKSE Input.releaseKey, sent
+    // once the page has let go, so nothing blocks it). The first few go to the server log. (The proper fix is in SkyrimPlatform's input hook.)
+    greymarchKeyReleaseTick(): any {
+        var sp = this.sp as any;
+        var focused = false;
+        try { focused = !!sp.browser.isFocused(); } catch (e) { return; }
+        var was = !!this.greymarchKeysFocused;
+        if (focused === was) return;
+        this.greymarchKeysFocused = focused;
+        var input = sp.Input;
+        if (!input || typeof input.isKeyPressed !== "function" || typeof input.releaseKey !== "function") return;
+        if (focused) {
+            var held: number[] = [];
+            for (var k = 1; k <= 0xdd; k++) { try { if (input.isKeyPressed(k)) held.push(k); } catch (e1) { /* not a key */ } }
+            this.greymarchKeysHeld = held;
+            return;
+        }
+        var list: number[] = this.greymarchKeysHeld || [];
+        this.greymarchKeysHeld = [];
+        var released: number[] = [];
+        for (var i = 0; i < list.length; i++) {
+            try { if (!input.isKeyPressed(list[i])) { input.releaseKey(list[i]); released.push(list[i]); } } catch (e2) { /* left as it is */ }
+        }
+        if (released.length) {
+            this.greymarchKeysSaid = (this.greymarchKeysSaid || 0) + 1;
+            if (this.greymarchKeysSaid <= 10) this.greymarchLog("keys: released " + released.map(function (x) { return "0x" + x.toString(16); }).join(", ") + " in the game (let go while a page had the keyboard)");
+        }
+    }
     greymarchTemplateFixTick(now: any): any {
         if (now < (this.greymarchTemplateFixNext || 0)) return;
         this.greymarchTemplateFixNext = now + 250;
@@ -356,6 +387,7 @@ export class GreymarchBridge {
         this.greymarchDoorPrompt(Date.now());
         this.greymarchChatPending();
         this.greymarchProfPending();
+        this.greymarchKeyReleaseTick(); // keys let go while a page had the keyboard are released in the game too (greymarchKeyReleaseTick)
         this.greymarchTemplateFixTick(Date.now()); // objects the start save pins to their unmodded spot go back where the plugins put them (templateFix.ts)
         this.greymarchEmoteTick(Date.now()); // the emote wheel (G): opening it, playing and stopping an emote (Skyrim functions: the update phase)
         this.greymarchChatWatch(Date.now());

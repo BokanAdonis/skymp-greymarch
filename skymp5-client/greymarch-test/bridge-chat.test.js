@@ -454,3 +454,27 @@ test("the chatbox's field of view: the game's two FOV settings are changed from 
   assert.deepStrictEqual(ini, []);
   assert.deepStrictEqual(cam, [], "the camera's view is never switched (the old way, which did not work)");
 });
+
+test("stuck keys: a key held when a page took the keyboard and let go there is released in the game once the page lets go; a key still held is not", () => {
+  const { gm, log, focus } = make();
+  const pressed = new Set([0x11, 0x2a]); // W walking, Shift held
+  const released = [];
+  gm.sp.Input = { isKeyPressed: (k) => pressed.has(k), releaseKey: (k) => released.push(k) };
+  focus.on = false; gm.greymarchKeyReleaseTick(); // in the world
+  focus.on = true; gm.greymarchKeyReleaseTick(); // Enter: the chat has the keyboard
+  pressed.delete(0x11); // W let go while typing (the game never saw it)
+  gm.greymarchKeyReleaseTick(); gm.greymarchKeyReleaseTick();
+  assert.deepStrictEqual(released, [], "nothing while the page has the keyboard");
+  focus.on = false; gm.greymarchKeyReleaseTick(); // the chat lets go
+  assert.deepStrictEqual(released, [0x11], "W released in the game; Shift is still held, so it stays");
+  gm.greymarchKeyReleaseTick(); focus.on = true; gm.greymarchKeyReleaseTick(); focus.on = false; gm.greymarchKeyReleaseTick();
+  assert.deepStrictEqual(released, [0x11], "not again: W was not held when the page took the keyboard the second time");
+  assert.ok(log.lines.some((l) => /keys: released 0x11/.test(l)), "the server log says so");
+});
+
+test("stuck keys: no Input functions (an old SkyrimPlatform) or no browser state changes nothing", () => {
+  const { gm, focus } = make();
+  gm.sp.Input = undefined;
+  focus.on = true; assert.doesNotThrow(() => gm.greymarchKeyReleaseTick());
+  focus.on = false; assert.doesNotThrow(() => gm.greymarchKeyReleaseTick());
+});
