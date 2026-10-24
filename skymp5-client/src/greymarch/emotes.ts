@@ -77,6 +77,17 @@ export const EMOTE_GROUPS: EmoteGroup[] = [
     ] },
 ];
 
+// EATING AND DRINKING (2026-10-24). Eating food, drinking or taking a potion from the inventory plays one of the emotes above on the player once the menu is closed
+// (bridge.ts greymarchConsumeNote / greymarchConsumePlay), and SkyMP shows it to everyone like any emote: food "bread" (the standing eating idle, ended after
+// EAT_SECONDS), a drink "drink", a potion "potion"; a poison (put on a weapon) nothing. Cosmetic only: the server decides what eating does (gamemode hunger.js).
+export const EAT_SECONDS = 4;
+const DRINK_WORDS = /\b(mead|ale|wine|beer|brandy|rum|milk|tea|juice|water|coffee|cocoa|cider|goblet|tankard|flin|shein|sujamma|matze|homebrew|nog|skooma|reserve|battle-?brew|battlecry|bloodwine|drink|jug|liquor|spirits)\b/i;
+export function consumeEmoteId(item: { food: boolean; poison: boolean; name: string }): string | null {
+    if (!item || item.poison) return null;
+    if (!item.food) return "potion";
+    return DRINK_WORDS.test(String(item.name || "")) && !/cake|\bpie\b|puff|sandwich|porridge|brulee|powder/i.test(String(item.name || "")) ? "drink" : "bread";
+}
+
 export function emoteById(id: unknown): Emote | null {
     if (typeof id !== "string") return null;
     for (var g = 0; g < EMOTE_GROUPS.length; g++) for (var i = 0; i < EMOTE_GROUPS[g].items.length; i++) if (EMOTE_GROUPS[g].items[i].id === id) return EMOTE_GROUPS[g].items[i];

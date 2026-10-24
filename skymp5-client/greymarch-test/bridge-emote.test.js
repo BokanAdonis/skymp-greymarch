@@ -28,7 +28,7 @@ function make(opts = {}) {
   const sp = {
     printConsole() {}, writeLogs: (n, l) => log.lines.push(l),
     Game: { getPlayer: () => player, getFormEx: (id) => ({ id }), forceThirdPerson: () => { log.thirdPerson++; } },
-    Idle: { from: (f) => f || null }, Actor: { from: (f) => (f && actors[f.id]) || null },
+    Idle: { from: (f) => f || null }, Actor: { from: (f) => (f && actors[f.id]) || null }, Potion: { from: (f) => (f && f.potion) || null },
     Debug: { sendAnimationEvent: (ref, name) => log.events.push(name), notification: (t) => log.notes.push(t) },
     Ui: { isMenuOpen: (name) => name === state.menu },
     Utility: { isInMenuMode: () => false },
@@ -45,7 +45,8 @@ function make(opts = {}) {
   const page = (msg) => at(() => gm.greymarchBrowserMessage({ arguments: ["greymarch", JSON.stringify(msg)] }));
   const shown = () => log.pages.filter((p) => p.fn === "show");
   const say = (msg) => at(() => gm.greymarchPacket(msg));
-  return { gm, log, state, tick, key, page, shown, say, bridgeSrc: bridgeJs };
+  const eat = (name, food = true, poison = false) => at(() => gm.greymarchConsumeNote({ potion: { isFood: () => food, isPoison: () => poison }, getName: () => name }));
+  return { gm, log, state, tick, key, page, shown, say, eat, bridgeSrc: bridgeJs };
 }
 
 test("holding G opens the wheel (hold mode) with every group, from the update phase; letting go tells the page", () => {
@@ -301,4 +302,27 @@ test("a face from the wheel goes back on when the talking stops; a beast's own m
   w.gm.greymarchVoiceMessage({ hud: false, listen: true, talking: true, speaking: [] });
   lipTick(w);
   assert.strictEqual(w.log.faces.me, undefined);
+});
+
+test("eating, drinking and potions: the matching idle once the menu is closed; eating ends after a few seconds; poisons, a drawn weapon or a running emote play nothing", () => {
+  assert.deepStrictEqual(["Venison Stew", "Nord Mead", "Jug of Milk", "Frost Mirriam Tea Sandwich", "Stros M'Kai Rum Cake", "Watermelon"].map((n) => emotes.consumeEmoteId({ food: true, poison: false, name: n })), ["bread", "drink", "drink", "bread", "bread", "bread"]);
+  assert.strictEqual(emotes.consumeEmoteId({ food: false, poison: false, name: "Potion of Healing" }), "potion");
+  assert.strictEqual(emotes.consumeEmoteId({ food: false, poison: true, name: "Deadly Poison" }), null);
+  const idleOf = (id) => emotes.emoteById(id).idle;
+  const s = make();
+  s.state.menu = "InventoryMenu"; s.eat("Venison Stew"); s.tick();
+  assert.deepStrictEqual(s.log.idles, [], "not while the inventory is open");
+  s.state.menu = null; s.tick();
+  assert.deepStrictEqual(s.log.idles, [idleOf("bread")], "the standing eating idle");
+  assert.strictEqual(s.log.thirdPerson, 0, "the camera is left alone"); assert.deepStrictEqual(s.log.notes, [], "no notice");
+  for (let i = 0; i < 70; i++) s.tick(50); // 3.5 s
+  assert.ok(s.gm.greymarchEmoteNow, "still eating");
+  for (let i = 0; i < 12; i++) s.tick(50);
+  assert.strictEqual(s.gm.greymarchEmoteNow, null, "done after EAT_SECONDS"); assert.strictEqual(s.log.idles[s.log.idles.length - 1], emotes.IDLE_STOP);
+  s.log.idles.length = 0;
+  s.eat("Ale"); s.tick(); assert.deepStrictEqual(s.log.idles, [idleOf("drink")]);
+  s.eat("Potion of Healing", false); s.tick(); assert.deepStrictEqual(s.log.idles, [idleOf("drink"), idleOf("potion")]);
+  s.eat("Deadly Poison", false, true); s.tick(); assert.strictEqual(s.log.idles.length, 2, "a poison: nothing");
+  s.state.drawn = true; s.eat("Apple Pie"); s.tick(); assert.strictEqual(s.log.idles.length, 2, "weapon drawn: nothing");
+  s.state.drawn = false; s.eat("Apple Pie"); s.tick(20000); assert.strictEqual(s.log.idles.length, 2, "forgotten after 15 seconds");
 });

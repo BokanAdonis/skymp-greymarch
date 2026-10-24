@@ -99,7 +99,7 @@ export class GreymarchBridge {
         try { this.controller.on("spellCast", (e: any) => { try { if (e && e.spell && e.caster && e.caster.getFormID() === 0x14) this.greymarchVampSignal("cast", e.spell.getFormID()); } catch (x) { /* not ours */ } }); } catch (vcErr) { /* no cast events: the powers are not reported */ } // a vampire's Mist Form or Vampire Lord (greymarchVampTick)
         try { this.controller.on("spellCast", (e: any) => { try { if (e && e.spell && e.caster && e.caster.getFormID() === 0x14) this.greymarchCastSend(e.spell.getFormID()); } catch (x) { /* not ours */ } }); } catch (hcErr) { /* no cast events: healing spells are not reported */ } // every cast of the player's own spells goes to the server, which applies the healing ones (healing.js); it never applies spell effects itself
         try { this.controller.on("magicEffectApply", (e: any) => { try { if (e && e.effect && e.target && e.target.getFormID() === 0x14) this.greymarchVampSignal("effect", e.effect.getFormID()); } catch (x) { /* not ours */ } }); } catch (veErr) { /* no effect events: a Potion of Blood is not reported */ } // a Potion of Blood drunk
-        try { this.controller.on("equip", (e: any) => { try { if (e && e.baseObj && e.actor && e.actor.getFormID() === 0x14) this.greymarchVampSignal("equip", e.baseObj.getFormID()); } catch (x) { /* not ours */ } }); } catch (vqErr) { /* the effect event still sees it */ } // a potion is "equipped" when it is drunk
+        try { this.controller.on("equip", (e: any) => { try { if (e && e.baseObj && e.actor && e.actor.getFormID() === 0x14) { this.greymarchVampSignal("equip", e.baseObj.getFormID()); this.greymarchConsumeNote(e.baseObj); } } catch (x) { /* not ours */ } }); } catch (vqErr) { /* the effect event still sees it */ } // a potion is "equipped" when it is drunk
         this.controller.emitter.on("greymarchStage", (text: string) => this.greymarchLog(text)); // other services report where the game is, for the server log
         this.controller.emitter.on("greymarchEar", (e: any) => { if (e && typeof e.name === "string" && isFinite(e.x) && isFinite(e.y) && isFinite(e.z)) { const m = this.greymarchEarsSeen || (this.greymarchEarsSeen = {}); m[e.name] = { x: e.x, y: e.y, z: e.z, at: Date.now(), localId: Number(e.id) || 0 }; } }); // where each named player's head is in the world (where their voice comes from: greymarchEarsTick), and which character this game draws for them (their mouth moves while they talk: greymarchLipTick)
         this.controller.emitter.on("greymarchHead", (e: any) => { const m = this.greymarchHeads || (this.greymarchHeads = {}); m[e.name] = { x: e.x, y: e.y, at: Date.now() }; this.greymarchRes = { w: e.rw, h: e.rh }; }); // where each named player's head is on screen (for the microphone icon)
@@ -2301,11 +2301,18 @@ export class GreymarchBridge {
         }
         if (this.greymarchFaceClearWanted) { this.greymarchFaceClearWanted = 0; if (this.greymarchFaceMine) this.greymarchFaceSet(null); }
         this.greymarchFaceTick(now);
+        // eating, drinking or a potion (greymarchConsumeNote): played once the menu is closed, unless an emote is on or the body is a beast; forgotten after 15 seconds
+        var cw = this.greymarchConsumeWant;
+        if (cw) {
+            if (now - cw.at > 15000) this.greymarchConsumeWant = null;
+            else if (!this.greymarchEmoteNow && !this.greymarchWolfOn && !this.greymarchShapeOn && !this.greymarchInMenu()) { this.greymarchConsumeWant = null; this.greymarchConsumePlay(cw.id, now); }
+        }
         var cur = this.greymarchEmoteNow;
         if (!cur) { this.greymarchEmoteStopWanted = 0; return; }
         var stopWhy = "";
         if (this.greymarchEmoteStopWanted) { this.greymarchEmoteStopWanted = 0; stopWhy = "stopped"; }
         else if (this.greymarchWolfOn || this.greymarchShapeOn) { this.greymarchEmoteNow = null; return; } // the body changed: the emote went with it
+        else if (cur.until && now >= cur.until) stopWhy = "done eating";
         else if (now >= (this.greymarchEmoteCheckAt || 0)) {
             this.greymarchEmoteCheckAt = now + 250;
             try {
@@ -2315,6 +2322,30 @@ export class GreymarchBridge {
             } catch (e) { /* asked again in a moment */ }
         }
         if (stopWhy) this.greymarchEmoteEnd(stopWhy);
+    }
+    // the player ate, drank or took a potion (the game "equips" it): remember which emote goes with it (emotes.ts consumeEmoteId)
+    greymarchConsumeNote(baseObj: any): any {
+        try {
+            var pot = this.sp.Potion.from(baseObj);
+            if (!pot) return;
+            var id = emoteMod.consumeEmoteId({ food: !!pot.isFood(), poison: !!pot.isPoison(), name: String(baseObj.getName() || "") });
+            if (id) this.greymarchConsumeWant = { id: id, at: Date.now() };
+        } catch (err) { /* not something eaten */ }
+    }
+    // play it like an emote, quietly (no notices, the camera is left alone): a weapon drawn or a game that refuses means no animation, nothing else
+    greymarchConsumePlay(id: string, now: number): any {
+        var em = emoteMod.emoteById(id);
+        if (!em) return;
+        var ok = false;
+        try {
+            var player = this.sp.Game.getPlayer();
+            if (player.isWeaponDrawn()) return;
+            var idle = this.sp.Idle.from(this.sp.Game.getFormEx(em.idle));
+            ok = !!idle && !!player.playIdle(idle);
+        } catch (err) { ok = false; }
+        var n = this.greymarchEmoteLogged = (this.greymarchEmoteLogged || 0) + 1;
+        if (n <= 20) this.greymarchLog("eat: " + id + " " + (ok ? "played" : "refused by the game"));
+        if (ok && em.kind === "loop") this.greymarchEmoteNow = { id: em.id, kind: "loop", stop: emoteMod.IDLE_STOP, at: now, until: now + emoteMod.EAT_SECONDS * 1000 };
     }
     greymarchEmotePlay(em: any): any {
         var sp = this.sp;
