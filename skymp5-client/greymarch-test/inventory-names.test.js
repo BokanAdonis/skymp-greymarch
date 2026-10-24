@@ -16,7 +16,7 @@ const NAMES = { [PAPER]: "Roll of Paper", [SWORD]: "Iron Sword" };
 const mods = { skyrimPlatform: { Game: { getFormEx: (id) => (NAMES[id] ? { getName: () => NAMES[id] } : null) } } };
 const mod = { exports: {} };
 new Function("require", "exports", "module", js)((p) => mods[p], mod.exports, mod);
-const { getDiff, hasExtras, sumInventories } = mod.exports;
+const { getDiff, hasExtras, sumInventories, roundHealth, withRoundedHealth } = mod.exports;
 
 const inv = (...entries) => ({ entries });
 
@@ -53,4 +53,22 @@ test("the item's own name as the game shows it is still the same item (no extra 
   assert.deepStrictEqual(getDiff(inv({ baseId: SWORD, count: 1, health: 1.1, name: "Iron Sword (Fine)" }), inv({ baseId: SWORD, count: 1, health: 1.1, name: "Iron Sword (Superior)" }), false).entries, []);
   assert.strictEqual(hasExtras({ baseId: SWORD, count: 1, name: "Iron Sword" }), false, "the plain form name is no extra");
   assert.strictEqual(sumInventories(inv({ baseId: SWORD, count: 1 }), inv({ baseId: SWORD, count: 2 })).entries[0].count, 3, "plain items still add up");
+});
+
+test("condition: tempered gear rounds to 0.1 as before; report papers keep five decimals below 1.1 (no quality word); 1.015 and below is no condition", () => {
+  assert.strictEqual(roundHealth(1.100000023841858), 1.1, "a 32-bit 1.1 from the server is 1.1");
+  assert.strictEqual(roundHealth(1.2345), 1.2, "tempered gear as before");
+  assert.strictEqual(roundHealth(1.0204100370407104), 1.02041, "a guard report paper (GR-0042) keeps its own condition");
+  assert.strictEqual(roundHealth(1.0999800205230713), 1.09998);
+  assert.strictEqual(roundHealth(1.01), undefined, "what AddItemEx gives every item is no condition");
+  assert.strictEqual(roundHealth(1), undefined);
+  assert.strictEqual(roundHealth(undefined), undefined);
+});
+
+test("two report papers with their own condition stay two entries, and the server's float copy compares equal to the game's", () => {
+  const server = inv({ baseId: PAPER, count: 1, name: "Guard Report GR-0001", health: 1.0199999809265137 }, { baseId: PAPER, count: 1, name: "Guard Report GR-0002", health: 1.0200099945068359 }, { baseId: SWORD, count: 1, health: 1.100000023841858 });
+  const game = inv({ baseId: PAPER, count: 1, name: "Guard Report GR-0001", health: 1.02 }, { baseId: PAPER, count: 1, name: "Guard Report GR-0002", health: 1.02001 }, { baseId: SWORD, count: 1, health: 1.1 });
+  assert.deepStrictEqual(getDiff(withRoundedHealth(server), game, true).entries, [], "nothing to add or remove");
+  assert.deepStrictEqual(withRoundedHealth(inv({ baseId: SWORD, count: 2, health: 1.01 })).entries, [{ baseId: SWORD, count: 2 }], "no condition is dropped");
+  assert.strictEqual(server.entries[0].health, 1.0199999809265137, "the server's copy itself is not changed");
 });

@@ -138,6 +138,18 @@ export const hasExtras = (e: Entry): boolean => {
   return !extrasEqual(e, { baseId: e.baseId, count: 0 }); // same baseId, so the item's own name counts as no name
 };
 
+// Greymarch: an item's condition as it is compared. Tempered gear (1.1 and up) is rounded to 0.1 as before. Between 1.015 and 1.1 (no quality word
+// such as "(Fine)" in the name) five decimals are kept: the server gives each guard report paper its own condition there (gamemode reports.js
+// paperHealth), which is what keeps Skyrim from piling two papers into one stack. 1.015 and below is no condition at all
+// (TESModPlatform::AddItemEx makes all items at least 1.01 health). The server's copy goes through the same rounding before it is compared
+// (applyInventory), so a 32-bit float sent as 1.100000023841858 is still 1.1.
+export const roundHealth = (h?: number): number | undefined => {
+  if (typeof h !== "number" || !Number.isFinite(h) || h <= 1.015) {
+    return undefined;
+  }
+  return h < 1.1 ? Math.round(h * 100000) / 100000 : Math.round(h * 10) / 10;
+};
+
 const extractExtraData = (
   refr: ObjectReference,
   extraList: BaseExtraList | null,
@@ -154,14 +166,15 @@ const extractExtraData = (
 
   (extraList || []).forEach((extra) => {
     switch (extra.type) {
-      case "Health":
-        out.health = Math.round((extra as ExtraHealth).health * 10) / 10;
-
-        // TESModPlatform::AddItemEx makes all items at least 1.01 health
-        if (out.health === 1) {
+      case "Health": {
+        const health = roundHealth((extra as ExtraHealth).health);
+        if (health === undefined) {
           delete out.health;
+        } else {
+          out.health = health;
         }
         break;
+      }
       case "Count":
         out.count = (extra as ExtraCount).count;
         break;
@@ -337,6 +350,20 @@ const resetBase = (refr: ObjectReference): void => {
   }
 };
 
+// the server's inventory with each condition rounded the way the game's own is read (roundHealth), so both sides compare alike
+export const withRoundedHealth = (inv: Inventory): Inventory => ({
+  entries: inv.entries.map((e) => {
+    const copy: Entry = { ...e };
+    const health = roundHealth(e.health);
+    if (health === undefined) {
+      delete copy.health;
+    } else {
+      copy.health = health;
+    }
+    return copy;
+  }),
+});
+
 export const applyInventory = (
   refr: ObjectReference,
   newInventory: Inventory,
@@ -344,7 +371,7 @@ export const applyInventory = (
   ignoreWorn = false
 ): boolean => {
   resetBase(refr);
-  const diff = getDiff(newInventory, getInventory(refr), ignoreWorn).entries;
+  const diff = getDiff(withRoundedHealth(newInventory), getInventory(refr), ignoreWorn).entries;
 
   let res = true;
 
