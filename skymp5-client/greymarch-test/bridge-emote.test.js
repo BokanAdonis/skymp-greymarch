@@ -20,6 +20,7 @@ function make(opts = {}) {
   const state = { drawn: false, speed: 0, menu: null, refuse: false };
   const player = {
     playIdle: (idle) => { log.idles.push(idle.id); return !state.refuse; },
+    getActorValue: (n) => (state.av || {})[n] || 0, damageActorValue: (n, v) => { log.damage = (log.damage || []).concat([[n, Math.round(v)]]); state.av[n] -= v; },
     isWeaponDrawn: () => state.drawn,
     getAnimationVariableFloat: (n) => (n === "Speed" ? state.speed : 0),
     ...faceLog("me"),
@@ -46,7 +47,7 @@ function make(opts = {}) {
   const page = (msg) => at(() => gm.greymarchBrowserMessage({ arguments: ["greymarch", JSON.stringify(msg)] }));
   const shown = () => log.pages.filter((p) => p.fn === "show");
   const say = (msg) => at(() => gm.greymarchPacket(msg));
-  const eat = (name, food = true, poison = false) => at(() => gm.greymarchConsumeNote({ potion: { isFood: () => food, isPoison: () => poison }, getName: () => name }));
+  const eat = (name, food = true, poison = false, fid = 0x3eaea, mgefs = [0x3eb15]) => at(() => gm.greymarchConsumeNote({ potion: { isFood: () => food, isPoison: () => poison, getNumEffects: () => mgefs.length, getNthEffectMagicEffect: (i) => ({ getFormID: () => mgefs[i] }) }, getName: () => name, getFormID: () => fid }));
   return { gm, log, state, tick, key, page, shown, say, eat, bridgeSrc: bridgeJs };
 }
 
@@ -343,4 +344,24 @@ test("food or a drink used from the inventory or favorites closes that menu (the
   assert.strictEqual(v.log.taps, undefined, "no menu open (a hotkey): nothing pressed");
   const w = make(); w.state.menu = "ContainerMenu"; w.eat("Apple Pie");
   assert.strictEqual(w.log.taps, undefined, "another menu: left alone");
+});
+
+test("a potion: the player's drink plays the swig and its instant effect is undone (effects ended, values back to the frame before); the server's drink after the swig keeps its effect and plays nothing", () => {
+  const s = make();
+  s.state.av = { health: 40, magicka: 100, stamina: 80 };
+  s.tick(); // the frame before the drink is noted
+  s.eat("Potion of Healing", false);
+  s.state.av.health = 90; // the game healed at once
+  let dispelled = 0; s.gm.greymarchPotionUndo.effects.push({ dispel: () => dispelled++ });
+  s.tick();
+  assert.strictEqual(s.state.av.health, 40, "back to before the drink"); assert.strictEqual(dispelled, 1, "its effect ended");
+  assert.deepStrictEqual(s.log.idles, [emotes.emoteById("potion").idle], "the swig");
+  for (let i = 0; i < 12; i++) s.tick(50);
+  assert.strictEqual(s.gm.greymarchPotionUndo, null, "the undo lasts half a second");
+  s.log.idles.length = 0;
+  s.eat("Potion of Healing", false); // the server's drink, after the swig
+  s.state.av.health = 90; s.tick();
+  assert.strictEqual(s.state.av.health, 90, "its effect stays"); assert.deepStrictEqual(s.log.idles, [], "no second swig");
+  s.eat("Potion of Healing", false); s.tick();
+  assert.deepStrictEqual(s.log.idles, [emotes.emoteById("potion").idle], "the next one the player drinks swigs again");
 });

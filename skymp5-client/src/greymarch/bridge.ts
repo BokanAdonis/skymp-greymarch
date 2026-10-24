@@ -94,6 +94,7 @@ export class GreymarchBridge {
         this.controller.on("tick", () => this.greymarchBodyTick(Date.now())); // select before the world: the held body is let go once a character is chosen ("tick": "update" does not run at the main menu) // a held Play / Create goes out once the world has loaded (greymarchChoiceTick) // the connecting screen: "tick", because "update" does not run at the main menu (it only uses the browser)
         try { this.controller.on("spellCast", (e: any) => { try { if (e && e.spell && e.spell.getFormID() === 0x92c48 && e.caster && e.caster.getFormID() === 0x14) this.greymarchWolfSignal("spellCast"); } catch (x) { /* not ours */ } }); } catch (scErr) { /* the effect checks still see it */ } // the werewolf power (greymarchWolfTick)
         try { this.controller.on("effectStart", (e: any) => { try { if (e && e.effect && e.effect.getFormID() === 0x92c45 && e.target && e.target.getFormID() === 0x14) this.greymarchWolfSignal("effectStart"); } catch (x) { /* not ours */ } }); } catch (esErr) { /* the other signals still see it */ }
+        try { this.controller.on("magicEffectApply", (e: any) => { try { var pu = this.greymarchPotionUndo; if (pu && e && e.effect && e.activeEffect && e.target && e.target.getFormID() === 0x14 && Date.now() < pu.until && pu.mgefs[e.effect.getFormID() >>> 0]) pu.effects.push(e.activeEffect); } catch (x) { /* not ours */ } }); } catch (puErr) { /* the bar shows the first drink for a moment */ } // the first drink of a potion: its effects are ended (greymarchPotionUndoTick)
         try { this.controller.on("magicEffectApply", (e: any) => { try { if (e && e.effect && e.activeEffect && this.greymarchMagicBlock && this.greymarchMagicBlock[e.effect.getFormID() >>> 0]) (this.greymarchMagicBlockQueue || (this.greymarchMagicBlockQueue = [])).push({ active: e.activeEffect, effect: e.effect.getFormID() >>> 0, caster: e.caster ? e.caster.getFormID() >>> 0 : 0 }); } catch (x) { /* not ours */ } }); } catch (mbErr) { /* no effect events: NPC raise-the-dead and summons are not stopped */ } // an NPC raising the dead or summoning (gamemode magicblock.js): ended in greymarchMagicBlockDrive
         try { this.controller.on("magicEffectApply", (e: any) => { try { if (e && e.effect && e.effect.getFormID() === 0x92c45 && e.target && e.target.getFormID() === 0x14) this.greymarchWolfSignal("magicEffectApply"); } catch (x) { /* not ours */ } }); } catch (maErr) { /* the other signals still see it */ }
         try { this.controller.on("spellCast", (e: any) => { try { if (e && e.spell && e.caster && e.caster.getFormID() === 0x14) this.greymarchVampSignal("cast", e.spell.getFormID()); } catch (x) { /* not ours */ } }); } catch (vcErr) { /* no cast events: the powers are not reported */ } // a vampire's Mist Form or Vampire Lord (greymarchVampTick)
@@ -2282,6 +2283,7 @@ export class GreymarchBridge {
     // Every frame (update phase): open the wheel, play or stop an emote, and end a lasting one when the player moves (keys can be rebound, so the speed is watched too) or draws a weapon.
     greymarchEmoteTick(now: number): any {
         var sp = this.sp;
+        this.greymarchPotionUndoTick(now);
         var wanted = this.greymarchEmoteWanted || 0;
         if (wanted) {
             this.greymarchEmoteWanted = 0;
@@ -2329,9 +2331,55 @@ export class GreymarchBridge {
             var pot = this.sp.Potion.from(baseObj);
             if (!pot) return;
             var id = emoteMod.consumeEmoteId({ food: !!pot.isFood(), poison: !!pot.isPoison(), name: String(baseObj.getName() || "") });
+            if (id === "potion") {
+                var fid = baseObj.getFormID() >>> 0;
+                var blood = 0; try { blood = this.greymarchVampForm("potion") >>> 0; } catch (bErr) { blood = 0; }
+                if (blood && fid === blood) return; // the Potion of Blood is the vampire code's
+                if (this.greymarchPotionServerDrink(fid)) return; // the server drinking it after the swig: no animation, its effect stays
+                this.greymarchPotionFirstDrink(pot, fid);
+            }
             if (id) this.greymarchConsumeWant = { id: id, at: Date.now() };
             if (id === "bread" || id === "mug") this.greymarchConsumeCloseMenu(); // food or a drink: the inventory closes so the meal is seen (a potion leaves it open: several in a row)
         } catch (err) { /* not something eaten */ }
+    }
+    // POTIONS TAKE A SWIG (gamemode potions.js). The player drinks: the swig plays, and the server keeps the effects back, puts that one potion back after the swig and
+    // has this game drink it again (the server's Papyrus Actor.EquipItem); that second drink's effects stay. The game itself applies the first drink at once, so
+    // here that is undone: the effects it starts are ended and health, magicka and stamina go back to the frame before (greymarchPotionUndoTick).
+    greymarchPotionFirstDrink(pot: any, fid: number): any {
+        var now = Date.now(), mgefs: any = {};
+        try { var n = pot.getNumEffects(); for (var i = 0; i < n && i < 16; i++) { var m = pot.getNthEffectMagicEffect(i); if (m) mgefs[m.getFormID() >>> 0] = true; } } catch (e) { /* only the values are put back */ }
+        var pend = this.greymarchPotionPending || (this.greymarchPotionPending = {});
+        pend[fid] = (pend[fid] || []).filter(function (t: number) { return t > now; }).concat([now + emoteMod.POTION_WAIT_MS]);
+        this.greymarchPotionUndo = { mgefs: mgefs, effects: [], snap: this.greymarchAvSnap ? { health: this.greymarchAvSnap.health, magicka: this.greymarchAvSnap.magicka, stamina: this.greymarchAvSnap.stamina } : null, until: now + emoteMod.POTION_UNDO_MS };
+    }
+    greymarchPotionServerDrink(fid: number): boolean {
+        var pend = this.greymarchPotionPending, now = Date.now();
+        if (!pend || !pend[fid]) return false;
+        var list = pend[fid].filter(function (t: number) { return t > now; });
+        var mine = list.length > 0;
+        if (mine) list.shift();
+        if (list.length) pend[fid] = list; else delete pend[fid];
+        return mine;
+    }
+    // every frame: note health, magicka and stamina (what a first drink is put back to); while a first drink is being undone, end its effects and take back any rise
+    greymarchPotionUndoTick(now: number): any {
+        var player: any = null;
+        try { player = this.sp.Game.getPlayer(); } catch (e) { return; }
+        if (!player) return;
+        var pu = this.greymarchPotionUndo;
+        if (pu) {
+            if (now >= pu.until) this.greymarchPotionUndo = null;
+            for (var i = 0; i < pu.effects.length; i++) { try { pu.effects[i].dispel(); } catch (dErr) { /* it ended */ } }
+            pu.effects = [];
+            if (pu.snap) {
+                var avs = ["health", "magicka", "stamina"];
+                for (var k = 0; k < avs.length; k++) {
+                    try { var cur = player.getActorValue(avs[k]), was = pu.snap[avs[k]]; if (typeof was === "number" && cur > was + 0.5) player.damageActorValue(avs[k], cur - was); } catch (vErr) { /* that value stays */ }
+                }
+            }
+            if (this.greymarchPotionUndo) return; // the frame before stays the drink's frame until the undo is over
+        }
+        try { this.greymarchAvSnap = { health: player.getActorValue("health"), magicka: player.getActorValue("magicka"), stamina: player.getActorValue("stamina") }; } catch (sErr) { /* asked next frame */ }
     }
     // close the inventory (or favorites) the food was used from: SkyrimPlatform has no "close menu", so the menu key is pressed for the player (the key mapped to
     // "Tween Menu", Tab unless rebound, closes an item menu back to the game). Only while one of those menus is still open, so it never opens the Tween menu.
