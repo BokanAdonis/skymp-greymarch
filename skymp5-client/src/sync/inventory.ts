@@ -91,10 +91,13 @@ const checkIfNameIsGeneratedByGame = (
   return false;
 };
 
+// Greymarch: names given by the server (guard report papers "Guard Report GR-0042", "Title (GR-0042)") are what tells two papers apart,
+// so two entries are one stack only when their names match exactly, or when both are the item's own name as the game shows it
+// (no name, "Iron Sword", "Iron Sword (Fine)"). "Title (GR-0041)" and "Title (GR-0042)" stay two stacks.
 const namesEqual = (a: Entry, b: Entry): boolean => {
   const aStr = a.name || "";
   const bStr = b.name || "";
-  if (cropName(getRealName(aStr)) === cropName(getRealName(bStr))) {
+  if (cropName(aStr) === cropName(bStr)) {
     return true;
   }
 
@@ -102,7 +105,10 @@ const namesEqual = (a: Entry, b: Entry): boolean => {
     const form = Game.getFormEx(a.baseId);
     if (form) {
       const formName = form.getName();
+      const isGameName = (s: string) =>
+        !s.length || s === formName || getRealName(s) === formName;
       if (
+        (isGameName(aStr) && isGameName(bStr)) ||
         checkIfNameIsGeneratedByGame(aStr, bStr, formName) ||
         checkIfNameIsGeneratedByGame(bStr, aStr, formName)
       )
@@ -120,7 +126,7 @@ const extrasEqual = (a: Entry, b: Entry, ignoreWorn = false) => {
     a.maxCharge === b.maxCharge &&
     !!a.removeEnchantmentOnUnequip === !!b.removeEnchantmentOnUnequip &&
     //a.chargePercent === b.chargePercent &&
-    //namesEqual(a, b) &&
+    namesEqual(a, b) && // Greymarch: on again, or differently named papers were merged into one stack in chests
     a.soul === b.soul &&
     a.poisonId === b.poisonId &&
     a.poisonCount === b.poisonCount &&
@@ -129,7 +135,7 @@ const extrasEqual = (a: Entry, b: Entry, ignoreWorn = false) => {
 };
 
 export const hasExtras = (e: Entry): boolean => {
-  return !extrasEqual(e, { baseId: 0, count: 0 });
+  return !extrasEqual(e, { baseId: e.baseId, count: 0 }); // same baseId, so the item's own name counts as no name
 };
 
 const extractExtraData = (
