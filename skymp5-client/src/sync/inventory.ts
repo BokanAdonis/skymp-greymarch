@@ -350,6 +350,16 @@ const resetBase = (refr: ObjectReference): void => {
   }
 };
 
+// misc items, books and notes: nothing anyone wears (see applyInventory)
+const isLooseItem = (baseId: number): boolean => {
+  const f = Game.getFormEx(baseId);
+  if (!f) {
+    return false;
+  }
+  const type = f.getType();
+  return type === FormType.Misc || type === FormType.Book;
+};
+
 // the server's inventory with each condition rounded the way the game's own is read (roundHealth), so both sides compare alike
 export const withRoundedHealth = (inv: Inventory): Inventory => ({
   entries: inv.entries.map((e) => {
@@ -371,7 +381,40 @@ export const applyInventory = (
   ignoreWorn = false
 ): boolean => {
   resetBase(refr);
-  const diff = getDiff(withRoundedHealth(newInventory), getInventory(refr), ignoreWorn).entries;
+  const serverInv = withRoundedHealth(newInventory);
+  const current = getInventory(refr);
+  let diff = getDiff(serverInv, current, ignoreWorn).entries;
+
+  // Greymarch: Skyrim cannot be told WHICH of several items of one base to remove: AddItemEx hands RemoveItem a new extra list, which is not one of
+  // the container's own, so Skyrim takes whichever comes first. With two guard report papers (one base, each its own name and condition) the wrong
+  // paper went, the server put it right, and the game took the wrong one again: papers bounced between chest and pack. So when an item with extras
+  // must go, every item of that base is taken out and the server's own list of it is put back, each with its own name and condition. Only loose
+  // items (misc items, books and notes) that nobody wears; equipment keeps the old way, so nothing is ever taken off a body.
+  const plainRemoval = new Set<Entry>();
+  if (!enableCrashProtection) {
+    const rebuild = new Set<number>();
+    diff.forEach((e) => {
+      if (e.count < 0 && hasExtras(e) && !e.worn && !e.wornLeft && isLooseItem(e.baseId)) {
+        rebuild.add(e.baseId);
+      }
+    });
+    if (rebuild.size) {
+      diff = diff.filter((e) => !rebuild.has(e.baseId));
+      rebuild.forEach((baseId) => {
+        const have = current.entries
+          .filter((e) => e.baseId === baseId)
+          .reduce((n, e) => n + e.count, 0);
+        if (have > 0) {
+          const removal: Entry = { baseId, count: -have };
+          plainRemoval.add(removal);
+          diff.push(removal);
+        }
+        serverInv.entries
+          .filter((e) => e.baseId === baseId && e.count > 0)
+          .forEach((e) => diff.push({ ...e }));
+      });
+    }
+  }
 
   let res = true;
 
@@ -457,7 +500,7 @@ export const applyInventory = (
         e.maxCharge ? e.maxCharge : 0,
         !!e.removeEnchantmentOnUnequip,
         e.chargePercent ? e.chargePercent : 0,
-        e.name ? cropName(e.name) : f.getName(),
+        plainRemoval.has(e) ? "" : e.name ? cropName(e.name) : f.getName(), // "": no extra list, so Skyrim removes that many of the base, whichever they are
         e.soul ? e.soul : 0,
         e.poisonId ? Potion.from(Game.getFormEx(e.poisonId)) : null,
         e.poisonCount ? e.poisonCount : 0
