@@ -2145,7 +2145,11 @@ export class GreymarchBridge {
         }
     }
     greymarchLedgerShow(): any {
-        if (this.greymarchScreenUp || this.greymarchAdminOn || this.greymarchMenuOn || this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn) return; // not over the select screen or the other panels
+        if (this.greymarchScreenUp || this.greymarchAdminOn || this.greymarchMenuOn || this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn) { // not over the select screen or the other panels
+            this.greymarchLog("ledger: not opened, " + [this.greymarchScreenUp ? "the select screen" : "", this.greymarchAdminOn ? "the staff panel" : "", this.greymarchMenuOn ? "the X menu" : "", this.greymarchProfOn ? "the K window" : "", this.greymarchChanceryOn ? "the chancery" : "", this.greymarchVampMenuOn ? "the vampire window" : "", this.greymarchLedgerOn ? "the ledger itself" : ""].filter(Boolean).join(", ") + " is marked open");
+            return;
+        }
+        this.greymarchLog("ledger: opened");
         this.greymarchLedgerOn = true;
         this.sp.browser.setVisible(true);
         this.sp.browser.setFocused(true);
