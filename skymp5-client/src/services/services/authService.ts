@@ -218,6 +218,7 @@ export class AuthService extends ClientListener {
       case 'greymarchShape':
       case 'greymarchShapeAnim':
       case 'greymarchStagger': // a starving character staggers (gamemode hunger.js)
+      case 'greymarchBuildAngle': // a piece a GM placed was turned: this game turns its copy (gamemode buildsys.js)
       case 'greymarchHungerFx': // starving: regeneration off
       case 'greymarchHunger': // the hunger bowl on the HUD
       case 'greymarchMagicBlock': // NPC raise-the-dead and summon effects to end (gamemode magicblock.js)

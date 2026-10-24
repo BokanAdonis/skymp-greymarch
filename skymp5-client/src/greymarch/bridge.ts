@@ -155,6 +155,7 @@ export class GreymarchBridge {
         if (type === "greymarchGmAlert") { this.greymarchChatToPage("alert", msg); return; } // a player typed /gm (the server only sends it to Trial GM and up)
         if (type === "greymarchMenuReply") { this.greymarchMenuToPage("reply", msg); return; }
         if (type === "greymarchShape") { this.greymarchShapeMsg(msg); return; }
+        if (type === "greymarchBuildAngle") { if (Number(msg.id) > 0 && typeof msg.z === "number" && isFinite(msg.z)) (this.greymarchBuildAngleQueue || (this.greymarchBuildAngleQueue = [])).push({ id: Number(msg.id) >>> 0, z: Number(msg.z) }); return; } // a piece a GM placed was turned (gamemode buildsys.js): SkyMP's SetAngle reaches only the server's copy, so this game turns its own (greymarchBuildAngleTick)
         if (type === "greymarchStagger") { if (Number(msg.actor) > 0) (this.greymarchStaggerQueue || (this.greymarchStaggerQueue = [])).push({ actor: Number(msg.actor), self: msg.self === true }); return; } // a starving character staggers (gamemode hunger.js; played in greymarchHungerDrive, for everyone near)
         if (type === "greymarchMagicBlock") { var mb: any = {}; if (Array.isArray(msg.effects)) for (var mi = 0; mi < msg.effects.length && mi < 5000; mi++) mb[Number(msg.effects[mi]) >>> 0] = true; this.greymarchMagicBlock = mb; return; } // the raise-the-dead and summon effects to end when an NPC casts them (gamemode magicblock.js)
         if (type === "greymarchHunger") { this.greymarchHudToPage("hunger", { stage: String(msg.stage || "fed") }); return; } // the hunger bowl on the HUD (right, level with the voice display; gamemode hunger.js)
@@ -399,6 +400,7 @@ export class GreymarchBridge {
         this.greymarchToastTick(Date.now());
         this.greymarchEffects(); // staff effects: noclip, speed, frozen, ghosts (cheap: does real work every 400 ms)
         this.greymarchHungerDrive(); // hunger: the stagger, regeneration off while starving
+        this.greymarchBuildAngleTick(); // a piece a GM placed was turned: this game turns its copy
         this.greymarchMagicBlockDrive(); // NPC raise-the-dead and summons: ended at once
         this.greymarchShapeDrive(); // a creature form as an NPC: moved every frame like SkyMP moves other players; other players' creature attacks
         this.greymarchShapeTick(); // a creature form staff put the player in (a goat, a giant ...): the server decides, the body is changed here
@@ -630,7 +632,7 @@ export class GreymarchBridge {
         this.greymarchAdminOn = true;
         this.sp.browser.setVisible(true);
         this.sp.browser.setFocused(true);
-        this.greymarchAdminToPage("show", mode === "tester" || mode === "dungeons" || mode === "encounters" ? mode : true);
+        this.greymarchAdminToPage("show", mode === "tester" || mode === "dungeons" || mode === "encounters" || mode === "build" ? mode : true);
     }
     greymarchAdminHide(): any {
         this.greymarchAdminOn = false;
@@ -647,7 +649,7 @@ export class GreymarchBridge {
         if (e.code === 19) { var rDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (e.isUp === true) rDown = false; if (rDown && !this.greymarchKey19 && this.greymarchWolfOn && !this.greymarchChatTyping) this.greymarchWolfRoarAt = Date.now(); this.greymarchKey19 = rDown; return; } // R: the werewolf roars (greymarchWolfTick; only while changed)
         if (e.code === 44) { var zDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (e.isUp === true) zDown = false; if (zDown && !this.greymarchKey44 && !this.greymarchChatTyping) { if (this.greymarchWolfOn) this.greymarchWolfBackAt = Date.now(); else this.greymarchWolfKeyAt = Date.now(); } this.greymarchKey44 = zDown; return; } // Z while changed: ask the server to change back (greymarchWolfTick)
         if (e.code === 256 || e.code === 257) { var mDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (e.isUp === true) mDown = false; if (mDown && !this["greymarchKey" + e.code]) this.greymarchShapeButton(e.code === 257); this["greymarchKey" + e.code] = mDown; return; } // mouse buttons: a creature's attacks (greymarchShapeTick)
-        if (e.code !== 65 && e.code !== 66 && e.code !== 64 && e.code !== 35 && e.code !== 1 && e.code !== 45 && e.code !== 28 && e.code !== 37 && e.code !== 34) return;
+        if (e.code !== 65 && e.code !== 66 && e.code !== 64 && e.code !== 35 && e.code !== 48 && e.code !== 1 && e.code !== 45 && e.code !== 28 && e.code !== 37 && e.code !== 34) return;
         var down = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true);
         if (e.isUp === true) down = false;
         if (e.code === 1 && down && this.greymarchChatTyping) { this.greymarchChatClose(); return; } // Esc cancels whenever the input is open (the messages stay on screen), whatever the key-up history says
@@ -663,6 +665,7 @@ export class GreymarchBridge {
         else if (e.code === 1 && this.greymarchMenuOn) this.greymarchMenuEscape();
         else if (e.code === 65 && !this.greymarchAdminOn && !this.greymarchMenuOn) { if (this.greymarchEmoteOn) this.greymarchEmoteHide(); this.greymarchAdminShow(); }
         else if (e.code === 35 && !this.greymarchAdminOn && !this.greymarchMenuOn && !this.greymarchChatTyping && !this.greymarchPanelHasKeys()) { if (this.greymarchEmoteOn) this.greymarchEmoteHide(); this.greymarchAdminShow("encounters"); } // H: the staff panel straight on its Encounters tab (GM and up; for anyone else the page closes again at once; the page closes it with H)
+        else if (e.code === 48 && !this.greymarchAdminOn && !this.greymarchMenuOn && !this.greymarchChatTyping && !this.greymarchPanelHasKeys()) { if (this.greymarchEmoteOn) this.greymarchEmoteHide(); this.greymarchAdminShow("build"); } // B: the staff panel straight on its Build tab (GM and up; for anyone else the page closes again at once)
         else if (e.code === 64 && !this.greymarchAdminOn && !this.greymarchMenuOn && !this.greymarchChatTyping) { if (this.greymarchEmoteOn) this.greymarchEmoteHide(); this.greymarchAdminShow("dungeons"); } // F6: the staff panel straight on its Dungeons tab (GM and up; the server checks the "dungeons" command, the page closes it with F6)
         else if (e.code === 66 && !this.greymarchAdminOn && !this.greymarchMenuOn && !this.greymarchChatTyping) this.greymarchAdminShow("tester"); // F8: the same panel as the tester menu (teleports, items, NPCs; the server gives testers those commands on the test server only)
         else if (e.code === 37 && !this.greymarchChatTyping && !this.greymarchEmoteOn && !(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn)) this.greymarchProfWanted = Date.now(); // K opens the professions window from the update phase (greymarchProfPending), where the game's menus can be asked about (the page itself closes it with K or Esc, like the staff panel with F7)
@@ -1545,6 +1548,19 @@ export class GreymarchBridge {
                 q[i].active.dispel();
                 this.greymarchCrumb("magic block: ended effect " + q[i].effect.toString(16) + " of NPC " + q[i].caster.toString(16));
             } catch (dErr) { /* it ended by itself */ }
+        }
+    }
+    // a piece a GM placed was turned (gamemode buildsys.js): this game's copy of it, if it has one loaded, takes the server's angle
+    greymarchBuildAngleTick(): any {
+        var q = this.greymarchBuildAngleQueue;
+        if (!q || !q.length) return;
+        this.greymarchBuildAngleQueue = [];
+        for (var i = 0; i < q.length && i < 32; i++) {
+            try {
+                var localId = misc.remoteIdToLocalId(q[i].id);
+                var ref = localId ? this.sp.ObjectReference.from(this.sp.Game.getFormEx(localId)) : null;
+                if (ref) ref.setAngle(0, 0, q[i].z);
+            } catch (aErr) { /* not drawn here: it loads with the server's angle */ }
         }
     }
     greymarchHungerDrive(): any {
