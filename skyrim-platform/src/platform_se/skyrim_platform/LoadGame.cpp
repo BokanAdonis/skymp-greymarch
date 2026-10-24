@@ -99,6 +99,10 @@ void LoadGame::Run(std::shared_ptr<SaveFile_::SaveFile> save,
     throw std::runtime_error("Bad SaveFile");
   }
 
+  // The template is a save from a played game: without this its moved
+  // objects, quest stages and cleared locations win over every plugin
+  save->RemoveChangeFormsExceptPlayer();
+
   ModifyPluginInfo(save);
 
   ModifySaveTime(save, time);
