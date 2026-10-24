@@ -2330,7 +2330,21 @@ export class GreymarchBridge {
             if (!pot) return;
             var id = emoteMod.consumeEmoteId({ food: !!pot.isFood(), poison: !!pot.isPoison(), name: String(baseObj.getName() || "") });
             if (id) this.greymarchConsumeWant = { id: id, at: Date.now() };
+            if (id === "bread" || id === "mug") this.greymarchConsumeCloseMenu(); // food or a drink: the inventory closes so the meal is seen (a potion leaves it open: several in a row)
         } catch (err) { /* not something eaten */ }
+    }
+    // close the inventory (or favorites) the food was used from: SkyrimPlatform has no "close menu", so the menu key is pressed for the player (the key mapped to
+    // "Tween Menu", Tab unless rebound, closes an item menu back to the game). Only while one of those menus is still open, so it never opens the Tween menu.
+    greymarchConsumeCloseMenu(): any {
+        var sp = this.sp, ui = sp.Ui, input = sp.Input;
+        try {
+            if (!input || typeof input.tapKey !== "function") return;
+            if (!(ui.isMenuOpen("InventoryMenu") || ui.isMenuOpen("FavoritesMenu"))) return;
+            var key = 0; try { key = Number(input.getMappedKey("Tween Menu", 0)) || 0; } catch (kErr) { key = 0; }
+            if (!(key > 0 && key < 0xff)) key = 15; // Tab
+            input.tapKey(key);
+            this.greymarchCrumb("eat: closed the menu (key " + key + ")");
+        } catch (err) { /* the player closes it */ }
     }
     // play it like an emote, quietly (no notices, the camera is left alone): a weapon drawn or a game that refuses means no animation, nothing else
     greymarchConsumePlay(id: string, now: number): any {

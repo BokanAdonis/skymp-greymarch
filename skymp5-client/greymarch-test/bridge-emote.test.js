@@ -31,6 +31,7 @@ function make(opts = {}) {
     Idle: { from: (f) => f || null }, Actor: { from: (f) => (f && actors[f.id]) || null }, Potion: { from: (f) => (f && f.potion) || null },
     Debug: { sendAnimationEvent: (ref, name) => log.events.push(name), notification: (t) => log.notes.push(t) },
     Ui: { isMenuOpen: (name) => name === state.menu },
+    Input: { tapKey: (k) => { log.taps = (log.taps || []).concat([k]); if (state.menu === "InventoryMenu" || state.menu === "FavoritesMenu") state.menu = null; }, getMappedKey: (c) => (c === "Tween Menu" ? state.tweenKey || 15 : 0) },
     Utility: { isInMenuMode: () => false },
     browser: { setVisible() {}, setFocused: (v) => log.focused.push(v), isFocused: () => true, executeJavaScript: (js) => { const m = /window\.__gmEmoteRun\((.*)\);$/.exec(js); if (m) log.pages.push(JSON.parse(m[1])); } },
     on() {}, storage: {},
@@ -310,8 +311,8 @@ test("eating, drinking and potions: the matching idle once the menu is closed; e
   assert.strictEqual(emotes.consumeEmoteId({ food: false, poison: true, name: "Deadly Poison" }), null);
   const idleOf = (id) => emotes.emoteById(id).idle;
   const s = make();
-  s.state.menu = "InventoryMenu"; s.eat("Venison Stew"); s.tick();
-  assert.deepStrictEqual(s.log.idles, [], "not while the inventory is open");
+  s.state.menu = "MagicMenu"; s.eat("Venison Stew"); s.tick();
+  assert.deepStrictEqual(s.log.idles, [], "not while a menu is open (one it does not close itself)");
   s.state.menu = null; s.tick();
   assert.deepStrictEqual(s.log.idles, [idleOf("bread")], "the standing eating idle");
   assert.strictEqual(s.log.thirdPerson, 0, "the camera is left alone"); assert.deepStrictEqual(s.log.notes, [], "no notice");
@@ -327,4 +328,19 @@ test("eating, drinking and potions: the matching idle once the menu is closed; e
   s.eat("Deadly Poison", false, true); s.tick(); assert.strictEqual(s.log.idles.length, 1, "a poison: nothing");
   s.state.drawn = true; s.eat("Apple Pie"); s.tick(); assert.strictEqual(s.log.idles.length, 1, "weapon drawn: nothing");
   s.state.drawn = false; s.eat("Apple Pie"); s.tick(20000); assert.strictEqual(s.log.idles.length, 1, "forgotten after 15 seconds");
+});
+
+test("food or a drink used from the inventory or favorites closes that menu (the Tween Menu key, Tab unless rebound); a potion leaves it open; no menu, no key", () => {
+  const s = make();
+  s.state.menu = "InventoryMenu"; s.eat("Venison Stew");
+  assert.deepStrictEqual(s.log.taps, [15], "Tab"); assert.strictEqual(s.state.menu, null);
+  s.tick(); assert.strictEqual(s.log.idles.length, 1, "and the meal plays at once");
+  const t = make(); t.state.tweenKey = 0x30; t.state.menu = "FavoritesMenu"; t.eat("Nord Mead");
+  assert.deepStrictEqual(t.log.taps, [0x30], "a rebound key");
+  const u = make(); u.state.menu = "InventoryMenu"; u.eat("Potion of Healing", false);
+  assert.strictEqual(u.log.taps, undefined, "a potion: the inventory stays open"); assert.strictEqual(u.state.menu, "InventoryMenu");
+  const v = make(); v.eat("Apple Pie");
+  assert.strictEqual(v.log.taps, undefined, "no menu open (a hotkey): nothing pressed");
+  const w = make(); w.state.menu = "ContainerMenu"; w.eat("Apple Pie");
+  assert.strictEqual(w.log.taps, undefined, "another menu: left alone");
 });
