@@ -31,6 +31,13 @@ float OneHit(float damageMult = 1.f)
   hitMsg.data.source = kIronDagger;
   ac.AddItem(hitMsg.data.source, 1);
 
+  // OnHit drops a weapon hit unless the weapon is equipped (as in HitTest)
+  Inventory::ExtraData worn;
+  worn.worn_ = true;
+  Equipment eq;
+  eq.inv.entries.push_back(Inventory::Entry(kIronDagger, 1, worn));
+  ac.SetEquipment(eq);
+
   ac.SetLastHitTime(0xff000000, std::chrono::steady_clock::now() - 10s);
   p.Messages().clear();
   p.GetActionListener().OnHit(rawMsgData, hitMsg);
