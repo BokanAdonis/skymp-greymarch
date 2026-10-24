@@ -304,8 +304,8 @@ test("a face from the wheel goes back on when the talking stops; a beast's own m
   assert.strictEqual(w.log.faces.me, undefined);
 });
 
-test("eating, drinking and potions: the matching idle once the menu is closed; eating ends after a few seconds; poisons, a drawn weapon or a running emote play nothing", () => {
-  assert.deepStrictEqual(["Venison Stew", "Nord Mead", "Jug of Milk", "Frost Mirriam Tea Sandwich", "Stros M'Kai Rum Cake", "Watermelon"].map((n) => emotes.consumeEmoteId({ food: true, poison: false, name: n })), ["bread", "drink", "drink", "bread", "bread", "bread"]);
+test("eating, drinking and potions: the matching idle once the menu is closed; eating and drinking take five seconds; poisons, a drawn weapon or a running emote play nothing", () => {
+  assert.deepStrictEqual(["Venison Stew", "Nord Mead", "Jug of Milk", "Frost Mirriam Tea Sandwich", "Stros M'Kai Rum Cake", "Watermelon"].map((n) => emotes.consumeEmoteId({ food: true, poison: false, name: n })), ["bread", "mug", "mug", "bread", "bread", "bread"]);
   assert.strictEqual(emotes.consumeEmoteId({ food: false, poison: false, name: "Potion of Healing" }), "potion");
   assert.strictEqual(emotes.consumeEmoteId({ food: false, poison: true, name: "Deadly Poison" }), null);
   const idleOf = (id) => emotes.emoteById(id).idle;
@@ -315,14 +315,16 @@ test("eating, drinking and potions: the matching idle once the menu is closed; e
   s.state.menu = null; s.tick();
   assert.deepStrictEqual(s.log.idles, [idleOf("bread")], "the standing eating idle");
   assert.strictEqual(s.log.thirdPerson, 0, "the camera is left alone"); assert.deepStrictEqual(s.log.notes, [], "no notice");
-  for (let i = 0; i < 70; i++) s.tick(50); // 3.5 s
+  for (let i = 0; i < 90; i++) s.tick(50); // 4.5 s
   assert.ok(s.gm.greymarchEmoteNow, "still eating");
   for (let i = 0; i < 12; i++) s.tick(50);
   assert.strictEqual(s.gm.greymarchEmoteNow, null, "done after EAT_SECONDS"); assert.strictEqual(s.log.idles[s.log.idles.length - 1], emotes.IDLE_STOP);
   s.log.idles.length = 0;
-  s.eat("Ale"); s.tick(); assert.deepStrictEqual(s.log.idles, [idleOf("drink")]);
-  s.eat("Potion of Healing", false); s.tick(); assert.deepStrictEqual(s.log.idles, [idleOf("drink"), idleOf("potion")]);
-  s.eat("Deadly Poison", false, true); s.tick(); assert.strictEqual(s.log.idles.length, 2, "a poison: nothing");
-  s.state.drawn = true; s.eat("Apple Pie"); s.tick(); assert.strictEqual(s.log.idles.length, 2, "weapon drawn: nothing");
-  s.state.drawn = false; s.eat("Apple Pie"); s.tick(20000); assert.strictEqual(s.log.idles.length, 2, "forgotten after 15 seconds");
+  s.eat("Ale"); s.tick(); assert.deepStrictEqual(s.log.idles, [idleOf("mug")], "the standing drinking idle");
+  for (let i = 0; i < 102; i++) s.tick(50); assert.strictEqual(s.gm.greymarchEmoteNow, null, "a drink also takes five seconds"); s.log.idles.length = 0;
+  s.eat("Ale"); s.tick(); s.log.idles.length = 0; s.state.speed = 100; s.tick(800); assert.strictEqual(s.gm.greymarchEmoteNow, null, "walking off ends it early"); s.state.speed = 0; s.log.idles.length = 0;
+  s.eat("Potion of Healing", false); s.tick(); assert.deepStrictEqual(s.log.idles, [idleOf("potion")], "a potion is a quick swig");
+  s.eat("Deadly Poison", false, true); s.tick(); assert.strictEqual(s.log.idles.length, 1, "a poison: nothing");
+  s.state.drawn = true; s.eat("Apple Pie"); s.tick(); assert.strictEqual(s.log.idles.length, 1, "weapon drawn: nothing");
+  s.state.drawn = false; s.eat("Apple Pie"); s.tick(20000); assert.strictEqual(s.log.idles.length, 1, "forgotten after 15 seconds");
 });
