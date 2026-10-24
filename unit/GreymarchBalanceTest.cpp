@@ -5,6 +5,7 @@
 
 #include "GreymarchBalance.h"
 #include "HitMessage.h"
+#include "PacketParser.h"
 
 PartOne& GetPartOne();
 using namespace std::chrono_literals;
