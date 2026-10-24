@@ -320,7 +320,11 @@ export class GreymarchBridge {
         if (now < (this.greymarchTemplateFixNext || 0)) return;
         this.greymarchTemplateFixNext = now + 250;
         try {
-            if (!this.greymarchTemplateFix) this.greymarchTemplateFix = new templateFixMod.TemplateFix();
+            if (!this.greymarchTemplateFix) {
+                this.greymarchTemplateFix = new templateFixMod.TemplateFix();
+                var fixRef = this.greymarchTemplateFix;
+                try { this.controller.on("loadGame", function () { fixRef.reset(); }); } catch (lgErr) { /* objects are then moved once per session */ } // a new world load puts the save's spots back
+            }
             var sp = this.sp;
             var moved = this.greymarchTemplateFix.tick({
                 look: function (id: number) {

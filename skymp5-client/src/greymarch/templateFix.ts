@@ -18,8 +18,12 @@ export interface TemplateFixApi {
 export class TemplateFix {
   private next = 0;
   private skip = new Set<number>(); // actors and objects this load order does not have
+  private done = new Set<number>(); // moved since the world was loaded: an object no mod moved is still at the same spot afterwards and is not moved again
   public moved = 0;
   constructor(private list: number[] = TEMPLATE_PINNED) { }
+
+  // A new world load puts the start save's spots back: everything may be moved again
+  reset(): void { this.done.clear(); }
 
   // One slice of the list; returns the ids moved
   tick(api: TemplateFixApi): number[] {
@@ -29,14 +33,14 @@ export class TemplateFix {
       const i = this.next;
       this.next = (this.next + 1) % n;
       const id = this.list[4 * i] >>> 0;
-      if (this.skip.has(id)) continue;
+      if (this.skip.has(id) || this.done.has(id)) continue;
       let o: PinnedObject | null = null;
       try { o = api.look(id); } catch (e) { o = null; }
       if (!o || o.actor) { this.skip.add(id); continue; }
       if (!o.loaded) continue;
       const dx = o.x - this.list[4 * i + 1], dy = o.y - this.list[4 * i + 2], dz = o.z - this.list[4 * i + 3];
       if (Math.abs(dx) > NEAR || Math.abs(dy) > NEAR || Math.abs(dz) > NEAR) continue;
-      try { api.move(id); out.push(id); this.moved++; } catch (e) { this.skip.add(id); }
+      try { api.move(id); out.push(id); this.moved++; this.done.add(id); } catch (e) { this.skip.add(id); }
       if (out.length >= MAX_MOVES) break;
     }
     return out;

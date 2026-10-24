@@ -75,3 +75,15 @@ test("a call looks at a bounded slice and moves a bounded number, and goes round
   assert.strictEqual(w.moved.length, n, "everything reached");
   assert.strictEqual(new Set(w.moved).size, n, "nothing twice");
 });
+
+test("an object no mod moved stays at the same spot after the move and is moved only once per world load; a new load allows it again", () => {
+  const list = [9, 10, 20, 30];
+  const moved = [];
+  const api = { look: () => ({ x: 10, y: 20, z: 30, loaded: true, actor: false }), move: (id) => moved.push(id) }; // the plugins agree with the save: it does not budge
+  const fix = new TemplateFix(list);
+  for (let i = 0; i < 5; i++) fix.tick(api);
+  assert.deepStrictEqual(moved, [9], "once, not on every pass");
+  fix.reset();
+  fix.tick(api);
+  assert.deepStrictEqual(moved, [9, 9], "after a new world load, once more");
+});
