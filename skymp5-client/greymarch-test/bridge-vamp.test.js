@@ -259,20 +259,31 @@ test("a vampire of a race without vampire eyes (khajiit, argonian) keeps their e
   } finally { Date.now = realNow; }
 });
 
-test("the worn fangs the server gave are put on (kept on), once a second, and only when the player has them", () => {
+test("the worn fangs: on (kept on) only while the server's look of this player says they show, off when /fangs hides them; nothing without the item", () => {
   const s = make();
   const sp = s.gm.sp;
-  const DB = 0x04000000, FANGS = DB + 0x03cf35;
-  let have = 0, on = false; const equips = [];
+  const DB = 0x04000000, FANGS = DB + 0x0323fe; // DLC2ApocryphaBookWarpArmor
+  let have = 0, on = false; const calls = [];
   sp.Game.getFormFromFile = (id, file) => (file === "Dragonborn.esm" ? { id: DB + id, getFormID: () => DB + id } : null);
-  Object.assign(sp.Game.getPlayer(), { getItemCount: (f) => (f.id === FANGS ? have : 0), isEquipped: () => on, equipItem: (f, keep, silent) => { equips.push([f.id, keep, silent]); on = true; } });
+  Object.assign(sp.Game.getPlayer(), { getItemCount: (f) => (f.id === FANGS ? have : 0), isEquipped: () => on,
+    equipItem: (f, keep, silent) => { calls.push(["on", f.id, keep, silent]); on = true; }, unequipItem: (f, keep, silent) => { calls.push(["off", f.id]); on = false; } });
+  const look = (fangs) => s.say({ customPacketType: "greymarchVampLooks", vampires: [{ actor: 0xff000001, glow: 1, fangs }], me: 0xff000001 });
+  look(true);
   s.gm.greymarchVampFangsWear(1_000);
-  assert.deepStrictEqual(equips, [], "nothing to wear");
+  assert.deepStrictEqual(calls, [], "nothing to wear");
   have = 1;
   s.gm.greymarchVampFangsWear(1_500);
-  assert.deepStrictEqual(equips, [], "once a second");
+  assert.deepStrictEqual(calls, [], "once a second");
   s.gm.greymarchVampFangsWear(2_100);
-  assert.deepStrictEqual(equips, [[FANGS, true, true]], "on, and kept on");
+  assert.deepStrictEqual(calls, [["on", FANGS, true, true]], "on, and kept on");
   s.gm.greymarchVampFangsWear(3_200);
-  assert.strictEqual(equips.length, 1, "already on");
+  assert.strictEqual(calls.length, 1, "already on");
+  look(false); // /fangs hides them
+  s.gm.greymarchVampFangsWear(4_300);
+  assert.deepStrictEqual(calls.pop(), ["off", FANGS], "off");
+  s.gm.greymarchVampFangsWear(5_400);
+  assert.strictEqual(calls.length, 1, "and not put back on (it used to be, within a second)");
+  look(true);
+  s.gm.greymarchVampFangsWear(6_500);
+  assert.deepStrictEqual(calls.pop(), ["on", FANGS, true, true], "bared again");
 });
