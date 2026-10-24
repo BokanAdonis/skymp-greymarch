@@ -9,6 +9,15 @@ const ts = require("typescript");
 
 const src = fs.readFileSync(path.join(__dirname, "..", "src", "greymarch", "bridge.ts"), "utf8");
 const js = ts.transpileModule(src, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2019 } }).outputText;
+const delSrc = fs.readFileSync(path.join(__dirname, "..", "src", "view", "actorDelete.ts"), "utf8");
+const delJs = ts.transpileModule(delSrc, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2019 } }).outputText;
+// The real view/actorDelete.ts, reading skyrimPlatform from the test's sp once it exists.
+function actorDeleteWith(spRef) {
+  const m = { exports: {} };
+  const skyrimPlatform = { get Actor() { return spRef.sp.Actor; }, get Game() { return spRef.sp.Game; } };
+  new Function("require", "exports", "module", delJs)((p) => (p === "skyrimPlatform" ? skyrimPlatform : undefined), m.exports, m);
+  return m.exports;
+}
 
 const NORD = 0x13746, GOAT = 0x131fa, GIANT = 0x131f9;
 const ATTACKS = { normal: ["attackStart_ClubAttack1", "attackStart_ClubAttack2"], power: ["attackPowerStart_Stomp"] };
@@ -16,8 +25,9 @@ function make(opts = {}) {
   const log = { lines: [], races: [], calls: [], equipped: [], events: [], sent: [], notes: [], applied: [], moves: [], offsets: [], wc: [], cam: [], av: [], remote: [], built: [] };
   const PUP = 0xff0000aa;
   let pupDeleted = false;
-  const puppet = { getAngleZ: () => 0, keepOffsetFromActor: (...a) => log.offsets.push(a), getFormID: () => PUP, setPosition: () => Promise.resolve(), enable: () => Promise.resolve(), resurrect: () => Promise.resolve(), startDeferredKill() {}, setActorValue: (k, v) => log.av.push([k, v]), setGhost() {}, blockActivation() {}, disable() {}, delete: () => { pupDeleted = true; log.calls.push("npcDeleted"); }, isDeleted: () => pupDeleted };
-  const mods = { "../messages": { MsgType: { CustomPacket: 77 } }, "../view/worldViewMisc": { remoteIdToLocalId: (id) => (opts.others || {})[id] || 0, localIdToRemoteId: (id) => id - 0xff000000 + 0x10000 }, "../sync/appearance": { applyAppearanceToPlayer: (a) => log.applied.push(a), applyAppearance: (a) => { log.built.push(a); return { built: true }; } }, "../sync/movementGet": { getMovement: () => ({ pos: [1, 2, 3], rot: [0, 0, 0], direction: 0, isWeapDrawn: false, runMode: opts.runMode || "Running" }) }, "../sync/movementApply": { applyMovement: (ac, m) => { if (opts.moveThrows) throw new Error("needs to be respawned"); log.moves.push({ id: ac.getFormID(), weap: m.isWeapDrawn }); } }, "../sync/animation": { applyAnimation: (ref, a) => log.remote.push([ref.id, a.animEventName]) }, "../services/services/worldCleanerService": { WorldCleanerService: function () {} }, "../services/services/remoteServer": { RemoteServer: {} }, "../services/services/singlePlayerService": { SinglePlayerService: {} } };
+  const puppet = { getAngleZ: () => 0, keepOffsetFromActor: (...a) => log.offsets.push(a), getFormID: () => PUP, setPosition: () => Promise.resolve(), enable: () => Promise.resolve(), resurrect: () => Promise.resolve(), startDeferredKill() {}, setActorValue: (k, v) => log.av.push([k, v]), setGhost() {}, blockActivation() {}, disable: () => { log.calls.push("npcDisabled"); return Promise.resolve(); }, delete: () => { pupDeleted = true; log.calls.push("npcDeleted"); }, isDeleted: () => pupDeleted, isInDialogueWithPlayer: () => false, getDialogueTarget: () => null };
+  const spRef = {};
+  const mods = { "../messages": { MsgType: { CustomPacket: 77 } }, "../view/worldViewMisc": { remoteIdToLocalId: (id) => (opts.others || {})[id] || 0, localIdToRemoteId: (id) => id - 0xff000000 + 0x10000 }, "../sync/appearance": { applyAppearanceToPlayer: (a) => log.applied.push(a), applyAppearance: (a) => { log.built.push(a); return { built: true }; } }, "../sync/movementGet": { getMovement: () => ({ pos: [1, 2, 3], rot: [0, 0, 0], direction: 0, isWeapDrawn: false, runMode: opts.runMode || "Running" }) }, "../sync/movementApply": { applyMovement: (ac, m) => { if (opts.moveThrows) throw new Error("needs to be respawned"); log.moves.push({ id: ac.getFormID(), weap: m.isWeapDrawn }); } }, "../sync/animation": { applyAnimation: (ref, a) => log.remote.push([ref.id, a.animEventName]) }, "../services/services/worldCleanerService": { WorldCleanerService: function () {} }, "../services/services/remoteServer": { RemoteServer: {} }, "../services/services/singlePlayerService": { SinglePlayerService: {} }, "../view/actorDelete": actorDeleteWith(spRef) };
   const mod = { exports: {} };
   new Function("require", "exports", "module", js)((p) => mods[p], mod.exports, mod);
   const race = (id) => ({ id, getFormID: () => id });
@@ -41,6 +51,7 @@ function make(opts = {}) {
     TESModPlatform: { resizeHeadpartsArray: (b, n) => { b.parts.length = n; }, setNpcSex: (b, s) => { b.sex = s; } },
     Debug: { sendAnimationEvent: (ref, name) => log.events.push(name), notification: (t) => log.notes.push(t) }, Utility: { isInMenuMode: () => menu }, on() {},
   };
+  spRef.sp = sp;
   const controller = { on() {}, lookupListener: () => ({ modWcProtection: (id, n) => log.wc.push([id, n]) }), emitter: { on() {}, emit: (n, m) => { if (n !== "sendMessage") return; const j = JSON.parse(m.message.contentJsonDump); if (j.customPacketType === "greymarchShapeAttack") log.sent.push(j); } } };
   const gm = new mod.exports.GreymarchBridge(sp, controller);
   let t = 1_000_000;
@@ -252,7 +263,11 @@ test("NPC mode: changing back removes the NPC, gives the camera back and makes t
   const s = make();
   s.say(giantNpc); s.tick(); await flushAll();
   s.say({ on: false, back: NORD, wear: [] }); s.tick();
-  assert.ok(s.log.calls.includes("npcDeleted"));
+  assert.ok(s.log.calls.includes("npcDisabled"));
+  assert.ok(!s.log.calls.includes("npcDeleted"), "not deleted while it may still be enabled (a deleted enabled actor crashed the game)");
+  assert.notDeepStrictEqual(s.log.wc[s.log.wc.length - 1], [s.PUP, -1], "still protected from the WorldCleaner until it is deleted");
+  await flushAll();
+  assert.ok(s.log.calls.indexOf("npcDisabled") < s.log.calls.indexOf("npcDeleted"), "deleted once the disable has finished");
   assert.ok(s.log.calls.includes("alpha:1"));
   assert.strictEqual(s.log.cam[s.log.cam.length - 1], 0x14, "the camera is the player's again");
   assert.deepStrictEqual(s.log.wc[s.log.wc.length - 1], [s.PUP, -1]);
