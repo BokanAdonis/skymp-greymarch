@@ -157,7 +157,9 @@ test("K opens the professions window, the page's questions go to the server as g
   const { gm, log, sentPackets } = make();
   const profPage = () => log.js.filter((x) => x.includes("__gmProfSend(")).map((x) => JSON.parse(x.slice(x.lastIndexOf("__gmProfSend(") + 13).replace(/\);$/, "")));
   gm.greymarchKey({ code: 37, isDown: true }); gm.greymarchProfPending();
-  assert.strictEqual(gm.greymarchProfOn, true);
+  assert.ok(!gm.greymarchProfOn, "not while K is still down (the page would never see it go up, and the browser would repeat the letter)");
+  gm.greymarchKey({ code: 37, isDown: false }); gm.greymarchProfPending();
+  assert.strictEqual(gm.greymarchProfOn, true, "opened when K is let go");
   assert.deepStrictEqual(profPage().pop(), { fn: "show", arg: true });
   assert.ok(log.js.some((j) => j.includes("greymarch-prof.html")), "the page script loads the professions page");
   gm.greymarchBrowserMessage({ arguments: ["greymarch", JSON.stringify({ type: "prof", rid: 5, op: "pick", args: { combat: "bowman", trades: ["miner"] } })] });
@@ -403,15 +405,31 @@ test("K typed into a game menu (the race menu's name box, the console) is a lett
   const { gm, log, menus } = make();
   for (const m of ["RaceSex Menu", "Console"]) {
     menus.add(m);
-    gm.greymarchKey({ code: 37, isDown: false }); gm.greymarchKey({ code: 37, isDown: true }); gm.greymarchProfPending();
+    gm.greymarchKey({ code: 37, isDown: false }); gm.greymarchKey({ code: 37, isDown: true }); gm.greymarchKey({ code: 37, isDown: false }); gm.greymarchProfPending();
     assert.ok(!gm.greymarchProfOn, m);
     menus.delete(m); gm.greymarchChatWhyNext = 0;
   }
   assert.ok(log.lines.some((l) => /K ignored: the game says 'RaceSex Menu' is open/.test(l)), "the server log says why");
   gm.greymarchProfPending();
   assert.ok(!gm.greymarchProfOn, "a K pressed in the menu does not open the window later, once the menu closes");
-  gm.greymarchKey({ code: 37, isDown: false }); gm.greymarchKey({ code: 37, isDown: true }); gm.greymarchProfPending();
+  gm.greymarchKey({ code: 37, isDown: false }); gm.greymarchKey({ code: 37, isDown: true }); gm.greymarchKey({ code: 37, isDown: false }); gm.greymarchProfPending();
   assert.strictEqual(gm.greymarchProfOn, true);
+});
+
+test("window hotkeys open on release: F7, H, B, F6, F8 and K hold nothing while down; a key-up the game never sent opens it once the key reads as up; still held, it waits", () => {
+  const { gm } = make();
+  const shows = []; gm.greymarchAdminShow = (mode) => { shows.push(mode || "staff"); };
+  gm.greymarchKey({ code: 48, isDown: true });
+  assert.deepStrictEqual(shows, [], "B down: nothing yet (the page would never see it go up and the browser would repeat the letter)");
+  gm.greymarchKey({ code: 48, isDown: false });
+  assert.deepStrictEqual(shows, ["build"], "B let go: the Build tab");
+  for (const [code, mode] of [[65, "staff"], [35, "encounters"], [64, "dungeons"], [66, "tester"]]) { gm.greymarchKey({ code, isDown: true }); gm.greymarchKey({ code, isDown: false }); assert.strictEqual(shows.pop(), mode); }
+  shows.length = 0;
+  let held = true; gm.sp.Input = { isKeyPressed: (c) => c === 35 && held };
+  gm.greymarchKey({ code: 35, isDown: true });
+  gm.greymarchHotkeyTick(Date.now() + 500); assert.deepStrictEqual(shows, [], "H still held: waits");
+  held = false; gm.greymarchHotkeyTick(Date.now() + 600); assert.deepStrictEqual(shows, ["encounters"], "the key-up never came, but H reads as up: opened");
+  gm.greymarchKey({ code: 35, isDown: true }); gm.greymarchKey({ code: 35, isDown: false }); assert.strictEqual(shows.length, 2, "and the next press works as before");
 });
 
 test("the chat's keyboard releases (its answer every 2 s, the release after a close, the voice display switching) leave the K window, the chancery and the vampire menu their cursor", () => {

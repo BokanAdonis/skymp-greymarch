@@ -63,6 +63,7 @@ const VAMP_OWN_TEETH = { male: 0x51631, female: 0x5150f }; // MaleMouthHumanoidD
 const CHANCERY_SCRIPT =PROF_SCRIPT.split("__gmProfSend").join("__gmChanceryRun").split("greymarch-prof").join("greymarch-chancery").split("2147483220").join("2147483221"); // the chancery window (/chancery): the same loader, another page
 const EMOTE_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmEmoteRun").split("greymarch-prof").join("greymarch-emote").split("2147483220").join("2147483223").split("e.key==='x'||e.key==='X'").join("e.key==='g'||e.key==='G'"); // the emote wheel (G): the same loader, another page; letting go of G inside the page is a release too
 const VAMP_MENU_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmVampRun").split("greymarch-prof").join("greymarch-vampire").split("2147483220").join("2147483222"); // the vampire window (/vampire): the same loader, another page
+const OPEN_ON_RELEASE = [65, 35, 48, 64, 66, 37]; // F7, H, B, F6, F8, K: their windows open when the key is let go (greymarchKey)
 const FORGE_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmForgeRun").split("greymarch-prof").join("greymarch-forge").split("2147483220").join("2147483225"); // the Greymarch forge window: the same loader, another page
 const CRAFT_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmCraftRun").split("greymarch-prof").join("greymarch-craft").split("2147483220").join("2147483224"); // the crafting panel (a station was used): the same loader, another page
 const MINIGAME_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmMiniRun").split("greymarch-prof").join("greymarch-minigame").split("2147483220").join("2147483226"); // the profession mini games (gamemode minigames.js): the same loader, another page, over the others
@@ -423,6 +424,7 @@ export class GreymarchBridge {
         this.greymarchForgeTick(Date.now()); // after the forge window closed: the smith is surely out of the forge's animation
         this.greymarchForgePreviewTick(Date.now()); // removes a preview copy an older version left
         this.greymarchPointerGuard(Date.now()); // a window that holds the mouse always has its pointer (the game's Cursor Menu)
+        this.greymarchHotkeyTick(Date.now()); // a window hotkey whose key-up the game never sent
         this.greymarchMiniActivateTick(); // a mini game won: the thing is used again (the server lets it through)
         this.greymarchMagicBlockDrive(); // NPC raise-the-dead and summons: ended at once
         this.greymarchShapeDrive(); // a creature form as an NPC: moved every frame like SkyMP moves other players; other players' creature attacks
@@ -690,17 +692,18 @@ export class GreymarchBridge {
         this["greymarchKey" + e.code] = down;
         if (e.code === 45 && !down && was) { this.greymarchMenuRelease(); return; } // X let go
         if (e.code === 34 && !down && was) { if (this.greymarchEmoteOn) this.greymarchEmoteToPage("release", true); else if (this.greymarchEmoteWanted) this.greymarchEmoteTapped = true; return; } // G let go: the wheel plays what the pointer is on (a quick tap leaves it open)
+        // F7, H, B, F6, F8 and K open a window that takes the keyboard: opened when the key is LET GO, not when it goes down. Taken on the press, the page never
+        // saw the key go up, so the browser held it down and repeated the letter into the chat line or a search box until another key was pressed.
+        if (OPEN_ON_RELEASE.indexOf(e.code) >= 0) {
+            if (down && !was) { this.greymarchHotkeyHeld = { code: e.code, at: Date.now() }; return; }
+            if (!down && was && this.greymarchHotkeyHeld && this.greymarchHotkeyHeld.code === e.code) { this.greymarchHotkeyHeld = null; this.greymarchHotkeyOpen(e.code); }
+            return;
+        }
         if (!down || was) return;
         if (e.code === 34 && !this.greymarchChatTyping && !this.greymarchPanelHasKeys()) this.greymarchEmoteWanted = Date.now(); // G: the emote wheel, opened from the update phase (greymarchEmoteTick), where the game's menus can be asked about
         else if (e.code === 1 && this.greymarchEmoteOn) this.greymarchEmoteHide();
         else if (e.code === 45 && !this.greymarchMenuOn && !this.greymarchAdminOn && !this.greymarchChatTyping && !this.greymarchEmoteOn) this.greymarchMenuHold(); // X held while looking at a player
         else if (e.code === 1 && this.greymarchMenuOn) this.greymarchMenuEscape();
-        else if (e.code === 65 && !this.greymarchAdminOn && !this.greymarchMenuOn) { if (this.greymarchEmoteOn) this.greymarchEmoteHide(); this.greymarchAdminShow(); }
-        else if (e.code === 35 && !this.greymarchAdminOn && !this.greymarchMenuOn && !this.greymarchChatTyping && !this.greymarchPanelHasKeys()) { if (this.greymarchEmoteOn) this.greymarchEmoteHide(); this.greymarchAdminShow("encounters"); } // H: the staff panel straight on its Encounters tab (GM and up; for anyone else the page closes again at once; the page closes it with H)
-        else if (e.code === 48 && !this.greymarchAdminOn && !this.greymarchMenuOn && !this.greymarchChatTyping && !this.greymarchPanelHasKeys()) { if (this.greymarchEmoteOn) this.greymarchEmoteHide(); this.greymarchAdminShow("build"); } // B: the staff panel straight on its Build tab (GM and up; for anyone else the page closes again at once)
-        else if (e.code === 64 && !this.greymarchAdminOn && !this.greymarchMenuOn && !this.greymarchChatTyping) { if (this.greymarchEmoteOn) this.greymarchEmoteHide(); this.greymarchAdminShow("dungeons"); } // F6: the staff panel straight on its Dungeons tab (GM and up; the server checks the "dungeons" command, the page closes it with F6)
-        else if (e.code === 66 && !this.greymarchAdminOn && !this.greymarchMenuOn && !this.greymarchChatTyping) this.greymarchAdminShow("tester"); // F8: the same panel as the tester menu (teleports, items, NPCs; the server gives testers those commands on the test server only)
-        else if (e.code === 37 && !this.greymarchChatTyping && !this.greymarchEmoteOn && !(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchCraftOn || this.greymarchForgeOn)) this.greymarchProfWanted = Date.now(); // K opens the professions window from the update phase (greymarchProfPending), where the game's menus can be asked about (the page itself closes it with K or Esc, like the staff panel with F7)
         else if (e.code === 1 && this.greymarchProfOn) this.greymarchProfHide();
         else if (e.code === 1 && this.greymarchChanceryOn) this.greymarchChanceryHide();
         else if (e.code === 1 && this.greymarchVampMenuOn) this.greymarchVampMenuHide();
@@ -709,6 +712,25 @@ export class GreymarchBridge {
         else if (e.code === 1 && this.greymarchCraftOn) this.greymarchCraftHide();
         else if (e.code === 1 && this.greymarchForgeOn) this.greymarchForgeHide();
         else if (e.code === 1 && this.greymarchAdminOn) this.greymarchAdminHide();
+    }
+    // a window hotkey let go (greymarchKey): what it opens, checked now (the state may have changed while it was held)
+    greymarchHotkeyOpen(code: number): any {
+        if (code === 65 && !this.greymarchAdminOn && !this.greymarchMenuOn) { if (this.greymarchEmoteOn) this.greymarchEmoteHide(); this.greymarchAdminShow(); }
+        else if (code === 35 && !this.greymarchAdminOn && !this.greymarchMenuOn && !this.greymarchChatTyping && !this.greymarchPanelHasKeys()) { if (this.greymarchEmoteOn) this.greymarchEmoteHide(); this.greymarchAdminShow("encounters"); } // H: the staff panel straight on its Encounters tab (GM and up; for anyone else the page closes again at once; the page closes it with H)
+        else if (code === 48 && !this.greymarchAdminOn && !this.greymarchMenuOn && !this.greymarchChatTyping && !this.greymarchPanelHasKeys()) { if (this.greymarchEmoteOn) this.greymarchEmoteHide(); this.greymarchAdminShow("build"); } // B: the staff panel straight on its Build tab (GM and up; for anyone else the page closes again at once)
+        else if (code === 64 && !this.greymarchAdminOn && !this.greymarchMenuOn && !this.greymarchChatTyping) { if (this.greymarchEmoteOn) this.greymarchEmoteHide(); this.greymarchAdminShow("dungeons"); } // F6: the staff panel straight on its Dungeons tab (GM and up; the server checks the "dungeons" command, the page closes it with F6)
+        else if (code === 66 && !this.greymarchAdminOn && !this.greymarchMenuOn && !this.greymarchChatTyping) this.greymarchAdminShow("tester"); // F8: the same panel as the tester menu (teleports, items, NPCs; the server gives testers those commands on the test server only)
+        else if (code === 37 && !this.greymarchChatTyping && !this.greymarchEmoteOn && !(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchCraftOn || this.greymarchForgeOn)) this.greymarchProfWanted = Date.now(); // K opens the professions window from the update phase (greymarchProfPending), where the game's menus can be asked about (the page itself closes it with K or Esc, like the staff panel with F7)
+    }
+    // a missed key-up (the game did not send it): once the key reads as up, the hotkey opens anyway (every frame, from greymarchTick)
+    greymarchHotkeyTick(now: number): any {
+        var held = this.greymarchHotkeyHeld;
+        if (!held || now - held.at < 100) return;
+        var up = false;
+        try { up = !(this.sp as any).Input.isKeyPressed(held.code); } catch (e) { up = now - held.at > 400; } // no way to ask: as a quick tap
+        if (!up) return;
+        this.greymarchHotkeyHeld = null; this["greymarchKey" + held.code] = false;
+        this.greymarchHotkeyOpen(held.code);
     }
     // ---- THE WEREWOLF FORM: the game's OWN power "Beast Form" (the spell WerewolfChange, Skyrim.esm 0x092C48) is the trigger; the SERVER decides; THIS CODE does the change.
     // WHY NOT THE GAME'S OWN SCRIPTS: SkyMP blocks Papyrus events on the client (BlockPapyrusEventsService calls blockPapyrusEvents(true); SkyrimPlatform's hook on the VM's
