@@ -161,6 +161,7 @@ export class GreymarchBridge {
         if (type === "greymarchStagger") { if (Number(msg.actor) > 0) (this.greymarchStaggerQueue || (this.greymarchStaggerQueue = [])).push({ actor: Number(msg.actor), self: msg.self === true }); return; } // a starving character staggers (gamemode hunger.js; played in greymarchHungerDrive, for everyone near)
         if (type === "greymarchMagicBlock") { var mb: any = {}; if (Array.isArray(msg.effects)) for (var mi = 0; mi < msg.effects.length && mi < 5000; mi++) mb[Number(msg.effects[mi]) >>> 0] = true; this.greymarchMagicBlock = mb; return; } // the raise-the-dead and summon effects to end when an NPC casts them (gamemode magicblock.js)
         if (type === "greymarchHunger") { this.greymarchHudToPage("hunger", { stage: String(msg.stage || "fed") }); return; } // the hunger bowl on the HUD (right, level with the voice display; gamemode hunger.js)
+        if (type === "greymarchEnergy") { this.greymarchHudToPage("energy", { v: Number(msg.v), state: String(msg.state || "") }); return; } // the energy bar on the HUD, always on screen above the hunger bowl (gamemode exhaustion.js)
         if (type === "greymarchHungerFx") { this.greymarchHungerRegen = msg.regen !== false; return; } // starving: no health or stamina regeneration (greymarchHungerDrive)
         if (type === "greymarchFaceOf") { this.greymarchFaceOf(msg); return; } // another player's face from the emote wheel (gamemode faces.js; put on in greymarchFaceTick)
         if (type === "greymarchBeast") { this.greymarchBeastFrames(msg); return; } // a server-driven animal moved (gamemode wildlifebrain.js): played by formView (gmPuppetMove)
@@ -1661,9 +1662,11 @@ export class GreymarchBridge {
         this.greymarchChopNext = now + 1000;
         var ref = 0;
         try { var player = this.sp.Game.getPlayer(); var furn = player ? player.getFurnitureReference() : null; ref = furn ? misc.localIdToRemoteId(furn.getFormID()) || 0 : 0; } catch (e) { ref = 0; }
-        if (!ref && !this.greymarchChopRef) return;
-        this.greymarchChopRef = ref;
-        this.controller.emitter.emit("sendMessage", { message: { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchChop", ref: ref >>> 0 }) }, reliability: "unreliable" });
+        // sitting or lying on the ground from the emote wheel is resting too (gamemode exhaustion.js); so is any furniture that is not a work station (the server tells them apart)
+        var em = this.greymarchEmoteNow, rest = !!(em && em.kind === "loop" && (em.id === "wounded2" || em.id === "lie"));
+        if (!ref && !rest && !this.greymarchChopRef && !this.greymarchChopRest) return;
+        this.greymarchChopRef = ref; this.greymarchChopRest = rest;
+        this.controller.emitter.emit("sendMessage", { message: { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify(rest ? { customPacketType: "greymarchChop", ref: ref >>> 0, rest: true } : { customPacketType: "greymarchChop", ref: ref >>> 0 }) }, reliability: "unreliable" });
     }
     // a piece a GM placed was turned (gamemode buildsys.js): this game's copy of it, if it has one loaded, takes the server's angle
     greymarchBuildAngleTick(): any {

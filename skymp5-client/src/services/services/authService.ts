@@ -224,6 +224,7 @@ export class AuthService extends ClientListener {
       case 'greymarchBuildAngle': // a piece a GM placed was turned: this game turns its copy (gamemode buildsys.js)
       case 'greymarchHungerFx': // starving: regeneration off
       case 'greymarchHunger': // the hunger bowl on the HUD
+      case 'greymarchEnergy': // the energy bar on the HUD while working or resting (gamemode exhaustion.js)
       case 'greymarchMagicBlock': // NPC raise-the-dead and summon effects to end (gamemode magicblock.js)
       case 'greymarchBeast':
       case 'greymarchFaceOf': // another player's face from the emote wheel (gamemode faces.js)
