@@ -31,6 +31,7 @@ const SHAPE_LAND_MS = 450; // a creature's swing is reported this long after it 
 const SHAPE_NPC_READY_MS = 8000; // a creature NPC that is not ready this long after it was placed is placed again
 const SHAPE_SILENCE_MS = 20000; // a creature form: with no word from the server for this long the player changes back by themselves (the server repeats "on" every 5 seconds)
 const WOLF_BACK_GRACE_MS = 2000; // Z changes back, but not in the first 2 seconds after the body changed
+const STANDUP_FALLBACK_MS = 1500; // greymarchStandUp: still in the furniture this long after the get-up animation was asked for, the player is snapped to standing
 const LIP_STEP_MS = 110; // a talking mouth changes shape this often
 const LIP_OPEN = [[0, 0.55], [1, 0.45], [6, 0.6], [11, 0.5], [5, 0.45], [8, 0.5]]; // [phoneme, strength]: Aah, BigAah, Eh, Oh, Eee, I
 const LIP_CLOSED = [[2, 0.55], [4, 0.4], [10, 0.4]]; // BMP, DST, N: the lips meet or nearly
@@ -148,7 +149,8 @@ export class GreymarchBridge {
         var type = msg.customPacketType;
         // GREYMARCH: staff panel traffic is handled first (and quietly: ghosts arrive every few seconds)
         if (type === "greymarchAdminReply") { var brids = this.greymarchBuildRids; if (brids && brids[msg.rid]) { delete brids[msg.rid]; this.greymarchBuildCamSay(msg.ok ? (msg.data && msg.data.message) || "Done." : String(msg.error || "That did not work.")); return; } this.greymarchAdminToPage("reply", msg); return; }
-        if (type === "greymarchNotice") { if (msg.title) { this.greymarchToast(msg); return; } try { this.sp.Debug.notification(String(msg.text).slice(0, 300)); } catch (e) { /* a notice is a nicety */ } return; }
+        if (type === "greymarchNotice") { if (msg.title) { this.greymarchToast(msg); return; } var nq = this.greymarchNoticeQueue || (this.greymarchNoticeQueue = []); if (nq.length < 20) nq.push(String(msg.text).slice(0, 300)); return; } // a plain notice: the game's own top-left message, shown from the update phase (greymarchNoticeTick: Debug.notification does nothing from here)
+        if (type === "greymarchStandUp") { this.greymarchStandUpWanted = Date.now(); return; } // get up from the furniture the player is in (gamemode professions.js, after a won mining game): done in greymarchStandUpTick
         if (type === "greymarchStats") { this.greymarchStatsWant = msg.stats && typeof msg.stats === "object" ? msg.stats : null; return; }
         if (type === "greymarchKill") { this.greymarchKillMe(); return; }
         if (type === "greymarchKnown") { this.greymarchKnown = msg.names && typeof msg.names === "object" ? msg.names : {}; this.greymarchNamesNext = 0; try { (Function("return this")() as any).__gmKnown = this.greymarchKnown; } catch (e) { /* the floating names keep showing IDs */ } return; }
@@ -212,6 +214,7 @@ export class GreymarchBridge {
         if (type === "greymarchEntered" && this.greymarchBodyHold()) this.greymarchBodyHold().entered(Date.now());
         if (type === "greymarchSelect" || type === "greymarchEntered") this.greymarchConnect = { done: true }; // the connecting screen's job is over
         if (type === "greymarchEntered") this.controller.emitter.emit("sendMessage", { message: { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchForgeReady" }) }, reliability: "reliable" }); // this game has the forge window (gamemode forgemenu.js)
+        if (type === "greymarchEntered") this.controller.emitter.emit("sendMessage", { message: { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchStandUpReady" }) }, reliability: "reliable" }); // this game understands greymarchStandUp (the server stops sending the stagger to get it out of the mining animation)
         if (type === "greymarchSelect") {
             // From here on the game reports "alive" to the server every 3 seconds (greymarchTick). If the game dies, the LAST alive line in the server log tells
             // how far it got and when, even when the player's own logs are unusable.
@@ -412,6 +415,8 @@ export class GreymarchBridge {
         this.greymarchToastTick(Date.now());
         this.greymarchEffects(); // staff effects: noclip, speed, frozen, ghosts (cheap: does real work every 400 ms)
         this.greymarchHungerDrive(); // hunger: the stagger, regeneration off while starving
+        this.greymarchNoticeTick(); // plain notices from the server, the game's own top-left message
+        this.greymarchStandUpTick(Date.now()); // the server asked the player to get up from their furniture (the end of a won mining game)
         this.greymarchBuildAngleTick(); // a piece a GM placed was turned: this game turns its copy
         this.greymarchBuildCamTick(Date.now()); // the build system's free camera: the preview where the camera looks
         this.greymarchChopTick(Date.now()); // sitting at a chopping block: the server counts the chops (XP, firewood)
@@ -1691,6 +1696,44 @@ export class GreymarchBridge {
             } catch (aErr) { /* not drawn here: it loads with the server's angle */ }
         }
     }
+    // Plain notices ({ customPacketType: "greymarchNotice", text } with no title): the game's own message at the top left. Debug.notification only works in the update
+    // phase, so the packet handler queues them and they are shown here, two per frame at most.
+    greymarchNoticeTick(): any {
+        var q = this.greymarchNoticeQueue;
+        if (!q || !q.length) return;
+        var some = q.splice(0, 2);
+        for (var i = 0; i < some.length; i++) { try { this.sp.Debug.notification(some[i]); } catch (e) { /* a notice is a nicety */ } }
+    }
+    // GET UP ({ customPacketType: "greymarchStandUp" }): the player leaves the furniture they are in (the pickaxe at an ore vein after a won mining game; a chair, a chopping
+    // block) with the normal get-up animation, as a movement key would do it. Skyrim never ends the mining animation by itself on this server. Not in furniture: nothing.
+    //   1. the behaviour graph's own furniture exit (IdleFurnitureExit): the get-up animation, and SkyMP passes it to the other games.
+    //   2. still in the same furniture STANDUP_FALLBACK_MS later: IdleForceDefaultState (a snap to standing, never a stagger).
+    // The furniture is never activated again: that activation would go to the server (it could start mining again). Each step is logged ("standup: ...").
+    greymarchStandUpTick(now: number): any {
+        var sp = this.sp;
+        var at = this.greymarchStandUpWanted || 0;
+        if (at) {
+            this.greymarchStandUpWanted = 0;
+            if (now - at > 5000) return; // a request from long ago
+            var player: any = null, furn: any = null;
+            try { player = sp.Game.getPlayer(); furn = player ? player.getFurnitureReference() : null; } catch (e) { furn = null; }
+            if (!player || !furn) { this.greymarchStandUpLog("not in furniture: nothing to do"); return; }
+            var fid = 0; try { fid = furn.getFormID(); } catch (e) { fid = 0; }
+            try { sp.Debug.sendAnimationEvent(player, "IdleFurnitureExit"); } catch (e) { /* the fallback gets them up */ }
+            this.greymarchStandUp = { at: now, furn: fid };
+            this.greymarchStandUpLog("getting up from " + fid.toString(16) + " (IdleFurnitureExit)");
+            return;
+        }
+        var job = this.greymarchStandUp;
+        if (!job || now - job.at < STANDUP_FALLBACK_MS) return;
+        this.greymarchStandUp = null;
+        var still = false, pl: any = null;
+        try { pl = sp.Game.getPlayer(); var f2 = pl ? pl.getFurnitureReference() : null; still = !!f2 && f2.getFormID() === job.furn; } catch (e) { still = false; }
+        if (!still) { this.greymarchStandUpLog("up after " + (now - job.at) + " ms"); return; }
+        try { sp.Debug.sendAnimationEvent(pl, "IdleForceDefaultState"); } catch (e) { /* nothing else to try */ }
+        this.greymarchStandUpLog("still in the furniture after " + (now - job.at) + " ms: IdleForceDefaultState");
+    }
+    greymarchStandUpLog(text: string): any { if ((this.greymarchStandUpLogged = (this.greymarchStandUpLogged || 0) + 1) <= 30) this.greymarchLog("standup: " + text); }
     greymarchHungerDrive(): any {
         var q = this.greymarchStaggerQueue;
         if (q && q.length) {
