@@ -1014,12 +1014,9 @@ export class GreymarchBridge {
         return ids[key];
     }
     greymarchVampSpellOf(desc: string): any { // "8d5bf:Skyrim.esm" -> that Spell in this game (null when the plugin or the record is not there)
-        var c = this.greymarchVampSpellCache || (this.greymarchVampSpellCache = {});
-        if (c[desc] === undefined) {
-            var at = desc.indexOf(":"), id = parseInt(desc.slice(0, at), 16), file = desc.slice(at + 1);
-            try { var fm = at > 0 && id > 0 ? this.sp.Game.getFormFromFile(id, file) : null; c[desc] = fm ? this.sp.Spell.from(fm) : null; } catch (e) { c[desc] = null; }
-        }
-        return c[desc];
+        // looked up fresh every time: a game object kept from an earlier frame is refused by the game ("Invalid _skyrimPlatform_indexInPool", 2026-10-25)
+        var at = desc.indexOf(":"), id = parseInt(desc.slice(0, at), 16), file = desc.slice(at + 1);
+        try { var fm = at > 0 && id > 0 ? this.sp.Game.getFormFromFile(id, file) : null; return fm ? this.sp.Spell.from(fm) : null; } catch (e) { return null; }
     }
     greymarchVampSignal(kind: string, id: number): any { // called from game event handlers: only remembered (the update phase looks the IDs up and reports)
         var q = this.greymarchVampSignals || (this.greymarchVampSignals = []);
@@ -1092,7 +1089,7 @@ export class GreymarchBridge {
                 if (!sw) continue;
                 try {
                     if (!player.hasSpell(sw)) { player.addSpell(sw, false); mine[d] = true; this.greymarchLog("vampire: the power " + d + " was missing from this game: added"); }
-                } catch (addErr) { this.greymarchLog("vampire: the power " + d + " could not be added: " + addErr); }
+                } catch (addErr) { var bad = this.greymarchVampSpellBad || (this.greymarchVampSpellBad = {}); if (!bad[d]) { bad[d] = true; this.greymarchLog("vampire: the power " + d + " could not be added: " + addErr); } } // said once
             }
             for (var dk in mine) {
                 if (keep[dk]) continue;
