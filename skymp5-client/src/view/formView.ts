@@ -38,6 +38,7 @@ const GM_WOLF_RACE_SETTLE_MS = 4000;
 // NPC in a way that has crashed games (spawning, removing, a model refresh, gear, an idle or a beast's animation). Every line is flushed (SkyrimPlatform's writeLogs ends
 // it with std::endl), so after a crash the last lines say what this game was doing. The launcher keeps the previous session's file and puts both in the support file.
 const gmCrumbStart = Date.now();
+let gmEchoLeft = 60; // GREYMARCH: "own anim" breadcrumb lines left (ITS OWN ANIMATIONS BACK)
 let gmDriftLeft = 120; // GREYMARCH: drift diagnostic lines left (gmHostedTick)
 const GM_HOLD_MAX_MS = 3000; // GREYMARCH: an NPC nobody hosts is held where the server has it for at most this long (see the movement branch)
 export const gmCrumb = (text: string): void => { try { writeLogs("greymarch-crumbs", ((Date.now() - gmCrumbStart) / 1000).toFixed(1) + "s " + text); } catch (e) { /* a breadcrumb is a nicety */ } };
@@ -746,7 +747,16 @@ export class FormView {
     const gmBeastLook = (!!model.appearance && !(Array.isArray(model.appearance.headpartIds) && model.appearance.headpartIds.length > 0)) || !!this.gmBeast;
 
     if (refr.is3DLoaded()) {
-      if (model.animation) {
+      // GREYMARCH: ITS OWN ANIMATIONS BACK (2026-10-24). The server sends an NPC's animations to every player near it, the host's game too, and SkyMP played them
+      // again on the NPC this game runs itself, a moment late: a jump or fall played on an NPC already on the ground left it in the falling state (the drift
+      // breadcrumbs: "jump true" for 17 s, hanging 160 units over its player) and played on it, it was sent out again. Deer, bandits and draugr walked in the air
+      // or into the ground. An NPC this game hosts plays only what its own AI does; the change count is taken so nothing old is played once it is handed on.
+      if (model.animation && alreadyHosted) {
+        if (this.animState.lastNumChanges !== model.animation.numChanges) {
+          this.animState.lastNumChanges = model.animation.numChanges;
+          if (gmEchoLeft > 0) { gmEchoLeft--; gmCrumb("own anim " + gmHex(refr.getFormID()) + " " + String(model.animation.animEventName).slice(0, 40) + ": not played again"); }
+        }
+      } else if (model.animation) {
         // and never a howl on a beast: played into a remote beast's graph without the howl shout behind it, "WW Howl.hkx" crashed the watching game (2026-10-19 #SZGE)
         if (gmBeastLook && (this.animState.useAnimOverrides || beastHeld(this.gmBeast, Date.now()) || String(model.animation.animEventName || "").toLowerCase().startsWith("howl") || /^skympfake/i.test(String(model.animation.animEventName || "")))) this.animState.lastNumChanges = model.animation.numChanges; // and never SkyMP's equip / unequip (it draws the weapon: see "NO WEAPON DRAW" above)
         else {

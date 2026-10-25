@@ -86,3 +86,13 @@ test("stuck moves: a move is never at speed 0; an NPC this game becomes the host
   const tick = formView.slice(formView.indexOf("private gmHostedTick("), formView.indexOf("public gmIsPlayerLook"));
   assert.ok(tick.indexOf('gmCrumb("drift "') > 0 && tick.indexOf('gmCrumb("drift "') < tick.indexOf("if (!others.length)"), "also when the host's player is alone");
 });
+
+test("its own animations back: an NPC this game hosts never replays the animations the server echoes to it (a replayed fall left it hanging in the air)", () => {
+  const at = formView.indexOf("if (model.animation && alreadyHosted) {");
+  assert.ok(at > 0, "the hosted case comes first");
+  const block = formView.slice(at, formView.indexOf("} else if (model.animation) {", at));
+  assert.ok(block.includes("this.animState.lastNumChanges = model.animation.numChanges;"), "taken as seen, so nothing old plays after a hand-off");
+  assert.ok(!block.includes("applyAnimation("), "not played");
+  const other = formView.slice(formView.indexOf("} else if (model.animation) {", at), formView.indexOf("this.animState.useAnimOverrides = false;", at));
+  assert.ok(other.includes("applyAnimation(refr, model.animation, this.animState);"), "other games still play them");
+});
