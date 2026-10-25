@@ -17,7 +17,9 @@
 // LOCKED HEIGHT (2026-10-24, the drift breadcrumbs: an elk kept z -10166 while it ran at 600 units a second and its player went up and down 80): some NPCs the
 // server made came out of their spawn with their height locked and ran flat, through the air and into hills. Their spawn no longer resurrects them (spawnProcess.ts,
 // a body rebuilt while it came in). And, in case one still is: a hosted NPC that moves 250+ units a second for 3 seconds in a row without its height changing by 1 unit
-// (real ground is never that flat) is put back 64 units above where it is, so the engine drops it onto the ground; at most every 10 s. Breadcrumb "reground".
+// (real ground is never that flat) has its body rebuilt where it stands (disabled and enabled again, Skyrim's own cure for a floating NPC); at most every 10 s.
+// Breadcrumb "reground". (Lifted 64 units instead, as at first, it fell straight back onto the same height: it stood on nothing the ground map knows,
+// 150 to 257 units over the real ground, 2026-10-24.) The drift lines say which cell the NPC is in, whether that cell is loaded, and the player's cell.
 // BODIES (2026-10-24), in every game: a body vanished when the movement of a game that still had the NPC alive (its host, a moment behind) arrived after the
 // death. SkyMP took that as a resurrection, which it does by rebuilding the NPC, and it never builds a dead one: the body was gone for good. Now the server's
 // death wins over any movement, and a dead NPC (not a player) IS built, then made dead, so a body also shows for a player who comes later.
@@ -27,12 +29,11 @@ export const RELEASE_HOLD_MS = 8000; // a game that let an NPC go does not ask f
 export const ENGAGE_MAX_DIST = 3000; // another player farther than this from the NPC is never made its target
 export const CHECK_EVERY_MS = 1000;
 export const UNLOADED_RELEASE_MS = 2000; // a hosted NPC whose body this game has not loaded for this long is let go (FLOATING NPCs above)
-export const BODY_KILL_EVERY_MS = 1000;
+export const BODY_KILL_EVERY_MS = 1000; // a dead NPC's body shown here is made dead at most this often (BODIES above)
 export const FLAT_MIN_MOVE = 250; // LOCKED HEIGHT: a one-second step this long ...
 export const FLAT_MAX_DZ = 1; // ... with less height change than this counts as flat
-export const FLAT_STEPS = 3; // this many flat steps in a row: put back on the ground
-export const REGROUND_LIFT = 64; // from this far above where it is
-export const REGROUND_EVERY_MS = 10000; // at most this often for one NPC // a dead NPC's body shown here is made dead at most this often (BODIES above)
+export const FLAT_STEPS = 3; // this many flat steps in a row: its body is rebuilt where it stands
+export const REGROUND_EVERY_MS = 10000; // at most this often for one NPC
 
 // hand the NPC on? dMe: the host's own player to the NPC; others: the other players (same cell, loaded, alive) to the NPC
 export function shouldRelease(dMe: number, others: number[]): boolean {

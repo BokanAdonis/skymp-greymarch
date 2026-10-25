@@ -24,7 +24,7 @@ import { getMovement } from "../sync/movementGet";
 import { lastTryHost, tryHost } from "./hostAttempts";
 import { ModelApplyUtils } from "./modelApplyUtils";
 import { localIdToRemoteId, getViewFromStorage } from "./worldViewMisc";
-import { flatStep, FLAT_STEPS, REGROUND_LIFT, REGROUND_EVERY_MS } from "../greymarch/npcHosting";
+import { flatStep, FLAT_STEPS, REGROUND_EVERY_MS } from "../greymarch/npcHosting";
 import { CHECK_EVERY_MS as GM_HOST_CHECK_MS, shouldRelease, pickTarget, markReleased, isReleased, withoutHosted, shouldReleaseUnloaded, movementDead, buildWhileDead, BODY_KILL_EVERY_MS } from "../greymarch/npcHosting";
 import { SpApiInteractor } from "../services/spApiInteractor";
 import { WorldCleanerService } from "../services/services/worldCleanerService";
@@ -40,6 +40,8 @@ const GM_WOLF_RACE_SETTLE_MS = 4000;
 // it with std::endl), so after a crash the last lines say what this game was doing. The launcher keeps the previous session's file and puts both in the support file.
 const gmCrumbStart = Date.now();
 let gmEchoLeft = 60; // GREYMARCH: "own anim" breadcrumb lines left (ITS OWN ANIMATIONS BACK)
+// GREYMARCH: an actor's cell for the drift lines: its id and whether it is loaded ("attached"), or "none"
+const gmCellOf = (a: Actor): string => { try { const c = a.getParentCell(); return c ? gmHex(c.getFormID()) + (c.isAttached() ? " attached" : " NOT attached") : "none"; } catch (e) { return "?"; } };
 let gmDriftLeft = 120; // GREYMARCH: drift diagnostic lines left (gmHostedTick)
 const GM_HOLD_MAX_MS = 3000; // GREYMARCH: an NPC nobody hosts is held where the server has it for at most this long (see the movement branch)
 export const gmCrumb = (text: string): void => { try { writeLogs("greymarch-crumbs", ((Date.now() - gmCrumbStart) / 1000).toFixed(1) + "s " + text); } catch (e) { /* a breadcrumb is a nicety */ } };
@@ -1036,13 +1038,16 @@ export class FormView {
       if (this.gmFlatSteps >= FLAT_STEPS && Date.now() - this.gmRegroundAt >= REGROUND_EVERY_MS) {
         this.gmRegroundAt = Date.now(); this.gmFlatSteps = 0;
         gmCrumb("reground " + gmHex(this.remoteRefrId as number) + " at " + gmNow.map(Math.round).join(" ") + " (height locked)");
-        try { npc.setPosition(gmNow[0], gmNow[1], gmNow[2] + REGROUND_LIFT); } catch (e) { /* the next check tries again */ }
+        const gmRid = npc.getFormID();
+        try {
+          npc.disable(false).then(() => { const again = ObjectReference.from(Game.getFormEx(gmRid)); if (again) again.enable(false); }).catch(() => { /* the next check tries again */ });
+        } catch (e) { /* the next check tries again */ }
       }
       if (Date.now() - this.gmDriftAt >= 3000 && gmDriftLeft > 0) {
         const hd = Math.hypot(npc.getPositionX() - me.getPositionX(), npc.getPositionY() - me.getPositionY());
         if (hd < 800) {
           this.gmDriftAt = Date.now(); gmDriftLeft--;
-          gmCrumb("drift " + gmHex(this.remoteRefrId as number) + " base " + gmHex(npc.getBaseObject() ? npc.getBaseObject()!.getFormID() : 0) + ": at " + Math.round(gmNow[0]) + " " + Math.round(gmNow[1]) + ", z " + Math.round(npc.getPositionZ()) + ", player z " + Math.round(me.getPositionZ()) + ", " + Math.round(hd) + " away, combat " + npc.getCombatState() + ", speed " + Math.round(npc.getAnimationVariableFloat("Speed")) + ", jump " + npc.getAnimationVariableBool("bInJumpState") + ", AI " + npc.isAIEnabled());
+          gmCrumb("drift " + gmHex(this.remoteRefrId as number) + " base " + gmHex(npc.getBaseObject() ? npc.getBaseObject()!.getFormID() : 0) + ": at " + Math.round(gmNow[0]) + " " + Math.round(gmNow[1]) + ", z " + Math.round(npc.getPositionZ()) + ", cell " + gmCellOf(npc) + " (player " + gmCellOf(me) + ")" + ", player z " + Math.round(me.getPositionZ()) + ", " + Math.round(hd) + " away, combat " + npc.getCombatState() + ", speed " + Math.round(npc.getAnimationVariableFloat("Speed")) + ", jump " + npc.getAnimationVariableBool("bInJumpState") + ", AI " + npc.isAIEnabled());
         }
       }
       const others: Actor[] = [];
