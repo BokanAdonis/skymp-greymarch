@@ -37,7 +37,7 @@ function make(opts = {}) {
     Ui: { isMenuOpen: (name) => name === state.menu },
     Input: { tapKey: (k) => { log.taps = (log.taps || []).concat([k]); if (state.menu === "InventoryMenu" || state.menu === "FavoritesMenu") state.menu = null; }, getMappedKey: (c) => (c === "Tween Menu" ? state.tweenKey || 15 : 0) },
     Utility: { isInMenuMode: () => false },
-    browser: { setVisible() {}, setFocused: (v) => log.focused.push(v), isFocused: () => true, executeJavaScript: (js) => { const m = /window\.__gmEmoteRun\((.*)\);$/.exec(js); if (m) log.pages.push(JSON.parse(m[1])); const c = /window\.__gmCraftRun\((.*)\);$/.exec(js); if (c) (log.craft = log.craft || []).push(JSON.parse(c[1])); } },
+    browser: { setVisible() {}, setFocused: (v) => log.focused.push(v), isFocused: () => true, executeJavaScript: (js) => { const m = /window\.__gmEmoteRun\((.*)\);$/.exec(js); if (m) log.pages.push(JSON.parse(m[1])); const c = /window\.__gmCraftRun\((.*)\);$/.exec(js); if (c) (log.craft = log.craft || []).push(JSON.parse(c[1])); const fo = /window\.__gmForgeRun\((.*)\);$/.exec(js); if (fo) (log.forge = log.forge || []).push(JSON.parse(fo[1])); } },
     on() {}, storage: {},
   };
   const controller = { on() {}, emitter: { on() {}, emit: (n, m) => { if (n === "sendMessage") { const c = JSON.parse(m.message.contentJsonDump); if (c.customPacketType !== "greymarchLog") log.sent.push(c); } } } };
@@ -423,4 +423,22 @@ test("the crafting panel: the server opens it at a station, the page's requests 
   s.say({ customPacketType: "greymarchCraftOpen", station: "kiln", title: "Charcoal kiln" }); s.page({ type: "craft-close" });
   assert.strictEqual(s.gm.greymarchCraftOn, false, "the page's close button closes it");
   assert.ok(/case 'greymarchCraftOpen':/.test(require("node:fs").readFileSync(require("node:path").join(__dirname, "..", "src", "services", "services", "authService.ts"), "utf8")), "the packets reach the bridge");
+});
+
+test("the forge window: the game says it has it on entering the world; the server opens it at a forge; requests go to the server as greymarchForge; Esc or the page closes it", () => {
+  let s = make();
+  try { s.say({ customPacketType: "greymarchEntered" }); } catch (e) { /* the rest of entering the world is not this test's */ }
+  assert.ok(s.log.sent.some((m) => m.customPacketType === "greymarchForgeReady"), "the server learns this game has the forge window");
+  assert.ok(!s.gm.greymarchForgeOn); s.say({ customPacketType: "greymarchForgeOpen" }); assert.ok(!s.gm.greymarchForgeOn || !s.gm.greymarchScreenUp, "never over the select screen");
+  s = make();
+  s.say({ customPacketType: "greymarchForgeOpen", title: "Forge" });
+  assert.strictEqual(s.gm.greymarchForgeOn, true); assert.strictEqual(s.log.forge.pop().fn, "show");
+  s.page({ type: "forge", rid: 3, op: "craft", args: { id: 12, qty: 2, tab: "weapons" } });
+  assert.deepStrictEqual(s.log.sent.pop(), { customPacketType: "greymarchForge", rid: 3, op: "craft", args: { id: 12, qty: 2, tab: "weapons" } });
+  s.say({ customPacketType: "greymarchForgeReply", rid: 3, ok: true }); assert.strictEqual(s.log.forge.pop().fn, "reply");
+  s.key(1, true); s.key(1, false);
+  assert.strictEqual(s.gm.greymarchForgeOn, false, "Esc closes it"); assert.strictEqual(s.log.forge.pop().fn, "hide");
+  s.say({ customPacketType: "greymarchForgeOpen" }); s.page({ type: "forge-close" });
+  assert.strictEqual(s.gm.greymarchForgeOn, false, "the page's close button closes it");
+  assert.ok(/case 'greymarchForgeOpen':/.test(require("node:fs").readFileSync(require("node:path").join(__dirname, "..", "src", "services", "services", "authService.ts"), "utf8")), "the packets reach the bridge");
 });
