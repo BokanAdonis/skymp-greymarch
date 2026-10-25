@@ -28,6 +28,13 @@ public:
     return *this;
   }
 
+  // A braced list (`files = { "Skyrim.esm" }`, used by the unit tests) was
+  // ambiguous between the assignment above and the implicit ones
+  EspmFileTable& operator=(std::initializer_list<std::string> names)
+  {
+    return *this = std::vector<std::string>(names);
+  }
+
   // Without explicit slots every file is treated as a full plugin indexed by
   // position, which is exactly the pre-ESL behaviour (used by tests).
   espm::PluginSlot SlotAt(size_t i) const
