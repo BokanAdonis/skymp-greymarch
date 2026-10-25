@@ -52,3 +52,27 @@ test("formView: the check runs once a second for NPCs this game hosts; a release
   assert.ok(tick.includes("npc.getCombatState() === 0 && npc.isHostileToActor(me)") && tick.includes("isDetectedBy(npc)") && tick.includes("npc.startCombat("), "engage only when hostile, idle and detected");
   assert.ok(tick.includes("placeOf(ac) !== myPlace"), "only players in the same cell or worldspace");
 });
+
+// 2026-10-24: deer, bandits and draugr walked in the air or half in the ground, and some bodies vanished when killed
+test("floating NPCs: a hosted NPC this game has not had loaded for 2 s is let go, so a game that has it loaded runs it on real ground", () => {
+  assert.strictEqual(H.shouldReleaseUnloaded(0, 99999), false, "loaded: kept");
+  assert.strictEqual(H.shouldReleaseUnloaded(1000, 2999), false, "a moment unloaded (a cell loading): kept");
+  assert.strictEqual(H.shouldReleaseUnloaded(1000, 3000), true);
+  const at = formView.indexOf("if (alreadyHosted && !refr.is3DLoaded()) {");
+  assert.ok(at > 0 && at < formView.indexOf("setDefaultAnimsDisabled(this.refrId, alreadyHosted ? false : true);"), "decided before this game sends its movement");
+  const block = formView.slice(at, formView.indexOf("} else this.gmUnloadedSince = 0;", at));
+  assert.ok(block.includes('storage["hosted"] = withoutHosted(') && block.includes("markReleased(") && block.includes("alreadyHosted = false"), "dropped from the hosted list, not asked for again at once");
+});
+
+test("bodies: the server's death wins over a movement that still has the NPC alive; a dead NPC is built (a dead player is not), then made dead", () => {
+  assert.strictEqual(H.movementDead(true, false), true, "the host a moment behind: not taken as a resurrection (that rebuilt the NPC and the body was gone)");
+  assert.strictEqual(H.movementDead(false, false), false);
+  assert.strictEqual(H.movementDead(undefined, true), true);
+  assert.strictEqual(H.buildWhileDead(false), true, "an NPC's body");
+  assert.strictEqual(H.buildWhileDead(true), false, "a player");
+  assert.ok(formView.includes("model.movement.isDead = movementDead(model.isDead, model.movement.isDead);") && formView.includes("model.movement.isDead = gmDeadBackup;"), "around applyMovement, put back after");
+  assert.ok(formView.indexOf("model.movement.isDead = movementDead(") < formView.indexOf("applyMovement(refr, model.movement, !!model.isMyClone);"));
+  assert.ok(formView.includes("if (this.refrId === 0 && !buildWhileDead("), "the dead-spawn rule");
+  const kill = formView.slice(formView.indexOf("this.applyAll(refr, model);"), formView.indexOf("gamemodeUpdateService.updateNeighbor("));
+  assert.ok(kill.includes("model.isDead && actor && !actor.isDead() && actor.is3DLoaded()") && kill.includes('emit("applyDeathStateEvent", { actor, isDead: true })') && kill.includes("BODY_KILL_EVERY_MS"), "made dead once its body is in, at most once a second");
+});

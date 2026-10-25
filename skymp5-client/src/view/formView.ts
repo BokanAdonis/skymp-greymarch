@@ -24,7 +24,7 @@ import { getMovement } from "../sync/movementGet";
 import { lastTryHost, tryHost } from "./hostAttempts";
 import { ModelApplyUtils } from "./modelApplyUtils";
 import { localIdToRemoteId, getViewFromStorage } from "./worldViewMisc";
-import { CHECK_EVERY_MS as GM_HOST_CHECK_MS, shouldRelease, pickTarget, markReleased, isReleased, withoutHosted } from "../greymarch/npcHosting";
+import { CHECK_EVERY_MS as GM_HOST_CHECK_MS, shouldRelease, pickTarget, markReleased, isReleased, withoutHosted, shouldReleaseUnloaded, movementDead, buildWhileDead, BODY_KILL_EVERY_MS } from "../greymarch/npcHosting";
 import { SpApiInteractor } from "../services/spApiInteractor";
 import { WorldCleanerService } from "../services/services/worldCleanerService";
 import { GamemodeUpdateService } from "../services/services/gamemodeUpdateService";
@@ -83,8 +83,9 @@ export class FormView {
 
 
     // Don't spawn dead actors if not already
+    // GREYMARCH: except an NPC's body (greymarch/npcHosting.ts, BODIES): it is built and then made dead below, so it never vanishes
     if (model.isDead) {
-      if (this.refrId === 0) {
+      if (this.refrId === 0 && !buildWhileDead(!!model.appearance && (model as any).greymarchPuppet !== true)) {
         return;
       }
     }
@@ -423,6 +424,11 @@ export class FormView {
         this.localImmortal = true;
       }
       this.applyAll(refr, model);
+      // GREYMARCH: BODIES (greymarch/npcHosting.ts): an NPC the server has dead is made dead here once its body is in (built dead, or alive here a moment behind)
+      if (model.isDead && actor && !actor.isDead() && actor.is3DLoaded() && Date.now() - this.gmBodyKillAt >= BODY_KILL_EVERY_MS) {
+        this.gmBodyKillAt = Date.now();
+        try { SpApiInteractor.getControllerInstance().emitter.emit("applyDeathStateEvent", { actor, isDead: true }); } catch (e) { /* the next update tries again */ }
+      }
 
       const gamemodeUpdateService = SpApiInteractor.getControllerInstance().lookupListener(GamemodeUpdateService);
       gamemodeUpdateService.updateNeighbor(refr, model, this.state);
@@ -552,6 +558,18 @@ export class FormView {
       this.gmHostCheckAt = Date.now();
       if (this.gmHostedTick(refr) === "released") alreadyHosted = false;
     }
+    // GREYMARCH: FLOATING NPCs (greymarch/npcHosting.ts): an NPC this game hosts but has not had loaded for UNLOADED_RELEASE_MS is let go
+    if (alreadyHosted && !refr.is3DLoaded()) {
+      if (!this.gmUnloadedSince) this.gmUnloadedSince = Date.now();
+      else if (shouldReleaseUnloaded(this.gmUnloadedSince, Date.now())) {
+        const gmRid = this.remoteRefrId as number;
+        storage["hosted"] = withoutHosted(storage["hosted"], gmRid);
+        markReleased(gmRid, Date.now());
+        gmCrumb("handoff " + gmHex(gmRid) + ": not loaded here for " + (Date.now() - this.gmUnloadedSince) + " ms");
+        this.gmUnloadedSince = 0;
+        alreadyHosted = false;
+      }
+    } else this.gmUnloadedSince = 0;
     setDefaultAnimsDisabled(this.refrId, alreadyHosted ? false : true);
 
     if (alreadyHosted) {
@@ -656,6 +674,9 @@ export class FormView {
           if (forcedWeapDrawn === true || forcedWeapDrawn === false) {
             model.movement.isWeapDrawn = forcedWeapDrawn;
           }
+          // GREYMARCH: BODIES (greymarch/npcHosting.ts): a movement that still has the NPC alive never brings back one the server has dead
+          const gmDeadBackup = model.movement.isDead;
+          model.movement.isDead = movementDead(model.isDead, model.movement.isDead);
           try {
             applyMovement(refr, model.movement, !!model.isMyClone);
           } catch (e) {
@@ -670,6 +691,7 @@ export class FormView {
             }
           }
           model.movement.isWeapDrawn = backup;
+          model.movement.isDead = gmDeadBackup;
 
           this.movState.lastNumChanges = +(model.numMovementChanges as number);
           this.movState.everApplied = true;
@@ -1018,6 +1040,8 @@ export class FormView {
   }
   public gmIsPlayerLook = false; // GREYMARCH: this view draws a player (another player's character), not an NPC
   private gmHostCheckAt = 0;
+  private gmUnloadedSince = 0; // GREYMARCH: since when this game hosts this NPC without having it loaded (0: loaded)
+  private gmBodyKillAt = 0;
   private gmPuppetReady = false;
   private gmPuppetAt = 0;
   private gmPuppetAttackAt = 0;
