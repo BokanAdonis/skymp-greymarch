@@ -1038,7 +1038,10 @@ export class RemoteServer extends ClientListener {
         return;
       }
 
-      this.greymarchMagicDiag(`magic: saw ${msg.data.caster.toString(16)} cast ${msg.data.spell.toString(16)} hand ${msg.data.castingSource} (their copy holds ${held ? held.getFormID().toString(16) : "nothing"}, casting ${spell ? spell.getFormID().toString(16) : "nothing"})`);
+      // GREYMARCH: a held spell only keeps burning on a copy that holds it: put it in the copy's hand first (both hands for a ritual spell
+      // like Dragon Breath). Without it a watcher saw no fire at all from a caster whose equipment the server had refused.
+      const equipped = isHeld && !held && !!spell && this.greymarchEquipForCast(ac, spell, msg.data.castingSource);
+      this.greymarchMagicDiag(`magic: saw ${msg.data.caster.toString(16)} cast ${msg.data.spell.toString(16)} hand ${msg.data.castingSource} (their copy holds ${held ? held.getFormID().toString(16) : "nothing"}, casting ${spell ? spell.getFormID().toString(16) : "nothing"}${equipped ? ", put in their copy's hands" : ""})`);
       if (spell) {
         castSpellImmediate(ac.getFormID(), msg.data.castingSource, spell.getFormID(), remoteIdToLocalId(msg.data.target),
           msg.data.aimAngle, msg.data.aimHeading, actorAnimationVariables);
@@ -1079,6 +1082,19 @@ export class RemoteServer extends ClientListener {
     return false;
   }
   private greymarchWerebearRace = -1;
+
+  // the spell into the copy's casting hand (0 left, 1 right), or both hands for a ritual spell (equip slot BothHands, Skyrim.esm 013F45)
+  private greymarchEquipForCast(ac: Actor, spell: Spell, castingSource: number): boolean {
+    if (castingSource !== 0 && castingSource !== 1) return false;
+    try {
+      const slot = spell.getEquipType();
+      const hands = slot && slot.getFormID() === 0x13f45 ? [0, 1] : [castingSource];
+      for (const hand of hands) ac.equipSpell(spell, hand);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
 
   private greymarchIsHeld(spell: Spell): boolean {
     try { const effect = spell.getNthEffectMagicEffect(0); return !!effect && effect.getCastingType() === 2; } catch (e) { return false; }

@@ -71,6 +71,19 @@ export class MagicSyncService extends ClientListener {
             this.sendInterrupt(key, "another spell cast from that hand");
         }
 
+        // GREYMARCH: a held ritual spell (both hands, Dragon Breath) is reported when its charge begins, seconds before any fire; it goes out
+        // when the fire starts (RitualSpellAimConcentrationStart, see onRitualAnimEvent)
+        if (!(open && open.msg.spell === msg.spell) && event.caster.getFormID() === this.playerId && this.isConcentration(msg.spell) && this.isRitual(msg.spell)) {
+            const waiting = this.pendingRituals.get(key);
+            this.pendingRituals.set(key, { msg, casterLocalId: event.caster.getFormID(), at: waiting && waiting.msg.spell === msg.spell ? waiting.at : Date.now() });
+            this.recentCasts.unshift({ casterLocalId: event.caster.getFormID(), spell: msg.spell, at: Date.now() });
+            this.recentCasts.length = Math.min(this.recentCasts.length, 8);
+            if (!waiting) {
+                this.diag(`magic: ritual cast ${msg.spell.toString(16)} hand ${msg.castingSource} by ${msg.caster.toString(16)}: sent when its fire starts`);
+            }
+            return;
+        }
+
         this.controller.emitter.emit("sendMessage", {
             message: { t: MsgType.SpellCast, data: msg },
             reliability: "reliable"
@@ -100,6 +113,11 @@ export class MagicSyncService extends ClientListener {
     }
 
     private onSendAnimationEventLeave(ctx: { animEventName: string, animationSucceeded: boolean }) {
+        const lowerName = ctx.animEventName.toLowerCase();
+        if (lowerName === "ritualspellaimconcentrationstart" || lowerName === "ritualspellout") {
+            this.controller.once('update', () => this.onRitualAnimEvent(lowerName));
+        }
+
         if (this.activeCasts.size === 0) {
             return;
         }
@@ -127,16 +145,45 @@ export class MagicSyncService extends ClientListener {
 
     }
 
+    // GREYMARCH: a ritual spell's fire starts (the cast that waited for it goes out, or the last one again: the game does not always report
+    // the cast again for a second stream) and stops (RitualSpellOut ends it; an Out before any fire, at the end of the charge, does nothing)
+    private onRitualAnimEvent(lowerName: string) {
+        const now = Date.now();
+        if (lowerName === "ritualspellaimconcentrationstart") {
+            const starts = Array.from(this.pendingRituals.entries());
+            for (const [key, last] of Array.from(this.lastRituals.entries())) {
+                if (now - last.at <= this.ritualRestartMs && !this.pendingRituals.has(key)) starts.push([key, last]);
+            }
+            for (const [key, waiting] of starts) {
+                if (this.activeCasts.has(key)) continue;
+                this.pendingRituals.delete(key);
+                this.lastRituals.delete(key);
+                const msg: SpellCastMsgData = { ...waiting.msg, interruptCast: false };
+                try { msg.actorAnimationVariables = this.getAnimationVariablesFromActorConverted(waiting.casterLocalId); } catch (e) { /* keep the last ones */ }
+                this.controller.emitter.emit("sendMessage", { message: { t: MsgType.SpellCast, data: msg }, reliability: "reliable" });
+                this.activeCasts.set(key, { msg, casterLocalId: waiting.casterLocalId, startedAt: now, lastSentAt: now, repeats: 0, varsSeen: {}, events: [], ritual: true });
+                this.diag(`magic: ritual fire ${msg.spell.toString(16)} hand ${msg.castingSource}: cast sent ${now - waiting.at} ms after the cast`);
+            }
+            return;
+        }
+        for (const [key, cast] of Array.from(this.activeCasts.entries())) {
+            if (!cast.ritual) continue;
+            this.lastRituals.set(key, { msg: cast.msg, casterLocalId: cast.casterLocalId, at: now });
+            this.sendInterrupt(key, "RitualSpellOut");
+        }
+    }
+
     // GREYMARCH: the end of a cast is sent on the "equipped" animation event (as upstream) or when the hand now holds another spell. Each
     // frame also notes when the caster's "is casting" animation variables are seen on and off; they go to the server log with the end, to
     // learn which signal really marks the end of a held spell like Flames (an earlier version ended casts on them and stopped every cast
     // in other players' games at once).
     private checkActiveCasts() {
+        const now = Date.now();
+        this.checkPendingRituals(now);
+
         if (this.activeCasts.size === 0) {
             return;
         }
-
-        const now = Date.now();
 
         for (const [key, cast] of Array.from(this.activeCasts.entries())) {
             const ac = Actor.from(Game.getFormEx(cast.casterLocalId));
@@ -171,6 +218,27 @@ export class MagicSyncService extends ClientListener {
         }
     }
 
+    // a ritual cast whose fire never started: dropped when the hand holds another spell, sent as a plain held cast after ritualWaitMs
+    // (as it was before this existed)
+    private checkPendingRituals(now: number) {
+        for (const [key, waiting] of Array.from(this.pendingRituals.entries())) {
+            const ac = Actor.from(Game.getFormEx(waiting.casterLocalId));
+            const equipped = ac ? ac.getEquippedSpell(waiting.msg.castingSource) : null;
+            if (!ac || (equipped && equipped.getFormID() !== waiting.msg.spell)) {
+                this.pendingRituals.delete(key);
+                continue;
+            }
+            if (now - waiting.at < this.ritualWaitMs) continue;
+            this.pendingRituals.delete(key);
+            this.controller.emitter.emit("sendMessage", { message: { t: MsgType.SpellCast, data: waiting.msg }, reliability: "reliable" });
+            this.activeCasts.set(key, { msg: waiting.msg, casterLocalId: waiting.casterLocalId, startedAt: now, lastSentAt: now, repeats: 0, varsSeen: {}, events: [], ritual: true });
+            this.diag(`magic: ritual cast ${waiting.msg.spell.toString(16)} hand ${waiting.msg.castingSource}: no fire start in ${this.ritualWaitMs} ms, sent anyway`);
+        }
+        for (const [key, last] of Array.from(this.lastRituals.entries())) {
+            if (now - last.at > this.ritualRestartMs) this.lastRituals.delete(key);
+        }
+    }
+
     private sendInterrupt(key: string, reason: string) {
         const cast = this.activeCasts.get(key);
         this.activeCasts.delete(key);
@@ -201,6 +269,17 @@ export class MagicSyncService extends ClientListener {
         }
         this.diagLeft--;
         try { (this.controller.emitter as any).emit("greymarchStage", text); } catch (e) { /* diagnostics never break the game */ }
+    }
+
+    // a ritual spell: equipped in both hands (equip slot BothHands, Skyrim.esm 013F45)
+    private isRitual(spellId: number): boolean {
+        try {
+            const spell = this.sp.Spell.from(Game.getFormEx(spellId));
+            const slot = spell ? spell.getEquipType() : null;
+            return !!slot && slot.getFormID() === 0x13f45;
+        } catch (e) {
+            return false;
+        }
     }
 
     // a held spell: its first effect is cast by concentration (2)
@@ -365,7 +444,12 @@ export class MagicSyncService extends ClientListener {
 
     private playerId = 0x14;
     private sendUpdateAnimationVariablesRateMs = 500;
-    private activeCasts = new Map<string, { msg: SpellCastMsgData, casterLocalId: number, startedAt: number, lastSentAt: number, repeats: number, varsSeen: Record<string, { on: number, off: number, was: boolean }>, events: string[] }>();
+    private activeCasts = new Map<string, { msg: SpellCastMsgData, casterLocalId: number, startedAt: number, lastSentAt: number, repeats: number, varsSeen: Record<string, { on: number, off: number, was: boolean }>, events: string[], ritual?: boolean }>();
+    // GREYMARCH: ritual casts waiting for their fire, and the last ritual cast per hand (for a second stream)
+    private pendingRituals = new Map<string, { msg: SpellCastMsgData, casterLocalId: number, at: number }>();
+    private lastRituals = new Map<string, { msg: SpellCastMsgData, casterLocalId: number, at: number }>();
+    private readonly ritualWaitMs = 8000;
+    private readonly ritualRestartMs = 15000;
     private readonly castVars = ["IsCastingRight", "IsCastingLeft", "IsCastingDual", "bWantCastRight", "bWantCastLeft"];
     private diagLeft = 40;
     private aimDiagLeft = 5;
