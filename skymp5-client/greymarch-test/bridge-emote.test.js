@@ -32,7 +32,7 @@ function make(opts = {}) {
   const sp = {
     printConsole() {}, writeLogs: (n, l) => log.lines.push(l),
     Game: { getPlayer: () => player, getFormEx: (id) => ({ id }), getFormFromFile: (id, file) => (file === "Missing.esp" ? null : { id, file }), forceThirdPerson: () => { log.thirdPerson++; } },
-    callNative: (cls, fn, self, a) => { (log.natives = log.natives || []).push([cls, fn, a]); if (cls !== "GreymarchCam" || state.noDll) throw new Error("Native function not found"); if (fn === "SetFreeCamera") { state.free = !!a; return true; } if (fn === "IsFreeCamera") return !!state.free; if (fn === "GetCamera") return (state.cam || [0, 0, 0, 0, 1, 0])[a]; return undefined; },
+    callNative: (cls, fn, self, a, b) => { (log.natives = log.natives || []).push([cls, fn, a]); if (cls !== "GreymarchCam" || state.noDll) throw new Error("Native function not found"); if (fn === "GetFurnitureMarker") return state.marker ? state.marker[b] : -99999; if (fn === "SetFreeCamera") { state.free = !!a; return true; } if (fn === "IsFreeCamera") return !!state.free; if (fn === "GetCamera") return (state.cam || [0, 0, 0, 0, 1, 0])[a]; return undefined; },
     Idle: { from: (f) => f || null }, ObjectReference: { from: (f) => (f && f.id ? { id: f.id, getPositionX: () => 500, getPositionY: () => 600, getPositionZ: () => 10, getAngleZ: () => 90 } : null) }, Actor: { from: (f) => (f && actors[f.id]) || null }, Potion: { from: (f) => (f && f.potion) || null },
     Debug: { sendAnimationEvent: (ref, name) => log.events.push(name), notification: (t) => log.notes.push(t) },
     Ui: { isMenuOpen: (name) => name === state.menu },
@@ -458,6 +458,31 @@ test("the forge window: the game says it has it on entering the world; the serve
   s.say({ customPacketType: "greymarchForgeOpen" }); s.page({ type: "forge-close" });
   assert.strictEqual(s.gm.greymarchForgeOn, false, "the page's close button closes it");
   assert.ok(/case 'greymarchForgeOpen':/.test(require("node:fs").readFileSync(require("node:path").join(__dirname, "..", "src", "services", "services", "authService.ts"), "utf8")), "the packets reach the bridge");
+});
+
+test("the station windows: a smelter opens the forge window in its station mode; the worker is put at the furniture's marker, facing its way, and does the smelter's own animation; requests name the station", () => {
+  const s = make();
+  s.state.marker = [520, 640, 12, Math.PI / 2];
+  s.say({ customPacketType: "greymarchForgeOpen", station: "smelter", title: "Smelter", ref: 0xc4321, anim: "IdleSmelterEnter" });
+  assert.strictEqual(s.gm.greymarchForgeOn, true);
+  assert.deepStrictEqual(s.log.forge.pop(), { fn: "show", arg: { station: "smelter", title: "Smelter" } }, "the page opens as the smelter");
+  s.at(() => s.gm.greymarchForgeTick(Date.now()));
+  assert.deepStrictEqual(s.log.movedTo.slice(1), [20, 40, 2, false], "moved onto the smelter's marker (its world spot less the furniture's), on the next frame");
+  assert.strictEqual(Math.round(s.log.turned), 90, "facing the marker's way");
+  assert.ok(!s.log.natives.some((n) => n[1] === "SetForge"), "no bellows: it is not a forge");
+  s.at(() => s.gm.greymarchForgeTick(Date.now() + 400)); assert.strictEqual(s.log.events.pop(), "IdleSmelterEnter", "at work like the game's own smelter");
+  s.page({ type: "forge", rid: 4, op: "craft", args: { station: "smelter", id: 2, qty: 1, tab: "ingots" } });
+  assert.deepStrictEqual(s.log.sent.pop(), { customPacketType: "greymarchForge", rid: 4, op: "craft", args: { station: "smelter", id: 2, qty: 1, tab: "ingots" } });
+  s.key(1, true); s.key(1, false); s.at(() => s.gm.greymarchForgeTick(Date.now()));
+  assert.strictEqual(s.log.events.pop(), "IdleSmelterExit", "steps out with the smelter's own exit");
+  const k = make(); // the kiln: no marker, no animation, only the window
+  k.say({ customPacketType: "greymarchForgeOpen", station: "kiln", title: "Charcoal Kiln", ref: 0x1234, anim: "" });
+  k.at(() => k.gm.greymarchForgeTick(Date.now()));
+  assert.strictEqual(k.log.movedTo, undefined, "nobody is moved at a station with no animation");
+  const o = make(); o.state.marker = null; // an older GreymarchCamera.dll (no marker): the window opens, nobody is moved into the furniture
+  o.say({ customPacketType: "greymarchForgeOpen", station: "tan", title: "Tanning Rack", ref: 0x1234, anim: "IdleTanningEnter" });
+  o.at(() => o.gm.greymarchForgeTick(Date.now())); o.at(() => o.gm.greymarchForgeTick(Date.now() + 400));
+  assert.strictEqual(o.log.movedTo, undefined); assert.ok(!o.log.events.includes("IdleTanningEnter"));
 });
 
 test("the pointer: while a window holds the mouse and has the focus but the game's Cursor Menu is closed, the focus is dropped and taken again (it opens it); never while it is open", () => {

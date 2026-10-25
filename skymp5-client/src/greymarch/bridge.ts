@@ -2508,15 +2508,21 @@ export class GreymarchBridge {
             this.sp.printConsole("[greymarch] could not reach the forge window: " + err);
         }
     }
+    // THE STATION WINDOWS (gamemode/src/stationmenu.js) are this window too: { customPacketType: "greymarchForgeOpen", station: "smelter" | "tan" | "cookpot" ..., title, ref, anim }
+    // opens the same page in that station's mode, and the player is put at the station's furniture marker doing its own animation (anim: IdleSmelterEnter ...).
     greymarchForgeShow(msg?: any): any {
-        if (this.greymarchForgeOn) { this.greymarchForgeToPage("show", true); return; }
+        var station = (msg && typeof msg.station === "string" && msg.station) || "forge";
+        var page = { station: station, title: (msg && typeof msg.title === "string" && msg.title) || (station === "forge" ? "Forge" : "") };
+        if (this.greymarchForgeOn) { this.greymarchForgeToPage("show", page); return; }
         if (this.greymarchScreenUp || this.greymarchAdminOn || this.greymarchMenuOn || this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchCraftOn) return; // not over the select screen or the other panels
-        this.greymarchLog("forge: opened");
+        this.greymarchLog(station === "forge" ? "forge: opened" : "station window: opened, " + station);
         this.greymarchForgeOn = true;
-        this.greymarchForgeAnimStart(msg && msg.forge);
+        this.greymarchForgeStation = station;
+        if (station === "forge") this.greymarchForgeAnimStart(msg && msg.forge);
+        else this.greymarchForgeAnimWant = { on: true, forge: Number(msg && msg.ref) >>> 0, station: station, anim: (msg && typeof msg.anim === "string" && /^Idle[A-Za-z]{1,40}$/.test(msg.anim)) ? msg.anim : "" };
         this.sp.browser.setVisible(true);
         this.sp.browser.setFocused(true);
-        this.greymarchForgeToPage("show", true);
+        this.greymarchForgeToPage("show", page);
     }
     greymarchForgeHide(): any {
         if (!this.greymarchForgeOn) return;
@@ -2533,11 +2539,37 @@ export class GreymarchBridge {
     // only ask; the turn and the animation happen on the next frame (greymarchForgeTick, from the update loop).
     greymarchForgeAnimStart(forgeId: any): any { this.greymarchForgeAnimWant = { on: true, forge: Number(forgeId) >>> 0 }; }
     greymarchForgeAnimEnd(): any { this.greymarchForgeAnimWant = { on: false }; }
+    // a station (not the forge): the player is put where the game puts a worker (the furniture's own marker, read by GreymarchCamera.dll 1.4: GetFurnitureMarker), facing
+    // its way, and its own animation plays a moment later. A station without a marker or an animation (the kiln, a loom, a mill) only opens the window.
+    greymarchStationAnimStart(want: any, now: number): any {
+        var sp = this.sp;
+        var player = sp.Game.getPlayer(); if (!player) return;
+        var id = want.forge >>> 0;
+        var local = id >= 0xff000000 ? misc.remoteIdToLocalId(id) : id;
+        var ref = local ? sp.ObjectReference.from(sp.Game.getFormEx(local)) : null;
+        this.greymarchForgeAnimExit = "";
+        if (!ref || !want.anim) { this.greymarchLog("station window: " + want.station + ", no animation here"); return; }
+        var m: any = [];
+        try { for (var k = 0; k < 4; k++) m.push(Number(sp.callNative("GreymarchCam", "GetFurnitureMarker", undefined, ref, k))); } catch (e) { m = []; }
+        if (m.length < 4 || !(m[0] > -99990) || !isFinite(m[0] + m[1] + m[2] + m[3])) { this.greymarchLog("station window: " + want.station + ", no furniture marker (GreymarchCamera.dll older than 1.4?), no animation"); return; }
+        var fx0 = ref.getPositionX(), fy0 = ref.getPositionY(), fz0 = ref.getPositionZ();
+        player.moveTo(ref, m[0] - fx0, m[1] - fy0, m[2] - fz0, false); // MoveTo: SetPosition on the player does nothing (the forge's log)
+        try { player.setAngle(0, 0, m[3] * 180 / Math.PI); } catch (e) { /* facing as they were */ }
+        this.greymarchForgeAt = { fx: m[0], fy: m[1], fz: m[2], fa: m[3] * 180 / Math.PI, at: now + 1500 }; // where the worker is a moment later goes to the log
+        this.greymarchLog("station window: " + want.station + " at " + id.toString(16) + ", the marker " + Math.round(m[0] - fx0) + "," + Math.round(m[1] - fy0) + "," + Math.round(m[2] - fz0) + " from it, facing " + Math.round(m[3] * 180 / Math.PI));
+        this.greymarchForgeAnimEvent = want.anim;
+        this.greymarchForgeAnimExit = want.anim.replace(/Enter$/, "Exit"); // IdleSmelterExit, IdleTanningExit ... (the game's own)
+        this.greymarchForgeAnimGo = now + 350;
+        this.greymarchForgeAnim = true; this.greymarchForgeAnimSafety = 0;
+    }
     greymarchForgeTick(now: number): any {
         var sp = this.sp, want = this.greymarchForgeAnimWant;
         if (want) {
             this.greymarchForgeAnimWant = null;
-            if (want.on) {
+            if (want.on && want.station && want.station !== "forge") {
+                try { this.greymarchStationAnimStart(want, now); } catch (e) { this.greymarchLog("station window: no animation (" + e + ")"); }
+            } else if (want.on) {
+                this.greymarchForgeAnimEvent = "IdleBlackSmithForgeEnter"; this.greymarchForgeAnimExit = "";
                 try {
                     var player = sp.Game.getPlayer();
                     if (player) {
@@ -2563,13 +2595,13 @@ export class GreymarchBridge {
             } else if (this.greymarchForgeAnim) {
                 this.greymarchForgeAnim = false;
                 try { sp.callNative("GreymarchCam", "SetForge", undefined, null); } catch (e) { /* no plugin */ }
-                try { var pl = sp.Game.getPlayer(); if (pl) sp.Debug.sendAnimationEvent(pl, "IdleChairExitStart"); } catch (e) { /* the next movement ends it */ }
+                try { var pl = sp.Game.getPlayer(); if (pl) sp.Debug.sendAnimationEvent(pl, this.greymarchForgeAnimExit || "IdleChairExitStart"); } catch (e) { /* the next movement ends it */ } // a station: its own exit
                 this.greymarchForgeAnimSafety = now + 2500; // and to be sure the smith is free: the default state once the exit has played
             }
         }
         if (this.greymarchForgeAnimGo && now >= this.greymarchForgeAnimGo) {
             this.greymarchForgeAnimGo = 0;
-            if (this.greymarchForgeAnim) { try { var ps = sp.Game.getPlayer(); if (ps) sp.Debug.sendAnimationEvent(ps, "IdleBlackSmithForgeEnter"); } catch (e) { this.greymarchLog("forge: no forge animation (" + e + ")"); } }
+            if (this.greymarchForgeAnim) { try { var ps = sp.Game.getPlayer(); if (ps) sp.Debug.sendAnimationEvent(ps, this.greymarchForgeAnimEvent || "IdleBlackSmithForgeEnter"); } catch (e) { this.greymarchLog("forge: no forge animation (" + e + ")"); } }
         }
         // the game's own crafting menu must never be open under the forge window (it took the pointer, and its E Create made things the window would refuse):
         // closed at once through GreymarchCamera.dll 1.3 (CloseMenu), noted in the log
