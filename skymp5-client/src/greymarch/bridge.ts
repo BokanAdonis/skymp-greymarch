@@ -2551,6 +2551,18 @@ export class GreymarchBridge {
             this.greymarchForgeRefocusAt = [now, now + 650];
             if (this.greymarchForgeAnim) { try { var ps = sp.Game.getPlayer(); if (ps) sp.Debug.sendAnimationEvent(ps, "IdleBlackSmithForgeEnter"); } catch (e) { this.greymarchLog("forge: no forge animation (" + e + ")"); } }
         }
+        // the game's own crafting menu must never be open under the forge window (it took the pointer, and its E Create made things the window would refuse):
+        // closed at once through GreymarchCamera.dll 1.3 (CloseMenu), noted in the log
+        if (this.greymarchForgeOn && now >= (this.greymarchForgeMenuNext || 0)) {
+            this.greymarchForgeMenuNext = now + 250;
+            try {
+                if (sp.Ui.isMenuOpen("Crafting Menu")) {
+                    var shut = false; try { shut = !!sp.callNative("GreymarchCam", "CloseMenu", undefined, "Crafting Menu"); } catch (e) { shut = false; }
+                    this.greymarchForgeMenuSaid = (this.greymarchForgeMenuSaid || 0) + 1;
+                    if (this.greymarchForgeMenuSaid <= 5) this.greymarchLog("forge: the game's own crafting menu was open under the forge window; " + (shut ? "closed it" : "could not close it (GreymarchCamera.dll older than 1.3)"));
+                }
+            } catch (e) { /* next time */ }
+        }
         // the forge window holds the mouse and keyboard while it is open: SkyMP takes them away when it rebuilds the player's body (skympClient.ts
         // setFocused(false), which moving onto the forge can cause), so they are given back whenever they are lost, like the character select (greymarchSelectFocusGuard)
         if (this.greymarchForgeOn && now >= (this.greymarchForgeFocusNext || 0)) {
