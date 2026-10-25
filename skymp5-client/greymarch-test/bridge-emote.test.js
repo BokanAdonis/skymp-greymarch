@@ -54,7 +54,7 @@ function make(opts = {}) {
   const eat = (name, food = true, poison = false, fid = 0x3eaea, mgefs = [0x3eb15]) => at(() => gm.greymarchConsumeNote({ potion: { isFood: () => food, isPoison: () => poison, getNumEffects: () => mgefs.length, getNthEffectMagicEffect: (i) => ({ getFormID: () => mgefs[i] }) }, getName: () => name, getFormID: () => fid }));
   const camTick = (ms = 50) => { t += ms; at(() => gm.greymarchBuildCamTick(t)); };
   const chopTick = (ms = 1000) => { t += ms; at(() => gm.greymarchChopTick(t)); };
-  return { gm, log, state, tick, camTick, chopTick, key, page, shown, say, eat, bridgeSrc: bridgeJs };
+  return { at, gm, log, state, tick, camTick, chopTick, key, page, shown, say, eat, bridgeSrc: bridgeJs };
 }
 
 test("holding G opens the wheel (hold mode) with every group, from the update phase; letting go tells the page", () => {
@@ -434,13 +434,16 @@ test("the forge window: the game says it has it on entering the world; the serve
   s = make();
   s.say({ customPacketType: "greymarchForgeOpen", title: "Forge", forge: 0xc430a });
   assert.strictEqual(s.gm.greymarchForgeOn, true); assert.strictEqual(s.log.forge.pop().fn, "show");
-  assert.strictEqual(s.log.turned, 130, "turned to face the forge"); assert.strictEqual(s.log.events.pop(), "IdleBlackSmithForgeEnter", "at work like the game's own forge menu");
+  assert.strictEqual(s.log.turned, undefined, "nothing from the packet itself (the game refuses calls there)");
+  s.at(() => s.gm.greymarchForgeTick(Date.now()));
+  assert.strictEqual(s.log.turned, 130, "turned to face the forge, on the next frame"); assert.strictEqual(s.log.events.pop(), "IdleBlackSmithForgeEnter", "at work like the game's own forge menu");
   s.page({ type: "forge", rid: 3, op: "craft", args: { id: 12, qty: 2, tab: "weapons" } });
   assert.deepStrictEqual(s.log.sent.pop(), { customPacketType: "greymarchForge", rid: 3, op: "craft", args: { id: 12, qty: 2, tab: "weapons" } });
   s.say({ customPacketType: "greymarchForgeReply", rid: 3, ok: true }); assert.strictEqual(s.log.forge.pop().fn, "reply");
   s.key(1, true); s.key(1, false);
   assert.strictEqual(s.gm.greymarchForgeOn, false, "Esc closes it"); assert.strictEqual(s.log.forge.pop().fn, "hide");
-  assert.strictEqual(s.log.events.pop(), "IdleChairExitStart", "steps out of the forge's animation");
+  s.at(() => s.gm.greymarchForgeTick(Date.now()));
+  assert.strictEqual(s.log.events.pop(), "IdleChairExitStart", "steps out of the forge's animation, on the next frame");
   s.say({ customPacketType: "greymarchForgeOpen" }); s.page({ type: "forge-close" });
   assert.strictEqual(s.gm.greymarchForgeOn, false, "the page's close button closes it");
   assert.ok(/case 'greymarchForgeOpen':/.test(require("node:fs").readFileSync(require("node:path").join(__dirname, "..", "src", "services", "services", "authService.ts"), "utf8")), "the packets reach the bridge");

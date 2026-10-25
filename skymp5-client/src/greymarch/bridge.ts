@@ -2450,29 +2450,36 @@ export class GreymarchBridge {
     // At the forge like the game's own menu: the smith turns to the forge and does the forge's hammering (the game's IdleBlackSmithForgeEnter, what the
     // forge furniture plays) while the window is open, and steps out of it (IdleChairExitStart, the forge's exit) when it closes. SkyMP passes the player's
     // animation events on, so the others see the smith at work. The window holds the keyboard, so the smith cannot walk off mid-swing.
-    greymarchForgeAnimStart(forgeId: any): any {
-        var sp = this.sp;
-        try {
-            var player = sp.Game.getPlayer(); if (!player) return;
-            var id = Number(forgeId) >>> 0;
-            var local = id >= 0xff000000 ? misc.remoteIdToLocalId(id) : id;
-            var ref = local ? sp.ObjectReference.from(sp.Game.getFormEx(local)) : null;
-            if (ref) { var turn = player.getHeadingAngle(ref); player.setAngle(0, 0, player.getAngleZ() + turn); }
-            sp.Debug.sendAnimationEvent(player, "IdleBlackSmithForgeEnter");
-            this.greymarchForgeAnim = true; this.greymarchForgeAnimSafety = 0;
-        } catch (e) { this.greymarchLog("forge: no forge animation (" + e + ")"); }
-    }
-    greymarchForgeAnimEnd(): any {
-        if (!this.greymarchForgeAnim) return;
-        this.greymarchForgeAnim = false;
-        try { var player = this.sp.Game.getPlayer(); if (player) this.sp.Debug.sendAnimationEvent(player, "IdleChairExitStart"); } catch (e) { /* the next movement ends it */ }
-        this.greymarchForgeAnimSafety = Date.now() + 2500; // and to be sure the smith is free: the default state once the exit has played (greymarchForgeTick)
-    }
+    // The game's functions cannot be called from a packet or a browser message (SkyrimPlatform: "can't be called in this context"), so open and close
+    // only ask; the turn and the animation happen on the next frame (greymarchForgeTick, from the update loop).
+    greymarchForgeAnimStart(forgeId: any): any { this.greymarchForgeAnimWant = { on: true, forge: Number(forgeId) >>> 0 }; }
+    greymarchForgeAnimEnd(): any { this.greymarchForgeAnimWant = { on: false }; }
     greymarchForgeTick(now: number): any {
+        var sp = this.sp, want = this.greymarchForgeAnimWant;
+        if (want) {
+            this.greymarchForgeAnimWant = null;
+            if (want.on) {
+                try {
+                    var player = sp.Game.getPlayer();
+                    if (player) {
+                        var id = want.forge;
+                        var local = id >= 0xff000000 ? misc.remoteIdToLocalId(id) : id;
+                        var ref = local ? sp.ObjectReference.from(sp.Game.getFormEx(local)) : null;
+                        if (ref) { var turn = player.getHeadingAngle(ref); player.setAngle(0, 0, player.getAngleZ() + turn); }
+                        sp.Debug.sendAnimationEvent(player, "IdleBlackSmithForgeEnter");
+                        this.greymarchForgeAnim = true; this.greymarchForgeAnimSafety = 0;
+                    }
+                } catch (e) { this.greymarchLog("forge: no forge animation (" + e + ")"); }
+            } else if (this.greymarchForgeAnim) {
+                this.greymarchForgeAnim = false;
+                try { var pl = sp.Game.getPlayer(); if (pl) sp.Debug.sendAnimationEvent(pl, "IdleChairExitStart"); } catch (e) { /* the next movement ends it */ }
+                this.greymarchForgeAnimSafety = now + 2500; // and to be sure the smith is free: the default state once the exit has played
+            }
+        }
         if (!this.greymarchForgeAnimSafety || now < this.greymarchForgeAnimSafety) return;
         this.greymarchForgeAnimSafety = 0;
         if (this.greymarchForgeAnim) return; // opened again meanwhile
-        try { var player = this.sp.Game.getPlayer(); if (player) this.sp.Debug.sendAnimationEvent(player, "IdleForceDefaultState"); } catch (e) { /* nothing to free */ }
+        try { var p2 = sp.Game.getPlayer(); if (p2) sp.Debug.sendAnimationEvent(p2, "IdleForceDefaultState"); } catch (e) { /* nothing to free */ }
     }
     greymarchForgeAsk(data: any): any {
         var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchForge", rid: data.rid, op: data.op, args: data.args }) };
