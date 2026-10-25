@@ -446,15 +446,12 @@ test("the forge window: the game says it has it on entering the world; the serve
   s.page({ type: "forge", rid: 3, op: "craft", args: { id: 12, qty: 2, tab: "weapons" } });
   assert.deepStrictEqual(s.log.sent.pop(), { customPacketType: "greymarchForge", rid: 3, op: "craft", args: { id: 12, qty: 2, tab: "weapons" } });
   s.say({ customPacketType: "greymarchForgeReply", rid: 3, ok: true }); assert.strictEqual(s.log.forge.pop().fn, "reply");
-  s.state.cam = [0, 0, 100, 0, 1, 0]; // the camera at 0,0,100 looking north
+  const before = (s.log.ghosts || []).length;
   s.page({ type: "forge-preview", key: "20:skyrim.esm" }); s.at(() => s.gm.greymarchForgePreviewTick(Date.now()));
-  const ghost = s.log.ghosts.pop(); assert.deepStrictEqual(ghost.base, { id: 0x20, file: "skyrim.esm" }, "the picked piece, a copy in this game only");
-  assert.deepStrictEqual(ghost.at.map(Math.round), [38, 75, 96], "in front of the camera, to its right");
-  s.page({ type: "forge-preview", key: "21:skyrim.esm" }); s.at(() => s.gm.greymarchForgePreviewTick(Date.now()));
-  assert.ok(ghost.gone, "another piece: the first one goes"); const second = s.log.ghosts.pop();
+  assert.strictEqual((s.log.ghosts || []).length, before, "no copy of the piece is ever placed in the world (it could be picked up)");
   s.key(1, true); s.key(1, false);
   assert.strictEqual(s.gm.greymarchForgeOn, false, "Esc closes it"); assert.strictEqual(s.log.forge.pop().fn, "hide");
-  s.at(() => s.gm.greymarchForgePreviewTick(Date.now())); assert.ok(second.gone, "the preview goes with the window");
+
   s.at(() => s.gm.greymarchForgeTick(Date.now()));
   assert.strictEqual(s.log.events.pop(), "IdleChairExitStart", "steps out of the forge's animation, on the next frame");
   assert.deepStrictEqual(s.log.natives.filter((n) => n[1] === "SetForge").pop(), ["GreymarchCam", "SetForge", null], "and the plugin lets the forge go");
