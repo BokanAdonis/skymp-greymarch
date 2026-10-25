@@ -437,6 +437,7 @@ test("the forge window: the game says it has it on entering the world; the serve
   assert.strictEqual(s.log.turned, undefined, "nothing from the packet itself (the game refuses calls there)");
   s.at(() => s.gm.greymarchForgeTick(Date.now()));
   assert.deepStrictEqual(s.log.movedTo, [0xc430a, 0, 0, 0, true], "moved onto the forge's working spot with its rotation (MoveTo), on the next frame");
+  const told = s.log.natives.filter((n) => n[1] === "SetForge").pop(); assert.strictEqual(told[2].id, 0xc430a, "the plugin is told the forge, so its bellows follow the pulls");
   assert.notStrictEqual(s.log.events[s.log.events.length - 1], "IdleBlackSmithForgeEnter", "the hammering waits until the smith is there");
   s.at(() => s.gm.greymarchForgeTick(Date.now() + 400)); assert.strictEqual(s.log.events.pop(), "IdleBlackSmithForgeEnter", "at work like the game's own forge menu");
   s.page({ type: "forge", rid: 3, op: "craft", args: { id: 12, qty: 2, tab: "weapons" } });
@@ -453,6 +454,7 @@ test("the forge window: the game says it has it on entering the world; the serve
   s.at(() => s.gm.greymarchForgePreviewTick(Date.now())); assert.ok(second.gone, "the preview goes with the window");
   s.at(() => s.gm.greymarchForgeTick(Date.now()));
   assert.strictEqual(s.log.events.pop(), "IdleChairExitStart", "steps out of the forge's animation, on the next frame");
+  assert.deepStrictEqual(s.log.natives.filter((n) => n[1] === "SetForge").pop(), ["GreymarchCam", "SetForge", null], "and the plugin lets the forge go");
   s.say({ customPacketType: "greymarchForgeOpen" }); s.page({ type: "forge-close" });
   assert.strictEqual(s.gm.greymarchForgeOn, false, "the page's close button closes it");
   assert.ok(/case 'greymarchForgeOpen':/.test(require("node:fs").readFileSync(require("node:path").join(__dirname, "..", "src", "services", "services", "authService.ts"), "utf8")), "the packets reach the bridge");

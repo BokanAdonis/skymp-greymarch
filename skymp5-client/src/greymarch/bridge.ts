@@ -2476,6 +2476,7 @@ export class GreymarchBridge {
                             var fx0 = ref.getPositionX(), fy0 = ref.getPositionY(), fz0 = ref.getPositionZ(), fa = ref.getAngleZ();
                             var bx = player.getPositionX(), by = player.getPositionY(), bz = player.getPositionZ();
                             player.moveTo(ref, 0, 0, 0, true);
+                            try { sp.callNative("GreymarchCam", "SetForge", undefined, ref); } catch (e) { /* an older GreymarchCamera.dll: no bellows */ } // the bellows follow the smith's pulls (GreymarchCamera.dll 1.2)
                             this.greymarchForgeAt = { fx: fx0, fy: fy0, fz: fz0, fa: fa, at: now + 1500 }; // where the smith is a moment later goes to the log
                             this.greymarchLog("forge: at " + id.toString(16) + " (" + Math.round(fx0) + "," + Math.round(fy0) + "," + Math.round(fz0) + " angle " + Math.round(fa) + "), the smith was " + Math.round(bx - fx0) + "," + Math.round(by - fy0) + "," + Math.round(bz - fz0) + " from it");
                         }
@@ -2485,12 +2486,26 @@ export class GreymarchBridge {
                 } catch (e) { this.greymarchLog("forge: no forge animation (" + e + ")"); }
             } else if (this.greymarchForgeAnim) {
                 this.greymarchForgeAnim = false;
+                try { sp.callNative("GreymarchCam", "SetForge", undefined, null); } catch (e) { /* no plugin */ }
                 try { var pl = sp.Game.getPlayer(); if (pl) sp.Debug.sendAnimationEvent(pl, "IdleChairExitStart"); } catch (e) { /* the next movement ends it */ }
                 this.greymarchForgeAnimSafety = now + 2500; // and to be sure the smith is free: the default state once the exit has played
             }
         }
+        // the pointer: SkyrimPlatform draws it through the game's Cursor Menu, opened when the page takes focus; moving onto the forge closes it, and taking a
+        // focus already held does nothing, so after the move the window lets go and takes the focus again (which opens the Cursor Menu again), twice
+        var rf = this.greymarchForgeRefocusAt;
+        if (rf && rf.length && now >= rf[0] && this.greymarchForgeOn) {
+            rf.shift();
+            try {
+                var had = false; try { had = !!sp.Ui.isMenuOpen("Cursor Menu"); } catch (e) { had = false; }
+                sp.browser.setFocused(false); sp.browser.setVisible(true); sp.browser.setFocused(true);
+                this.greymarchForgeCursorSaid = (this.greymarchForgeCursorSaid || 0) + 1;
+                if (this.greymarchForgeCursorSaid <= 6) this.greymarchLog("forge: focus taken again for the pointer (the Cursor Menu was " + (had ? "open" : "closed") + ", now " + (sp.Ui.isMenuOpen("Cursor Menu") ? "open" : "closed") + ")");
+            } catch (e) { /* next time */ }
+        }
         if (this.greymarchForgeAnimGo && now >= this.greymarchForgeAnimGo) {
             this.greymarchForgeAnimGo = 0;
+            this.greymarchForgeRefocusAt = [now, now + 650];
             if (this.greymarchForgeAnim) { try { var ps = sp.Game.getPlayer(); if (ps) sp.Debug.sendAnimationEvent(ps, "IdleBlackSmithForgeEnter"); } catch (e) { this.greymarchLog("forge: no forge animation (" + e + ")"); } }
         }
         // the forge window holds the mouse and keyboard while it is open: SkyMP takes them away when it rebuilds the player's body (skympClient.ts
