@@ -37,7 +37,7 @@ function make(opts = {}) {
     Ui: { isMenuOpen: (name) => name === state.menu },
     Input: { tapKey: (k) => { log.taps = (log.taps || []).concat([k]); if (state.menu === "InventoryMenu" || state.menu === "FavoritesMenu") state.menu = null; }, getMappedKey: (c) => (c === "Tween Menu" ? state.tweenKey || 15 : 0) },
     Utility: { isInMenuMode: () => false },
-    browser: { setVisible() {}, setFocused: (v) => log.focused.push(v), isFocused: () => true, executeJavaScript: (js) => { const m = /window\.__gmEmoteRun\((.*)\);$/.exec(js); if (m) log.pages.push(JSON.parse(m[1])); } },
+    browser: { setVisible() {}, setFocused: (v) => log.focused.push(v), isFocused: () => true, executeJavaScript: (js) => { const m = /window\.__gmEmoteRun\((.*)\);$/.exec(js); if (m) log.pages.push(JSON.parse(m[1])); const c = /window\.__gmCraftRun\((.*)\);$/.exec(js); if (c) (log.craft = log.craft || []).push(JSON.parse(c[1])); } },
     on() {}, storage: {},
   };
   const controller = { on() {}, emitter: { on() {}, emit: (n, m) => { if (n === "sendMessage") { const c = JSON.parse(m.message.contentJsonDump); if (c.customPacketType !== "greymarchLog") log.sent.push(c); } } } };
@@ -406,4 +406,21 @@ test("the chopping block: while the player sits in furniture its id goes to the 
   assert.deepStrictEqual(chops(), [0x10a3b5, 0x10a3b5, 0x10a3b5], "once a second, not every frame");
   s.state.furn = 0; s.chopTick(); s.chopTick(); s.chopTick();
   assert.deepStrictEqual(chops(), [0x10a3b5, 0x10a3b5, 0x10a3b5, 0], "got up: one 0, then quiet");
+});
+
+test("the crafting panel: the server opens it at a station, the page's requests go to the server as greymarchCraft, replies reach the page, Esc or the page closes it", () => {
+  const s = make();
+  s.say({ customPacketType: "greymarchCraftOpen", station: "kiln", title: "Charcoal kiln" });
+  assert.strictEqual(s.gm.greymarchCraftOn, true);
+  assert.deepStrictEqual(s.log.craft.pop(), { fn: "show", arg: { customPacketType: "greymarchCraftOpen", station: "kiln", title: "Charcoal kiln" } });
+  assert.strictEqual(s.log.focused.pop(), true, "the panel has the mouse and keyboard");
+  s.page({ type: "craft", rid: 4, op: "craft", args: { recipeId: "wc_charcoal", qty: 2 } });
+  assert.deepStrictEqual(s.log.sent.pop(), { customPacketType: "greymarchCraft", rid: 4, op: "craft", args: { recipeId: "wc_charcoal", qty: 2 } });
+  s.say({ customPacketType: "greymarchCraftReply", rid: 4, ok: true }); assert.strictEqual(s.log.craft.pop().fn, "reply");
+  s.say({ customPacketType: "greymarchCraftDone", rid: 4, ok: true }); assert.strictEqual(s.log.craft.pop().fn, "done");
+  s.key(1, true); s.key(1, false);
+  assert.strictEqual(s.gm.greymarchCraftOn, false, "Esc closes it"); assert.strictEqual(s.log.craft.pop().fn, "hide");
+  s.say({ customPacketType: "greymarchCraftOpen", station: "kiln", title: "Charcoal kiln" }); s.page({ type: "craft-close" });
+  assert.strictEqual(s.gm.greymarchCraftOn, false, "the page's close button closes it");
+  assert.ok(/case 'greymarchCraftOpen':/.test(require("node:fs").readFileSync(require("node:path").join(__dirname, "..", "src", "services", "services", "authService.ts"), "utf8")), "the packets reach the bridge");
 });
