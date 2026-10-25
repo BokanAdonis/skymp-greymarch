@@ -2468,18 +2468,18 @@ export class GreymarchBridge {
                         var id = want.forge;
                         var local = id >= 0xff000000 ? misc.remoteIdToLocalId(id) : id;
                         var ref = local ? sp.ObjectReference.from(sp.Game.getFormEx(local)) : null;
-                        // where the game itself puts a smith: the forge's furniture marker is at the forge's own origin, facing the forge's way
-                        // (Furniture\BlacksmithForgeMarker.nif and ...WR.nif: BSFurnitureMarkerNode offset 0, 0, 34, heading 0)
-                        // the marker is 34 units up (the model's floor stones sit above its origin), scaled with the forge
+                        // where the game itself puts a smith: the forge's furniture marker is at the forge's origin, facing its way (BlacksmithForgeMarker.nif,
+                        // ...WR.nif: heading 0; its origin is the floor: a smith standing there is 1 unit above it). SetPosition on the player did nothing
+                        // (the log showed the smith where they were), so MoveTo, the game's own teleport onto an object, with its rotation; the hammering
+                        // starts once the smith is there (greymarchForgeAnimGo, a moment later).
                         if (ref) {
-                            var sc = 1; try { sc = Number(ref.getScale()) || 1; } catch (e) { sc = 1; }
                             var fx0 = ref.getPositionX(), fy0 = ref.getPositionY(), fz0 = ref.getPositionZ(), fa = ref.getAngleZ();
                             var bx = player.getPositionX(), by = player.getPositionY(), bz = player.getPositionZ();
-                            player.setPosition(fx0, fy0, fz0 + 34 * sc); player.setAngle(0, 0, fa);
-                            this.greymarchForgeAt = { fx: fx0, fy: fy0, fz: fz0, fa: fa, at: Date.now() + 1500 }; // where the smith is a moment later goes to the log (greymarchForgeTick)
-                            this.greymarchLog("forge: at " + id.toString(16) + " (" + Math.round(fx0) + "," + Math.round(fy0) + "," + Math.round(fz0) + " angle " + Math.round(fa) + " scale " + sc + "), the smith was " + Math.round(bx - fx0) + "," + Math.round(by - fy0) + "," + Math.round(bz - fz0) + " from it");
+                            player.moveTo(ref, 0, 0, 0, true);
+                            this.greymarchForgeAt = { fx: fx0, fy: fy0, fz: fz0, fa: fa, at: now + 1500 }; // where the smith is a moment later goes to the log
+                            this.greymarchLog("forge: at " + id.toString(16) + " (" + Math.round(fx0) + "," + Math.round(fy0) + "," + Math.round(fz0) + " angle " + Math.round(fa) + "), the smith was " + Math.round(bx - fx0) + "," + Math.round(by - fy0) + "," + Math.round(bz - fz0) + " from it");
                         }
-                        sp.Debug.sendAnimationEvent(player, "IdleBlackSmithForgeEnter");
+                        this.greymarchForgeAnimGo = now + (ref ? 350 : 0);
                         this.greymarchForgeAnim = true; this.greymarchForgeAnimSafety = 0;
                     }
                 } catch (e) { this.greymarchLog("forge: no forge animation (" + e + ")"); }
@@ -2488,6 +2488,10 @@ export class GreymarchBridge {
                 try { var pl = sp.Game.getPlayer(); if (pl) sp.Debug.sendAnimationEvent(pl, "IdleChairExitStart"); } catch (e) { /* the next movement ends it */ }
                 this.greymarchForgeAnimSafety = now + 2500; // and to be sure the smith is free: the default state once the exit has played
             }
+        }
+        if (this.greymarchForgeAnimGo && now >= this.greymarchForgeAnimGo) {
+            this.greymarchForgeAnimGo = 0;
+            if (this.greymarchForgeAnim) { try { var ps = sp.Game.getPlayer(); if (ps) sp.Debug.sendAnimationEvent(ps, "IdleBlackSmithForgeEnter"); } catch (e) { this.greymarchLog("forge: no forge animation (" + e + ")"); } }
         }
         // the forge window holds the mouse and keyboard while it is open: SkyMP takes them away when it rebuilds the player's body (skympClient.ts
         // setFocused(false), which moving onto the forge can cause), so they are given back whenever they are lost, like the character select (greymarchSelectFocusGuard)
