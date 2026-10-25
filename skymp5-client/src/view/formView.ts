@@ -247,7 +247,10 @@ export class FormView {
         // 2026-10-19). So a hidden marker is put on the spot first (TESModPlatform.moveRefrToPosition is not latent) and the creature is made there.
         const isServerCreature = (baseForm: Form) => baseForm.getType() === FormType.NPC && !model.appearance;
         const gmBeastLookNow = !!model.appearance && !(Array.isArray(model.appearance.headpartIds) && model.appearance.headpartIds.length > 0); // a werewolf or werebear look
-        const spawnAtSpot = (baseForm: Form, pos: [number, number, number], rot: [number, number, number]): ObjectReference | null => {
+        // GREYMARCH: persist false for a server NPC (2026-10-24, an experiment): made as a temporary reference like Skyrim's own NPCs, not a persistent one. Server
+        // NPCs made persistent ran with their height locked, through the air and into hills, while the game's own NPCs walked the same ground; nothing done to
+        // them afterwards (stopping moves, no Resurrect, a rebuild, the server moving them) brought them down. A beast look stays persistent as before.
+        const spawnAtSpot = (baseForm: Form, pos: [number, number, number], rot: [number, number, number], persist = true): ObjectReference | null => {
           try {
             const worldOrCell = model.movement ? model.movement.worldOrCell : 0;
             const markerBase = Game.getFormEx(0x3b); // XMarker
@@ -255,7 +258,7 @@ export class FormView {
             if (!marker) return null;
             if (!worldOrCell) { marker.delete(); return null; }
             TESModPlatform.moveRefrToPosition(marker, Cell.from(Game.getFormEx(worldOrCell)), WorldSpace.from(Game.getFormEx(worldOrCell)), pos[0], pos[1], pos[2], rot[0], rot[1], rot[2]);
-            const ref = marker.placeAtMe(baseForm, 1, true, true) as ObjectReference;
+            const ref = marker.placeAtMe(baseForm, 1, persist, true) as ObjectReference;
             marker.delete();
             return ref || null;
           } catch (e) {
@@ -267,7 +270,7 @@ export class FormView {
         const spawnMethodOriginal = {
           spawn(baseForm: Form, spawnPosition: [number, number, number], spawnRotation: [number, number, number]): ObjectReference {
             if (isServerCreature(baseForm)) {
-              const atSpot = spawnAtSpot(baseForm, spawnPosition, spawnRotation);
+              const atSpot = spawnAtSpot(baseForm, spawnPosition, spawnRotation, false);
               if (atSpot) return atSpot;
             }
             // GREYMARCH: A BEAST LOOK IS ALSO MADE AT ITS SPOT (2026-10-22), and is not moved after (spawnProcess.ts skips its setPosition). Made at the watching

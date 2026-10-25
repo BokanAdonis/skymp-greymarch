@@ -112,3 +112,10 @@ test("locked height: a server NPC is not resurrected at its spawn; one that runs
   assert.ok(tick.includes('", cell " + gmCellOf(npc) + " (player " + gmCellOf(me) + ")"'), "the drift lines say which cell");
   assert.ok(tick.indexOf("reground") < tick.indexOf("if (!others.length)"), "also when its player is alone");
 });
+
+test("a server NPC is made as a temporary reference (an experiment: persistent ones ran with their height locked); a beast look stays persistent", () => {
+  assert.ok(formView.includes("const ref = marker.placeAtMe(baseForm, 1, persist, true) as ObjectReference;"));
+  assert.ok(formView.includes("const atSpot = spawnAtSpot(baseForm, spawnPosition, spawnRotation, false);"), "a server creature: not persistent");
+  const flat = formView.split(String.fromCharCode(10)).map((l) => l.trim()).join(" ");
+  assert.ok(flat.includes("if (gmBeastLookNow) { const atSpot = spawnAtSpot(baseForm, spawnPosition, spawnRotation);"), "a beast look: persistent as before");
+});
