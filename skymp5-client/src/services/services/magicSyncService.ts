@@ -9,6 +9,7 @@ import { logTrace } from '../../logging';
 import { MsgType } from "../../messages";
 import { SpellCastMsgData, SpellCastMessage } from "../messages/spellCastMessage";
 import { UpdateAnimVariablesMessageMsgData } from "../messages/updateAnimVariablesMessage";
+import { sanitizeAim, sanitizeAimFloats, lookFromAngles } from "./spellAim";
 
 export class MagicSyncService extends ClientListener {
     constructor(private sp: Sp, private controller: CombinedController) {
@@ -251,7 +252,37 @@ export class MagicSyncService extends ClientListener {
             aimHeading: e.aimHeading,
             actorAnimationVariables: this.getAnimationVariablesFromActorConverted(e.caster.getFormID()),
         }
+
+        // GREYMARCH: the player's aim is sent as where they look when the game's aim points far away from it (spellAim.ts)
+        if (e.caster.getFormID() === this.playerId) {
+            const look = this.getPlayerLook(e.caster);
+            if (look) {
+                const aim = sanitizeAim(spellCastData.aimAngle, spellCastData.aimHeading, look.lookPitch, look.bodyHeading);
+                if (aim.fixed) {
+                    this.aimDiag(`magic: aim of ${spellCastData.spell.toString(16)} replaced: game ${spellCastData.aimAngle.toFixed(2)}/${spellCastData.aimHeading.toFixed(2)}, look ${aim.aimAngle.toFixed(2)}/${aim.aimHeading.toFixed(2)} (rad)`);
+                    spellCastData.aimAngle = aim.aimAngle;
+                    spellCastData.aimHeading = aim.aimHeading;
+                }
+            }
+        }
         return spellCastData;
+    }
+
+    // the player's pitch and heading in radians, or null when they cannot be read
+    private getPlayerLook(ac: { getAngleX(): number, getAngleZ(): number }): { lookPitch: number, bodyHeading: number } | null {
+        try {
+            return lookFromAngles(ac.getAngleX(), ac.getAngleZ());
+        } catch (e) {
+            return null;
+        }
+    }
+
+    private aimDiag(text: string) {
+        if (this.aimDiagLeft <= 0) {
+            return;
+        }
+        this.aimDiagLeft--;
+        this.diag(text);
     }
 
     private getAnimationVariablesFromActorConverted(actorId: number) {
@@ -259,9 +290,23 @@ export class MagicSyncService extends ClientListener {
         const booleans: ArrayBuffer = animVars.booleans;
         const floats: ArrayBuffer = animVars.floats;
         const integers: ArrayBuffer = animVars.integers;
+        let floatBytes = Array.from(new Uint8Array(floats));
+        // GREYMARCH: the player's aim offsets go out as where they look when they point far away from it: a held spell is aimed from
+        // them in other games (spellAim.ts)
+        if (actorId === this.playerId) {
+            const ac = Game.getPlayer();
+            const look = ac ? this.getPlayerLook(ac) : null;
+            if (look) {
+                const res = sanitizeAimFloats(floatBytes, look.lookPitch);
+                if (res.fixed) {
+                    this.aimDiag(`magic: aim variables replaced: game pitch ${res.pitch.toFixed(2)} heading ${res.heading.toFixed(2)}, look pitch ${look.lookPitch.toFixed(2)} (rad)`);
+                    floatBytes = res.bytes;
+                }
+            }
+        }
         return {
             booleans: Array.from(new Uint8Array(booleans)),
-            floats: Array.from(new Uint8Array(floats)),
+            floats: floatBytes,
             integers: Array.from(new Uint8Array(integers)),
         }
     }
@@ -322,6 +367,7 @@ export class MagicSyncService extends ClientListener {
     private activeCasts = new Map<string, { msg: SpellCastMsgData, casterLocalId: number, startedAt: number, lastSentAt: number, repeats: number, varsSeen: Record<string, { on: number, off: number, was: boolean }>, events: string[] }>();
     private readonly castVars = ["IsCastingRight", "IsCastingLeft", "IsCastingDual", "bWantCastRight", "bWantCastLeft"];
     private diagLeft = 40;
+    private aimDiagLeft = 5;
     private readonly keepaliveMs = 1000;
     private recentCasts: { casterLocalId: number, spell: number, at: number }[] = [];
     private lastSendUpdateAnimationVariables: number = 0;
