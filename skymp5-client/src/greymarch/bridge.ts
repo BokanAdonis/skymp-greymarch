@@ -402,6 +402,7 @@ export class GreymarchBridge {
         this.greymarchHungerDrive(); // hunger: the stagger, regeneration off while starving
         this.greymarchBuildAngleTick(); // a piece a GM placed was turned: this game turns its copy
         this.greymarchBuildCamTick(Date.now()); // the build system's free camera: the preview where the camera looks
+        this.greymarchChopTick(Date.now()); // sitting at a chopping block: the server counts the chops (XP, firewood)
         this.greymarchMagicBlockDrive(); // NPC raise-the-dead and summons: ended at once
         this.greymarchShapeDrive(); // a creature form as an NPC: moved every frame like SkyMP moves other players; other players' creature attacks
         this.greymarchShapeTick(); // a creature form staff put the player in (a goat, a giant ...): the server decides, the body is changed here
@@ -1638,6 +1639,17 @@ export class GreymarchBridge {
         var pos = spot.pos.map(function (n: number) { return Math.round(n * 10) / 10; }), rot = Math.round(spot.rot * 10) / 10;
         this.greymarchAdminSend({ rid: rid, op: "build", args: b.mode === "move" ? { sub: "move_to", id: b.id, pos: pos, rot: rot } : { sub: "place_at", key: b.key, pos: pos, rot: rot } });
         if (b.mode === "move") this.greymarchBuildCamEnd("moved");
+    }
+    // ---- THE CHOPPING BLOCK (gamemode professions.js chopSeen): while the player sits in a piece of furniture, its id goes to the server once a second; 0 once when they get up.
+    // The server only counts it for the chopping block it let them sit at (a Woodcutter): a chop every few seconds, XP each chop, firewood every second chop. Nothing is given here.
+    greymarchChopTick(now: number): any {
+        if (now < (this.greymarchChopNext || 0)) return;
+        this.greymarchChopNext = now + 1000;
+        var ref = 0;
+        try { var player = this.sp.Game.getPlayer(); var furn = player ? player.getFurnitureReference() : null; ref = furn ? misc.localIdToRemoteId(furn.getFormID()) || 0 : 0; } catch (e) { ref = 0; }
+        if (!ref && !this.greymarchChopRef) return;
+        this.greymarchChopRef = ref;
+        this.controller.emitter.emit("sendMessage", { message: { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchChop", ref: ref >>> 0 }) }, reliability: "unreliable" });
     }
     // a piece a GM placed was turned (gamemode buildsys.js): this game's copy of it, if it has one loaded, takes the server's angle
     greymarchBuildAngleTick(): any {

@@ -15,7 +15,7 @@ const bridgeJs = tr("bridge.ts");
 function make(opts = {}) {
   const log = { idles: [], events: [], notes: [], pages: [], lines: [], thirdPerson: 0, focused: [], sent: [], faces: {} };
   const faceLog = (who) => ({ clearExpressionOverride: () => (log.faces[who] = []), resetExpressionOverrides: () => (log.faces[who] = []), setExpressionOverride: (m, s) => (log.faces[who] = log.faces[who] || []).push(["mood", m, s]), setExpressionPhoneme: (i, v) => (log.faces[who] = log.faces[who] || []).push(["ph", i, v]) });
-  const mods = { "../messages": { MsgType: { CustomPacket: 77 } }, "./emotes": emotes, "../view/worldViewMisc": { remoteIdToLocalId: (id) => (opts.others || {})[id] || 0 }, "../services/services/remoteServer": { RemoteServer: {} }, "../services/services/singlePlayerService": { SinglePlayerService: {} } };
+  const mods = { "../messages": { MsgType: { CustomPacket: 77 } }, "./emotes": emotes, "../view/worldViewMisc": { remoteIdToLocalId: (id) => (opts.others || {})[id] || 0, localIdToRemoteId: (id) => (id >= 0xff000000 ? 0 : id) }, "../services/services/remoteServer": { RemoteServer: {} }, "../services/services/singlePlayerService": { SinglePlayerService: {} } };
   const bridge = load(bridgeJs, mods);
   const state = { drawn: false, speed: 0, menu: null, refuse: false };
   const player = {
@@ -23,6 +23,7 @@ function make(opts = {}) {
     placeAtMe: (base) => { const g = { base, at: null, rot: null, gone: false, setPosition: (x, y, z) => { g.at = [x, y, z]; }, setAngle: (a, b, c) => { g.rot = [a, b, c]; }, disable() { g.gone = true; }, delete() { g.gone = true; } }; (log.ghosts = log.ghosts || []).push(g); return g; },
     getActorValue: (n) => (state.av || {})[n] || 0, damageActorValue: (n, v) => { log.damage = (log.damage || []).concat([[n, Math.round(v)]]); state.av[n] -= v; },
     isWeaponDrawn: () => state.drawn,
+    getFurnitureReference: () => (state.furn ? { getFormID: () => state.furn } : null),
     getAnimationVariableFloat: (n) => (n === "Speed" ? state.speed : 0),
     ...faceLog("me"),
   };
@@ -51,7 +52,8 @@ function make(opts = {}) {
   const say = (msg) => at(() => gm.greymarchPacket(msg));
   const eat = (name, food = true, poison = false, fid = 0x3eaea, mgefs = [0x3eb15]) => at(() => gm.greymarchConsumeNote({ potion: { isFood: () => food, isPoison: () => poison, getNumEffects: () => mgefs.length, getNthEffectMagicEffect: (i) => ({ getFormID: () => mgefs[i] }) }, getName: () => name, getFormID: () => fid }));
   const camTick = (ms = 50) => { t += ms; at(() => gm.greymarchBuildCamTick(t)); };
-  return { gm, log, state, tick, camTick, key, page, shown, say, eat, bridgeSrc: bridgeJs };
+  const chopTick = (ms = 1000) => { t += ms; at(() => gm.greymarchChopTick(t)); };
+  return { gm, log, state, tick, camTick, chopTick, key, page, shown, say, eat, bridgeSrc: bridgeJs };
 }
 
 test("holding G opens the wheel (hold mode) with every group, from the update phase; letting go tells the page", () => {
@@ -394,4 +396,14 @@ test("the build system's free camera: Place in the Build tab turns it on, a prev
   const t = make(); t.state.noDll = true;
   t.page({ type: "build-cam", mode: "place", key: "d932f:Skyrim.esm", name: "Forge" }); t.camTick();
   assert.ok(!t.gm.greymarchBuildCam, "no plugin: no free camera, nothing changes");
+});
+
+test("the chopping block: while the player sits in furniture its id goes to the server once a second, 0 once on getting up, nothing while standing", () => {
+  const s = make();
+  const chops = () => s.log.sent.filter((m) => m.customPacketType === "greymarchChop").map((m) => m.ref);
+  s.chopTick(); s.chopTick(); assert.deepStrictEqual(chops(), [], "standing: nothing sent");
+  s.state.furn = 0x10a3b5; s.chopTick(); s.chopTick(400); s.chopTick(600); s.chopTick();
+  assert.deepStrictEqual(chops(), [0x10a3b5, 0x10a3b5, 0x10a3b5], "once a second, not every frame");
+  s.state.furn = 0; s.chopTick(); s.chopTick(); s.chopTick();
+  assert.deepStrictEqual(chops(), [0x10a3b5, 0x10a3b5, 0x10a3b5, 0], "got up: one 0, then quiet");
 });
