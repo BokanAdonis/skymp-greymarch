@@ -416,6 +416,7 @@ export class GreymarchBridge {
         this.greymarchBuildCamTick(Date.now()); // the build system's free camera: the preview where the camera looks
         this.greymarchChopTick(Date.now()); // sitting at a chopping block: the server counts the chops (XP, firewood)
         this.greymarchForgeTick(Date.now()); // after the forge window closed: the smith is surely out of the forge's animation
+        this.greymarchForgePreviewTick(Date.now()); // the forge window's turning preview of the picked piece
         this.greymarchMiniActivateTick(); // a mini game won: the thing is used again (the server lets it through)
         this.greymarchMagicBlockDrive(); // NPC raise-the-dead and summons: ended at once
         this.greymarchShapeDrive(); // a creature form as an NPC: moved every frame like SkyMP moves other players; other players' creature attacks
@@ -576,6 +577,7 @@ export class GreymarchBridge {
         if (data && data.type === "craft-close") { this.greymarchCraftHide(); return; }
         if (data && data.type === "forge") { this.greymarchForgeAsk(data); return; } // the forge window asks the server (the SERVER decides and makes the item)
         if (data && data.type === "forge-close") { this.greymarchForgeHide(); return; }
+        if (data && data.type === "forge-preview") { this.greymarchForgePreviewWant = String(data.key || ""); return; } // the piece picked in the forge window: shown in the world (greymarchForgePreviewTick)
         if (data && data.type === "vampire") { this.greymarchVampMenuAsk(data); return; } // the vampire window asks the server (the SERVER decides)
         if (data && data.type === "vampire-close") { this.greymarchVampMenuHide(); return; }
         if (data && data.type === "ledger") { this.greymarchLedgerAsk(data); return; } // the guard ledger asks the server (the SERVER decides)
@@ -2352,7 +2354,7 @@ export class GreymarchBridge {
     }
     greymarchCraftShow(msg: any): any {
         if (this.greymarchCraftOn) { this.greymarchCraftToPage("show", msg); return; } // another station: the open panel lists its recipes
-        if (this.greymarchScreenUp || this.greymarchAdminOn || this.greymarchMenuOn || this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn) return; // not over the select screen or the other panels
+        if (this.greymarchScreenUp || this.greymarchAdminOn || this.greymarchMenuOn || this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchForgeOn) return; // not over the select screen or the other panels (the forge window included: closing a panel on top of it took its mouse away)
         this.greymarchLog("craft: opened at " + String((msg && msg.station) || "?"));
         this.greymarchCraftOn = true;
         this.sp.browser.setVisible(true);
@@ -2445,6 +2447,7 @@ export class GreymarchBridge {
         this.greymarchForgeOn = false;
         this.greymarchForgeToPage("hide", true);
         this.greymarchForgeAnimEnd();
+        this.greymarchForgePreviewWant = ""; // the preview goes with the window
         if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchEmoteOn || !!this.greymarchGuardsHud || !!this.greymarchProfOn || !!this.greymarchChanceryOn || !!this.greymarchVampMenuOn || !!this.greymarchLedgerOn || !!this.greymarchCraftOn); }
     }
     // At the forge like the game's own menu: the smith turns to the forge and does the forge's hammering (the game's IdleBlackSmithForgeEnter, what the
@@ -2465,7 +2468,9 @@ export class GreymarchBridge {
                         var id = want.forge;
                         var local = id >= 0xff000000 ? misc.remoteIdToLocalId(id) : id;
                         var ref = local ? sp.ObjectReference.from(sp.Game.getFormEx(local)) : null;
-                        if (ref) { var turn = player.getHeadingAngle(ref); player.setAngle(0, 0, player.getAngleZ() + turn); }
+                        // where the game itself puts a smith: the forge's furniture marker is at the forge's own origin, facing the forge's way
+                        // (Furniture\BlacksmithForgeMarker.nif and ...WR.nif: BSFurnitureMarkerNode offset 0, 0, 34, heading 0)
+                        if (ref) { player.setPosition(ref.getPositionX(), ref.getPositionY(), ref.getPositionZ()); player.setAngle(0, 0, ref.getAngleZ()); }
                         sp.Debug.sendAnimationEvent(player, "IdleBlackSmithForgeEnter");
                         this.greymarchForgeAnim = true; this.greymarchForgeAnimSafety = 0;
                     }
@@ -2480,6 +2485,41 @@ export class GreymarchBridge {
         this.greymarchForgeAnimSafety = 0;
         if (this.greymarchForgeAnim) return; // opened again meanwhile
         try { var p2 = sp.Game.getPlayer(); if (p2) sp.Debug.sendAnimationEvent(p2, "IdleForceDefaultState"); } catch (e) { /* nothing to free */ }
+    }
+    // THE PREVIEW: the piece picked in the forge window, as a copy in this game only (like the build system's ghost), floating on the right of the screen
+    // in front of the camera and slowly turning, like the game's own crafting menu. Made, moved and removed on frames (greymarchForgePreviewTick).
+    greymarchForgePreviewTick(now: number): any {
+        var sp = this.sp, want = this.greymarchForgePreviewWant;
+        if (want !== undefined && want !== null) {
+            this.greymarchForgePreviewWant = null;
+            if (this.greymarchForgeGhost) { try { this.greymarchForgeGhost.disable(false); this.greymarchForgeGhost.delete(); } catch (e) { /* gone */ } this.greymarchForgeGhost = null; }
+            var m = /^([0-9a-f]{1,8}):(.+)$/i.exec(want);
+            if (m) {
+                try {
+                    var base = sp.Game.getFormFromFile(parseInt(m[1], 16), m[2]);
+                    var player = sp.Game.getPlayer();
+                    var g = base && player ? player.placeAtMe(base, 1, false, false) : null;
+                    if (g) { try { g.setMotionType(4, false); } catch (e) { /* keyframed: it does not fall */ } this.greymarchForgeGhost = g; this.greymarchForgeGhostSince = now; }
+                } catch (e) { this.greymarchLog("forge: no preview (" + e + ")"); }
+            }
+        }
+        var ghost = this.greymarchForgeGhost; if (!ghost) return;
+        try {
+            var c: number[] = [];
+            try { for (var i = 0; i < 6; i++) c.push(Number(sp.callNative("GreymarchCam", "GetCamera", undefined, i))); } catch (e) { c = []; }
+            var px: number, py: number, pz: number, fx: number, fy: number, fz: number;
+            if (c.length === 6 && c.every(function (n) { return isFinite(n); }) && Math.hypot(c[3], c[4], c[5]) > 0.01) {
+                var len = Math.hypot(c[3], c[4], c[5]); px = c[0]; py = c[1]; pz = c[2]; fx = c[3] / len; fy = c[4] / len; fz = c[5] / len;
+            } else { // no camera plugin: from the player's eyes, the way they face
+                var pl = sp.Game.getPlayer(); var a = pl.getAngleZ() * Math.PI / 180;
+                px = pl.getPositionX(); py = pl.getPositionY(); pz = pl.getPositionZ() + 110; fx = Math.sin(a); fy = Math.cos(a); fz = 0;
+            }
+            var hl = Math.hypot(fx, fy) || 1, rx = fy / hl, ry = -fx / hl; // the camera's right, level
+            var d = 75;
+            var x = px + fx * d + rx * d * 0.5, y = py + fy * d + ry * d * 0.5, z = pz + fz * d - 4;
+            ghost.setPosition(x, y, z);
+            ghost.setAngle(0, 0, ((now - (this.greymarchForgeGhostSince || now)) / 25) % 360);
+        } catch (e) { try { ghost.delete(); } catch (e2) { /* gone */ } this.greymarchForgeGhost = null; }
     }
     greymarchForgeAsk(data: any): any {
         var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchForge", rid: data.rid, op: data.op, args: data.args }) };

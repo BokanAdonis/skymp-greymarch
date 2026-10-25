@@ -23,7 +23,7 @@ function make(opts = {}) {
     placeAtMe: (base) => { const g = { base, at: null, rot: null, gone: false, setPosition: (x, y, z) => { g.at = [x, y, z]; }, setAngle: (a, b, c) => { g.rot = [a, b, c]; }, disable() { g.gone = true; }, delete() { g.gone = true; } }; (log.ghosts = log.ghosts || []).push(g); return g; },
     getActorValue: (n) => (state.av || {})[n] || 0, damageActorValue: (n, v) => { log.damage = (log.damage || []).concat([[n, Math.round(v)]]); state.av[n] -= v; },
     isWeaponDrawn: () => state.drawn,
-    getHeadingAngle: () => 30, getAngleZ: () => 100, setAngle: (a, b, c) => { log.turned = c; },
+    getHeadingAngle: () => 30, getAngleZ: () => 100, setAngle: (a, b, c) => { log.turned = c; }, setPosition: (x, y, z) => { log.stood = [x, y, z]; },
     getFurnitureReference: () => (state.furn ? { getFormID: () => state.furn } : null),
     getAnimationVariableFloat: (n) => (n === "Speed" ? state.speed : 0),
     ...faceLog("me"),
@@ -33,7 +33,7 @@ function make(opts = {}) {
     printConsole() {}, writeLogs: (n, l) => log.lines.push(l),
     Game: { getPlayer: () => player, getFormEx: (id) => ({ id }), getFormFromFile: (id, file) => (file === "Missing.esp" ? null : { id, file }), forceThirdPerson: () => { log.thirdPerson++; } },
     callNative: (cls, fn, self, a) => { (log.natives = log.natives || []).push([cls, fn, a]); if (cls !== "GreymarchCam" || state.noDll) throw new Error("Native function not found"); if (fn === "SetFreeCamera") { state.free = !!a; return true; } if (fn === "IsFreeCamera") return !!state.free; if (fn === "GetCamera") return (state.cam || [0, 0, 0, 0, 1, 0])[a]; return undefined; },
-    Idle: { from: (f) => f || null }, ObjectReference: { from: (f) => (f && f.id ? { id: f.id } : null) }, Actor: { from: (f) => (f && actors[f.id]) || null }, Potion: { from: (f) => (f && f.potion) || null },
+    Idle: { from: (f) => f || null }, ObjectReference: { from: (f) => (f && f.id ? { id: f.id, getPositionX: () => 500, getPositionY: () => 600, getPositionZ: () => 10, getAngleZ: () => 90 } : null) }, Actor: { from: (f) => (f && actors[f.id]) || null }, Potion: { from: (f) => (f && f.potion) || null },
     Debug: { sendAnimationEvent: (ref, name) => log.events.push(name), notification: (t) => log.notes.push(t) },
     Ui: { isMenuOpen: (name) => name === state.menu },
     Input: { tapKey: (k) => { log.taps = (log.taps || []).concat([k]); if (state.menu === "InventoryMenu" || state.menu === "FavoritesMenu") state.menu = null; }, getMappedKey: (c) => (c === "Tween Menu" ? state.tweenKey || 15 : 0) },
@@ -436,12 +436,19 @@ test("the forge window: the game says it has it on entering the world; the serve
   assert.strictEqual(s.gm.greymarchForgeOn, true); assert.strictEqual(s.log.forge.pop().fn, "show");
   assert.strictEqual(s.log.turned, undefined, "nothing from the packet itself (the game refuses calls there)");
   s.at(() => s.gm.greymarchForgeTick(Date.now()));
-  assert.strictEqual(s.log.turned, 130, "turned to face the forge, on the next frame"); assert.strictEqual(s.log.events.pop(), "IdleBlackSmithForgeEnter", "at work like the game's own forge menu");
+  assert.deepStrictEqual([s.log.stood, s.log.turned], [[500, 600, 10], 90], "on the forge's own spot, facing its way (the forge marker), on the next frame"); assert.strictEqual(s.log.events.pop(), "IdleBlackSmithForgeEnter", "at work like the game's own forge menu");
   s.page({ type: "forge", rid: 3, op: "craft", args: { id: 12, qty: 2, tab: "weapons" } });
   assert.deepStrictEqual(s.log.sent.pop(), { customPacketType: "greymarchForge", rid: 3, op: "craft", args: { id: 12, qty: 2, tab: "weapons" } });
   s.say({ customPacketType: "greymarchForgeReply", rid: 3, ok: true }); assert.strictEqual(s.log.forge.pop().fn, "reply");
+  s.state.cam = [0, 0, 100, 0, 1, 0]; // the camera at 0,0,100 looking north
+  s.page({ type: "forge-preview", key: "20:skyrim.esm" }); s.at(() => s.gm.greymarchForgePreviewTick(Date.now()));
+  const ghost = s.log.ghosts.pop(); assert.deepStrictEqual(ghost.base, { id: 0x20, file: "skyrim.esm" }, "the picked piece, a copy in this game only");
+  assert.deepStrictEqual(ghost.at.map(Math.round), [38, 75, 96], "in front of the camera, to its right");
+  s.page({ type: "forge-preview", key: "21:skyrim.esm" }); s.at(() => s.gm.greymarchForgePreviewTick(Date.now()));
+  assert.ok(ghost.gone, "another piece: the first one goes"); const second = s.log.ghosts.pop();
   s.key(1, true); s.key(1, false);
   assert.strictEqual(s.gm.greymarchForgeOn, false, "Esc closes it"); assert.strictEqual(s.log.forge.pop().fn, "hide");
+  s.at(() => s.gm.greymarchForgePreviewTick(Date.now())); assert.ok(second.gone, "the preview goes with the window");
   s.at(() => s.gm.greymarchForgeTick(Date.now()));
   assert.strictEqual(s.log.events.pop(), "IdleChairExitStart", "steps out of the forge's animation, on the next frame");
   s.say({ customPacketType: "greymarchForgeOpen" }); s.page({ type: "forge-close" });
