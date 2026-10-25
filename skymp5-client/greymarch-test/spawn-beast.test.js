@@ -49,7 +49,7 @@ test("a beast look is not resurrected (its 3D reset freed the werewolf's half-bu
   await spawn(human);
   assert.deepStrictEqual(spawn.resurrected, [human]);
   await spawn(null);
-  assert.strictEqual(spawn.resurrected.length, 1, "SkyMP's own NPCs as before");
+  assert.strictEqual(spawn.resurrected.length, 0, "a server NPC (no look) is alive already: no Resurrect (it rebuilt the body and some came out with their height locked, 2026-10-24)");
 });
 
 test("formView.ts: a beast look gets no full model refresh when it comes on screen, and its gear only 3 seconds after the spawn (both rebuilt the half-built werewolf graph)", () => {

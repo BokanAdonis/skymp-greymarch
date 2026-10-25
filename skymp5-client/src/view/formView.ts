@@ -24,6 +24,7 @@ import { getMovement } from "../sync/movementGet";
 import { lastTryHost, tryHost } from "./hostAttempts";
 import { ModelApplyUtils } from "./modelApplyUtils";
 import { localIdToRemoteId, getViewFromStorage } from "./worldViewMisc";
+import { flatStep, FLAT_STEPS, REGROUND_LIFT, REGROUND_EVERY_MS } from "../greymarch/npcHosting";
 import { CHECK_EVERY_MS as GM_HOST_CHECK_MS, shouldRelease, pickTarget, markReleased, isReleased, withoutHosted, shouldReleaseUnloaded, movementDead, buildWhileDead, BODY_KILL_EVERY_MS } from "../greymarch/npcHosting";
 import { SpApiInteractor } from "../services/spApiInteractor";
 import { WorldCleanerService } from "../services/services/worldCleanerService";
@@ -1028,11 +1029,20 @@ export class FormView {
       const myPlace = placeOf(me);
       // DIAGNOSTIC (2026-10-24, NPCs walking in the air or half in the ground with only their host's player there): every 3 s, at most 120 lines a game, an NPC
       // this game runs near its player: its height and the player's, to the breadcrumbs file
+      // GREYMARCH: LOCKED HEIGHT (greymarch/npcHosting.ts): far each second with no height change, three times in a row: dropped back onto the ground
+      const gmNow = [npc.getPositionX(), npc.getPositionY(), npc.getPositionZ()];
+      this.gmFlatSteps = flatStep(this.gmLastPos, gmNow) ? this.gmFlatSteps + 1 : 0;
+      this.gmLastPos = gmNow;
+      if (this.gmFlatSteps >= FLAT_STEPS && Date.now() - this.gmRegroundAt >= REGROUND_EVERY_MS) {
+        this.gmRegroundAt = Date.now(); this.gmFlatSteps = 0;
+        gmCrumb("reground " + gmHex(this.remoteRefrId as number) + " at " + gmNow.map(Math.round).join(" ") + " (height locked)");
+        try { npc.setPosition(gmNow[0], gmNow[1], gmNow[2] + REGROUND_LIFT); } catch (e) { /* the next check tries again */ }
+      }
       if (Date.now() - this.gmDriftAt >= 3000 && gmDriftLeft > 0) {
         const hd = Math.hypot(npc.getPositionX() - me.getPositionX(), npc.getPositionY() - me.getPositionY());
         if (hd < 800) {
           this.gmDriftAt = Date.now(); gmDriftLeft--;
-          gmCrumb("drift " + gmHex(this.remoteRefrId as number) + " base " + gmHex(npc.getBaseObject() ? npc.getBaseObject()!.getFormID() : 0) + ": z " + Math.round(npc.getPositionZ()) + ", player z " + Math.round(me.getPositionZ()) + ", " + Math.round(hd) + " away, combat " + npc.getCombatState() + ", speed " + Math.round(npc.getAnimationVariableFloat("Speed")) + ", jump " + npc.getAnimationVariableBool("bInJumpState") + ", AI " + npc.isAIEnabled());
+          gmCrumb("drift " + gmHex(this.remoteRefrId as number) + " base " + gmHex(npc.getBaseObject() ? npc.getBaseObject()!.getFormID() : 0) + ": at " + Math.round(gmNow[0]) + " " + Math.round(gmNow[1]) + ", z " + Math.round(npc.getPositionZ()) + ", player z " + Math.round(me.getPositionZ()) + ", " + Math.round(hd) + " away, combat " + npc.getCombatState() + ", speed " + Math.round(npc.getAnimationVariableFloat("Speed")) + ", jump " + npc.getAnimationVariableBool("bInJumpState") + ", AI " + npc.isAIEnabled());
         }
       }
       const others: Actor[] = [];
@@ -1069,6 +1079,9 @@ export class FormView {
   private gmHostCheckAt = 0;
   private gmWasHost = false; // GREYMARCH: this game hosted this NPC at the last update
   private gmDriftAt = 0;
+  private gmLastPos: number[] | null = null; // GREYMARCH: LOCKED HEIGHT: where this hosted NPC was at the last check
+  private gmFlatSteps = 0;
+  private gmRegroundAt = 0;
   private gmUnloadedSince = 0; // GREYMARCH: since when this game hosts this NPC without having it loaded (0: loaded)
   private gmBodyKillAt = 0;
   private gmPuppetReady = false;

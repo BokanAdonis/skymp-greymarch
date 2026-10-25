@@ -62,10 +62,10 @@ export class SpawnProcess {
     // GREYMARCH: NO AI SWITCHING FOR A BEAST (2026-10-22, v172 to v174, taken out again). A beast enabled with its AI off never started its animations (other players
     // saw it T-posed in the air) and the watching game crashed in the animation update the moment its AI was switched back on (13:26, #HXBA as the Elder Alpha,
     // SkyrimSE.exe+0A8C5B8). What stopped the crash at the spawn itself was making it at its spot (formView.ts, gmSpawnedAtSpot).
-    refr.enable(false).then(() => this.resurrect(refrId, beastLook));
+    refr.enable(false).then(() => this.resurrect(refrId, beastLook, !appearance));
   }
 
-  private resurrect(refrId: number, beastLook = false) {
+  private resurrect(refrId: number, beastLook = false, serverNpc = false) {
     const refr = ObjectReference.from(Game.getFormEx(refrId));
     if (!refr || refr.getFormID() !== refrId) {
       return;
@@ -78,6 +78,13 @@ export class SpawnProcess {
     // watching game crashed in a werewolf turn clip (hkbClipGenerator "WW TurnRight60", SkyrimSE.exe+0A8C590) the moment a player was drawn as the werewolf
     // (2026-10-18 the black bear, 2026-10-19 #YERB in the College). A person's look is resurrected as before.
     if (ac && beastLook) {
+      this.callback();
+      return;
+    }
+    // GREYMARCH: NO RESURRECT FOR A SERVER NPC (2026-10-24, greymarch/npcHosting.ts LOCKED HEIGHT). A deer, an elk or a bandit the server made (no player look) was
+    // just placed, so it is alive; Resurrect rebuilt its body while it was still coming in, and some came out of it with their height locked: they ran flat
+    // through the air and into hills. A player's look is resurrected as before.
+    if (ac && serverNpc) {
       this.callback();
       return;
     }

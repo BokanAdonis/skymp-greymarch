@@ -96,3 +96,18 @@ test("its own animations back: an NPC this game hosts never replays the animatio
   const other = formView.slice(formView.indexOf("} else if (model.animation) {", at), formView.indexOf("this.animState.useAnimOverrides = false;", at));
   assert.ok(other.includes("applyAnimation(refr, model.animation, this.animState);"), "other games still play them");
 });
+
+test("locked height: a server NPC is not resurrected at its spawn; one that runs flat for 3 s is dropped back onto the ground, at most every 10 s", () => {
+  assert.strictEqual(H.flatStep(null, [0, 0, 0]), false);
+  assert.strictEqual(H.flatStep([0, 0, -10166], [600, 0, -10166]), true, "the elk: 600 units, not a unit up or down");
+  assert.strictEqual(H.flatStep([0, 0, -10166], [600, 0, -10160]), false, "real ground goes up and down");
+  assert.strictEqual(H.flatStep([0, 0, 0], [100, 0, 0]), false, "standing or walking slowly: not judged");
+  const spawn = fs.readFileSync(path.join(__dirname, "..", "src", "view", "spawnProcess.ts"), "utf8");
+  const skip = spawn.indexOf("if (ac && serverNpc) {");
+  assert.ok(skip > 0 && skip < spawn.indexOf("return ac.resurrect()"), "a server NPC (no player look) skips Resurrect");
+  assert.ok(spawn.includes("this.resurrect(refrId, beastLook, !appearance)"));
+  const tick = formView.slice(formView.indexOf("private gmHostedTick("), formView.indexOf("public gmIsPlayerLook"));
+  assert.ok(tick.includes("this.gmFlatSteps >= FLAT_STEPS && Date.now() - this.gmRegroundAt >= REGROUND_EVERY_MS"));
+  assert.ok(tick.includes("npc.setPosition(gmNow[0], gmNow[1], gmNow[2] + REGROUND_LIFT)"));
+  assert.ok(tick.indexOf("reground") < tick.indexOf("if (!others.length)"), "also when its player is alone");
+});
