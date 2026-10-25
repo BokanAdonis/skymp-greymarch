@@ -235,6 +235,8 @@ export class AuthService extends ClientListener {
       case 'greymarchVampLord':
       case 'greymarchVampMenuReply':
       case 'greymarchVampMenuOpen':
+      case 'greymarchMinigame': // a profession mini game before the work (gamemode minigames.js)
+      case 'greymarchMinigameDone':
       case 'greymarchLedgerReply': // the guard ledger (/reports, gamemode reports.js)
       case 'greymarchLedgerOpen':
       case 'greymarchWolfAlphas':

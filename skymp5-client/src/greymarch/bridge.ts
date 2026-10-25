@@ -63,6 +63,7 @@ const CHANCERY_SCRIPT =PROF_SCRIPT.split("__gmProfSend").join("__gmChanceryRun")
 const EMOTE_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmEmoteRun").split("greymarch-prof").join("greymarch-emote").split("2147483220").join("2147483223").split("e.key==='x'||e.key==='X'").join("e.key==='g'||e.key==='G'"); // the emote wheel (G): the same loader, another page; letting go of G inside the page is a release too
 const VAMP_MENU_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmVampRun").split("greymarch-prof").join("greymarch-vampire").split("2147483220").join("2147483222"); // the vampire window (/vampire): the same loader, another page
 const CRAFT_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmCraftRun").split("greymarch-prof").join("greymarch-craft").split("2147483220").join("2147483224"); // the crafting panel (a station was used): the same loader, another page
+const MINIGAME_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmMiniRun").split("greymarch-prof").join("greymarch-minigame").split("2147483220").join("2147483226"); // the profession mini games (gamemode minigames.js): the same loader, another page, over the others
 const LEDGER_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmLedgerRun").split("greymarch-prof").join("greymarch-ledger").split("2147483220").join("2147483223"); // the guard ledger (/reports): the same loader, another page
 
 // Which way the camera faces, in degrees the Skyrim way (0 = north, 90 = east). Skyrim Platform has no camera call, so 24 points on a wide ring round the head are
@@ -178,6 +179,8 @@ export class GreymarchBridge {
         if (type === "greymarchWolfFeed") { this.greymarchWolfFeedAt = Date.now(); return; } // the wolf fed (a kill or a corpse): the feeding animation (greymarchWolfTick)
         if (type === "greymarchChanceryReply") { this.greymarchChanceryToPage("reply", msg); return; } // the chancery window (/chancery)
         if (type === "greymarchChanceryOpen") { this.greymarchChanceryShow(); return; }
+        if (type === "greymarchMinigame") { this.greymarchMiniShow(msg); return; } // a profession mini game before the work (gamemode minigames.js)
+        if (type === "greymarchMinigameDone") { this.greymarchMiniDone(msg); return; }
         if (type === "greymarchCraftOpen") { this.greymarchCraftShow(msg); return; } // a crafting station was used (gamemode craftsys.js): the crafting panel
         if (type === "greymarchCraftReply") { this.greymarchCraftToPage("reply", msg); return; }
         if (type === "greymarchCraftDone") { this.greymarchCraftToPage("done", msg); return; }
@@ -407,6 +410,7 @@ export class GreymarchBridge {
         this.greymarchBuildAngleTick(); // a piece a GM placed was turned: this game turns its copy
         this.greymarchBuildCamTick(Date.now()); // the build system's free camera: the preview where the camera looks
         this.greymarchChopTick(Date.now()); // sitting at a chopping block: the server counts the chops (XP, firewood)
+        this.greymarchMiniActivateTick(); // a mini game won: the thing is used again (the server lets it through)
         this.greymarchMagicBlockDrive(); // NPC raise-the-dead and summons: ended at once
         this.greymarchShapeDrive(); // a creature form as an NPC: moved every frame like SkyMP moves other players; other players' creature attacks
         this.greymarchShapeTick(); // a creature form staff put the player in (a goat, a giant ...): the server decides, the body is changed here
@@ -560,6 +564,8 @@ export class GreymarchBridge {
         if (data && data.type === "prof-close") { this.greymarchProfHide(); return; }
         if (data && data.type === "chancery") { this.greymarchChanceryAsk(data); return; } // the chancery window asks the server (the SERVER decides)
         if (data && data.type === "chancery-close") { this.greymarchChanceryHide(); return; }
+        if (data && data.type === "minigame-shown") { this.greymarchMiniSend("greymarchMinigameShown", { token: data.token }); return; } // the mini game window is up
+        if (data && data.type === "minigame-result") { this.greymarchMiniSend("greymarchMinigameResult", { token: data.token, ok: data.ok === true }); this.greymarchMiniHide(); return; }
         if (data && data.type === "craft") { this.greymarchCraftAsk(data); return; } // the crafting panel asks the server (the SERVER decides and makes the item)
         if (data && data.type === "craft-close") { this.greymarchCraftHide(); return; }
         if (data && data.type === "vampire") { this.greymarchVampMenuAsk(data); return; } // the vampire window asks the server (the SERVER decides)
@@ -683,6 +689,7 @@ export class GreymarchBridge {
         else if (e.code === 1 && this.greymarchChanceryOn) this.greymarchChanceryHide();
         else if (e.code === 1 && this.greymarchVampMenuOn) this.greymarchVampMenuHide();
         else if (e.code === 1 && this.greymarchLedgerOn) this.greymarchLedgerHide();
+        else if (e.code === 1 && this.greymarchMiniOn) this.greymarchMiniToPage("escape", true); // Esc gives the mini game up (the page sends the loss)
         else if (e.code === 1 && this.greymarchCraftOn) this.greymarchCraftHide();
         else if (e.code === 1 && this.greymarchAdminOn) this.greymarchAdminHide();
     }
@@ -2341,6 +2348,61 @@ export class GreymarchBridge {
         this.sp.browser.setFocused(true);
         this.greymarchCraftToPage("show", msg);
     }
+    // ---- THE PROFESSION MINI GAMES. The page is Platform/UI/greymarch-minigame.html; the SERVER decides (gamemode minigames.js): it refuses the work, sends
+    // { customPacketType: "greymarchMinigame", token, kind, level, target }, and after a win ({ greymarchMinigameDone, ok, target }) lets the next use of target
+    // through, which this game makes at once (greymarchMiniActivateTick: target used again by the player). A loss shows the server's words.
+    greymarchMiniToPage(fn: any, arg: any): any {
+        var json = JSON.stringify({ fn: fn, arg: arg }).replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
+        try {
+            this.sp.browser.executeJavaScript(MINIGAME_SCRIPT + "window.__gmMiniRun(" + json + ");");
+        } catch (err) {
+            this.sp.printConsole("[greymarch] could not reach the mini game: " + err);
+        }
+    }
+    greymarchMiniShow(msg: any): any {
+        if (this.greymarchScreenUp) return; // the select screen: the server lets the work through once it sees no window (or the player tries again)
+        this.greymarchLog("minigame: " + String((msg && msg.kind) || "?") + " (level " + String((msg && msg.level) || 1) + ")");
+        this.greymarchMiniOn = true;
+        this.sp.browser.setVisible(true);
+        this.sp.browser.setFocused(true);
+        this.greymarchMiniToPage("show", { token: msg.token, kind: msg.kind, level: msg.level, quick: msg.quick === true, recipe: msg.recipe || null, animal: msg.animal || "", ore: msg.ore || "" }); // recipe: the Chef's dish and ingredients; animal: the Hunter's kill (its coat); ore: the Miner's vein
+        // the character acts it out: kneeling over the body to skin it (the emote wheel's "Search a body"; the other work has the game's own animation already:
+        // the forge, the pot, the chopping block, the vein)
+        if (msg.kind === "skin") { this.greymarchEmotePlayWanted = { id: "searchbody", at: Date.now() }; this.greymarchMiniActing = true; }
+    }
+    greymarchMiniHide(): any {
+        if (this.greymarchMiniActing && !this.greymarchMiniOn) { this.greymarchMiniActing = false; this.greymarchEmoteStopWanted = Date.now(); }
+        if (!this.greymarchMiniOn) return;
+        this.greymarchMiniOn = false;
+        this.greymarchMiniToPage("hide", true);
+        if (!this.greymarchScreenUp && !this.greymarchPanelHasKeys()) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchCraftOn || !!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchEmoteOn || !!this.greymarchGuardsHud || !!this.greymarchProfOn || !!this.greymarchChanceryOn || !!this.greymarchVampMenuOn || !!this.greymarchLedgerOn); }
+    }
+    greymarchMiniSend(type: string, body: any): any {
+        var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify(Object.assign({ customPacketType: type }, body)) };
+        this.controller.emitter.emit("sendMessage", { message: message, reliability: "reliable" });
+    }
+    greymarchMiniDone(msg: any): any {
+        this.greymarchMiniHide();
+        var acted = !!this.greymarchMiniActing;
+        if (acted) { this.greymarchMiniActing = false; this.greymarchEmoteStopWanted = Date.now(); } // up again before the body menu opens
+        if (msg && msg.ok === true && Number(msg.target) > 0) { this.greymarchMiniActivate = { target: Number(msg.target) >>> 0, at: Date.now() + (acted ? 600 : 0) }; return; }
+        if (msg && msg.text) { try { this.sp.Debug.notification(String(msg.text)); } catch (e) { /* the page showed it already */ } }
+    }
+    // the thing the player won a mini game for is used again, from the update phase (Papyrus calls)
+    greymarchMiniActivateTick(): any {
+        var want = this.greymarchMiniActivate;
+        if (!want || Date.now() < want.at) return; // a moment after the kneel ends
+        this.greymarchMiniActivate = null;
+        if (Date.now() - want.at > 5000) return;
+        try {
+            var sp = this.sp;
+            var localId = want.target >= 0xff000000 ? misc.remoteIdToLocalId(want.target) : want.target;
+            var ref = localId ? sp.ObjectReference.from(sp.Game.getFormEx(localId)) : null;
+            var me = sp.Game.getPlayer();
+            if (ref && me) { ref.activate(me, false); this.greymarchLog("minigame: won, " + (localId >>> 0).toString(16) + " used again"); }
+            else this.greymarchLog("minigame: won, but " + (want.target >>> 0).toString(16) + " is not here any more");
+        } catch (err) { this.greymarchLog("minigame: could not use it again: " + err); }
+    }
     greymarchCraftHide(): any {
         if (!this.greymarchCraftOn) return;
         this.greymarchCraftOn = false;
@@ -2760,7 +2822,7 @@ export class GreymarchBridge {
     // The chat page answers every "show" (a few seconds apart) with whether it is really typing. If the game thinks otherwise, the game gives way: a keyboard that the page is not using is released,
     // so movement can never stay locked behind a chat that is not open. (An input opened less than a second ago is left alone: the answer may have been sent before it.)
     // The windows that hold the keyboard (and the mouse cursor) while they are open. The chat's keyboard releases leave them alone: releasing it every 2 s took the K window's cursor away (2026-10-18).
-    greymarchPanelHasKeys(): any { return !!(this.greymarchAdminOn || this.greymarchMenuOn || this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchCraftOn || this.greymarchEmoteOn); }
+    greymarchPanelHasKeys(): any { return !!(this.greymarchMiniOn || this.greymarchAdminOn || this.greymarchMenuOn || this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchCraftOn || this.greymarchEmoteOn); }
     // ---- THE FIELD OF VIEW (the chatbox's Settings). Skyrim Platform cannot reach the camera's field of view and the camera never reads the game's settings
     // again, so the value goes into fDefaultWorldFOV / fDefault1stPersonFOV (the Skyrim.ini ones) and Greymarch's SKSE plugin GreymarchCamera.dll (in the game
     // files; launcher repo skse/GreymarchCamera) sees the change within a quarter of a second and puts it on the camera, in any view. (Switching the view and
@@ -2840,6 +2902,7 @@ export class GreymarchBridge {
         if (this.greymarchVampMenuOn) { try { this.greymarchVampMenuHide(); } catch (e5) { this.greymarchVampMenuOn = false; } }
         if (this.greymarchLedgerOn) { try { this.greymarchLedgerHide(); } catch (e6) { this.greymarchLedgerOn = false; } }
         if (this.greymarchCraftOn) { try { this.greymarchCraftHide(); } catch (e7) { this.greymarchCraftOn = false; } }
+        if (this.greymarchMiniOn) { try { this.greymarchMiniHide(); } catch (e8) { this.greymarchMiniOn = false; } }
         if (this.greymarchEmoteOn) { try { this.greymarchEmoteHide(); } catch (e6) { this.greymarchEmoteOn = false; } }
     }
     // Why a key press did nothing, to the server log (at most once every 5 seconds, so a held key cannot flood it)
