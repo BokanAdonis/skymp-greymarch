@@ -97,7 +97,7 @@ test("its own animations back: an NPC this game hosts never replays the animatio
   assert.ok(other.includes("applyAnimation(refr, model.animation, this.animState);"), "other games still play them");
 });
 
-test("locked height: a server NPC is not resurrected at its spawn; one that runs flat for 3 s is only noted (the server moves it), at most every 10 s", () => {
+test("locked height: a server NPC is not resurrected at its spawn; one that runs flat for 3 s is rebuilt where it stands with its gear kept, at most every 10 s", () => {
   assert.strictEqual(H.flatStep(null, [0, 0, 0]), false);
   assert.strictEqual(H.flatStep([0, 0, -10166], [600, 0, -10166]), true, "the elk: 600 units, not a unit up or down");
   assert.strictEqual(H.flatStep([0, 0, -10166], [600, 0, -10160]), false, "real ground goes up and down");
@@ -108,14 +108,16 @@ test("locked height: a server NPC is not resurrected at its spawn; one that runs
   assert.ok(spawn.includes("this.resurrect(refrId, beastLook, !appearance)"));
   const tick = formView.slice(formView.indexOf("private gmHostedTick("), formView.indexOf("public gmIsPlayerLook"));
   assert.ok(tick.includes("this.gmFlatSteps >= FLAT_STEPS && Date.now() - this.gmRegroundAt >= REGROUND_EVERY_MS"));
-  assert.ok(!tick.includes("npc.disable(") && !tick.includes("npc.setPosition("), "only noted: a rebuild redrew its gear (other loadouts), a lift fell back; the server puts it on the land");
+  assert.ok(tick.includes("npc.disable(false).then(") && tick.includes("again.enable(false).then(") && !tick.includes("npc.setPosition("), "rebuilt where it stands (a lift fell back)");
+  assert.ok(tick.includes("applyEquipment(ac, gmEq)") && tick.includes("this.eqState = this.getDefaultEquipState();"), "its gear put back after (it was drawn anew: other loadouts)");
+  assert.ok(formView.includes("this.gmLastEquipment = model.equipment;"));
   assert.ok(tick.includes('", cell " + gmCellOf(npc) + " (player " + gmCellOf(me) + ")"'), "the drift lines say which cell");
   assert.ok(tick.indexOf("reground") < tick.indexOf("if (!others.length)"), "also when its player is alone");
 });
 
-test("a server NPC is made as a temporary reference (an experiment: persistent ones ran with their height locked); a beast look stays persistent", () => {
+test("a server NPC is made persistent again (made temporary for one test, it floated all the same)", () => {
   assert.ok(formView.includes("const ref = marker.placeAtMe(baseForm, 1, persist, true) as ObjectReference;"));
-  assert.ok(formView.includes("const atSpot = spawnAtSpot(baseForm, spawnPosition, spawnRotation, false);"), "a server creature: not persistent");
+  assert.ok(formView.includes("const atSpot = spawnAtSpot(baseForm, spawnPosition, spawnRotation, true);"), "a server creature: persistent");
   const flat = formView.split(String.fromCharCode(10)).map((l) => l.trim()).join(" ");
   assert.ok(flat.includes("if (gmBeastLookNow) { const atSpot = spawnAtSpot(baseForm, spawnPosition, spawnRotation);"), "a beast look: persistent as before");
 });

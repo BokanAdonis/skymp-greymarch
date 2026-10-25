@@ -247,9 +247,8 @@ export class FormView {
         // 2026-10-19). So a hidden marker is put on the spot first (TESModPlatform.moveRefrToPosition is not latent) and the creature is made there.
         const isServerCreature = (baseForm: Form) => baseForm.getType() === FormType.NPC && !model.appearance;
         const gmBeastLookNow = !!model.appearance && !(Array.isArray(model.appearance.headpartIds) && model.appearance.headpartIds.length > 0); // a werewolf or werebear look
-        // GREYMARCH: persist false for a server NPC (2026-10-24, an experiment): made as a temporary reference like Skyrim's own NPCs, not a persistent one. Server
-        // NPCs made persistent ran with their height locked, through the air and into hills, while the game's own NPCs walked the same ground; nothing done to
-        // them afterwards (stopping moves, no Resurrect, a rebuild, the server moving them) brought them down. A beast look stays persistent as before.
+        // GREYMARCH: persist: a server NPC was made as a temporary reference for one test (2026-10-24): it ran with its height locked all the same, so it is
+        // persistent again, as when the bandits walked their best (the developer, "it was working before").
         const spawnAtSpot = (baseForm: Form, pos: [number, number, number], rot: [number, number, number], persist = true): ObjectReference | null => {
           try {
             const worldOrCell = model.movement ? model.movement.worldOrCell : 0;
@@ -270,7 +269,7 @@ export class FormView {
         const spawnMethodOriginal = {
           spawn(baseForm: Form, spawnPosition: [number, number, number], spawnRotation: [number, number, number]): ObjectReference {
             if (isServerCreature(baseForm)) {
-              const atSpot = spawnAtSpot(baseForm, spawnPosition, spawnRotation, false);
+              const atSpot = spawnAtSpot(baseForm, spawnPosition, spawnRotation, true);
               if (atSpot) return atSpot;
             }
             // GREYMARCH: A BEAST LOOK IS ALSO MADE AT ITS SPOT (2026-10-22), and is not moved after (spawnProcess.ts skips its setPosition). Made at the watching
@@ -820,6 +819,7 @@ export class FormView {
     }
 
     if (model.equipment) {
+      this.gmLastEquipment = model.equipment; // GREYMARCH: what it wears, for a rebuild (gmHostedTick, "reground")
       if (this.eqState.lastNumChanges !== model.equipment.numChanges) {
         const ac = Actor.from(refr);
         // If we do not block inventory here, we will be able to reproduce the bug:
@@ -1040,9 +1040,23 @@ export class FormView {
       this.gmLastPos = gmNow;
       if (this.gmFlatSteps >= FLAT_STEPS && Date.now() - this.gmRegroundAt >= REGROUND_EVERY_MS) {
         this.gmRegroundAt = Date.now(); this.gmFlatSteps = 0;
-        // only noted: the server puts such an NPC back on the land (gamemode groundclamp.js). Rebuilding it here (disabled and enabled) made it vanish and come
-        // back with its gear drawn again from its outfit lists ("bandits respawn with other loadouts", 2026-10-24), and it stayed in the air anyway
-        gmCrumb("reground " + gmHex(this.remoteRefrId as number) + " at " + gmNow.map(Math.round).join(" ") + " (height locked; left to the server)");
+        // its body rebuilt where it stands (disabled and enabled again), as when the bandits walked their best (2026-10-24). Enabled again, the game draws its
+        // gear anew from its outfit lists ("bandits respawn with other loadouts"): the server's record of what it wore is put back on it at once, and once more
+        // by the normal gear step (its change count is reset)
+        gmCrumb("reground " + gmHex(this.remoteRefrId as number) + " at " + gmNow.map(Math.round).join(" ") + " (height locked; rebuilt, gear kept)");
+        const gmRid = npc.getFormID();
+        const gmEq = this.gmLastEquipment;
+        try {
+          npc.disable(false).then(() => {
+            const again = ObjectReference.from(Game.getFormEx(gmRid));
+            if (!again) return;
+            return again.enable(false).then(() => {
+              const ac = Actor.from(Game.getFormEx(gmRid));
+              if (ac && gmEq) { try { applyEquipment(ac, gmEq); } catch (e) { /* the gear step tries again */ } }
+              this.eqState = this.getDefaultEquipState();
+            });
+          }).catch(() => { /* the next check tries again */ });
+        } catch (e) { /* the next check tries again */ }
       }
       if (Date.now() - this.gmDriftAt >= 3000 && gmDriftLeft > 0) {
         const hd = Math.hypot(npc.getPositionX() - me.getPositionX(), npc.getPositionY() - me.getPositionY());
@@ -1085,6 +1099,7 @@ export class FormView {
   private gmHostCheckAt = 0;
   private gmWasHost = false; // GREYMARCH: this game hosted this NPC at the last update
   private gmDriftAt = 0;
+  private gmLastEquipment: any = null; // GREYMARCH: the server's record of what this NPC wears (put back after a rebuild)
   private gmLastPos: number[] | null = null; // GREYMARCH: LOCKED HEIGHT: where this hosted NPC was at the last check
   private gmFlatSteps = 0;
   private gmRegroundAt = 0;
