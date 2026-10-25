@@ -294,16 +294,26 @@ void ActionListener::OnUpdateEquipment(const RawMessageData& rawMsgData,
 
   std::vector<uint32_t> itemIdsToUnequip;
 
+  // GREYMARCH: an item the server's inventory does not contain is left out of
+  // the equipment (and unequipped in the player's game), the rest of the
+  // update is kept. One such item (an Iron War Axe, 2026-10-25) used to
+  // refuse the whole update: the hand spells were lost with it, so every
+  // other player's copy of this player held nothing and their held spells
+  // (Dragon Breath) showed no fire.
+  Equipment accepted = data;
+  std::vector<uint32_t> itemIdsDropped;
   const auto& inventory = actor->GetInventory();
-  for (auto& entry : equipmentInv.entries) {
-    if (!inventory.HasItem(entry.baseId)) {
-      spdlog::warn(
-        "ActionListener::OnUpdateEquipment {:x} - rejected equipment "
-        "update: inventory does not contain item {:x}",
-        actorFormId, entry.baseId);
-      isAllowed = false;
-      break;
+  for (auto it = accepted.inv.entries.begin();
+       it != accepted.inv.entries.end();) {
+    if (inventory.HasItem(it->baseId)) {
+      ++it;
+      continue;
     }
+    spdlog::warn("ActionListener::OnUpdateEquipment {:x} - inventory does "
+                 "not contain item {:x}: left out of the equipment",
+                 actorFormId, it->baseId);
+    itemIdsDropped.push_back(it->baseId);
+    it = accepted.inv.entries.erase(it);
   }
 
   if (isAllowed) {
@@ -312,7 +322,7 @@ void ActionListener::OnUpdateEquipment(const RawMessageData& rawMsgData,
       uint32_t occupiedSlots = 0;
       // Track which item owns each bit so we can report conflicts
       std::array<uint32_t, 32> slotOwner = {};
-      for (auto& entry : equipmentInv.entries) {
+      for (auto& entry : accepted.inv.entries) {
         if (entry.GetWorn() == Inventory::Worn::None) {
           continue;
         }
@@ -391,8 +401,23 @@ void ActionListener::OnUpdateEquipment(const RawMessageData& rawMsgData,
     }
   };
 
+  auto unequipItems = [&](const std::vector<uint32_t>& itemIds) {
+    for (uint32_t itemId : itemIds) {
+      SpSnippetObjectArgument itemArg;
+      itemArg.formId = itemId;
+      itemArg.type = "Form";
+      std::vector<std::optional<
+        std::variant<bool, double, std::string, SpSnippetObjectArgument>>>
+        args;
+      args.push_back(itemArg);
+      args.push_back(false);
+      args.push_back(true);
+      SpSnippet("Actor", "UnequipItem", args, actor->GetFormId())
+        .Execute(actor, SpSnippetMode::kNoReturnResult);
+    }
+  };
+
   if (isAllowed) {
-    Equipment accepted = data;
     if (spellIdsToRemove[static_cast<size_t>(SpellSlotId::Left)]) {
       accepted.leftSpell.reset();
     }
@@ -405,9 +430,27 @@ void ActionListener::OnUpdateEquipment(const RawMessageData& rawMsgData,
     if (spellIdsToRemove[static_cast<size_t>(SpellSlotId::Instant)]) {
       accepted.instantSpell.reset();
     }
-    SendToNeighbours(msg.idx, rawMsgData, true);
+    // GREYMARCH: when something was left out, the others get what the server
+    // accepted, not the player's own message
+    const bool isFiltered = !itemIdsDropped.empty() ||
+      std::any_of(spellIdsToRemove.begin(), spellIdsToRemove.end(),
+                  [](uint32_t id) { return id != 0; });
+    if (isFiltered && msg.idx == actor->GetIdx()) {
+      UpdateEquipmentMessage acceptedMsg;
+      acceptedMsg.idx = msg.idx;
+      acceptedMsg.data = accepted;
+      for (auto listener : actor->GetActorListeners()) {
+        listener->GetActorToSendTo().SendToUser(acceptedMsg, true);
+      }
+    } else {
+      SendToNeighbours(msg.idx, rawMsgData, true);
+    }
     actor->SetEquipment(accepted);
     removeUnlearnedSpells();
+    if (!itemIdsDropped.empty()) {
+      actor->SendInventoryUpdate();
+      unequipItems(itemIdsDropped);
+    }
   } else {
     actor->SendInventoryUpdate();
 
@@ -441,19 +484,7 @@ void ActionListener::OnUpdateEquipment(const RawMessageData& rawMsgData,
       // but not worn in the new equipment (client tried to unequip them)
     }
 
-    for (uint32_t itemId : itemIdsToUnequip) {
-      SpSnippetObjectArgument itemArg;
-      itemArg.formId = itemId;
-      itemArg.type = "Form";
-      std::vector<std::optional<
-        std::variant<bool, double, std::string, SpSnippetObjectArgument>>>
-        args;
-      args.push_back(itemArg);
-      args.push_back(false);
-      args.push_back(true);
-      SpSnippet("Actor", "UnequipItem", args, actor->GetFormId())
-        .Execute(actor, SpSnippetMode::kNoReturnResult);
-    }
+    unequipItems(itemIdsToUnequip);
   }
 
   UpdateEquipmentAttemptEvent updateEquipmentAttemptEvent(actor, data,

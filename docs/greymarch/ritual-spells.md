@@ -30,7 +30,5 @@ Tests: `skymp5-client/greymarch-test/ritual-cast.test.js`.
 
 ## Not covered
 
-- **The refused equipment update.** When one item in the update is missing from the server's inventory, the server rejects the whole update
-  (`ActionListener::OnUpdateEquipment`). The other items, the spells included, are lost with it. The real fix is server side: drop the missing
-  item and keep the rest.
+- **The refused equipment update** is fixed on the server side: see `docs/greymarch/equipment-missing-item.md`.
 - The ritual event names come from one test-server log. Other ritual spells may use other events; those still fall back to the 8 s send.
