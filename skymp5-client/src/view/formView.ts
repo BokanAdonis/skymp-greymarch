@@ -38,6 +38,7 @@ const GM_WOLF_RACE_SETTLE_MS = 4000;
 // NPC in a way that has crashed games (spawning, removing, a model refresh, gear, an idle or a beast's animation). Every line is flushed (SkyrimPlatform's writeLogs ends
 // it with std::endl), so after a crash the last lines say what this game was doing. The launcher keeps the previous session's file and puts both in the support file.
 const gmCrumbStart = Date.now();
+let gmDriftLeft = 120; // GREYMARCH: drift diagnostic lines left (gmHostedTick)
 const GM_HOLD_MAX_MS = 3000; // GREYMARCH: an NPC nobody hosts is held where the server has it for at most this long (see the movement branch)
 export const gmCrumb = (text: string): void => { try { writeLogs("greymarch-crumbs", ((Date.now() - gmCrumbStart) / 1000).toFixed(1) + "s " + text); } catch (e) { /* a breadcrumb is a nicety */ } };
 const gmHex = (n: any): string => (Number(n) >>> 0).toString(16);
@@ -575,6 +576,13 @@ export class FormView {
     if (alreadyHosted) {
       Actor.from(refr)?.clearKeepOffsetFromActor();
     }
+    // GREYMARCH: STUCK MOVES (greymarch/npcHosting.ts): an NPC this game has just become the host of is taken out of any move SkyMP gave it while it played the
+    // server's movement, so the engine's own ground and gravity drive it from now on
+    if (alreadyHosted && !this.gmWasHost) {
+      try { Actor.from(refr)?.stopTranslation(); } catch (e) { /* it was not moving */ }
+      gmCrumb("host start " + gmHex(this.refrId) + ": move stopped");
+    }
+    this.gmWasHost = alreadyHosted;
 
     // GREYMARCH: A SERVER-DRIVEN ANIMAL (gamemode wildlifebrain.js; the server sets the custom property greymarchPuppet). The server decides where it goes and
     // when it attacks, so this game never hosts it and never lets it fight on its own: it plays the server's frames (gmPuppetMove) the way SkyMP plays another
@@ -1008,6 +1016,15 @@ export class FormView {
       if (!npc || !me || npc.isDead()) return "";
       const placeOf = (a: Actor): number => { const w = a.getWorldSpace() || a.getParentCell(); return w ? w.getFormID() : 0; };
       const myPlace = placeOf(me);
+      // DIAGNOSTIC (2026-10-24, NPCs walking in the air or half in the ground with only their host's player there): every 3 s, at most 120 lines a game, an NPC
+      // this game runs near its player: its height and the player's, to the breadcrumbs file
+      if (Date.now() - this.gmDriftAt >= 3000 && gmDriftLeft > 0) {
+        const hd = Math.hypot(npc.getPositionX() - me.getPositionX(), npc.getPositionY() - me.getPositionY());
+        if (hd < 800) {
+          this.gmDriftAt = Date.now(); gmDriftLeft--;
+          gmCrumb("drift " + gmHex(this.remoteRefrId as number) + " base " + gmHex(npc.getBaseObject() ? npc.getBaseObject()!.getFormID() : 0) + ": z " + Math.round(npc.getPositionZ()) + ", player z " + Math.round(me.getPositionZ()) + ", " + Math.round(hd) + " away, combat " + npc.getCombatState() + ", speed " + Math.round(npc.getAnimationVariableFloat("Speed")) + ", jump " + npc.getAnimationVariableBool("bInJumpState") + ", AI " + npc.isAIEnabled());
+        }
+      }
       const others: Actor[] = [];
       const arr = getViewFromStorage()?.getFormViews();
       const n = arr ? arr.getFormViewsArrayLength() : 0;
@@ -1040,6 +1057,8 @@ export class FormView {
   }
   public gmIsPlayerLook = false; // GREYMARCH: this view draws a player (another player's character), not an NPC
   private gmHostCheckAt = 0;
+  private gmWasHost = false; // GREYMARCH: this game hosted this NPC at the last update
+  private gmDriftAt = 0;
   private gmUnloadedSince = 0; // GREYMARCH: since when this game hosts this NPC without having it loaded (0: loaded)
   private gmBodyKillAt = 0;
   private gmPuppetReady = false;

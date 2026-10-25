@@ -11,6 +11,7 @@ import { ObjectReferenceEx } from "../extensions/objectReferenceEx";
 import { SpApiInteractor } from "../services/spApiInteractor";
 
 const sqr = (x: number) => x * x;
+const GM_MIN_TRANSLATE_SPEED = 100; // GREYMARCH: see translateTo
 
 export const applyMovement = (refr: ObjectReference, m: Movement, isMyClone?: boolean): void => {
   if (teleportIfNeed(refr, m)) {
@@ -175,7 +176,9 @@ const translateTo = (refr: ObjectReference, m: Movement) => {
   const refrRealPos = ObjectReferenceEx.getPos(refr);
   const distance = ObjectReferenceEx.getDistance(refrRealPos, gTempTargetPos);
 
-  const speed = distance / time;
+  // GREYMARCH: STUCK MOVES (greymarch/npcHosting.ts): never a move at speed 0. An NPC already at the spot but facing another way got one, which never ends:
+  // the engine keeps it in that move (no gravity, no ground), and once its own AI walked it, it went on at that height, in the air or into the ground
+  const speed = Math.max(distance / time, GM_MIN_TRANSLATE_SPEED);
 
   const angleDiff = Math.abs(m.rot[2] - refr.getAngleZ());
   if (

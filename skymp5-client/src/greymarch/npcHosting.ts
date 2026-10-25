@@ -10,6 +10,10 @@
 //   * FLOATING NPCs (2026-10-24): an NPC whose body the host's game has not loaded (its player walked on, 2+ cells away) is let go too. There the game moves
 //     it with no ground under it, and every other game played that place: deer, bandits and draugr walking in the air or half in the ground. A game that has
 //     it loaded asks for it and runs it on real ground; if no game has it loaded, nobody sees it.
+// STUCK MOVES (2026-10-24, the same NPCs with only their host's player there): SkyMP plays the server's movement with TranslateTo, and gave an NPC already at
+// its spot but facing another way a move at speed 0, which never ends. The engine keeps a moving actor out of its gravity and ground until the move is done, so
+// once the game ran the NPC itself it walked on at that height. A move is never slower than 100 units a second now (movementApply.ts), and an NPC this game
+// becomes the host of has its move stopped (formView.ts). Breadcrumbs: "host start", and "drift" lines (an NPC's height beside its player's).
 // BODIES (2026-10-24), in every game: a body vanished when the movement of a game that still had the NPC alive (its host, a moment behind) arrived after the
 // death. SkyMP took that as a resurrection, which it does by rebuilding the NPC, and it never builds a dead one: the body was gone for good. Now the server's
 // death wins over any movement, and a dead NPC (not a player) IS built, then made dead, so a body also shows for a player who comes later.

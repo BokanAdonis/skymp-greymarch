@@ -76,3 +76,13 @@ test("bodies: the server's death wins over a movement that still has the NPC ali
   const kill = formView.slice(formView.indexOf("this.applyAll(refr, model);"), formView.indexOf("gamemodeUpdateService.updateNeighbor("));
   assert.ok(kill.includes("model.isDead && actor && !actor.isDead() && actor.is3DLoaded()") && kill.includes('emit("applyDeathStateEvent", { actor, isDead: true })') && kill.includes("BODY_KILL_EVERY_MS"), "made dead once its body is in, at most once a second");
 });
+
+test("stuck moves: a move is never at speed 0; an NPC this game becomes the host of has its move stopped; drift breadcrumbs", () => {
+  const apply = fs.readFileSync(path.join(__dirname, "..", "src", "sync", "movementApply.ts"), "utf8");
+  assert.ok(apply.includes("const speed = Math.max(distance / time, GM_MIN_TRANSLATE_SPEED);") && apply.includes("const GM_MIN_TRANSLATE_SPEED = 100;"));
+  const at = formView.indexOf("if (alreadyHosted && !this.gmWasHost) {");
+  assert.ok(at > 0 && formView.slice(at, at + 300).includes("stopTranslation()"), "on the change to host");
+  assert.ok(formView.includes("this.gmWasHost = alreadyHosted;"));
+  const tick = formView.slice(formView.indexOf("private gmHostedTick("), formView.indexOf("public gmIsPlayerLook"));
+  assert.ok(tick.indexOf('gmCrumb("drift "') > 0 && tick.indexOf('gmCrumb("drift "') < tick.indexOf("if (!others.length)"), "also when the host's player is alone");
+});
