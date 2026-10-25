@@ -168,3 +168,12 @@ test("the aim lines in the server log stop after five", () => {
   for (let i = 0; i < 10; i++) g.cast(g.player, -1.3, 0);
   assert.strictEqual(g.logs.filter((l) => /aim/.test(l)).length, 5);
 });
+
+test("aim lines still reach the log after the 40 cast lines are used up", () => {
+  const bytes = floatBytes({ 13: -0.05, 14: 0.1 });
+  const g = make(bytes);
+  for (let i = 0; i < 45; i++) g.cast(g.player, 0.08, 90 * DEG); // normal casts use up the cast lines
+  assert.ok(!g.logs.some((l) => /aim/.test(l)));
+  g.cast(g.player, -1.3, 0);
+  assert.ok(g.logs.some((l) => /^magic: aim of 12fd0 replaced/.test(l)), "the aim line is still written");
+});

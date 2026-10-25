@@ -277,12 +277,13 @@ export class MagicSyncService extends ClientListener {
         }
     }
 
+    // its own budget: the cast lines (diagLeft) are used up after 40 casts, and a replaced aim must still reach the log
     private aimDiag(text: string) {
         if (this.aimDiagLeft <= 0) {
             return;
         }
         this.aimDiagLeft--;
-        this.diag(text);
+        try { (this.controller.emitter as any).emit("greymarchStage", text); } catch (e) { /* diagnostics never break the game */ }
     }
 
     private getAnimationVariablesFromActorConverted(actorId: number) {
