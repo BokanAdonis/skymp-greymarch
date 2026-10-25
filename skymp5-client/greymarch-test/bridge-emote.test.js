@@ -38,7 +38,7 @@ function make(opts = {}) {
     Ui: { isMenuOpen: (name) => name === state.menu },
     Input: { tapKey: (k) => { log.taps = (log.taps || []).concat([k]); if (state.menu === "InventoryMenu" || state.menu === "FavoritesMenu") state.menu = null; }, getMappedKey: (c) => (c === "Tween Menu" ? state.tweenKey || 15 : 0) },
     Utility: { isInMenuMode: () => false },
-    browser: { setVisible() {}, setFocused: (v) => log.focused.push(v), isFocused: () => true, executeJavaScript: (js) => { const m = /window\.__gmEmoteRun\((.*)\);$/.exec(js); if (m) log.pages.push(JSON.parse(m[1])); const c = /window\.__gmCraftRun\((.*)\);$/.exec(js); if (c) (log.craft = log.craft || []).push(JSON.parse(c[1])); const fo = /window\.__gmForgeRun\((.*)\);$/.exec(js); if (fo) (log.forge = log.forge || []).push(JSON.parse(fo[1])); } },
+    browser: { setVisible() {}, setFocused: (v) => log.focused.push(v), isFocused: () => state.focused !== false, executeJavaScript: (js) => { const m = /window\.__gmEmoteRun\((.*)\);$/.exec(js); if (m) log.pages.push(JSON.parse(m[1])); const c = /window\.__gmCraftRun\((.*)\);$/.exec(js); if (c) (log.craft = log.craft || []).push(JSON.parse(c[1])); const fo = /window\.__gmForgeRun\((.*)\);$/.exec(js); if (fo) (log.forge = log.forge || []).push(JSON.parse(fo[1])); } },
     on() {}, storage: {},
   };
   const controller = { on() {}, emitter: { on() {}, emit: (n, m) => { if (n === "sendMessage") { const c = JSON.parse(m.message.contentJsonDump); if (c.customPacketType !== "greymarchLog") log.sent.push(c); } } } };
@@ -458,4 +458,19 @@ test("the forge window: the game says it has it on entering the world; the serve
   s.say({ customPacketType: "greymarchForgeOpen" }); s.page({ type: "forge-close" });
   assert.strictEqual(s.gm.greymarchForgeOn, false, "the page's close button closes it");
   assert.ok(/case 'greymarchForgeOpen':/.test(require("node:fs").readFileSync(require("node:path").join(__dirname, "..", "src", "services", "services", "authService.ts"), "utf8")), "the packets reach the bridge");
+});
+
+test("the pointer: while a window holds the mouse and has the focus but the game's Cursor Menu is closed, the focus is dropped and taken again (it opens it); never while it is open", () => {
+  const s = make();
+  s.say({ customPacketType: "greymarchForgeOpen" });
+  const n = s.log.focused.length;
+  s.state.menu = "Cursor Menu"; s.at(() => s.gm.greymarchPointerGuard(Date.now() + 1000));
+  assert.strictEqual(s.log.focused.length, n, "the Cursor Menu is open: nothing touched (dropping the focus then would close it)");
+  s.state.menu = null; s.at(() => s.gm.greymarchPointerGuard(Date.now() + 2000));
+  assert.deepStrictEqual(s.log.focused.slice(n), [false, true], "closed: dropped and taken again, which opens it");
+  s.state.focused = false; s.at(() => s.gm.greymarchPointerGuard(Date.now() + 3000));
+  assert.strictEqual(s.log.focused.length, n + 2, "no focus: left to the window's own focus guard");
+  s.state.focused = true; s.page({ type: "forge-close" }); const m = s.log.focused.length;
+  s.at(() => s.gm.greymarchPointerGuard(Date.now() + 4000));
+  assert.strictEqual(s.log.focused.length, m, "no window open: nothing");
 });

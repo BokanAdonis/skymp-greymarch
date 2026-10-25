@@ -421,7 +421,8 @@ export class GreymarchBridge {
         this.greymarchBuildCamTick(Date.now()); // the build system's free camera: the preview where the camera looks
         this.greymarchChopTick(Date.now()); // sitting at a chopping block: the server counts the chops (XP, firewood)
         this.greymarchForgeTick(Date.now()); // after the forge window closed: the smith is surely out of the forge's animation
-        this.greymarchForgePreviewTick(Date.now()); // the forge window's turning preview of the picked piece
+        this.greymarchForgePreviewTick(Date.now()); // removes a preview copy an older version left
+        this.greymarchPointerGuard(Date.now()); // a window that holds the mouse always has its pointer (the game's Cursor Menu)
         this.greymarchMiniActivateTick(); // a mini game won: the thing is used again (the server lets it through)
         this.greymarchMagicBlockDrive(); // NPC raise-the-dead and summons: ended at once
         this.greymarchShapeDrive(); // a creature form as an NPC: moved every frame like SkyMP moves other players; other players' creature attacks
@@ -2534,21 +2535,8 @@ export class GreymarchBridge {
                 this.greymarchForgeAnimSafety = now + 2500; // and to be sure the smith is free: the default state once the exit has played
             }
         }
-        // the pointer: SkyrimPlatform draws it through the game's Cursor Menu, opened when the page takes focus; moving onto the forge closes it, and taking a
-        // focus already held does nothing, so after the move the window lets go and takes the focus again (which opens the Cursor Menu again), twice
-        var rf = this.greymarchForgeRefocusAt;
-        if (rf && rf.length && now >= rf[0] && this.greymarchForgeOn) {
-            rf.shift();
-            try {
-                var had = false; try { had = !!sp.Ui.isMenuOpen("Cursor Menu"); } catch (e) { had = false; }
-                sp.browser.setFocused(false); sp.browser.setVisible(true); sp.browser.setFocused(true);
-                this.greymarchForgeCursorSaid = (this.greymarchForgeCursorSaid || 0) + 1;
-                if (this.greymarchForgeCursorSaid <= 6) this.greymarchLog("forge: focus taken again for the pointer (the Cursor Menu was " + (had ? "open" : "closed") + ", now " + (sp.Ui.isMenuOpen("Cursor Menu") ? "open" : "closed") + ")");
-            } catch (e) { /* next time */ }
-        }
         if (this.greymarchForgeAnimGo && now >= this.greymarchForgeAnimGo) {
             this.greymarchForgeAnimGo = 0;
-            this.greymarchForgeRefocusAt = [now, now + 650];
             if (this.greymarchForgeAnim) { try { var ps = sp.Game.getPlayer(); if (ps) sp.Debug.sendAnimationEvent(ps, "IdleBlackSmithForgeEnter"); } catch (e) { this.greymarchLog("forge: no forge animation (" + e + ")"); } }
         }
         // the game's own crafting menu must never be open under the forge window (it took the pointer, and its E Create made things the window would refuse):
@@ -2586,6 +2574,24 @@ export class GreymarchBridge {
         if (!ghost) return;
         this.greymarchForgeGhost = null;
         try { ghost.disable(false); ghost.delete(); } catch (e) { /* gone */ }
+    }
+    // THE POINTER. SkyrimPlatform draws it through the game's Cursor Menu, which it opens when a page takes the focus (BrowserApiTilted SetFocused) and only
+    // then: something that closes the Cursor Menu while a page has the focus (moving the player onto a forge, a game menu closing) leaves the window without a
+    // pointer until the focus is dropped and taken again (F6 did that by hand). Four times a second, while one of our windows holds the mouse and keyboard and
+    // has the focus but the Cursor Menu is not open, the focus is dropped and taken again, which opens it. Only then: doing it while the Cursor Menu IS open
+    // queues its closing after the check for it (the cause of the missing pointer, 2026-10-25).
+    greymarchPointerGuard(now: number): any {
+        if (now < (this.greymarchPointerNext || 0)) return;
+        this.greymarchPointerNext = now + 250;
+        if (this.greymarchScreenUp || !this.greymarchPanelHasKeys() || this.greymarchEmoteOn) return; // the emote wheel needs no pointer
+        var sp = this.sp;
+        try {
+            if (!sp.browser.isFocused()) return; // the focus guards of each window take it back
+            if (sp.Ui.isMenuOpen("Cursor Menu")) return;
+            sp.browser.setFocused(false); sp.browser.setVisible(true); sp.browser.setFocused(true);
+            this.greymarchPointerFixed = (this.greymarchPointerFixed || 0) + 1;
+            if (this.greymarchPointerFixed <= 8) this.greymarchLog("pointer: a window had the mouse but no pointer (the Cursor Menu was closed); opened it again (" + (sp.Ui.isMenuOpen("Cursor Menu") ? "open now" : "opens next frame") + ")");
+        } catch (e) { /* next time */ }
     }
     greymarchForgeAsk(data: any): any {
         var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchForge", rid: data.rid, op: data.op, args: data.args }) };
