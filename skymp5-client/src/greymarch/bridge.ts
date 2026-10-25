@@ -1013,6 +1013,14 @@ export class GreymarchBridge {
         if (ids[key] === undefined) { try { var fm = this.sp.Game.getFormFromFile((VAMP_FORMS as any)[key], "Dawnguard.esm"); ids[key] = fm ? fm.getFormID() : 0; } catch (e) { ids[key] = 0; } }
         return ids[key];
     }
+    greymarchVampSpellOf(desc: string): any { // "8d5bf:Skyrim.esm" -> that Spell in this game (null when the plugin or the record is not there)
+        var c = this.greymarchVampSpellCache || (this.greymarchVampSpellCache = {});
+        if (c[desc] === undefined) {
+            var at = desc.indexOf(":"), id = parseInt(desc.slice(0, at), 16), file = desc.slice(at + 1);
+            try { var fm = at > 0 && id > 0 ? this.sp.Game.getFormFromFile(id, file) : null; c[desc] = fm ? this.sp.Spell.from(fm) : null; } catch (e) { c[desc] = null; }
+        }
+        return c[desc];
+    }
     greymarchVampSignal(kind: string, id: number): any { // called from game event handlers: only remembered (the update phase looks the IDs up and reports)
         var q = this.greymarchVampSignals || (this.greymarchVampSignals = []);
         if (q.length < 8) q.push({ kind: kind, id: id });
@@ -1069,6 +1077,30 @@ export class GreymarchBridge {
                 this.greymarchVampAvKey = key;
                 this.greymarchLog("vampire: abilities " + (want ? "set (" + key + ")" : "taken away"));
             } catch (avErr) { this.greymarchVampAvKey = key; this.greymarchLog("vampire: the abilities could not be set: " + avErr); }
+        }
+        // the powers the server names (want.spells, "<hex id>:<plugin>"). The server teaches them with Actor.AddSpell, which did not always reach this game's Magic menu
+        // (a vampire had none of them, 2026-10-25, though the server's log said each was given). Every 2 seconds a listed power the game is missing is added, and one this
+        // added that the server no longer names is taken away again (Mist Form while it cools down, the Lord's own outside that shape). The server still decides every use.
+        if (now >= (this.greymarchVampSpellNext || 0)) {
+            this.greymarchVampSpellNext = now + 2000;
+            var listed: string[] = want && Array.isArray(want.spells) ? want.spells : [];
+            var mine = this.greymarchVampSpellMine || (this.greymarchVampSpellMine = {});
+            var keep: any = {};
+            for (var si = 0; si < listed.length; si++) {
+                var d = String(listed[si]); keep[d] = true;
+                var sw = this.greymarchVampSpellOf(d);
+                if (!sw) continue;
+                try {
+                    if (!player.hasSpell(sw)) { player.addSpell(sw, false); mine[d] = true; this.greymarchLog("vampire: the power " + d + " was missing from this game: added"); }
+                } catch (addErr) { this.greymarchLog("vampire: the power " + d + " could not be added: " + addErr); }
+            }
+            for (var dk in mine) {
+                if (keep[dk]) continue;
+                delete mine[dk];
+                var sg = this.greymarchVampSpellOf(dk);
+                try { if (sg && player.hasSpell(sg)) player.removeSpell(sg); } catch (rmErr) { /* gone already */ }
+                this.greymarchLog("vampire: the power " + dk + " taken away again (the server no longer names it)");
+            }
         }
         // no Restoration magic: a Restoration spell put in a hand is taken out of it again
         if (want && want.noRestoration && now >= (this.greymarchVampRestoNext || 0)) {

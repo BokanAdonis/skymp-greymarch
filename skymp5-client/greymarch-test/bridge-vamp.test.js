@@ -23,6 +23,7 @@ function make(opts = {}) {
     getBaseActorValue: (n) => base[n], setActorValue: (n, v) => { log.av[n] = v; },
     getEquippedSpell: (slot) => equipped[slot], unequipSpell: (s, slot) => { log.unequipped.push(slot); equipped[slot] = null; },
     dispelSpell: (s) => log.dispelled.push(s.id),
+    hasSpell: (s) => (log.known = log.known || new Set()).has(s.id), addSpell: (s) => { (log.known = log.known || new Set()).add(s.id); (log.added = log.added || []).push(s.id); }, removeSpell: (s) => { (log.known = log.known || new Set()).delete(s.id); (log.removed = log.removed || []).push(s.id); },
     playIdleWithTarget: (idle, target) => { log.idles.push([idle.id, target.name]); return true; },
     name: "me",
   };
@@ -30,7 +31,7 @@ function make(opts = {}) {
   const sp = {
     printConsole() {}, writeLogs: (n, l) => log.lines.push(l),
     browser: { executeJavaScript: (s) => { const m = /__gmHudSend\((.*)\);$/.exec(s); if (m) log.hud.push(JSON.parse(m[1])); } },
-    Game: { getPlayer: () => player, getFormEx: (id) => (id === 0x5000 ? other : { id }), getFormFromFile: (id, file) => (file === "Dawnguard.esm" ? { getFormID: () => DG + id } : null) },
+    Game: { getPlayer: () => player, getFormEx: (id) => (id === 0x5000 ? other : { id }), getFormFromFile: (id, file) => (file === "Dawnguard.esm" ? { id: DG + id, getFormID: () => DG + id } : file === "Skyrim.esm" ? { id, getFormID: () => id } : null) },
     Spell: { from: (f) => f }, Idle: { from: (f) => f }, Actor: { from: (f) => (f === other ? other : null) },
     Debug: { sendAnimationEvent: (ref, name) => log.events.push([ref.name, name]), notification: (t) => log.notes.push(t) },
     on() {},
@@ -286,4 +287,25 @@ test("the worn fangs: on (kept on) only while the server's look of this player s
   look(true);
   s.gm.greymarchVampFangsWear(6_500);
   assert.deepStrictEqual(calls.pop(), ["on", FANGS, true, true], "bared again");
+});
+
+test("the powers the server names are added when the game is missing them, and the ones it added go again when the server stops naming them", () => {
+  const s = make();
+  const realNow = Date.now; let t = 1_000_000; Date.now = () => t;
+  try {
+    s.say(state({ spells: ["8d5bf:Skyrim.esm", "38ba:Dawnguard.esm", "1:Nowhere.esp"] }));
+    s.tick();
+    assert.deepStrictEqual(s.log.added, [0x8d5bf, DG + 0x38ba], "both added; a record this game does not have is skipped");
+    assert.ok(s.log.lines.some((l) => /power 8d5bf:Skyrim.esm was missing from this game: added/.test(l)));
+    t += 500; s.tick();
+    assert.strictEqual(s.log.added.length, 2, "checked every 2 seconds, not every frame");
+    t += 2000; s.tick();
+    assert.strictEqual(s.log.added.length, 2, "already there: nothing added twice");
+    s.say(state({ spells: ["8d5bf:Skyrim.esm"] })); // Mist Form cooling down
+    t += 2000; s.tick();
+    assert.deepStrictEqual(s.log.removed, [DG + 0x38ba]);
+    s.say({ customPacketType: "greymarchVampire", on: false });
+    t += 2000; s.tick();
+    assert.deepStrictEqual(s.log.removed, [DG + 0x38ba, 0x8d5bf], "no longer a vampire: what this added goes");
+  } finally { Date.now = realNow; }
 });
