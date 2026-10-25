@@ -2470,7 +2470,15 @@ export class GreymarchBridge {
                         var ref = local ? sp.ObjectReference.from(sp.Game.getFormEx(local)) : null;
                         // where the game itself puts a smith: the forge's furniture marker is at the forge's own origin, facing the forge's way
                         // (Furniture\BlacksmithForgeMarker.nif and ...WR.nif: BSFurnitureMarkerNode offset 0, 0, 34, heading 0)
-                        if (ref) { player.setPosition(ref.getPositionX(), ref.getPositionY(), ref.getPositionZ()); player.setAngle(0, 0, ref.getAngleZ()); }
+                        // the marker is 34 units up (the model's floor stones sit above its origin), scaled with the forge
+                        if (ref) {
+                            var sc = 1; try { sc = Number(ref.getScale()) || 1; } catch (e) { sc = 1; }
+                            var fx0 = ref.getPositionX(), fy0 = ref.getPositionY(), fz0 = ref.getPositionZ(), fa = ref.getAngleZ();
+                            var bx = player.getPositionX(), by = player.getPositionY(), bz = player.getPositionZ();
+                            player.setPosition(fx0, fy0, fz0 + 34 * sc); player.setAngle(0, 0, fa);
+                            this.greymarchForgeAt = { fx: fx0, fy: fy0, fz: fz0, fa: fa, at: Date.now() + 1500 }; // where the smith is a moment later goes to the log (greymarchForgeTick)
+                            this.greymarchLog("forge: at " + id.toString(16) + " (" + Math.round(fx0) + "," + Math.round(fy0) + "," + Math.round(fz0) + " angle " + Math.round(fa) + " scale " + sc + "), the smith was " + Math.round(bx - fx0) + "," + Math.round(by - fy0) + "," + Math.round(bz - fz0) + " from it");
+                        }
                         sp.Debug.sendAnimationEvent(player, "IdleBlackSmithForgeEnter");
                         this.greymarchForgeAnim = true; this.greymarchForgeAnimSafety = 0;
                     }
@@ -2480,6 +2488,17 @@ export class GreymarchBridge {
                 try { var pl = sp.Game.getPlayer(); if (pl) sp.Debug.sendAnimationEvent(pl, "IdleChairExitStart"); } catch (e) { /* the next movement ends it */ }
                 this.greymarchForgeAnimSafety = now + 2500; // and to be sure the smith is free: the default state once the exit has played
             }
+        }
+        // the forge window holds the mouse and keyboard while it is open: SkyMP takes them away when it rebuilds the player's body (skympClient.ts
+        // setFocused(false), which moving onto the forge can cause), so they are given back whenever they are lost, like the character select (greymarchSelectFocusGuard)
+        if (this.greymarchForgeOn && now >= (this.greymarchForgeFocusNext || 0)) {
+            this.greymarchForgeFocusNext = now + 200;
+            try { if (!sp.browser.isFocused()) { sp.browser.setVisible(true); sp.browser.setFocused(true); this.greymarchForgeRefocused = (this.greymarchForgeRefocused || 0) + 1; if (this.greymarchForgeRefocused <= 5) this.greymarchLog("forge: the window lost the mouse and keyboard, took them back"); } } catch (e) { /* next frame */ }
+        }
+        var fa2 = this.greymarchForgeAt;
+        if (fa2 && now >= fa2.at) {
+            this.greymarchForgeAt = null;
+            try { var pp = sp.Game.getPlayer(); this.greymarchLog("forge: the smith stands " + Math.round(pp.getPositionX() - fa2.fx) + "," + Math.round(pp.getPositionY() - fa2.fy) + "," + Math.round(pp.getPositionZ() - fa2.fz) + " from the forge, angle " + Math.round(pp.getAngleZ() - fa2.fa) + " from its"); } catch (e) { /* only a log line */ }
         }
         if (!this.greymarchForgeAnimSafety || now < this.greymarchForgeAnimSafety) return;
         this.greymarchForgeAnimSafety = 0;
