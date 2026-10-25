@@ -183,9 +183,7 @@ export class GreymarchBridge {
         if (type === "greymarchChanceryOpen") { this.greymarchChanceryShow(); return; }
         if (type === "greymarchMinigame") { this.greymarchMiniShow(msg); return; } // a profession mini game before the work (gamemode minigames.js)
         if (type === "greymarchMinigameDone") { this.greymarchMiniDone(msg); return; }
-        if (type === "greymarchForgeOpen") { this.greymarchForgeShow(); return; } // a forge was used (gamemode forgemenu.js): the Greymarch forge window instead of the game's menu
-        if (type === "greymarchForgeReply") { this.greymarchForgeToPage("reply", msg); return; }
-        if (type === "greymarchForgeOpen") { this.greymarchForgeShow(); return; } // a forge was used (gamemode forgemenu.js): the Greymarch forge window instead of the game's menu
+        if (type === "greymarchForgeOpen") { this.greymarchForgeShow(msg); return; } // a forge was used (gamemode forgemenu.js): the Greymarch forge window instead of the game's menu
         if (type === "greymarchForgeReply") { this.greymarchForgeToPage("reply", msg); return; }
         if (type === "greymarchCraftOpen") { this.greymarchCraftShow(msg); return; } // a crafting station was used (gamemode craftsys.js): the crafting panel
         if (type === "greymarchCraftReply") { this.greymarchCraftToPage("reply", msg); return; }
@@ -417,6 +415,7 @@ export class GreymarchBridge {
         this.greymarchBuildAngleTick(); // a piece a GM placed was turned: this game turns its copy
         this.greymarchBuildCamTick(Date.now()); // the build system's free camera: the preview where the camera looks
         this.greymarchChopTick(Date.now()); // sitting at a chopping block: the server counts the chops (XP, firewood)
+        this.greymarchForgeTick(Date.now()); // after the forge window closed: the smith is surely out of the forge's animation
         this.greymarchMiniActivateTick(); // a mini game won: the thing is used again (the server lets it through)
         this.greymarchMagicBlockDrive(); // NPC raise-the-dead and summons: ended at once
         this.greymarchShapeDrive(); // a creature form as an NPC: moved every frame like SkyMP moves other players; other players' creature attacks
@@ -2431,11 +2430,12 @@ export class GreymarchBridge {
             this.sp.printConsole("[greymarch] could not reach the forge window: " + err);
         }
     }
-    greymarchForgeShow(): any {
+    greymarchForgeShow(msg?: any): any {
         if (this.greymarchForgeOn) { this.greymarchForgeToPage("show", true); return; }
         if (this.greymarchScreenUp || this.greymarchAdminOn || this.greymarchMenuOn || this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchCraftOn) return; // not over the select screen or the other panels
         this.greymarchLog("forge: opened");
         this.greymarchForgeOn = true;
+        this.greymarchForgeAnimStart(msg && msg.forge);
         this.sp.browser.setVisible(true);
         this.sp.browser.setFocused(true);
         this.greymarchForgeToPage("show", true);
@@ -2444,7 +2444,35 @@ export class GreymarchBridge {
         if (!this.greymarchForgeOn) return;
         this.greymarchForgeOn = false;
         this.greymarchForgeToPage("hide", true);
+        this.greymarchForgeAnimEnd();
         if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchEmoteOn || !!this.greymarchGuardsHud || !!this.greymarchProfOn || !!this.greymarchChanceryOn || !!this.greymarchVampMenuOn || !!this.greymarchLedgerOn || !!this.greymarchCraftOn); }
+    }
+    // At the forge like the game's own menu: the smith turns to the forge and does the forge's hammering (the game's IdleBlackSmithForgeEnter, what the
+    // forge furniture plays) while the window is open, and steps out of it (IdleChairExitStart, the forge's exit) when it closes. SkyMP passes the player's
+    // animation events on, so the others see the smith at work. The window holds the keyboard, so the smith cannot walk off mid-swing.
+    greymarchForgeAnimStart(forgeId: any): any {
+        var sp = this.sp;
+        try {
+            var player = sp.Game.getPlayer(); if (!player) return;
+            var id = Number(forgeId) >>> 0;
+            var local = id >= 0xff000000 ? misc.remoteIdToLocalId(id) : id;
+            var ref = local ? sp.ObjectReference.from(sp.Game.getFormEx(local)) : null;
+            if (ref) { var turn = player.getHeadingAngle(ref); player.setAngle(0, 0, player.getAngleZ() + turn); }
+            sp.Debug.sendAnimationEvent(player, "IdleBlackSmithForgeEnter");
+            this.greymarchForgeAnim = true; this.greymarchForgeAnimSafety = 0;
+        } catch (e) { this.greymarchLog("forge: no forge animation (" + e + ")"); }
+    }
+    greymarchForgeAnimEnd(): any {
+        if (!this.greymarchForgeAnim) return;
+        this.greymarchForgeAnim = false;
+        try { var player = this.sp.Game.getPlayer(); if (player) this.sp.Debug.sendAnimationEvent(player, "IdleChairExitStart"); } catch (e) { /* the next movement ends it */ }
+        this.greymarchForgeAnimSafety = Date.now() + 2500; // and to be sure the smith is free: the default state once the exit has played (greymarchForgeTick)
+    }
+    greymarchForgeTick(now: number): any {
+        if (!this.greymarchForgeAnimSafety || now < this.greymarchForgeAnimSafety) return;
+        this.greymarchForgeAnimSafety = 0;
+        if (this.greymarchForgeAnim) return; // opened again meanwhile
+        try { var player = this.sp.Game.getPlayer(); if (player) this.sp.Debug.sendAnimationEvent(player, "IdleForceDefaultState"); } catch (e) { /* nothing to free */ }
     }
     greymarchForgeAsk(data: any): any {
         var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchForge", rid: data.rid, op: data.op, args: data.args }) };
