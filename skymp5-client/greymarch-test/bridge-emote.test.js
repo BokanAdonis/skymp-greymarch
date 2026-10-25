@@ -483,6 +483,12 @@ test("the station windows: a smelter opens the forge window in its station mode;
   o.say({ customPacketType: "greymarchForgeOpen", station: "tan", title: "Tanning Rack", ref: 0x1234, anim: "IdleTanningEnter" });
   o.at(() => o.gm.greymarchForgeTick(Date.now())); o.at(() => o.gm.greymarchForgeTick(Date.now() + 400));
   assert.strictEqual(o.log.movedTo, undefined); assert.ok(!o.log.events.includes("IdleTanningEnter"));
+  const w = make(); w.state.marker = null; // a spinning wheel (the loom): no marker in its mesh, so the spot the server gives, turned with the wheel (angle 90 here)
+  w.say({ customPacketType: "greymarchForgeOpen", station: "loom", title: "Loom", ref: 0x1234, anim: "IdleAlchemyEnter", stand: [0, -55, 0] });
+  w.at(() => w.gm.greymarchForgeTick(Date.now()));
+  assert.deepStrictEqual(w.log.movedTo.slice(1).map(Math.round), [-55, 0, 0, 0], "55 units in front of the wheel, turned with it");
+  assert.strictEqual(Math.round(w.log.turned), 90, "facing the way the wheel faces");
+  w.at(() => w.gm.greymarchForgeTick(Date.now() + 400)); assert.strictEqual(w.log.events.pop(), "IdleAlchemyEnter");
 });
 
 test("the pointer: while a window holds the mouse and has the focus but the game's Cursor Menu is closed, the focus is dropped and taken again (it opens it); never while it is open", () => {

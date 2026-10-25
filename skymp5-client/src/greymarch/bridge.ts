@@ -2516,7 +2516,7 @@ export class GreymarchBridge {
         this.greymarchForgeOn = true;
         this.greymarchForgeStation = station;
         if (station === "forge") this.greymarchForgeAnimStart(msg && msg.forge);
-        else this.greymarchForgeAnimWant = { on: true, forge: Number(msg && msg.ref) >>> 0, station: station, anim: (msg && typeof msg.anim === "string" && /^Idle[A-Za-z]{1,40}$/.test(msg.anim)) ? msg.anim : "" };
+        else this.greymarchForgeAnimWant = { on: true, forge: Number(msg && msg.ref) >>> 0, station: station, anim: (msg && typeof msg.anim === "string" && /^Idle[A-Za-z]{1,40}$/.test(msg.anim)) ? msg.anim : "", stand: (msg && Array.isArray(msg.stand) && msg.stand.length === 3 && msg.stand.every((v: any) => typeof v === "number" && isFinite(v) && Math.abs(v) <= 400)) ? msg.stand : null };
         this.sp.browser.setVisible(true);
         this.sp.browser.setFocused(true);
         this.greymarchForgeToPage("show", page);
@@ -2548,8 +2548,13 @@ export class GreymarchBridge {
         if (!ref || !want.anim) { this.greymarchLog("station window: " + want.station + ", no animation here"); return; }
         var m: any = [];
         try { for (var k = 0; k < 4; k++) m.push(Number(sp.callNative("GreymarchCam", "GetFurnitureMarker", undefined, ref, k))); } catch (e) { m = []; }
-        if (m.length < 4 || !(m[0] > -99990) || !isFinite(m[0] + m[1] + m[2] + m[3])) { this.greymarchLog("station window: " + want.station + ", no furniture marker (GreymarchCamera.dll older than 1.4?), no animation"); return; }
         var fx0 = ref.getPositionX(), fy0 = ref.getPositionY(), fz0 = ref.getPositionZ();
+        if ((m.length < 4 || !(m[0] > -99990) || !isFinite(m[0] + m[1] + m[2] + m[3])) && want.stand) {
+            // no marker in the mesh (the spinning wheels): the spot the server gives, in the furniture's own frame (right, forward, turn), turned with it
+            var a = ref.getAngleZ() * Math.PI / 180, sx = want.stand[0], sy = want.stand[1];
+            m = [fx0 + sx * Math.cos(a) + sy * Math.sin(a), fy0 - sx * Math.sin(a) + sy * Math.cos(a), fz0, a + want.stand[2] * Math.PI / 180];
+        }
+        if (m.length < 4 || !(m[0] > -99990) || !isFinite(m[0] + m[1] + m[2] + m[3])) { this.greymarchLog("station window: " + want.station + ", no furniture marker (GreymarchCamera.dll older than 1.4?), no animation"); return; }
         player.moveTo(ref, m[0] - fx0, m[1] - fy0, m[2] - fz0, false); // MoveTo: SetPosition on the player does nothing (the forge's log)
         try { player.setAngle(0, 0, m[3] * 180 / Math.PI); } catch (e) { /* facing as they were */ }
         this.greymarchForgeAt = { fx: m[0], fy: m[1], fz: m[2], fa: m[3] * 180 / Math.PI, at: now + 1500 }; // where the worker is a moment later goes to the log
