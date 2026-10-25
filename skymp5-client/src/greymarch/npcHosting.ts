@@ -17,8 +17,9 @@
 // LOCKED HEIGHT (2026-10-24, the drift breadcrumbs: an elk kept z -10166 while it ran at 600 units a second and its player went up and down 80): some NPCs the
 // server made came out of their spawn with their height locked and ran flat, through the air and into hills. Their spawn no longer resurrects them (spawnProcess.ts,
 // a body rebuilt while it came in). And, in case one still is: a hosted NPC that moves 250+ units a second for 3 seconds in a row without its height changing by 1 unit
-// (real ground is never that flat) has its body rebuilt where it stands (disabled and enabled again, Skyrim's own cure for a floating NPC); at most every 10 s.
-// Breadcrumb "reground". (Lifted 64 units instead, as at first, it fell straight back onto the same height: it stood on nothing the ground map knows,
+// (real ground is never that flat) is noted in the breadcrumbs ("reground"), at most every 10 s; the server puts it back on the land (gamemode groundclamp.js).
+// It was rebuilt here at first (disabled and enabled again): that did not bring it down, and it made the NPC vanish and come back with its gear drawn again
+// from its outfit lists (bandits "respawning with other loadouts", 2026-10-24). (Lifted 64 units instead, as at first, it fell straight back onto the same height: it stood on nothing the ground map knows,
 // 150 to 257 units over the real ground, 2026-10-24.) The drift lines say which cell the NPC is in, whether that cell is loaded, and the player's cell.
 // BODIES (2026-10-24), in every game: a body vanished when the movement of a game that still had the NPC alive (its host, a moment behind) arrived after the
 // death. SkyMP took that as a resurrection, which it does by rebuilding the NPC, and it never builds a dead one: the body was gone for good. Now the server's
@@ -32,7 +33,7 @@ export const UNLOADED_RELEASE_MS = 2000; // a hosted NPC whose body this game ha
 export const BODY_KILL_EVERY_MS = 1000; // a dead NPC's body shown here is made dead at most this often (BODIES above)
 export const FLAT_MIN_MOVE = 250; // LOCKED HEIGHT: a one-second step this long ...
 export const FLAT_MAX_DZ = 1; // ... with less height change than this counts as flat
-export const FLAT_STEPS = 3; // this many flat steps in a row: its body is rebuilt where it stands
+export const FLAT_STEPS = 3; // this many flat steps in a row: noted ("reground")
 export const REGROUND_EVERY_MS = 10000; // at most this often for one NPC
 
 // hand the NPC on? dMe: the host's own player to the NPC; others: the other players (same cell, loaded, alive) to the NPC

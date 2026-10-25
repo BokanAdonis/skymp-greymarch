@@ -1037,11 +1037,9 @@ export class FormView {
       this.gmLastPos = gmNow;
       if (this.gmFlatSteps >= FLAT_STEPS && Date.now() - this.gmRegroundAt >= REGROUND_EVERY_MS) {
         this.gmRegroundAt = Date.now(); this.gmFlatSteps = 0;
-        gmCrumb("reground " + gmHex(this.remoteRefrId as number) + " at " + gmNow.map(Math.round).join(" ") + " (height locked)");
-        const gmRid = npc.getFormID();
-        try {
-          npc.disable(false).then(() => { const again = ObjectReference.from(Game.getFormEx(gmRid)); if (again) again.enable(false); }).catch(() => { /* the next check tries again */ });
-        } catch (e) { /* the next check tries again */ }
+        // only noted: the server puts such an NPC back on the land (gamemode groundclamp.js). Rebuilding it here (disabled and enabled) made it vanish and come
+        // back with its gear drawn again from its outfit lists ("bandits respawn with other loadouts", 2026-10-24), and it stayed in the air anyway
+        gmCrumb("reground " + gmHex(this.remoteRefrId as number) + " at " + gmNow.map(Math.round).join(" ") + " (height locked; left to the server)");
       }
       if (Date.now() - this.gmDriftAt >= 3000 && gmDriftLeft > 0) {
         const hd = Math.hypot(npc.getPositionX() - me.getPositionX(), npc.getPositionY() - me.getPositionY());

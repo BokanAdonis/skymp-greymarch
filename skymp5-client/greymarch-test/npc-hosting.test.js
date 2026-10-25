@@ -97,7 +97,7 @@ test("its own animations back: an NPC this game hosts never replays the animatio
   assert.ok(other.includes("applyAnimation(refr, model.animation, this.animState);"), "other games still play them");
 });
 
-test("locked height: a server NPC is not resurrected at its spawn; one that runs flat for 3 s has its body rebuilt where it stands, at most every 10 s", () => {
+test("locked height: a server NPC is not resurrected at its spawn; one that runs flat for 3 s is only noted (the server moves it), at most every 10 s", () => {
   assert.strictEqual(H.flatStep(null, [0, 0, 0]), false);
   assert.strictEqual(H.flatStep([0, 0, -10166], [600, 0, -10166]), true, "the elk: 600 units, not a unit up or down");
   assert.strictEqual(H.flatStep([0, 0, -10166], [600, 0, -10160]), false, "real ground goes up and down");
@@ -108,7 +108,7 @@ test("locked height: a server NPC is not resurrected at its spawn; one that runs
   assert.ok(spawn.includes("this.resurrect(refrId, beastLook, !appearance)"));
   const tick = formView.slice(formView.indexOf("private gmHostedTick("), formView.indexOf("public gmIsPlayerLook"));
   assert.ok(tick.includes("this.gmFlatSteps >= FLAT_STEPS && Date.now() - this.gmRegroundAt >= REGROUND_EVERY_MS"));
-  assert.ok(tick.includes("npc.disable(false).then(") && tick.includes("again.enable(false)"), "its body rebuilt where it stands (lifted, it fell back onto the same height)");
+  assert.ok(!tick.includes("npc.disable(") && !tick.includes("npc.setPosition("), "only noted: a rebuild redrew its gear (other loadouts), a lift fell back; the server puts it on the land");
   assert.ok(tick.includes('", cell " + gmCellOf(npc) + " (player " + gmCellOf(me) + ")"'), "the drift lines say which cell");
   assert.ok(tick.indexOf("reground") < tick.indexOf("if (!others.length)"), "also when its player is alone");
 });
