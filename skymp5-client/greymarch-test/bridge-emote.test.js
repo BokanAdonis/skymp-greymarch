@@ -20,6 +20,7 @@ function make(opts = {}) {
   const state = { drawn: false, speed: 0, menu: null, refuse: false };
   const player = {
     playIdle: (idle) => { log.idles.push(idle.id); return !state.refuse; },
+    placeAtMe: (base) => { const g = { base, at: null, rot: null, gone: false, setPosition: (x, y, z) => { g.at = [x, y, z]; }, setAngle: (a, b, c) => { g.rot = [a, b, c]; }, disable() { g.gone = true; }, delete() { g.gone = true; } }; (log.ghosts = log.ghosts || []).push(g); return g; },
     getActorValue: (n) => (state.av || {})[n] || 0, damageActorValue: (n, v) => { log.damage = (log.damage || []).concat([[n, Math.round(v)]]); state.av[n] -= v; },
     isWeaponDrawn: () => state.drawn,
     getAnimationVariableFloat: (n) => (n === "Speed" ? state.speed : 0),
@@ -28,7 +29,8 @@ function make(opts = {}) {
   const actors = {}; for (const local of Object.values(opts.others || {})) actors[local] = faceLog(local.toString(16));
   const sp = {
     printConsole() {}, writeLogs: (n, l) => log.lines.push(l),
-    Game: { getPlayer: () => player, getFormEx: (id) => ({ id }), forceThirdPerson: () => { log.thirdPerson++; } },
+    Game: { getPlayer: () => player, getFormEx: (id) => ({ id }), getFormFromFile: (id, file) => (file === "Missing.esp" ? null : { id, file }), forceThirdPerson: () => { log.thirdPerson++; } },
+    callNative: (cls, fn, self, a) => { (log.natives = log.natives || []).push([cls, fn, a]); if (cls !== "GreymarchCam" || state.noDll) throw new Error("Native function not found"); if (fn === "SetFreeCamera") { state.free = !!a; return true; } if (fn === "IsFreeCamera") return !!state.free; if (fn === "GetCamera") return (state.cam || [0, 0, 0, 0, 1, 0])[a]; return undefined; },
     Idle: { from: (f) => f || null }, Actor: { from: (f) => (f && actors[f.id]) || null }, Potion: { from: (f) => (f && f.potion) || null },
     Debug: { sendAnimationEvent: (ref, name) => log.events.push(name), notification: (t) => log.notes.push(t) },
     Ui: { isMenuOpen: (name) => name === state.menu },
@@ -48,7 +50,8 @@ function make(opts = {}) {
   const shown = () => log.pages.filter((p) => p.fn === "show");
   const say = (msg) => at(() => gm.greymarchPacket(msg));
   const eat = (name, food = true, poison = false, fid = 0x3eaea, mgefs = [0x3eb15]) => at(() => gm.greymarchConsumeNote({ potion: { isFood: () => food, isPoison: () => poison, getNumEffects: () => mgefs.length, getNthEffectMagicEffect: (i) => ({ getFormID: () => mgefs[i] }) }, getName: () => name, getFormID: () => fid }));
-  return { gm, log, state, tick, key, page, shown, say, eat, bridgeSrc: bridgeJs };
+  const camTick = (ms = 50) => { t += ms; at(() => gm.greymarchBuildCamTick(t)); };
+  return { gm, log, state, tick, camTick, key, page, shown, say, eat, bridgeSrc: bridgeJs };
 }
 
 test("holding G opens the wheel (hold mode) with every group, from the update phase; letting go tells the page", () => {
@@ -364,4 +367,31 @@ test("a potion: the player's drink plays the swig and its instant effect is undo
   assert.strictEqual(s.state.av.health, 90, "its effect stays"); assert.deepStrictEqual(s.log.idles, [], "no second swig");
   s.eat("Potion of Healing", false); s.tick();
   assert.deepStrictEqual(s.log.idles, [emotes.emoteById("potion").idle], "the next one the player drinks swigs again");
+});
+
+test("the build system's free camera: Place in the Build tab turns it on, a preview stands where the camera looks, the arrows move and turn it, Enter sends the exact spot, B or Esc leaves", () => {
+  const s = make();
+  s.state.cam = [1000, 2000, 300, 0, 1, 0]; // at 1000,2000,300 looking north
+  s.page({ type: "build-cam", mode: "place", key: "d932f:Skyrim.esm", name: "Blacksmith Forge" }); s.camTick();
+  assert.strictEqual(s.state.free, true, "the game's free camera is on");
+  const g = s.log.ghosts[0]; assert.deepStrictEqual(g.base, { id: 0xd932f, file: "Skyrim.esm" });
+  assert.deepStrictEqual(g.at, [1000, 2400, 300], "400 units ahead"); assert.deepStrictEqual(g.rot, [0, 0, 180], "facing the camera");
+  s.key(200, true); s.key(200, false); s.key(205, true); s.key(205, false); s.key(201, true); s.key(201, false); s.camTick(50);
+  assert.deepStrictEqual(g.at, [1000, 2440, 310]); assert.deepStrictEqual(g.rot, [0, 0, 195]);
+  s.key(28, true); s.key(28, false);
+  const sent = s.log.sent.filter((m) => m.customPacketType === "greymarchAdmin").pop();
+  assert.deepStrictEqual([sent.op, sent.args.sub, sent.args.key, sent.args.pos, sent.args.rot], ["build", "place_at", "d932f:Skyrim.esm", [1000, 2440, 310], 195]);
+  assert.ok(s.gm.greymarchBuildCam, "placing keeps the camera on for the next one");
+  s.say({ customPacketType: "greymarchAdminReply", rid: sent.rid, ok: true, data: { message: "Blacksmith Forge placed." } });
+  s.key(1, true); s.key(1, false);
+  assert.strictEqual(s.gm.greymarchBuildCam, null); assert.strictEqual(s.state.free, false, "Esc leaves: the camera is the player's again"); assert.ok(g.gone, "the preview is gone");
+  // moving a placed piece ends with the move
+  s.page({ type: "build-cam", mode: "move", key: "6c:Skyrim.esm", name: "Chest", id: 4278190240 }); s.camTick(50);
+  s.key(28, true); s.key(28, false);
+  const mv = s.log.sent.filter((m) => m.customPacketType === "greymarchAdmin").pop();
+  assert.deepStrictEqual([mv.args.sub, mv.args.id], ["move_to", 4278190240]); assert.strictEqual(s.gm.greymarchBuildCam, null);
+  // no plugin: says so, nothing changes
+  const t = make(); t.state.noDll = true;
+  t.page({ type: "build-cam", mode: "place", key: "d932f:Skyrim.esm", name: "Forge" }); t.camTick();
+  assert.ok(!t.gm.greymarchBuildCam, "no plugin: no free camera, nothing changes");
 });

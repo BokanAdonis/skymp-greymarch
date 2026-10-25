@@ -144,7 +144,7 @@ export class GreymarchBridge {
     greymarchPacket(msg: any): any {
         var type = msg.customPacketType;
         // GREYMARCH: staff panel traffic is handled first (and quietly: ghosts arrive every few seconds)
-        if (type === "greymarchAdminReply") { this.greymarchAdminToPage("reply", msg); return; }
+        if (type === "greymarchAdminReply") { var brids = this.greymarchBuildRids; if (brids && brids[msg.rid]) { delete brids[msg.rid]; this.greymarchBuildCamSay(msg.ok ? (msg.data && msg.data.message) || "Done." : String(msg.error || "That did not work.")); return; } this.greymarchAdminToPage("reply", msg); return; }
         if (type === "greymarchNotice") { if (msg.title) { this.greymarchToast(msg); return; } try { this.sp.Debug.notification(String(msg.text).slice(0, 300)); } catch (e) { /* a notice is a nicety */ } return; }
         if (type === "greymarchStats") { this.greymarchStatsWant = msg.stats && typeof msg.stats === "object" ? msg.stats : null; return; }
         if (type === "greymarchKill") { this.greymarchKillMe(); return; }
@@ -401,6 +401,7 @@ export class GreymarchBridge {
         this.greymarchEffects(); // staff effects: noclip, speed, frozen, ghosts (cheap: does real work every 400 ms)
         this.greymarchHungerDrive(); // hunger: the stagger, regeneration off while starving
         this.greymarchBuildAngleTick(); // a piece a GM placed was turned: this game turns its copy
+        this.greymarchBuildCamTick(Date.now()); // the build system's free camera: the preview where the camera looks
         this.greymarchMagicBlockDrive(); // NPC raise-the-dead and summons: ended at once
         this.greymarchShapeDrive(); // a creature form as an NPC: moved every frame like SkyMP moves other players; other players' creature attacks
         this.greymarchShapeTick(); // a creature form staff put the player in (a goat, a giant ...): the server decides, the body is changed here
@@ -543,6 +544,7 @@ export class GreymarchBridge {
         if (data && data.type === "release") { this.greymarchLift("the screen released it"); return; } // the screen's own safety timer
         if (data && data.type === "admin") { this.greymarchAdminSend(data); return; } // the staff panel asks the server for something (the SERVER decides if it is allowed)
         if (data && data.type === "admin-close") { this.greymarchAdminHide(); return; }
+        if (data && data.type === "build-cam") { this.greymarchBuildCamWanted = { mode: data.mode, key: data.key, name: data.name, id: data.id, at: Date.now() }; this.greymarchAdminHide(); return; } // the Build tab: place or move a piece with the free camera (greymarchBuildCamTick)
         if (data && data.type === "chat") { this.greymarchChatSend(data); return; } // the chatbox sends a line, or asks what this player may use (the SERVER decides)
         if (data && data.type === "chat-focus") { this.greymarchChatFocus(data.on); return; }
         if (data && data.type === "chat-sync") { this.greymarchChatSync(!!data.typing); return; }
@@ -645,6 +647,7 @@ export class GreymarchBridge {
     }
     // F7 opens the panel (the page itself closes it with F7 or Escape). Escape also closes it from here, because the game un-focuses the browser on Escape.
     greymarchKey(e: any): any {
+        if (this.greymarchBuildCam && this.greymarchBuildCamKey(e)) return; // the build system's free camera has the keys it uses
         if (this.greymarchEmoteNow && this.greymarchEmoteNow.kind === "loop" && (e.code === 17 || e.code === 30 || e.code === 31 || e.code === 32 || e.code === 57)) { var mvDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (mvDown && e.isUp !== true) this.greymarchEmoteStopWanted = Date.now(); } // W A S D or Space ends an emote that lasts (greymarchEmoteTick)
         if (e.code === 19) { var rDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (e.isUp === true) rDown = false; if (rDown && !this.greymarchKey19 && this.greymarchWolfOn && !this.greymarchChatTyping) this.greymarchWolfRoarAt = Date.now(); this.greymarchKey19 = rDown; return; } // R: the werewolf roars (greymarchWolfTick; only while changed)
         if (e.code === 44) { var zDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (e.isUp === true) zDown = false; if (zDown && !this.greymarchKey44 && !this.greymarchChatTyping) { if (this.greymarchWolfOn) this.greymarchWolfBackAt = Date.now(); else this.greymarchWolfKeyAt = Date.now(); } this.greymarchKey44 = zDown; return; } // Z while changed: ask the server to change back (greymarchWolfTick)
@@ -1549,6 +1552,92 @@ export class GreymarchBridge {
                 this.greymarchCrumb("magic block: ended effect " + q[i].effect.toString(16) + " of NPC " + q[i].caster.toString(16));
             } catch (dErr) { /* it ended by itself */ }
         }
+    }
+    // ---- THE BUILD SYSTEM'S FREE CAMERA (gamemode buildsys.js "place_at" / "move_to"). Place or Hold in the Build tab closes the panel and turns on the game's own free
+    // camera (the console's "tfc", given by Greymarch's SKSE plugin GreymarchCamera.dll through the script GreymarchCam). The GM flies it as usual (WASD, the mouse);
+    // a preview of the piece (a copy in this game only) stands where the camera looks. Up / Down arrows: closer / farther; Left / Right: turn it; Page Up / Page Down:
+    // raise / lower it; Shift: bigger steps; Enter: put it there (the server checks the spot is in the GM's cell, near their body); B or Esc: leave.
+    // Placing keeps the camera on for the next one; moving a placed piece ends with it. Nothing here decides anything: the server does the placing.
+    greymarchBuildCamSay(text: string): any { try { this.greymarchToast({ title: "Build", text: String(text).slice(0, 300), kind: "info", ms: 4500 }); } catch (e) { try { this.sp.Debug.notification(String(text).slice(0, 200)); } catch (e2) { /* a hint is a nicety */ } } }
+    greymarchBuildCamStart(w: any): any {
+        var sp = this.sp, key = String(w.key || ""), m = /^([0-9a-f]{1,8}):(.+)$/i.exec(key), base: any = null;
+        try { base = m ? sp.Game.getFormFromFile(parseInt(m[1], 16), m[2]) : null; } catch (e) { base = null; }
+        if (!base) { this.greymarchBuildCamSay("That piece is not in this game's files."); return; }
+        var on = false;
+        try { on = !!sp.callNative("GreymarchCam", "SetFreeCamera", undefined, true); } catch (e) { on = false; this.greymarchLog("build: no free camera (" + e + ")"); }
+        if (!on) { this.greymarchBuildCamSay("The free camera needs the latest game files (GreymarchCamera.dll). The Build tab's own buttons still place and move things."); return; }
+        this.greymarchBuildCam = { mode: w.mode === "move" ? "move" : "place", key: key, name: String(w.name || "It").slice(0, 60), id: Number(w.id) >>> 0, base: base, ghost: null, dist: 400, turn: 0, up: 0, last: "", next: 0, shift: false };
+        this.greymarchLog("build: free camera on, " + this.greymarchBuildCam.mode + " " + key);
+        this.greymarchBuildCamSay(this.greymarchBuildCam.name + ": fly with WASD and the mouse. Up / Down arrows closer / farther, Left / Right turn, Page Up / Down raise / lower, Shift bigger steps, Enter puts it there, B or Esc leaves.");
+    }
+    greymarchBuildCamEnd(why: string): any {
+        var b = this.greymarchBuildCam;
+        this.greymarchBuildCam = null;
+        if (!b) return;
+        if (b.ghost) { try { b.ghost.disable(false); b.ghost.delete(); } catch (e) { /* gone */ } }
+        try { if (this.sp.callNative("GreymarchCam", "IsFreeCamera", undefined)) this.sp.callNative("GreymarchCam", "SetFreeCamera", undefined, false); } catch (e) { /* the camera is the player's again on the next view change */ }
+        this.greymarchLog("build: free camera off (" + why + ")");
+    }
+    // where the preview goes: the camera's spot plus its forward direction times the distance, raised by up; turned to face the camera, plus the GM's turn
+    greymarchBuildCamSpot(): any {
+        var sp = this.sp, b = this.greymarchBuildCam, c: number[] = [];
+        for (var i = 0; i < 6; i++) c.push(Number(sp.callNative("GreymarchCam", "GetCamera", undefined, i)));
+        if (!c.every(function (n) { return isFinite(n); })) return null;
+        var len = Math.hypot(c[3], c[4], c[5]); if (!(len > 0.01)) return null;
+        var fx = c[3] / len, fy = c[4] / len, fz = c[5] / len;
+        var pos = [c[0] + fx * b.dist, c[1] + fy * b.dist, c[2] + fz * b.dist + b.up];
+        var face = Math.atan2(-fx, -fy) * 180 / Math.PI; // towards the camera (0 = north, like the game's Z angle)
+        var rot = (((face + b.turn) % 360) + 360) % 360;
+        return { pos: pos, rot: rot };
+    }
+    greymarchBuildCamTick(now: number): any {
+        var w = this.greymarchBuildCamWanted;
+        if (w) { this.greymarchBuildCamWanted = null; if (now - w.at <= 3000) { if (this.greymarchBuildCam) this.greymarchBuildCamEnd("another piece"); this.greymarchBuildCamStart(w); } }
+        var b = this.greymarchBuildCam;
+        if (!b || now < b.next) return;
+        b.next = now + 33;
+        try {
+            if (!this.sp.callNative("GreymarchCam", "IsFreeCamera", undefined)) { this.greymarchBuildCamEnd("the free camera went off"); return; }
+            var spot = this.greymarchBuildCamSpot();
+            if (!spot) return;
+            var sig = spot.pos.map(function (n: number) { return Math.round(n); }).join(",") + "," + Math.round(spot.rot);
+            if (sig === b.last) return;
+            b.last = sig;
+            if (!b.ghost) { var player = this.sp.Game.getPlayer(); b.ghost = player ? player.placeAtMe(b.base, 1, false, false) : null; if (!b.ghost) return; }
+            b.ghost.setPosition(spot.pos[0], spot.pos[1], spot.pos[2]);
+            b.ghost.setAngle(0, 0, spot.rot);
+        } catch (err) { if (b.ghost) { try { b.ghost.delete(); } catch (dErr) { /* gone */ } b.ghost = null; } } // a cell change took the preview: made again next time
+    }
+    // the free camera's keys; true when the key was the build system's (the game still flies the camera with its own)
+    greymarchBuildCamKey(e: any): boolean {
+        var b = this.greymarchBuildCam; if (!b) return false;
+        var down = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true);
+        if (e.isUp === true) down = false;
+        if (e.code === 42 || e.code === 54) { b.shift = down; return false; } // Shift: bigger steps (it still runs the camera faster)
+        var mine = [28, 1, 200, 208, 203, 205, 201, 209, 48];
+        if (mine.indexOf(e.code) < 0) return false;
+        if (!down) return true;
+        var big = !!b.shift;
+        if (e.code === 200) b.dist = Math.min(2000, b.dist + (big ? 200 : 40));
+        else if (e.code === 208) b.dist = Math.max(80, b.dist - (big ? 200 : 40));
+        else if (e.code === 203) b.turn -= big ? 90 : 15;
+        else if (e.code === 205) b.turn += big ? 90 : 15;
+        else if (e.code === 201) b.up += big ? 100 : 10;
+        else if (e.code === 209) b.up -= big ? 100 : 10;
+        else if (e.code === 28 && e.isRepeating !== true) this.greymarchBuildCamSend();
+        else if (e.code === 48 || e.code === 1) { this.greymarchBuildCamEnd(e.code === 48 ? "B" : "Esc"); if (e.code === 48) this.greymarchAdminShow("build"); }
+        b.next = 0; // the preview follows at once
+        return true;
+    }
+    greymarchBuildCamSend(): any {
+        var b = this.greymarchBuildCam; if (!b) return;
+        var spot: any = null; try { spot = this.greymarchBuildCamSpot(); } catch (e) { spot = null; }
+        if (!spot) { this.greymarchBuildCamSay("The camera could not be read. Try again."); return; }
+        var rid = 1000000000 + (this.greymarchBuildRidN = (this.greymarchBuildRidN || 0) + 1);
+        (this.greymarchBuildRids || (this.greymarchBuildRids = {}))[rid] = true;
+        var pos = spot.pos.map(function (n: number) { return Math.round(n * 10) / 10; }), rot = Math.round(spot.rot * 10) / 10;
+        this.greymarchAdminSend({ rid: rid, op: "build", args: b.mode === "move" ? { sub: "move_to", id: b.id, pos: pos, rot: rot } : { sub: "place_at", key: b.key, pos: pos, rot: rot } });
+        if (b.mode === "move") this.greymarchBuildCamEnd("moved");
     }
     // a piece a GM placed was turned (gamemode buildsys.js): this game's copy of it, if it has one loaded, takes the server's angle
     greymarchBuildAngleTick(): any {
