@@ -6,6 +6,7 @@
 #include "ActionListener.h"
 #include "GreymarchBalance.h"
 #include "HitMessage.h"
+#include "formulas/TES5DamageFormula.h"
 
 PartOne& GetPartOne();
 using namespace std::chrono_literals;
@@ -13,10 +14,18 @@ using namespace std::chrono_literals;
 namespace {
 constexpr uint32_t kIronDagger = 0x0001397E;
 
+// puts the game files' table back when a test ends, even a failed one: the table is shared by every test after it
+struct BalanceReset
+{
+  ~BalanceReset() { GreymarchBalance::Set({}); }
+};
+
 // one hit of the player on themselves with an iron dagger: how much of their health it took (0..1)
 float OneHit(float damageMult = 1.f)
 {
   PartOne& p = GetPartOne();
+  // GetPartOne's own formula deals 25 every hit; this test is about the real one
+  p.SetDamageFormula(std::make_unique<TES5DamageFormula>());
   DoConnect(p, 0);
   p.CreateActor(0xff000000, { 0, 0, 0 }, 0, 0x3c);
   p.SetUserActor(0, 0xff000000);
@@ -82,6 +91,7 @@ TEST_CASE("Greymarch: the balance table reads the spell part (multipliers, dual 
 TEST_CASE("Greymarch: a weapon's damage comes from the live table, and the attacker's multiplier scales it",
           "[Greymarch]")
 {
+  BalanceReset reset;
   GreymarchBalance::Set({});
   const float plain = OneHit();
   REQUIRE(plain > 0.f);
