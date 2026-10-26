@@ -13,6 +13,9 @@
 //   maxArmor      the most armor can block, in percent (the game's fMaxArmorRating)
 //   shieldBlock / weaponBlock   what still gets through a block with a shield / with a weapon (0.35 = 65% stopped)
 //   powerAttack / sneak         damage multipliers for a power attack and a sneak attack
+//   spells    { "<global spell id>": multiplier }   a spell hit's damage times this (the F7 Spells balance tab: the number set / the game's, times the school's percent)
+//   dualCast                    how much harder a dual cast spell hits (the game's 2.2)
+//   playerSpells / npcSpells    a spell hit's damage times this when a player / an NPC cast it
 struct GreymarchBalanceTable
 {
   std::unordered_map<uint32_t, float> weaponDamage;
@@ -23,6 +26,10 @@ struct GreymarchBalanceTable
   std::optional<float> weaponBlock;
   std::optional<float> powerAttack;
   std::optional<float> sneak;
+  std::unordered_map<uint32_t, float> spellMult;
+  std::optional<float> dualCast;
+  std::optional<float> playerSpells;
+  std::optional<float> npcSpells;
 
   // Throws on text that is not a JSON object. Values out of range are left out (the plugin's value is used).
   static GreymarchBalanceTable FromJson(const nlohmann::json& j);

@@ -56,6 +56,22 @@ TEST_CASE("Greymarch: the balance table reads numbers and leaves out what is bro
   REQUIRE_THROWS(GreymarchBalanceTable::FromJson(nlohmann::json::parse("[1]")));
 }
 
+TEST_CASE("Greymarch: the balance table reads the spell part (multipliers, dual casting, players and NPCs) and refuses what is out of range",
+          "[Greymarch]")
+{
+  auto t = GreymarchBalanceTable::FromJson(nlohmann::json::parse(
+    R"({"spells":{"77774":2,"77773":0.5,"9":500,"y":1},"dualCast":3,"playerSpells":0.8,"npcSpells":20})"));
+  REQUIRE(t.spellMult.size() == 2);
+  REQUIRE(t.spellMult.at(77774) == 2.f);
+  REQUIRE(t.spellMult.at(77773) == Catch::Approx(0.5f));
+  REQUIRE(t.dualCast.value() == 3.f);
+  REQUIRE(t.playerSpells.value() == Catch::Approx(0.8f));
+  REQUIRE_FALSE(t.npcSpells.has_value()); // more than 10 times: refused
+  auto none = GreymarchBalanceTable::FromJson(nlohmann::json::parse(R"({"dualCast":0.5})"));
+  REQUIRE_FALSE(none.dualCast.has_value()); // below 1: refused
+  REQUIRE(none.spellMult.empty());
+}
+
 TEST_CASE("Greymarch: a weapon's damage comes from the live table, and the attacker's multiplier scales it",
           "[Greymarch]")
 {
