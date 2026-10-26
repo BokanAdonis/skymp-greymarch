@@ -102,6 +102,14 @@ TEST_CASE("Distribution folder must contain all requested files",
     return spdlog::info("Skipping DistContentsTest - CI env not detected");
   }
 
+  // GREYMARCH: a build of only some targets (greymarch-server.yml builds the
+  // server and the unit tests) leaves out the client, papyrus-vm and gamemode
+  auto partial = getenv("SKYMP_PARTIAL_BUILD");
+  if (partial && strcmp(partial, "1") == 0) {
+    return spdlog::info(
+      "Skipping DistContentsTest - only some targets were built");
+  }
+
   auto distDir = std::filesystem::path(DIST_DIR);
   auto begin = std::filesystem::recursive_directory_iterator(distDir);
   auto end = std::filesystem::recursive_directory_iterator();

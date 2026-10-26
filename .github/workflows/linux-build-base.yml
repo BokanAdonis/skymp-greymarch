@@ -226,5 +226,8 @@ jobs:
           - name: Test
             if: ${{ !inputs.skip_tests }}
             run: |
-              docker run --rm -v "${{ github.workspace }}:/src" -w /src/build -u skymp localhost/buildimage \
+              # GREYMARCH: a build of only some targets (--target=...) has only part of the dist; DistContentsTest skips then
+              docker run --rm -v "${{ github.workspace }}:/src" -w /src/build -u skymp \
+                -e "SKYMP_PARTIAL_BUILD=${{ contains(inputs.extra_build_args, '--target') && '1' || '' }}" \
+                localhost/buildimage \
                 ctest -C ${{env.BUILD_TYPE}} --verbose --output-on-failure
