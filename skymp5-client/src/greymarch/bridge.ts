@@ -66,6 +66,7 @@ const VAMP_MENU_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmVampRun").s
 const OPEN_ON_RELEASE = [65, 35, 48, 64, 66, 37]; // F7, H, B, F6, F8, K: their windows open when the key is let go (greymarchKey)
 const FORGE_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmForgeRun").split("greymarch-prof").join("greymarch-forge").split("2147483220").join("2147483225"); // the Greymarch forge window: the same loader, another page
 const CRAFT_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmCraftRun").split("greymarch-prof").join("greymarch-craft").split("2147483220").join("2147483224"); // the crafting panel (a station was used): the same loader, another page
+const MINI_KEEP_MS = 3500; // a mini game window kept up between logs (the chopping block) closes if the next does not come within this
 const MINIGAME_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmMiniRun").split("greymarch-prof").join("greymarch-minigame").split("2147483220").join("2147483226"); // the profession mini games (gamemode minigames.js): the same loader, another page, over the others
 const LEDGER_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmLedgerRun").split("greymarch-prof").join("greymarch-ledger").split("2147483220").join("2147483223"); // the guard ledger (/reports): the same loader, another page
 
@@ -581,7 +582,7 @@ export class GreymarchBridge {
         if (data && data.type === "chancery") { this.greymarchChanceryAsk(data); return; } // the chancery window asks the server (the SERVER decides)
         if (data && data.type === "chancery-close") { this.greymarchChanceryHide(); return; }
         if (data && data.type === "minigame-shown") { this.greymarchMiniSend("greymarchMinigameShown", { token: data.token }); return; } // the mini game window is up
-        if (data && data.type === "minigame-result") { this.greymarchMiniSend("greymarchMinigameResult", { token: data.token, ok: data.ok === true }); this.greymarchMiniHide(); return; }
+        if (data && data.type === "minigame-result") { this.greymarchMiniSend("greymarchMinigameResult", { token: data.token, ok: data.ok === true }); if (this.greymarchMiniKeep) { this.greymarchMiniKeptAt = Date.now(); return; } this.greymarchMiniHide(); return; } // keep: the window waits for the server's word (greymarchMiniDone)
         if (data && data.type === "craft") { this.greymarchCraftAsk(data); return; } // the crafting panel asks the server (the SERVER decides and makes the item)
         if (data && data.type === "craft-close") { this.greymarchCraftHide(); return; }
         if (data && data.type === "forge") { this.greymarchForgeAsk(data); return; } // the forge window asks the server (the SERVER decides and makes the item)
@@ -2472,9 +2473,12 @@ export class GreymarchBridge {
         if (this.greymarchScreenUp) return; // the select screen: the server lets the work through once it sees no window (or the player tries again)
         this.greymarchLog("minigame: " + String((msg && msg.kind) || "?") + " (level " + String((msg && msg.level) || 1) + ")");
         this.greymarchMiniOn = true;
+        // keep (gamemode professions.js, the chopping block): the window stays up between one log and the next; the server's greymarchMinigameDone { keep: true }
+        // says another is coming, anything else closes it, and with no next one within MINI_KEEP_MS it closes by itself (greymarchMiniActivateTick)
+        this.greymarchMiniKeep = msg.keep === true; this.greymarchMiniKeptAt = 0;
         this.sp.browser.setVisible(true);
         this.sp.browser.setFocused(true);
-        this.greymarchMiniToPage("show", { token: msg.token, kind: msg.kind, level: msg.level, quick: msg.quick === true, recipe: msg.recipe || null, animal: msg.animal || "", ore: msg.ore || "" }); // recipe: the Chef's dish and ingredients; animal: the Hunter's kill (its coat); ore: the Miner's vein
+        this.greymarchMiniToPage("show", { token: msg.token, kind: msg.kind, level: msg.level, quick: msg.quick === true, recipe: msg.recipe || null, animal: msg.animal || "", ore: msg.ore || "", keep: msg.keep === true }); // recipe: the Chef's dish and ingredients; animal: the Hunter's kill (its coat); ore: the Miner's vein
         // the character acts it out: kneeling over the body to skin it (the emote wheel's "Search a body"; the other work has the game's own animation already:
         // the forge, the pot, the chopping block, the vein)
         // the server names it (msg.emote: examine for mining, searchbody for skinning); an older server: skinning kneels
@@ -2483,6 +2487,7 @@ export class GreymarchBridge {
     }
     greymarchMiniHide(): any {
         if (this.greymarchMiniActing && !this.greymarchMiniOn) { this.greymarchMiniActing = false; this.greymarchEmoteStopWanted = Date.now(); }
+        this.greymarchMiniKeep = false; this.greymarchMiniKeptAt = 0;
         if (!this.greymarchMiniOn) return;
         this.greymarchMiniOn = false;
         this.greymarchMiniToPage("hide", true);
@@ -2493,6 +2498,7 @@ export class GreymarchBridge {
         this.controller.emitter.emit("sendMessage", { message: message, reliability: "reliable" });
     }
     greymarchMiniDone(msg: any): any {
+        if (msg && msg.keep === true && this.greymarchMiniOn && this.greymarchMiniKeep) { this.greymarchMiniKeptAt = Date.now(); return; } // the next log is coming: the window stays up (the page shows how this one went)
         this.greymarchMiniHide();
         var acted = !!this.greymarchMiniActing;
         if (acted) { this.greymarchMiniActing = false; this.greymarchEmoteStopWanted = Date.now(); } // up again before the body menu opens
@@ -2501,6 +2507,8 @@ export class GreymarchBridge {
     }
     // the thing the player won a mini game for is used again, from the update phase (Papyrus calls)
     greymarchMiniActivateTick(): any {
+        // a window kept up between logs with no next one in time: closed, so it never holds the keys for nothing
+        if (this.greymarchMiniOn && this.greymarchMiniKeptAt && Date.now() - this.greymarchMiniKeptAt > MINI_KEEP_MS) { this.greymarchLog("minigame: no next one, the window closes"); this.greymarchMiniHide(); }
         var want = this.greymarchMiniActivate;
         if (!want || Date.now() < want.at) return; // a moment after the kneel ends
         this.greymarchMiniActivate = null;

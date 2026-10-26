@@ -32,6 +32,19 @@ test("a win uses the thing again from the update phase; a loss shows the server'
   assert.ok(bridge.includes("return !!(this.greymarchMiniOn || this.greymarchAdminOn"), "the game's keys stay with the page while it is open");
 });
 
+test("keep (the chopping block, 2026-10-26): the window stays up between logs on the server's word, and closes by itself if no next one comes", () => {
+  const show = bridge.slice(bridge.indexOf("greymarchMiniShow(msg: any)"), bridge.indexOf("greymarchMiniHide(): any {"));
+  assert.ok(show.includes("this.greymarchMiniKeep = msg.keep === true; this.greymarchMiniKeptAt = 0;") && show.includes("keep: msg.keep === true }"), "the show says so, and the page is told");
+  assert.ok(bridge.includes("if (this.greymarchMiniKeep) { this.greymarchMiniKeptAt = Date.now(); return; } this.greymarchMiniHide(); return; }"), "a kept window waits for the server after a result; any other closes at once, as before");
+  const done = bridge.slice(bridge.indexOf("greymarchMiniDone(msg: any)"), bridge.indexOf("greymarchMiniActivateTick(): any {"));
+  assert.ok(done.indexOf("msg.keep === true && this.greymarchMiniOn && this.greymarchMiniKeep") < done.indexOf("this.greymarchMiniHide();"), "Done with keep: stays up; without: closes");
+  const hide = bridge.slice(bridge.indexOf("greymarchMiniHide(): any {"), bridge.indexOf("greymarchMiniSend(type: string"));
+  assert.ok(hide.includes("this.greymarchMiniKeep = false; this.greymarchMiniKeptAt = 0;"));
+  const tick = bridge.slice(bridge.indexOf("greymarchMiniActivateTick(): any {"), bridge.indexOf("greymarchCraftHide(): any {"));
+  assert.ok(tick.includes("Date.now() - this.greymarchMiniKeptAt > MINI_KEEP_MS") && tick.includes("this.greymarchMiniHide();"), "no next one in time: closed");
+  assert.ok(/const MINI_KEEP_MS = \d+;/.test(bridge));
+});
+
 test("the character acts it out: kneeling over the body while skinning, up again before the body menu opens; the quick prompts go to the page", () => {
   const show = bridge.slice(bridge.indexOf("greymarchMiniShow(msg: any)"), bridge.indexOf("greymarchMiniHide(): any {"));
   assert.ok(show.includes('var mEm = emoteMod.emoteById(typeof msg.emote === "string" ? msg.emote : msg.kind === "skin" ? "searchbody" : "");'), "the server names the emote (examine, searchbody); an older server: skinning kneels");
