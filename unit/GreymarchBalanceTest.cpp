@@ -30,6 +30,12 @@ float OneHit(float damageMult = 1.f)
   hitMsg.data.aggressor = 0x14;
   hitMsg.data.source = kIronDagger;
   ac.AddItem(hitMsg.data.source, 1);
+  // the server only lets a weapon hit land when the weapon is in the hand (OnHit checks the equipment)
+  Inventory::ExtraData worn;
+  worn.worn_ = true;
+  Equipment eq;
+  eq.inv.entries.push_back(Inventory::Entry(kIronDagger, 1, worn));
+  ac.SetEquipment(eq);
 
   ac.SetLastHitTime(0xff000000, std::chrono::steady_clock::now() - 10s);
   p.Messages().clear();
