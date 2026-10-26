@@ -3,6 +3,7 @@
 #include <catch2/catch_all.hpp>
 #include <chrono>
 
+#include "ActionListener.h"
 #include "GreymarchBalance.h"
 #include "HitMessage.h"
 
