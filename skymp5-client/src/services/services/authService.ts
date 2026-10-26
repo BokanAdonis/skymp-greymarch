@@ -244,6 +244,8 @@ export class AuthService extends ClientListener {
       case 'greymarchMinigameDone':
       case 'greymarchLedgerReply': // the guard ledger (/reports, gamemode reports.js)
       case 'greymarchLedgerOpen':
+      case 'greymarchScribeReply': // the scribe's desk (/scribe, gamemode scribe.js)
+      case 'greymarchScribeOpen':
       case 'greymarchWolfAlphas':
       case 'greymarchWolfRoar':
         this.gm.greymarchPacket(msgContent);

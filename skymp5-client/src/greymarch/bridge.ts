@@ -68,7 +68,8 @@ const FORGE_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmForgeRun").spli
 const CRAFT_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmCraftRun").split("greymarch-prof").join("greymarch-craft").split("2147483220").join("2147483224"); // the crafting panel (a station was used): the same loader, another page
 const MINI_KEEP_MS = 3500; // a mini game window kept up between logs (the chopping block) closes if the next does not come within this
 const MINIGAME_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmMiniRun").split("greymarch-prof").join("greymarch-minigame").split("2147483220").join("2147483226"); // the profession mini games (gamemode minigames.js): the same loader, another page, over the others
-const LEDGER_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmLedgerRun").split("greymarch-prof").join("greymarch-ledger").split("2147483220").join("2147483223"); // the guard ledger (/reports): the same loader, another page
+const LEDGER_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmLedgerRun").split("greymarch-prof").join("greymarch-ledger").split("2147483220").join("2147483223"); // the guard ledger (/reports)
+const SCRIBE_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmScribeRun").split("greymarch-prof").join("greymarch-scribe").split("2147483220").join("2147483227"); // the scribe's desk (/scribe): letters and books: the same loader, another page
 
 // Which way the camera faces, in degrees the Skyrim way (0 = north, 90 = east). Skyrim Platform has no camera call, so 24 points on a wide ring round the head are
 // put through worldPointToScreenPoint: the camera faces where the points in front of it cross the middle of the screen. null = could not tell (looking straight up or down).
@@ -197,6 +198,8 @@ export class GreymarchBridge {
         if (type === "greymarchVampMenuOpen") { this.greymarchVampMenuShow(); return; }
         if (type === "greymarchLedgerReply") { this.greymarchLedgerToPage("reply", msg); return; } // the guard ledger (/reports)
         if (type === "greymarchLedgerOpen") { this.greymarchLedgerShow(); return; }
+        if (type === "greymarchScribeReply") { this.greymarchScribeToPage("reply", msg); return; } // the scribe's desk (/scribe)
+        if (type === "greymarchScribeOpen") { this.greymarchScribeShow(); return; }
         if (type === "greymarchProfReply") { this.greymarchLog("prof: the server's answer arrived (rid " + msg.rid + ", ok " + msg.ok + ")"); this.greymarchProfToPage("reply", msg); return; } // the professions window (K)
         if (type === "greymarchCombatMod") { var cm = Number(msg.mult); this.greymarchCombatWant = cm >= 0.1 && cm <= 3 ? cm : 1; return; } // the damage multiplier for what is in hand (professions: a weapon above your rank hits weaker, a Brawler's fists hit harder)
         if (type === "greymarchMenuEvent" && msg.type === "body" && Number(msg.looking) > 0 && !this.greymarchMenuOn) { this.greymarchMenuShow({ mode: "open", looking: Number(msg.looking) }); return; } // E on the body of a dead wild animal (gamemode wildlifesystem.js): the menu opens on it to take what is on it
@@ -316,7 +319,7 @@ export class GreymarchBridge {
         this.greymarchToPage("hide");
         this.sp.browser.setFocused(false);
         this.greymarchScreenUp = false;
-        this.sp.browser.setVisible(!!this.greymarchCraftOn || !!this.greymarchForgeOn || !!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchEmoteOn || !!this.greymarchGuardsHud || !!(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchCraftOn || this.greymarchForgeOn)); // stays visible (but never focused) while the voice display is on; the staff panel keeps it up and focused
+        this.sp.browser.setVisible(!!this.greymarchCraftOn || !!this.greymarchForgeOn || !!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchEmoteOn || !!this.greymarchGuardsHud || !!(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchScribeOn || this.greymarchCraftOn || this.greymarchForgeOn)); // stays visible (but never focused) while the voice display is on; the staff panel keeps it up and focused
         if (this.greymarchAdminOn) this.sp.browser.setFocused(true);
         this.greymarchChatShow();
         this.greymarchReportLoadOrder();
@@ -560,7 +563,7 @@ export class GreymarchBridge {
         try { var talking = {}; if (hud) for (var ti = 0; ti < ids.length; ti++) talking[ids[ti]] = 1; (Function("return this")() as any).__gmSpeaking = talking; } catch (e) { /* the names stay unmarked */ }
         this.greymarchHudOn = hud;
         // the page is shown (never focused) while the display is on, hidden when it is off; the select screen and the veil decide for themselves while they are up
-        if (changed && !this.greymarchScreenUp) { try { this.sp.browser.setVisible(!!this.greymarchCraftOn || !!this.greymarchForgeOn || hud || !!this.greymarchChatOn || !!this.greymarchEmoteOn || !!this.greymarchGuardsHud || !!(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchCraftOn || this.greymarchForgeOn)); if (!this.greymarchChatTyping && !this.greymarchPanelHasKeys()) this.sp.browser.setFocused(false); } catch (err) { /* nothing to do */ } }
+        if (changed && !this.greymarchScreenUp) { try { this.sp.browser.setVisible(!!this.greymarchCraftOn || !!this.greymarchForgeOn || hud || !!this.greymarchChatOn || !!this.greymarchEmoteOn || !!this.greymarchGuardsHud || !!(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchScribeOn || this.greymarchCraftOn || this.greymarchForgeOn)); if (!this.greymarchChatTyping && !this.greymarchPanelHasKeys()) this.sp.browser.setFocused(false); } catch (err) { /* nothing to do */ } }
     }
     greymarchBrowserMessage(e: any): any {
         if (!e.arguments || e.arguments[0] !== "greymarch") return;
@@ -592,6 +595,8 @@ export class GreymarchBridge {
         if (data && data.type === "vampire-close") { this.greymarchVampMenuHide(); return; }
         if (data && data.type === "ledger") { this.greymarchLedgerAsk(data); return; } // the guard ledger asks the server (the SERVER decides)
         if (data && data.type === "ledger-close") { this.greymarchLedgerHide(); return; }
+        if (data && data.type === "scribe") { this.greymarchScribeAsk(data); return; } // the scribe's desk asks the server (the SERVER decides)
+        if (data && data.type === "scribe-close") { this.greymarchScribeHide(); return; }
         if (data && data.type === "emote") { this.greymarchEmotePlayWanted = { id: data.id, at: Date.now() }; return; } // the emote wheel: play one (greymarchEmoteTick checks it is on the list)
         if (data && data.type === "emote-stop") { this.greymarchEmoteStopWanted = Date.now(); this.greymarchFaceClearWanted = Date.now(); return; } // the middle of the wheel: the emote and the face
         if (data && data.type === "emote-close") { this.greymarchEmoteHide(); return; }
@@ -672,7 +677,7 @@ export class GreymarchBridge {
     greymarchAdminHide(): any {
         this.greymarchAdminOn = false;
         this.greymarchAdminToPage("hide", true);
-        if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchCraftOn || !!this.greymarchForgeOn || !!this.greymarchHudOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchEmoteOn || !!this.greymarchGuardsHud || !!(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchCraftOn || this.greymarchForgeOn)); }
+        if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchCraftOn || !!this.greymarchForgeOn || !!this.greymarchHudOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchEmoteOn || !!this.greymarchGuardsHud || !!(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchScribeOn || this.greymarchCraftOn || this.greymarchForgeOn)); }
     }
     greymarchAdminSend(data: any): any {
         var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchAdmin", rid: data.rid, op: data.op, args: data.args }) };
@@ -710,6 +715,7 @@ export class GreymarchBridge {
         else if (e.code === 1 && this.greymarchChanceryOn) this.greymarchChanceryHide();
         else if (e.code === 1 && this.greymarchVampMenuOn) this.greymarchVampMenuHide();
         else if (e.code === 1 && this.greymarchLedgerOn) this.greymarchLedgerHide();
+        else if (e.code === 1 && this.greymarchScribeOn) this.greymarchScribeHide();
         else if (e.code === 1 && this.greymarchMiniOn) this.greymarchMiniToPage("escape", true); // Esc gives the mini game up (the page sends the loss)
         else if (e.code === 1 && this.greymarchCraftOn) this.greymarchCraftHide();
         else if (e.code === 1 && this.greymarchForgeOn) this.greymarchForgeHide();
@@ -722,7 +728,7 @@ export class GreymarchBridge {
         else if (code === 48 && !this.greymarchAdminOn && !this.greymarchMenuOn && !this.greymarchChatTyping && !this.greymarchPanelHasKeys()) { if (this.greymarchEmoteOn) this.greymarchEmoteHide(); this.greymarchAdminShow("build"); } // B: the staff panel straight on its Build tab (GM and up; for anyone else the page closes again at once)
         else if (code === 64 && !this.greymarchAdminOn && !this.greymarchMenuOn && !this.greymarchChatTyping) { if (this.greymarchEmoteOn) this.greymarchEmoteHide(); this.greymarchAdminShow("dungeons"); } // F6: the staff panel straight on its Dungeons tab (GM and up; the server checks the "dungeons" command, the page closes it with F6)
         else if (code === 66 && !this.greymarchAdminOn && !this.greymarchMenuOn && !this.greymarchChatTyping) this.greymarchAdminShow("tester"); // F8: the same panel as the tester menu (teleports, items, NPCs; the server gives testers those commands on the test server only)
-        else if (code === 37 && !this.greymarchChatTyping && !this.greymarchEmoteOn && !(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchCraftOn || this.greymarchForgeOn)) this.greymarchProfWanted = Date.now(); // K opens the professions window from the update phase (greymarchProfPending), where the game's menus can be asked about (the page itself closes it with K or Esc, like the staff panel with F7)
+        else if (code === 37 && !this.greymarchChatTyping && !this.greymarchEmoteOn && !(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchScribeOn || this.greymarchCraftOn || this.greymarchForgeOn)) this.greymarchProfWanted = Date.now(); // K opens the professions window from the update phase (greymarchProfPending), where the game's menus can be asked about (the page itself closes it with K or Esc, like the staff panel with F7)
     }
     // a missed key-up (the game did not send it): once the key reads as up, the hotkey opens anyway (every frame, from greymarchTick)
     greymarchHotkeyTick(now: number): any {
@@ -2059,7 +2065,7 @@ export class GreymarchBridge {
     greymarchToastTick(now: any): any {
         if (!this.greymarchToastUntil || now < this.greymarchToastUntil) return;
         this.greymarchToastUntil = 0;
-        if (!this.greymarchAdminOn && !this.greymarchMenuOn && !this.greymarchHudOn && !this.greymarchChatOn && !this.greymarchGuardsHud && !(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchCraftOn || this.greymarchForgeOn) && !this.greymarchScreenUp) { try { this.sp.browser.setVisible(false); } catch (e2) { /* fine */ } }
+        if (!this.greymarchAdminOn && !this.greymarchMenuOn && !this.greymarchHudOn && !this.greymarchChatOn && !this.greymarchGuardsHud && !(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchScribeOn || this.greymarchCraftOn || this.greymarchForgeOn) && !this.greymarchScreenUp) { try { this.sp.browser.setVisible(false); } catch (e2) { /* fine */ } }
     }
     // KILL: staff kill a character from THEIR OWN game, which is the one thing every SkyMP build lets a game do to its own character.
     greymarchKillMe(): any {
@@ -2276,7 +2282,7 @@ export class GreymarchBridge {
         }
     }
     greymarchMenuShow(arg: any): any {
-        if (this.greymarchScreenUp || this.greymarchAdminOn || this.greymarchMenuOn || (this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchCraftOn || this.greymarchForgeOn)) return; // not over the select screen, the staff panel, the professions window, or itself
+        if (this.greymarchScreenUp || this.greymarchAdminOn || this.greymarchMenuOn || (this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchScribeOn || this.greymarchCraftOn || this.greymarchForgeOn)) return; // not over the select screen, the staff panel, the professions window, or itself
         this.greymarchMenuOn = true;
         this.sp.browser.setVisible(true);
         this.sp.browser.setFocused(true);
@@ -2285,7 +2291,7 @@ export class GreymarchBridge {
     // HOLD X: look at a player and hold X, and the menu for THAT player appears; let go of X over an option to pick it (the page does the picking: it gets "release").
     // Not looking at a player: nothing opens (a short hint says why). The page is shown and focused while it is up, so the mouse is a cursor.
     greymarchMenuHold(): any {
-        if (this.greymarchScreenUp || this.greymarchAdminOn || this.greymarchMenuOn || (this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchCraftOn || this.greymarchForgeOn)) return;
+        if (this.greymarchScreenUp || this.greymarchAdminOn || this.greymarchMenuOn || (this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchScribeOn || this.greymarchCraftOn || this.greymarchForgeOn)) return;
         var looking = 0, isObject = false;
         try {
             var ref = this.sp.Game.getCurrentCrosshairRef();
@@ -2321,7 +2327,7 @@ export class GreymarchBridge {
         this.greymarchMenuOn = false;
         this.greymarchMenuToPage("hide", true);
         this.greymarchMenuEscAt = 0;
-        if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchCraftOn || !!this.greymarchForgeOn || !!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchChatOn || !!this.greymarchEmoteOn || !!this.greymarchGuardsHud || !!(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchCraftOn || this.greymarchForgeOn)); }
+        if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchCraftOn || !!this.greymarchForgeOn || !!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchChatOn || !!this.greymarchEmoteOn || !!this.greymarchGuardsHud || !!(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchScribeOn || this.greymarchCraftOn || this.greymarchForgeOn)); }
     }
     // ---- THE PROFESSIONS WINDOW (K). The page is Platform/UI/greymarch-prof.html; the SERVER decides what a profession allows, the ranks and the XP.
     greymarchProfToPage(fn: any, arg: any): any {
@@ -2342,17 +2348,17 @@ export class GreymarchBridge {
         this.greymarchProfShow();
     }
     greymarchProfShow(): any {
-        if (this.greymarchScreenUp || this.greymarchAdminOn || this.greymarchMenuOn || (this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchCraftOn || this.greymarchForgeOn) || this.greymarchChatTyping) return; // not over the select screen, the other panels, or while typing
+        if (this.greymarchScreenUp || this.greymarchAdminOn || this.greymarchMenuOn || (this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchScribeOn || this.greymarchCraftOn || this.greymarchForgeOn) || this.greymarchChatTyping) return; // not over the select screen, the other panels, or while typing
         this.greymarchProfOn = true;
         this.sp.browser.setVisible(true);
         this.sp.browser.setFocused(true);
         this.greymarchProfToPage("show", true);
     }
     greymarchProfHide(): any {
-        if (!(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchCraftOn || this.greymarchForgeOn)) return;
+        if (!(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchScribeOn || this.greymarchCraftOn || this.greymarchForgeOn)) return;
         this.greymarchProfOn = false;
         this.greymarchProfToPage("hide", true);
-        if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchCraftOn || !!this.greymarchForgeOn || !!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchEmoteOn || !!this.greymarchGuardsHud || !!(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchCraftOn || this.greymarchForgeOn)); }
+        if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchCraftOn || !!this.greymarchForgeOn || !!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchEmoteOn || !!this.greymarchGuardsHud || !!(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchScribeOn || this.greymarchCraftOn || this.greymarchForgeOn)); }
     }
     greymarchProfSend(data: any): any {
         this.greymarchLog("prof: window asks the server (rid " + data.rid + ", " + data.op + ")");
@@ -2369,7 +2375,7 @@ export class GreymarchBridge {
         }
     }
     greymarchChanceryShow(): any {
-        if (this.greymarchScreenUp || this.greymarchAdminOn || this.greymarchMenuOn || this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchCraftOn || this.greymarchForgeOn) return; // not over the select screen or the other panels
+        if (this.greymarchScreenUp || this.greymarchAdminOn || this.greymarchMenuOn || this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchScribeOn || this.greymarchCraftOn || this.greymarchForgeOn) return; // not over the select screen or the other panels
         this.greymarchChanceryOn = true;
         this.sp.browser.setVisible(true);
         this.sp.browser.setFocused(true);
@@ -2379,7 +2385,7 @@ export class GreymarchBridge {
         if (!this.greymarchChanceryOn) return;
         this.greymarchChanceryOn = false;
         this.greymarchChanceryToPage("hide", true);
-        if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchCraftOn || !!this.greymarchForgeOn || !!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchEmoteOn || !!this.greymarchGuardsHud || !!this.greymarchProfOn || !!this.greymarchVampMenuOn || !!this.greymarchLedgerOn); }
+        if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchCraftOn || !!this.greymarchForgeOn || !!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchEmoteOn || !!this.greymarchGuardsHud || !!this.greymarchProfOn || !!this.greymarchVampMenuOn || !!this.greymarchLedgerOn || !!this.greymarchScribeOn); }
     }
     greymarchChanceryAsk(data: any): any {
         var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchChancery", rid: data.rid, op: data.op, args: data.args }) };
@@ -2396,7 +2402,7 @@ export class GreymarchBridge {
         }
     }
     greymarchVampMenuShow(): any {
-        if (this.greymarchScreenUp || this.greymarchAdminOn || this.greymarchMenuOn || this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchCraftOn || this.greymarchForgeOn) return; // not over the select screen or the other panels
+        if (this.greymarchScreenUp || this.greymarchAdminOn || this.greymarchMenuOn || this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchScribeOn || this.greymarchCraftOn || this.greymarchForgeOn) return; // not over the select screen or the other panels
         this.greymarchVampMenuOn = true;
         this.sp.browser.setVisible(true);
         this.sp.browser.setFocused(true);
@@ -2406,7 +2412,7 @@ export class GreymarchBridge {
         if (!this.greymarchVampMenuOn) return;
         this.greymarchVampMenuOn = false;
         this.greymarchVampMenuToPage("hide", true);
-        if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchCraftOn || !!this.greymarchForgeOn || !!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchEmoteOn || !!this.greymarchGuardsHud || !!this.greymarchProfOn || !!this.greymarchChanceryOn || !!this.greymarchLedgerOn); }
+        if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchCraftOn || !!this.greymarchForgeOn || !!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchEmoteOn || !!this.greymarchGuardsHud || !!this.greymarchProfOn || !!this.greymarchChanceryOn || !!this.greymarchLedgerOn || !!this.greymarchScribeOn); }
     }
     greymarchVampMenuAsk(data: any): any {
         var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchVampMenu", rid: data.rid, op: data.op }) };
@@ -2423,8 +2429,8 @@ export class GreymarchBridge {
         }
     }
     greymarchLedgerShow(): any {
-        if (this.greymarchScreenUp || this.greymarchAdminOn || this.greymarchMenuOn || this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchCraftOn || this.greymarchForgeOn) { // not over the select screen or the other panels
-            this.greymarchLog("ledger: not opened, " + [this.greymarchScreenUp ? "the select screen" : "", this.greymarchAdminOn ? "the staff panel" : "", this.greymarchMenuOn ? "the X menu" : "", this.greymarchProfOn ? "the K window" : "", this.greymarchChanceryOn ? "the chancery" : "", this.greymarchVampMenuOn ? "the vampire window" : "", this.greymarchLedgerOn ? "the ledger itself" : ""].filter(Boolean).join(", ") + " is marked open");
+        if (this.greymarchScreenUp || this.greymarchAdminOn || this.greymarchMenuOn || this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchScribeOn || this.greymarchCraftOn || this.greymarchForgeOn) { // not over the select screen or the other panels
+            this.greymarchLog("ledger: not opened, " + [this.greymarchScreenUp ? "the select screen" : "", this.greymarchAdminOn ? "the staff panel" : "", this.greymarchMenuOn ? "the X menu" : "", this.greymarchProfOn ? "the K window" : "", this.greymarchChanceryOn ? "the chancery" : "", this.greymarchVampMenuOn ? "the vampire window" : "", this.greymarchLedgerOn ? "the ledger itself" : "", this.greymarchScribeOn ? "the scribe's desk" : ""].filter(Boolean).join(", ") + " is marked open");
             return;
         }
         this.greymarchLog("ledger: opened");
@@ -2439,6 +2445,33 @@ export class GreymarchBridge {
         this.greymarchLedgerToPage("hide", true);
         if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchCraftOn || !!this.greymarchForgeOn || !!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchEmoteOn || !!this.greymarchGuardsHud || !!this.greymarchProfOn || !!this.greymarchChanceryOn || !!this.greymarchVampMenuOn); }
     }
+    // ---- THE SCRIBE'S DESK (/scribe or /write). The page is Platform/UI/greymarch-scribe.html; the SERVER decides everything (gamemode/src/scribe.js, off unless
+    // greymarch-data/scribe.on exists), which opens it ({ customPacketType: "greymarchScribeOpen" }). Built like the guard ledger; the requests carry args.
+    greymarchScribeToPage(fn: any, arg: any): any {
+        var json = JSON.stringify({ fn: fn, arg: arg }).replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
+        try {
+            this.sp.browser.executeJavaScript(SCRIBE_SCRIPT + "window.__gmScribeRun(" + json + ");");
+        } catch (err) {
+            this.sp.printConsole("[greymarch] could not reach the scribe's desk: " + err);
+        }
+    }
+    greymarchScribeShow(): any {
+        if (this.greymarchScreenUp || this.greymarchAdminOn || this.greymarchMenuOn || this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchScribeOn || this.greymarchCraftOn || this.greymarchForgeOn) { // not over the select screen or the other panels
+            this.greymarchLog("scribe: not opened, " + [this.greymarchScreenUp ? "the select screen" : "", this.greymarchAdminOn ? "the staff panel" : "", this.greymarchMenuOn ? "the X menu" : "", this.greymarchProfOn ? "the K window" : "", this.greymarchChanceryOn ? "the chancery" : "", this.greymarchVampMenuOn ? "the vampire window" : "", this.greymarchLedgerOn ? "the guard ledger" : "", this.greymarchScribeOn ? "the desk itself" : "", this.greymarchCraftOn ? "the crafting panel" : "", this.greymarchForgeOn ? "the forge window" : ""].filter(Boolean).join(", ") + " is marked open");
+            return;
+        }
+        this.greymarchLog("scribe: opened");
+        this.greymarchScribeOn = true;
+        this.sp.browser.setVisible(true);
+        this.sp.browser.setFocused(true);
+        this.greymarchScribeToPage("show", true);
+    }
+    greymarchScribeHide(): any {
+        if (!this.greymarchScribeOn) return;
+        this.greymarchScribeOn = false;
+        this.greymarchScribeToPage("hide", true);
+        if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchCraftOn || !!this.greymarchForgeOn || !!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchEmoteOn || !!this.greymarchGuardsHud || !!this.greymarchProfOn || !!this.greymarchChanceryOn || !!this.greymarchVampMenuOn); }
+    }
     // ---- THE CRAFTING PANEL. The page is Platform/UI/greymarch-craft.html; the SERVER decides everything (gamemode/src/craftsys.js), which opens it when a station is used
     // ({ customPacketType: "greymarchCraftOpen", station, title }; the Charcoal Kiln always, every other station only while greymarch-data/crafting.on exists).
     greymarchCraftToPage(fn: any, arg: any): any {
@@ -2451,7 +2484,7 @@ export class GreymarchBridge {
     }
     greymarchCraftShow(msg: any): any {
         if (this.greymarchCraftOn) { this.greymarchCraftToPage("show", msg); return; } // another station: the open panel lists its recipes
-        if (this.greymarchScreenUp || this.greymarchAdminOn || this.greymarchMenuOn || this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchForgeOn) return; // not over the select screen or the other panels (the forge window included: closing a panel on top of it took its mouse away)
+        if (this.greymarchScreenUp || this.greymarchAdminOn || this.greymarchMenuOn || this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchScribeOn || this.greymarchForgeOn) return; // not over the select screen or the other panels (the forge window included: closing a panel on top of it took its mouse away)
         this.greymarchLog("craft: opened at " + String((msg && msg.station) || "?"));
         this.greymarchCraftOn = true;
         this.sp.browser.setVisible(true);
@@ -2491,7 +2524,7 @@ export class GreymarchBridge {
         if (!this.greymarchMiniOn) return;
         this.greymarchMiniOn = false;
         this.greymarchMiniToPage("hide", true);
-        if (!this.greymarchScreenUp && !this.greymarchPanelHasKeys()) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchCraftOn || !!this.greymarchForgeOn || !!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchEmoteOn || !!this.greymarchGuardsHud || !!this.greymarchProfOn || !!this.greymarchChanceryOn || !!this.greymarchVampMenuOn || !!this.greymarchLedgerOn); }
+        if (!this.greymarchScreenUp && !this.greymarchPanelHasKeys()) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchCraftOn || !!this.greymarchForgeOn || !!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchEmoteOn || !!this.greymarchGuardsHud || !!this.greymarchProfOn || !!this.greymarchChanceryOn || !!this.greymarchVampMenuOn || !!this.greymarchLedgerOn || !!this.greymarchScribeOn); }
     }
     greymarchMiniSend(type: string, body: any): any {
         var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify(Object.assign({ customPacketType: type }, body)) };
@@ -2526,7 +2559,7 @@ export class GreymarchBridge {
         if (!this.greymarchCraftOn) return;
         this.greymarchCraftOn = false;
         this.greymarchCraftToPage("hide", true);
-        if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchEmoteOn || !!this.greymarchGuardsHud || !!this.greymarchProfOn || !!this.greymarchChanceryOn || !!this.greymarchVampMenuOn || !!this.greymarchLedgerOn || !!this.greymarchForgeOn); }
+        if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchEmoteOn || !!this.greymarchGuardsHud || !!this.greymarchProfOn || !!this.greymarchChanceryOn || !!this.greymarchVampMenuOn || !!this.greymarchLedgerOn || !!this.greymarchScribeOn || this.greymarchScribeOn || !!this.greymarchForgeOn); }
     }
     // ---- THE GREYMARCH FORGE WINDOW. The page is Platform/UI/greymarch-forge.html; the SERVER decides everything (gamemode/src/forgemenu.js). Using a forge, the server
     // keeps the game's menu shut and opens this ({ customPacketType: "greymarchForgeOpen" }) for a game that said it has it ("greymarchForgeReady", sent on entering the world).
@@ -2544,7 +2577,7 @@ export class GreymarchBridge {
         var station = (msg && typeof msg.station === "string" && msg.station) || "forge";
         var page = { station: station, title: (msg && typeof msg.title === "string" && msg.title) || (station === "forge" ? "Forge" : "") };
         if (this.greymarchForgeOn) { this.greymarchForgeToPage("show", page); return; }
-        if (this.greymarchScreenUp || this.greymarchAdminOn || this.greymarchMenuOn || this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchCraftOn) return; // not over the select screen or the other panels
+        if (this.greymarchScreenUp || this.greymarchAdminOn || this.greymarchMenuOn || this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchScribeOn || this.greymarchCraftOn) return; // not over the select screen or the other panels
         this.greymarchLog(station === "forge" ? "forge: opened" : "station window: opened, " + station);
         this.greymarchForgeOn = true;
         this.greymarchForgeStation = station;
@@ -2560,7 +2593,7 @@ export class GreymarchBridge {
         this.greymarchForgeToPage("hide", true);
         this.greymarchForgeAnimEnd();
         this.greymarchForgePreviewWant = ""; // the preview goes with the window
-        if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchEmoteOn || !!this.greymarchGuardsHud || !!this.greymarchProfOn || !!this.greymarchChanceryOn || !!this.greymarchVampMenuOn || !!this.greymarchLedgerOn || !!this.greymarchCraftOn); }
+        if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchEmoteOn || !!this.greymarchGuardsHud || !!this.greymarchProfOn || !!this.greymarchChanceryOn || !!this.greymarchVampMenuOn || !!this.greymarchLedgerOn || !!this.greymarchScribeOn || this.greymarchScribeOn || !!this.greymarchCraftOn); }
     }
     // At the forge like the game's own menu: the smith turns to the forge and does the forge's hammering (the game's IdleBlackSmithForgeEnter, what the
     // forge furniture plays) while the window is open, and steps out of it (IdleChairExitStart, the forge's exit) when it closes. SkyMP passes the player's
@@ -2704,6 +2737,10 @@ export class GreymarchBridge {
         var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchLedger", rid: data.rid, op: data.op, args: data.args }) };
         this.controller.emitter.emit("sendMessage", { message: message, reliability: "reliable" });
     }
+    greymarchScribeAsk(data: any): any {
+        var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchScribe", rid: data.rid, op: data.op, args: data.args }) };
+        this.controller.emitter.emit("sendMessage", { message: message, reliability: "reliable" });
+    }
     greymarchMenuSend(data: any): any {
         var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchMenu", rid: data.rid, op: data.op, args: data.args }) };
         this.controller.emitter.emit("sendMessage", { message: message, reliability: "reliable" });
@@ -2783,7 +2820,7 @@ export class GreymarchBridge {
         if (!this.greymarchEmoteOn) return;
         this.greymarchEmoteOn = false;
         this.greymarchEmoteToPage("hide", true);
-        if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchCraftOn || !!this.greymarchForgeOn || !!this.greymarchHudOn || !!this.greymarchChatOn || !!this.greymarchGuardsHud || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchCraftOn || this.greymarchForgeOn)); }
+        if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchCraftOn || !!this.greymarchForgeOn || !!this.greymarchHudOn || !!this.greymarchChatOn || !!this.greymarchGuardsHud || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchScribeOn || this.greymarchCraftOn || this.greymarchForgeOn)); }
     }
     greymarchEmoteSay(text: string): any { try { this.sp.Debug.notification(text); } catch (e) { /* a hint is a nicety */ } }
     // Every frame (update phase): open the wheel, play or stop an emote, and end a lasting one when the player moves (keys can be rebound, so the speed is watched too) or draws a weapon.
@@ -3163,7 +3200,7 @@ export class GreymarchBridge {
     // The chat page answers every "show" (a few seconds apart) with whether it is really typing. If the game thinks otherwise, the game gives way: a keyboard that the page is not using is released,
     // so movement can never stay locked behind a chat that is not open. (An input opened less than a second ago is left alone: the answer may have been sent before it.)
     // The windows that hold the keyboard (and the mouse cursor) while they are open. The chat's keyboard releases leave them alone: releasing it every 2 s took the K window's cursor away (2026-10-18).
-    greymarchPanelHasKeys(): any { return !!(this.greymarchMiniOn || this.greymarchAdminOn || this.greymarchMenuOn || this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchCraftOn || this.greymarchForgeOn || this.greymarchEmoteOn); }
+    greymarchPanelHasKeys(): any { return !!(this.greymarchMiniOn || this.greymarchAdminOn || this.greymarchMenuOn || this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchScribeOn || this.greymarchCraftOn || this.greymarchForgeOn || this.greymarchEmoteOn); }
     // ---- THE FIELD OF VIEW (the chatbox's Settings). Skyrim Platform cannot reach the camera's field of view and the camera never reads the game's settings
     // again, so the value goes into fDefaultWorldFOV / fDefault1stPersonFOV (the Skyrim.ini ones) and Greymarch's SKSE plugin GreymarchCamera.dll (in the game
     // files; launcher repo skse/GreymarchCamera) sees the change within a quarter of a second and puts it on the camera, in any view. (Switching the view and
@@ -3231,17 +3268,18 @@ export class GreymarchBridge {
     // them is still marked open means the mark is stale (the window closed without saying so, or lost the keyboard): the mark is cleared and that window hidden, so the chat opens.
     // While the browser really has the keyboard, the window is open for real and Enter belongs to it.
     greymarchChatStaleWindows(): any {
-        if (!this.greymarchAdminOn && !this.greymarchMenuOn && !this.greymarchProfOn && !this.greymarchChanceryOn && !this.greymarchVampMenuOn && !this.greymarchLedgerOn && !this.greymarchCraftOn && !this.greymarchForgeOn && !this.greymarchEmoteOn) return;
+        if (!this.greymarchAdminOn && !this.greymarchMenuOn && !this.greymarchProfOn && !this.greymarchChanceryOn && !this.greymarchVampMenuOn && !this.greymarchLedgerOn && !this.greymarchScribeOn && !this.greymarchCraftOn && !this.greymarchForgeOn && !this.greymarchEmoteOn) return;
         var focused = true;
         try { focused = !!this.sp.browser.isFocused(); } catch (e) { focused = true; } // cannot tell: leave the window alone
         if (focused) return;
-        this.greymarchLog("chat: Enter reached the game while " + [this.greymarchAdminOn ? "the staff panel" : "", this.greymarchMenuOn ? "the X menu" : "", this.greymarchProfOn ? "the K window" : "", this.greymarchChanceryOn ? "the chancery" : "", this.greymarchVampMenuOn ? "the vampire window" : "", this.greymarchLedgerOn ? "the guard ledger" : "", this.greymarchEmoteOn ? "the emote wheel" : ""].filter(Boolean).join(", ") + " was marked open without the keyboard; closed it so the chat opens");
+        this.greymarchLog("chat: Enter reached the game while " + [this.greymarchAdminOn ? "the staff panel" : "", this.greymarchMenuOn ? "the X menu" : "", this.greymarchProfOn ? "the K window" : "", this.greymarchChanceryOn ? "the chancery" : "", this.greymarchVampMenuOn ? "the vampire window" : "", this.greymarchLedgerOn ? "the guard ledger" : "", this.greymarchScribeOn ? "the scribe's desk" : "", this.greymarchEmoteOn ? "the emote wheel" : ""].filter(Boolean).join(", ") + " was marked open without the keyboard; closed it so the chat opens");
         if (this.greymarchAdminOn) { try { this.greymarchAdminHide(); } catch (e1) { this.greymarchAdminOn = false; } }
         if (this.greymarchMenuOn) { try { this.greymarchMenuHide(); } catch (e2) { this.greymarchMenuOn = false; } }
         if (this.greymarchProfOn) { try { this.greymarchProfHide(); } catch (e3) { this.greymarchProfOn = false; } }
         if (this.greymarchChanceryOn) { try { this.greymarchChanceryHide(); } catch (e4) { this.greymarchChanceryOn = false; } }
         if (this.greymarchVampMenuOn) { try { this.greymarchVampMenuHide(); } catch (e5) { this.greymarchVampMenuOn = false; } }
         if (this.greymarchLedgerOn) { try { this.greymarchLedgerHide(); } catch (e6) { this.greymarchLedgerOn = false; } }
+        if (this.greymarchScribeOn) { try { this.greymarchScribeHide(); } catch (e7) { this.greymarchScribeOn = false; } }
         if (this.greymarchCraftOn) { try { this.greymarchCraftHide(); } catch (e7) { this.greymarchCraftOn = false; } }
         if (this.greymarchForgeOn) { try { this.greymarchForgeHide(); } catch (e8) { this.greymarchForgeOn = false; } }
         if (this.greymarchMiniOn) { try { this.greymarchMiniHide(); } catch (e8) { this.greymarchMiniOn = false; } }
