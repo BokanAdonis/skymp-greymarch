@@ -61,6 +61,10 @@ GreymarchBalanceTable GreymarchBalanceTable::FromJson(const nlohmann::json& j)
   t.weaponBlock = Number(j, "weaponBlock", 0.f, 1.f);
   t.powerAttack = Number(j, "powerAttack", 0.f, 10.f);
   t.sneak = Number(j, "sneak", 0.f, 10.f);
+  ReadMap(j, "spells", 100.f, t.spellMult);
+  t.dualCast = Number(j, "dualCast", 1.f, 5.f);
+  t.playerSpells = Number(j, "playerSpells", 0.f, 10.f);
+  t.npcSpells = Number(j, "npcSpells", 0.f, 10.f);
   return t;
 }
 

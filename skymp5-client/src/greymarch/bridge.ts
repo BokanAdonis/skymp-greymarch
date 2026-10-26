@@ -184,6 +184,7 @@ export class GreymarchBridge {
         if (type === "greymarchWolfFeed") { this.greymarchWolfFeedAt = Date.now(); return; } // the wolf fed (a kill or a corpse): the feeding animation (greymarchWolfTick)
         if (type === "greymarchChanceryReply") { this.greymarchChanceryToPage("reply", msg); return; } // the chancery window (/chancery)
         if (type === "greymarchChanceryOpen") { this.greymarchChanceryShow(); return; }
+        if (type === "greymarchEmote") { if (typeof msg.emote === "string" && msg.emote.length < 40) this.greymarchServerEmote = { id: msg.emote, ms: Math.max(500, Math.min(30000, Number(msg.ms) || 4000)), at: Date.now() }; return; } // the server asks for an emote (a Harvester or Chef kneeling at a salt deposit): played in greymarchEmoteTick
         if (type === "greymarchMinigame") { this.greymarchMiniShow(msg); return; } // a profession mini game before the work (gamemode minigames.js)
         if (type === "greymarchMinigameDone") { this.greymarchMiniDone(msg); return; }
         if (type === "greymarchForgeOpen") { this.greymarchForgeShow(msg); return; } // a forge was used (gamemode forgemenu.js): the Greymarch forge window instead of the game's menu
@@ -679,7 +680,7 @@ export class GreymarchBridge {
     // F7 opens the panel (the page itself closes it with F7 or Escape). Escape also closes it from here, because the game un-focuses the browser on Escape.
     greymarchKey(e: any): any {
         if (this.greymarchBuildCam && this.greymarchBuildCamKey(e)) return; // the build system's free camera has the keys it uses
-        if (this.greymarchEmoteNow && this.greymarchEmoteNow.kind === "loop" && (e.code === 17 || e.code === 30 || e.code === 31 || e.code === 32 || e.code === 57)) { var mvDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (mvDown && e.isUp !== true) this.greymarchEmoteStopWanted = Date.now(); } // W A S D or Space ends an emote that lasts (greymarchEmoteTick)
+        if (this.greymarchEmoteNow && this.greymarchEmoteNow.kind === "loop" && !this.greymarchEmoteNow.meal && (e.code === 17 || e.code === 30 || e.code === 31 || e.code === 32 || e.code === 57)) { var mvDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (mvDown && e.isUp !== true) this.greymarchEmoteStopWanted = Date.now(); } // W A S D or Space ends an emote that lasts (greymarchEmoteTick)
         if (e.code === 19) { var rDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (e.isUp === true) rDown = false; if (rDown && !this.greymarchKey19 && this.greymarchWolfOn && !this.greymarchChatTyping) this.greymarchWolfRoarAt = Date.now(); this.greymarchKey19 = rDown; return; } // R: the werewolf roars (greymarchWolfTick; only while changed)
         if (e.code === 44) { var zDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (e.isUp === true) zDown = false; if (zDown && !this.greymarchKey44 && !this.greymarchChatTyping) { if (this.greymarchWolfOn) this.greymarchWolfBackAt = Date.now(); else this.greymarchWolfKeyAt = Date.now(); } this.greymarchKey44 = zDown; return; } // Z while changed: ask the server to change back (greymarchWolfTick)
         if (e.code === 256 || e.code === 257) { var mDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (e.isUp === true) mDown = false; if (mDown && !this["greymarchKey" + e.code]) this.greymarchShapeButton(e.code === 257); this["greymarchKey" + e.code] = mDown; return; } // mouse buttons: a creature's attacks (greymarchShapeTick)
@@ -2476,7 +2477,9 @@ export class GreymarchBridge {
         this.greymarchMiniToPage("show", { token: msg.token, kind: msg.kind, level: msg.level, quick: msg.quick === true, recipe: msg.recipe || null, animal: msg.animal || "", ore: msg.ore || "" }); // recipe: the Chef's dish and ingredients; animal: the Hunter's kill (its coat); ore: the Miner's vein
         // the character acts it out: kneeling over the body to skin it (the emote wheel's "Search a body"; the other work has the game's own animation already:
         // the forge, the pot, the chopping block, the vein)
-        if (msg.kind === "skin") { this.greymarchEmotePlayWanted = { id: "searchbody", at: Date.now() }; this.greymarchMiniActing = true; }
+        // the server names it (msg.emote: examine for mining, searchbody for skinning); an older server: skinning kneels
+        var mEm = emoteMod.emoteById(typeof msg.emote === "string" ? msg.emote : msg.kind === "skin" ? "searchbody" : "");
+        if (mEm && mEm.kind !== "face") { this.greymarchEmotePlayWanted = { id: mEm.id, at: Date.now() }; this.greymarchMiniActing = true; }
     }
     greymarchMiniHide(): any {
         if (this.greymarchMiniActing && !this.greymarchMiniOn) { this.greymarchMiniActing = false; this.greymarchEmoteStopWanted = Date.now(); }
@@ -2797,24 +2800,32 @@ export class GreymarchBridge {
             if (em && now - play.at <= 2000) { if (em.kind === "face") this.greymarchFaceSet(em); else this.greymarchEmotePlay(em); }
         }
         if (this.greymarchFaceClearWanted) { this.greymarchFaceClearWanted = 0; if (this.greymarchFaceMine) this.greymarchFaceSet(null); }
+        this.greymarchServerEmoteTick(now);
         this.greymarchFaceTick(now);
-        // eating, drinking or a potion (greymarchConsumeNote): played once the menu is closed, unless an emote is on or the body is a beast; forgotten after 15 seconds
-        var cw = this.greymarchConsumeWant;
-        if (cw) {
-            if (now - cw.at > 15000) this.greymarchConsumeWant = null;
-            else if (!this.greymarchEmoteNow && !this.greymarchWolfOn && !this.greymarchShapeOn && !this.greymarchInMenu()) { this.greymarchConsumeWant = null; this.greymarchConsumePlay(cw.id, now); }
+        // eating, drinking or a potion (greymarchConsumeNote): played in turn once the menu is closed, unless an emote is on or the body is a beast. Waiting behind a meal
+        // does not count towards the 15 seconds after which one is forgotten (a second meal plays after the first, it never replaces it).
+        var cq = this.greymarchConsumeQueue;
+        if (cq && cq.length) {
+            var eating = !!(this.greymarchEmoteNow && this.greymarchEmoteNow.meal);
+            if (eating) for (var qi = 0; qi < cq.length; qi++) cq[qi].at = now;
+            else {
+                while (cq.length && now - cq[0].at > 15000) cq.shift();
+                if (cq.length && !this.greymarchEmoteNow && !this.greymarchWolfOn && !this.greymarchShapeOn && !this.greymarchInMenu()) { var next = cq.shift(); this.greymarchConsumePlay(next.id, now); }
+            }
         }
+        if (this.greymarchMealLocked && !(this.greymarchEmoteNow && this.greymarchEmoteNow.meal)) this.greymarchMealLock(false, "the meal ended another way"); // never left frozen (a beast form, an emote dropped elsewhere)
         var cur = this.greymarchEmoteNow;
         if (!cur) { this.greymarchEmoteStopWanted = 0; return; }
         var stopWhy = "";
-        if (this.greymarchEmoteStopWanted) { this.greymarchEmoteStopWanted = 0; stopWhy = "stopped"; }
-        else if (this.greymarchWolfOn || this.greymarchShapeOn) { this.greymarchEmoteNow = null; return; } // the body changed: the emote went with it
+        if (this.greymarchEmoteStopWanted && !cur.meal) { this.greymarchEmoteStopWanted = 0; stopWhy = "stopped"; }
+        else if (this.greymarchWolfOn || this.greymarchShapeOn) { this.greymarchEmoteNow = null; if (cur.meal) this.greymarchMealLock(false, "beast form"); return; } // the body changed: the emote went with it
         else if (cur.until && now >= cur.until) stopWhy = "done eating";
         else if (now >= (this.greymarchEmoteCheckAt || 0)) {
             this.greymarchEmoteCheckAt = now + 250;
             try {
                 var player = sp.Game.getPlayer();
-                if (player.isWeaponDrawn()) stopWhy = "weapon drawn";
+                if (cur.meal) { this.greymarchEmoteStopWanted = 0; if (player.isDead()) stopWhy = "died"; } // a meal lasts its full time: moving, a weapon or Stop do not end it (the controls are locked)
+                else if (player.isWeaponDrawn()) stopWhy = "weapon drawn";
                 else if (cur.kind === "loop" && now - cur.at > 700 && player.getAnimationVariableFloat("Speed") > 30) stopWhy = "moved";
             } catch (e) { /* asked again in a moment */ }
         }
@@ -2833,7 +2844,7 @@ export class GreymarchBridge {
                 if (this.greymarchPotionServerDrink(fid)) return; // the server drinking it after the swig: no animation, its effect stays
                 this.greymarchPotionFirstDrink(pot, fid);
             }
-            if (id) this.greymarchConsumeWant = { id: id, at: Date.now() };
+            if (id) { var cq = this.greymarchConsumeQueue || (this.greymarchConsumeQueue = []); if (cq.length < 5) cq.push({ id: id, at: Date.now() }); } // in turn: a meal never replaces the one playing
             if (id === "bread" || id === "mug") this.greymarchConsumeCloseMenu(); // food or a drink: the inventory closes so the meal is seen (a potion leaves it open: several in a row)
         } catch (err) { /* not something eaten */ }
     }
@@ -2902,11 +2913,28 @@ export class GreymarchBridge {
         } catch (err) { ok = false; }
         var n = this.greymarchEmoteLogged = (this.greymarchEmoteLogged || 0) + 1;
         if (n <= 20) this.greymarchLog("eat: " + id + " " + (ok ? "played" : "refused by the game"));
-        if (ok && em.kind === "loop") this.greymarchEmoteNow = { id: em.id, kind: "loop", stop: emoteMod.IDLE_STOP, at: now, until: now + emoteMod.EAT_SECONDS * 1000 };
+        if (ok && em.kind === "loop") { this.greymarchEmoteNow = { id: em.id, kind: "loop", stop: emoteMod.IDLE_STOP, at: now, until: now + emoteMod.EAT_SECONDS * 1000, meal: true }; this.greymarchMealLock(true, id); }
+    }
+    // A MEAL CANNOT BE SKIPPED (the server fills the hunger the moment the food leaves the inventory): while eating or drinking (EAT_SECONDS) the player cannot walk,
+    // jump, fight, sneak or activate; looking around, the camera and the menus stay. The controls come back when the meal is over or ends any other way (death, a beast
+    // form: greymarchEmoteTick also frees them every frame if the meal is gone), never while staff hold the player frozen (greymarchEffects).
+    greymarchMealLock(on: boolean, why: string): any {
+        var sp = this.sp;
+        if (on) {
+            try { sp.Game.disablePlayerControls(true, true, false, false, true, false, true, false, 0); this.greymarchMealLocked = true; } catch (e) { this.greymarchMealLocked = false; return; }
+            this.greymarchCrumb("eat: controls locked (" + why + ")");
+            return;
+        }
+        if (!this.greymarchMealLocked) return;
+        this.greymarchMealLocked = false;
+        if (this.greymarchFxHave && this.greymarchFxHave.frozen) return; // staff froze the player: that lock stays
+        try { sp.Game.enablePlayerControls(true, true, false, false, true, false, true, false, 0); } catch (e) { /* nothing else to try */ }
+        this.greymarchCrumb("eat: controls back (" + why + ")");
     }
     greymarchEmotePlay(em: any): any {
         var sp = this.sp;
         if (this.greymarchWolfOn || this.greymarchShapeOn) { this.greymarchEmoteSay("A beast has no emotes"); return; }
+        if (this.greymarchEmoteNow && this.greymarchEmoteNow.meal) { this.greymarchEmoteSay("Finish eating first"); return; }
         var ok = false, player: any = null;
         try {
             player = sp.Game.getPlayer();
@@ -3074,10 +3102,39 @@ export class GreymarchBridge {
             if (face) this.greymarchFaceApply(mac, face, false);
         }
     }
+    // THE SERVER ASKS FOR AN EMOTE ({ customPacketType: "greymarchEmote", emote: <a wheel emote id>, ms }): played as if picked from the wheel (so everyone sees it) and
+    // ended like the wheel's Stop after ms. Moving, a drawn weapon or anything else that ends it sooner just ends it: the server keeps its own time. Ignored when
+    // the player is dead, in furniture or mounted, mid-meal, or the id is not an emote (faces too).
+    greymarchServerEmoteTick(now: number): any {
+        var want = this.greymarchServerEmote;
+        if (want) {
+            this.greymarchServerEmote = null;
+            var em = emoteMod.emoteById(want.id);
+            var why = "";
+            if (!em || em.kind === "face") why = "not an emote";
+            else if (now - want.at > 3000) why = "too late";
+            else if (this.greymarchEmoteNow && this.greymarchEmoteNow.meal) why = "eating";
+            else {
+                try { var pl = this.sp.Game.getPlayer(); if (!pl || pl.isDead()) why = "dead"; else if (pl.getFurnitureReference()) why = "in furniture"; else if (pl.isOnMount()) why = "mounted"; } catch (e) { why = "the player could not be read"; }
+            }
+            if (why) { this.greymarchLog("emote: the server's " + want.id + " ignored (" + why + ")"); }
+            else {
+                this.greymarchEmotePlay(em);
+                var cur = this.greymarchEmoteNow;
+                this.greymarchServerEmoteEnd = cur && cur.id === em.id ? { id: em.id, at: cur.at, until: now + want.ms } : null; // a one-off ends by itself
+            }
+        }
+        var end = this.greymarchServerEmoteEnd;
+        if (!end || now < end.until) return;
+        this.greymarchServerEmoteEnd = null;
+        var now2 = this.greymarchEmoteNow;
+        if (now2 && now2.id === end.id && now2.at === end.at) this.greymarchEmoteEnd("the server's time is up"); // still the same emote: stand up, as Stop does
+    }
     greymarchEmoteEnd(why: string): any {
         var sp = this.sp, cur = this.greymarchEmoteNow;
         this.greymarchEmoteNow = null;
         if (!cur) return;
+        if (cur.meal) this.greymarchMealLock(false, why);
         this.greymarchCrumb("emote end " + cur.id + " (" + why + ")");
         try {
             var player = sp.Game.getPlayer();

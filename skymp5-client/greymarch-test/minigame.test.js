@@ -34,7 +34,8 @@ test("a win uses the thing again from the update phase; a loss shows the server'
 
 test("the character acts it out: kneeling over the body while skinning, up again before the body menu opens; the quick prompts go to the page", () => {
   const show = bridge.slice(bridge.indexOf("greymarchMiniShow(msg: any)"), bridge.indexOf("greymarchMiniHide(): any {"));
-  assert.ok(show.includes('if (msg.kind === "skin") { this.greymarchEmotePlayWanted = { id: "searchbody", at: Date.now() }; this.greymarchMiniActing = true; }'));
+  assert.ok(show.includes('var mEm = emoteMod.emoteById(typeof msg.emote === "string" ? msg.emote : msg.kind === "skin" ? "searchbody" : "");'), "the server names the emote (examine, searchbody); an older server: skinning kneels");
+  assert.ok(show.includes('if (mEm && mEm.kind !== "face") { this.greymarchEmotePlayWanted = { id: mEm.id, at: Date.now() }; this.greymarchMiniActing = true; }'));
   assert.ok(show.includes("quick: msg.quick === true") && show.includes("recipe: msg.recipe || null") && show.includes('animal: msg.animal || ""') && show.includes('ore: msg.ore || ""'), "the quick prompts, the Chef's recipe, the Hunter's animal and the Miner's ore go to the page");
   const done = bridge.slice(bridge.indexOf("greymarchMiniDone(msg: any)"), bridge.indexOf("greymarchMiniActivateTick(): any {"));
   assert.ok(done.includes("this.greymarchEmoteStopWanted = Date.now();") && done.includes("at: Date.now() + (acted ? 600 : 0)"));

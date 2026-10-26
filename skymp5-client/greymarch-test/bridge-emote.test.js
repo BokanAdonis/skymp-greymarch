@@ -22,7 +22,7 @@ function make(opts = {}) {
     playIdle: (idle) => { log.idles.push(idle.id); return !state.refuse; },
     placeAtMe: (base) => { const g = { base, at: null, rot: null, gone: false, setPosition: (x, y, z) => { g.at = [x, y, z]; }, setAngle: (a, b, c) => { g.rot = [a, b, c]; }, disable() { g.gone = true; }, delete() { g.gone = true; } }; (log.ghosts = log.ghosts || []).push(g); return g; },
     getActorValue: (n) => (state.av || {})[n] || 0, damageActorValue: (n, v) => { log.damage = (log.damage || []).concat([[n, Math.round(v)]]); state.av[n] -= v; },
-    isWeaponDrawn: () => state.drawn,
+    isWeaponDrawn: () => state.drawn, isDead: () => !!state.dead, isOnMount: () => !!state.mounted,
     getHeadingAngle: () => 30, getAngleZ: () => 100, setAngle: (a, b, c) => { log.turned = c; }, setPosition: (x, y, z) => { log.stood = [x, y, z]; }, moveTo: (ref, dx, dy, dz, match) => { log.movedTo = [ref.id, dx, dy, dz, match]; }, getPositionX: () => (log.stood ? log.stood[0] : 480), getPositionY: () => (log.stood ? log.stood[1] : 560), getPositionZ: () => (log.stood ? log.stood[2] : 44),
     getFurnitureReference: () => (state.furn ? { getFormID: () => state.furn } : null),
     getAnimationVariableFloat: (n) => (n === "Speed" ? state.speed : 0),
@@ -31,7 +31,7 @@ function make(opts = {}) {
   const actors = {}; for (const local of Object.values(opts.others || {})) actors[local] = faceLog(local.toString(16));
   const sp = {
     printConsole() {}, writeLogs: (n, l) => log.lines.push(l),
-    Game: { getPlayer: () => player, getFormEx: (id) => ({ id }), getFormFromFile: (id, file) => (file === "Missing.esp" ? null : { id, file }), forceThirdPerson: () => { log.thirdPerson++; } },
+    Game: { getPlayer: () => player, getFormEx: (id) => ({ id }), getFormFromFile: (id, file) => (file === "Missing.esp" ? null : { id, file }), forceThirdPerson: () => { log.thirdPerson++; }, disablePlayerControls: (...a) => (log.controls = log.controls || []).push(["off", ...a]), enablePlayerControls: (...a) => (log.controls = log.controls || []).push(["on", ...a]) },
     callNative: (cls, fn, self, a, b) => { (log.natives = log.natives || []).push([cls, fn, a]); if (cls !== "GreymarchCam" || state.noDll) throw new Error("Native function not found"); if (fn === "GetFurnitureMarker") return state.marker ? state.marker[b] : -99999; if (fn === "SetFreeCamera") { state.free = !!a; return true; } if (fn === "IsFreeCamera") return !!state.free; if (fn === "GetCamera") return (state.cam || [0, 0, 0, 0, 1, 0])[a]; return undefined; },
     Idle: { from: (f) => f || null }, ObjectReference: { from: (f) => (f && f.id ? { id: f.id, getPositionX: () => 500, getPositionY: () => 600, getPositionZ: () => 10, getAngleZ: () => 90 } : null) }, Actor: { from: (f) => (f && actors[f.id]) || null }, Potion: { from: (f) => (f && f.potion) || null },
     Debug: { sendAnimationEvent: (ref, name) => log.events.push(name), notification: (t) => log.notes.push(t) },
@@ -330,7 +330,7 @@ test("eating, drinking and potions: the matching idle once the menu is closed; e
   s.log.idles.length = 0;
   s.eat("Ale"); s.tick(); assert.deepStrictEqual(s.log.idles, [idleOf("mug")], "the standing drinking idle");
   for (let i = 0; i < 102; i++) s.tick(50); assert.strictEqual(s.gm.greymarchEmoteNow, null, "a drink also takes five seconds"); s.log.idles.length = 0;
-  s.eat("Ale"); s.tick(); s.log.idles.length = 0; s.state.speed = 100; s.tick(800); assert.strictEqual(s.gm.greymarchEmoteNow, null, "walking off ends it early"); s.state.speed = 0; s.log.idles.length = 0;
+  s.eat("Ale"); s.tick(); s.log.idles.length = 0; s.state.speed = 100; s.tick(800); assert.ok(s.gm.greymarchEmoteNow && s.gm.greymarchEmoteNow.meal, "moving does not end a meal"); s.state.speed = 0; for (let i = 0; i < 90; i++) s.tick(50); assert.strictEqual(s.gm.greymarchEmoteNow, null); s.log.idles.length = 0;
   s.eat("Potion of Healing", false); s.tick(); assert.deepStrictEqual(s.log.idles, [idleOf("potion")], "a potion is a quick swig");
   s.eat("Deadly Poison", false, true); s.tick(); assert.strictEqual(s.log.idles.length, 1, "a poison: nothing");
   s.state.drawn = true; s.eat("Apple Pie"); s.tick(); assert.strictEqual(s.log.idles.length, 1, "weapon drawn: nothing");
@@ -504,4 +504,91 @@ test("the pointer: while a window holds the mouse and has the focus but the game
   s.state.focused = true; s.page({ type: "forge-close" }); const m = s.log.focused.length;
   s.at(() => s.gm.greymarchPointerGuard(Date.now() + 4000));
   assert.strictEqual(s.log.focused.length, m, "no window open: nothing");
+});
+
+test("a meal cannot be skipped: the controls are locked for its five seconds (not looking, the camera or the menus); moving, a weapon, W or Stop do not end it", () => {
+  const LOCK = [true, true, false, false, true, false, true, false, 0];
+  const s = make();
+  s.eat("Venison Stew"); s.tick();
+  assert.deepStrictEqual(s.log.controls, [["off", ...LOCK]], "movement, fighting, sneaking, activating");
+  s.key(17, true); s.key(17, false); s.state.speed = 120; s.state.drawn = true;
+  s.page({ type: "emote-stop" });
+  for (let i = 0; i < 40; i++) s.tick(50); // 2 s
+  assert.ok(s.gm.greymarchEmoteNow && s.gm.greymarchEmoteNow.meal, "still eating");
+  s.page({ type: "emote", id: "wave" }); s.tick();
+  assert.strictEqual(s.log.notes.at(-1), "Finish eating first", "no wheel emote over a meal");
+  for (let i = 0; i < 70; i++) s.tick(50);
+  assert.strictEqual(s.gm.greymarchEmoteNow, null, "over after five seconds");
+  assert.deepStrictEqual(s.log.controls, [["off", ...LOCK], ["on", ...LOCK]], "and free again (only what the meal locked)");
+  assert.strictEqual(s.log.idles.at(-1), emotes.IDLE_STOP);
+});
+
+test("a second meal waits for the first and plays after it; a meal is never replaced", () => {
+  const s = make();
+  const bread = emotes.emoteById("bread").idle, mug = emotes.emoteById("mug").idle;
+  s.eat("Venison Stew"); s.tick();
+  s.eat("Nord Mead"); s.tick();
+  assert.deepStrictEqual(s.log.idles, [bread], "the drink waits");
+  for (let i = 0; i < 101; i++) s.tick(50);
+  assert.deepStrictEqual(s.log.idles.filter((x) => x !== emotes.IDLE_STOP), [bread, mug], "then plays (waiting did not use up its 15 seconds)");
+  assert.ok(s.gm.greymarchEmoteNow && s.gm.greymarchEmoteNow.id === "mug");
+  assert.strictEqual(s.log.controls.filter((c) => c[0] === "off").length, 2);
+});
+
+test("the controls always come back: death, a beast form, a staff freeze is left alone", () => {
+  const d = make();
+  d.eat("Venison Stew"); d.tick();
+  d.state.dead = true; d.tick(300);
+  assert.strictEqual(d.gm.greymarchEmoteNow, null);
+  assert.strictEqual(d.log.controls.at(-1)[0], "on", "dead: free");
+  const w = make();
+  w.eat("Venison Stew"); w.tick();
+  w.gm.greymarchWolfOn = true; w.tick(); w.tick();
+  assert.strictEqual(w.log.controls.at(-1)[0], "on", "a beast form: free");
+  assert.strictEqual(w.gm.greymarchMealLocked, false);
+  const o = make();
+  o.eat("Venison Stew"); o.tick();
+  o.gm.greymarchEmoteNow = null; o.tick();
+  assert.strictEqual(o.log.controls.at(-1)[0], "on", "the meal dropped any other way: free next frame");
+  const f = make();
+  f.eat("Venison Stew"); f.tick();
+  f.gm.greymarchFxHave = { frozen: true };
+  for (let i = 0; i < 110; i++) f.tick(50);
+  assert.strictEqual(f.log.controls.length, 1, "staff froze the player: the meal does not unfreeze them");
+});
+
+test("potions stay a quick swig: no lock", () => {
+  const s = make();
+  s.eat("Potion of Healing", false); s.tick();
+  assert.strictEqual(s.log.controls, undefined);
+});
+
+test("the server asks for an emote (greymarchEmote, a salt deposit): played like the wheel's, ended like Stop after ms; ignored when dead, in furniture, mounted, eating or unknown", () => {
+  const kneel = emotes.emoteById("searchbody").idle;
+  const s = make();
+  s.say({ customPacketType: "greymarchEmote", emote: "searchbody", ms: 4000 });
+  assert.deepStrictEqual(s.log.idles, [], "nothing from the packet handler");
+  s.tick();
+  assert.deepStrictEqual(s.log.idles, [kneel], "kneels");
+  assert.strictEqual(s.log.thirdPerson, 1, "as from the wheel");
+  for (let i = 0; i < 70; i++) s.tick(50); // 3.5 s
+  assert.deepStrictEqual(s.log.idles, [kneel], "still kneeling");
+  for (let i = 0; i < 12; i++) s.tick(50);
+  assert.deepStrictEqual(s.log.idles, [kneel, emotes.IDLE_STOP], "up after 4 s, the way Stop does it");
+  assert.strictEqual(s.gm.greymarchEmoteNow, null);
+  const m = make();
+  m.say({ customPacketType: "greymarchEmote", emote: "searchbody", ms: 4000 }); m.tick();
+  m.state.speed = 120; m.tick(800);
+  assert.strictEqual(m.gm.greymarchEmoteNow, null, "walked off: it just ends");
+  m.state.speed = 0; m.log.idles.length = 0;
+  m.say({ customPacketType: "greymarchEmote", emote: "pray", ms: 4000 }); m.tick();
+  for (let i = 0; i < 100; i++) m.tick(50);
+  assert.deepStrictEqual(m.log.idles, [emotes.emoteById("pray").idle, emotes.IDLE_STOP], "an emote picked again later is not ended by an old timer");
+  const no = (setup, emote) => { const x = make(); setup(x); x.say({ customPacketType: "greymarchEmote", emote, ms: 4000 }); x.tick(); return x.log.idles.length; };
+  assert.strictEqual(no((x) => { x.state.dead = true; }, "searchbody"), 0, "dead");
+  assert.strictEqual(no((x) => { x.state.furn = 0x1234; }, "searchbody"), 0, "in furniture");
+  assert.strictEqual(no((x) => { x.state.mounted = true; }, "searchbody"), 0, "mounted");
+  assert.strictEqual(no(() => {}, "explode"), 0, "unknown");
+  assert.strictEqual(no(() => {}, "fangs"), 0, "a face is not an emote here");
+  assert.strictEqual(no((x) => { x.eat("Venison Stew"); x.tick(); x.log.idles.length = 0; }, "searchbody"), 0, "eating");
 });

@@ -5,6 +5,7 @@
 #include "CropRegeneration.h"
 #include "Exceptions.h"
 #include "GetBaseActorValues.h"
+#include "GreymarchBalance.h"
 #include "HitData.h"
 #include "MathUtils.h"
 #include "MovementValidation.h"
@@ -1295,8 +1296,9 @@ void ActionListener::OnSpellHit(MpActor* aggressor,
   damage = damage <= 0.f ? 0.f : damage;
 
   // GREYMARCH: a spell dual cast in the last 10 seconds hits 2.2 times as
-  // hard (the game's dual-casting magnitude)
-  constexpr float kDualCastMult = 2.2f;
+  // hard (the game's dual-casting magnitude), or what the balance table says
+  const auto& balance = GreymarchBalance::Get();
+  const float kDualCastMult = balance.dualCast.value_or(2.2f);
   if (auto it = lastCasts.find({ aggressor->GetFormId(), hitData.source });
       it != lastCasts.end() && it->second.isDualCasting) {
     const std::chrono::duration<float> age =
@@ -1315,6 +1317,18 @@ void ActionListener::OnSpellHit(MpActor* aggressor,
                                       targetActorPtr->GetFormId(),
                                       hitData.source);
   }
+
+  // GREYMARCH: the F7 Spells balance tab: this spell's multiplier (its number
+  // set / the game's, times its school's percent), and the percent for spells
+  // cast by players or by NPCs
+  if (auto it = balance.spellMult.find(hitData.source);
+      it != balance.spellMult.end()) {
+    damage *= it->second;
+  }
+  const bool casterIsPlayer =
+    partOne.serverState.UserByActor(aggressor) != Networking::InvalidUserId;
+  damage *= casterIsPlayer ? balance.playerSpells.value_or(1.f)
+                           : balance.npcSpells.value_or(1.f);
 
   targetActorValues.healthPercentage = CalculateCurrentHealthPercentage(
     *targetActorPtr, damage, targetActorValues.healthPercentage, nullptr);
