@@ -131,3 +131,141 @@ TEST_CASE("CropHealthRegeneration, CropMagickaRegeneration and "
   p.DestroyActor(0xff000000);
   DoDisconnect(p, 0);
 }
+
+// GREYMARCH: regeneration enchantments on worn armour and clothing
+namespace {
+const auto kRegenTestWorn = [] {
+  Inventory::ExtraData extra;
+  extra.worn_ = true;
+  return extra;
+}();
+
+constexpr uint32_t kRingMagickaRate03 = 0x100E59; // EnchRingMagickaRate03
+constexpr uint32_t kRingHealRate03 = 0x100E51;    // EnchRingHealRate03
+constexpr uint32_t kRingStaminaRate03 = 0x100E55; // EnchRingStaminaRate03
+constexpr auto kHealRateMult =
+  espm::ActorValue::HealRateMult_or_CombatHealthRegenMultMod;
+constexpr auto kMagickaRateMult =
+  espm::ActorValue::MagickaRateMult_or_CombatHealthRegenMultPowerMod;
+constexpr auto kStaminaRateMult = espm::ActorValue::StaminaRateMult;
+}
+
+TEST_CASE("WornRegenBonus counts the regeneration enchantment of what is "
+          "worn, and only that",
+          "[CropRegeneration]")
+{
+  PartOne& p = GetPartOne();
+  DoConnect(p, 0);
+  p.CreateActor(0xff000000, { 0, 0, 0 }, 0, 0x3c);
+  p.SetUserActor(0, 0xff000000);
+  auto& ac = p.worldState.GetFormAt<MpActor>(0xff000000);
+
+  ac.SetEquipment(Equipment());
+  REQUIRE(WornRegenBonus(ac, kMagickaRateMult) == 0.f);
+
+  // carried, not worn: nothing
+  Equipment carried;
+  carried.inv.entries.push_back(Inventory::Entry(kRingMagickaRate03, 1));
+  ac.SetEquipment(carried);
+  REQUIRE(WornRegenBonus(ac, kMagickaRateMult) == 0.f);
+
+  Equipment magicka;
+  magicka.inv.entries.push_back(
+    Inventory::Entry(kRingMagickaRate03, 1, kRegenTestWorn));
+  ac.SetEquipment(magicka);
+  REQUIRE(WornRegenBonus(ac, kMagickaRateMult) > 0.f);
+  REQUIRE(WornRegenBonus(ac, kHealRateMult) == 0.f);
+  REQUIRE(WornRegenBonus(ac, kStaminaRateMult) == 0.f);
+
+  Equipment heal;
+  heal.inv.entries.push_back(
+    Inventory::Entry(kRingHealRate03, 1, kRegenTestWorn));
+  ac.SetEquipment(heal);
+  REQUIRE(WornRegenBonus(ac, kHealRateMult) > 0.f);
+  REQUIRE(WornRegenBonus(ac, kMagickaRateMult) == 0.f);
+
+  Equipment stamina;
+  stamina.inv.entries.push_back(
+    Inventory::Entry(kRingStaminaRate03, 1, kRegenTestWorn));
+  ac.SetEquipment(stamina);
+  REQUIRE(WornRegenBonus(ac, kStaminaRateMult) > 0.f);
+  REQUIRE(WornRegenBonus(ac, kMagickaRateMult) == 0.f);
+
+  // an iron dagger has no enchantment
+  Equipment dagger;
+  dagger.inv.entries.push_back(Inventory::Entry(0x1397E, 1, kRegenTestWorn));
+  ac.SetEquipment(dagger);
+  REQUIRE(WornRegenBonus(ac, kMagickaRateMult) == 0.f);
+
+  p.DestroyActor(0xff000000);
+  DoDisconnect(p, 0);
+}
+
+TEST_CASE("A worn Fortify Magicka/Health/Stamina Regen enchantment lets the "
+          "faster regeneration through the crop",
+          "[CropRegeneration]")
+{
+  PartOne& p = GetPartOne();
+  DoConnect(p, 0);
+  p.CreateActor(0xff000000, { 0, 0, 0 }, 0, 0x3c);
+  p.SetUserActor(0, 0xff000000);
+  auto& ac = p.worldState.GetFormAt<MpActor>(0xff000000);
+
+  uint32_t baseId = ac.GetBaseId();
+  auto appearance = ac.GetAppearance();
+  uint32_t raceId = appearance ? appearance->raceId : 0;
+  BaseActorValues baseValues =
+    GetBaseActorValues(&p.worldState, baseId, raceId, {});
+
+  ac.SetPercentages({ 0.0f, 0.0f, 0.0f });
+  ac.SetEquipment(Equipment());
+  const float time = 1.0f;
+
+  const float plainMagicka = CropMagickaRegeneration(1.0f, time, &ac);
+  const float plainHealth = CropHealthRegeneration(1.0f, time, &ac);
+  const float plainStamina = CropStaminaRegeneration(1.0f, time, &ac);
+
+  Equipment eq;
+  eq.inv.entries.push_back(
+    Inventory::Entry(kRingMagickaRate03, 1, kRegenTestWorn));
+  ac.SetEquipment(eq);
+  const float magickaBonus = WornRegenBonus(ac, kMagickaRateMult);
+  const float expectedMagicka = baseValues.magickaRate *
+    (baseValues.magickaRateMult + magickaBonus) * time / 10000.0f;
+  REQUIRE_THAT(CropMagickaRegeneration(1.0f, time, &ac),
+               Catch::Matchers::WithinAbs(expectedMagicka, 0.000001f));
+  REQUIRE(expectedMagicka > plainMagicka);
+
+  // what the game regenerated with the ring is kept as it is, not pulled back
+  REQUIRE_THAT(CropMagickaRegeneration(expectedMagicka * 0.99f, time, &ac),
+               Catch::Matchers::WithinAbs(expectedMagicka * 0.99f, 0.000001f));
+  // the ring still has a limit: more than it gives is cropped
+  REQUIRE_THAT(CropMagickaRegeneration(expectedMagicka * 2.f, time, &ac),
+               Catch::Matchers::WithinAbs(expectedMagicka, 0.000001f));
+
+  Equipment heal;
+  heal.inv.entries.push_back(
+    Inventory::Entry(kRingHealRate03, 1, kRegenTestWorn));
+  ac.SetEquipment(heal);
+  const float expectedHealth = baseValues.healRate *
+    (baseValues.healRateMult + WornRegenBonus(ac, kHealRateMult)) * time /
+    10000.0f;
+  REQUIRE_THAT(CropHealthRegeneration(1.0f, time, &ac),
+               Catch::Matchers::WithinAbs(expectedHealth, 0.000001f));
+  REQUIRE(expectedHealth > plainHealth);
+
+  Equipment stamina;
+  stamina.inv.entries.push_back(
+    Inventory::Entry(kRingStaminaRate03, 1, kRegenTestWorn));
+  ac.SetEquipment(stamina);
+  const float expectedStamina = baseValues.staminaRate *
+    (baseValues.staminaRateMult + WornRegenBonus(ac, kStaminaRateMult)) *
+    time / 10000.0f;
+  REQUIRE_THAT(CropStaminaRegeneration(1.0f, time, &ac),
+               Catch::Matchers::WithinAbs(expectedStamina, 0.000001f));
+  REQUIRE(expectedStamina > plainStamina);
+
+  ac.SetEquipment(Equipment());
+  p.DestroyActor(0xff000000);
+  DoDisconnect(p, 0);
+}

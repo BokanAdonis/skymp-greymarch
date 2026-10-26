@@ -1,8 +1,13 @@
 #pragma once
 #include "WorldState.h"
+#include "libespm/ActorValue.h"
 float CropRegeneration(float newAttributeValue, float secondsAfterLastRegen,
                        float attributeRate, float attributeRateMult,
                        float oldAttributeValue, bool hasActiveMagicEffects);
+
+// GREYMARCH: the regeneration boost (percent) the enchantments of the actor's
+// worn armour and clothing give one actor value, e.g. MagickaRateMult
+float WornRegenBonus(const MpActor& actor, espm::ActorValue av);
 
 float CropHealthRegeneration(float newAttributeValue,
                              float secondsAfterLastRegen, MpActor* actor);

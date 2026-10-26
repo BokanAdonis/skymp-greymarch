@@ -3,6 +3,9 @@
 #include "MathUtils.h"
 #include "MpActor.h"
 #include "MpChangeForms.h"
+#include "WorldState.h"
+#include "libespm/espm.h"
+#include <algorithm>
 
 namespace {
 
@@ -16,6 +19,60 @@ BaseActorValues GetValues(MpActor* actor)
                             actor->GetTemplateChain());
 }
 
+}
+
+// GREYMARCH: what the enchantments of the armour and clothing the actor wears
+// add to one regeneration actor value (a robe or ring of Recovery: +N% on
+// MagickaRateMult). The game regenerates that much faster; the crop below did
+// not know and took the extra back every update, so the bar filled fast, then
+// dropped. Only an item's own enchantment from the game files counts, and the
+// worn items are the ones the server checked the player owns
+// (OnUpdateEquipment), so a modified client cannot add any. Only boosts count:
+// a penalty is left to the game (the crop is only a limit).
+float WornRegenBonus(const MpActor& actor, espm::ActorValue av)
+{
+  WorldState* espmProvider = actor.GetParent();
+  if (!espmProvider || av == espm::ActorValue::None) {
+    return 0.f;
+  }
+  auto& browser = espmProvider->GetEspm().GetBrowser();
+  float total = 0.f;
+
+  for (const auto& entry : actor.GetEquipment().inv.entries) {
+    if (entry.GetWorn() == Inventory::Worn::None) {
+      continue;
+    }
+    const auto armorLookup = browser.LookupById(entry.baseId);
+    if (!armorLookup.rec || armorLookup.rec->GetType() != espm::ARMO::kType) {
+      continue;
+    }
+    const auto armor = espm::GetData<espm::ARMO>(entry.baseId, espmProvider);
+    if (!armor.enchantmentFormId) {
+      continue;
+    }
+    const uint32_t enchId = armorLookup.ToGlobalId(armor.enchantmentFormId);
+    const auto enchLookup = browser.LookupById(enchId);
+    if (!enchLookup.rec || enchLookup.rec->GetType() != espm::ENCH::kType) {
+      continue;
+    }
+    for (const auto& effect :
+         espm::GetData<espm::ENCH>(enchId, espmProvider).effects) {
+      if (effect.magnitude <= 0.f) {
+        continue;
+      }
+      const uint32_t mgefId = enchLookup.ToGlobalId(effect.effectId);
+      const auto mgefLookup = browser.LookupById(mgefId);
+      if (!mgefLookup.rec || mgefLookup.rec->GetType() != espm::MGEF::kType) {
+        continue;
+      }
+      if (espm::GetData<espm::MGEF>(mgefId, espmProvider).data.primaryAV ==
+          av) {
+        total += effect.magnitude;
+      }
+    }
+  }
+
+  return total;
 }
 
 float CropRegeneration(float newAttributeValue, float secondsAfterLastRegen,
@@ -70,9 +127,12 @@ float CropHealthRegeneration(float newAttributeValue,
 {
   const BaseActorValues baseValues = GetValues(actor);
   const ActorValues& actorValues = actor->GetActorValues();
-  const float rate = std::max(baseValues.healRate, actorValues.healRate);
+  const float rate = std::max(baseValues.healRate, actorValues.healRate) +
+    WornRegenBonus(*actor, espm::ActorValue::HealRate);
   const float rateMult =
-    std::max(baseValues.healRateMult, actorValues.healRateMult);
+    std::max(baseValues.healRateMult, actorValues.healRateMult) +
+    WornRegenBonus(*actor,
+                   espm::ActorValue::HealRateMult_or_CombatHealthRegenMultMod);
   const float oldPercentage = actorValues.healthPercentage;
   const bool hasActiveMagicEffects = !actor->GetActiveMagicEffects().Empty();
   return CropRegeneration(newAttributeValue, secondsAfterLastRegen, rate,
@@ -84,9 +144,14 @@ float CropMagickaRegeneration(float newAttributeValue,
 {
   const BaseActorValues baseValues = GetValues(actor);
   const ActorValues& actorValues = actor->GetActorValues();
-  const float rate = std::max(baseValues.magickaRate, actorValues.magickaRate);
+  const float rate =
+    std::max(baseValues.magickaRate, actorValues.magickaRate) +
+    WornRegenBonus(*actor, espm::ActorValue::MagickaRate);
   const float rateMult =
-    std::max(baseValues.magickaRateMult, actorValues.magickaRateMult);
+    std::max(baseValues.magickaRateMult, actorValues.magickaRateMult) +
+    WornRegenBonus(*actor,
+                   espm::ActorValue::
+                     MagickaRateMult_or_CombatHealthRegenMultPowerMod);
   const float oldPercentage = actorValues.magickaPercentage;
   const bool hasActiveMagicEffects = !actor->GetActiveMagicEffects().Empty();
   return CropRegeneration(newAttributeValue, secondsAfterLastRegen, rate,
@@ -98,11 +163,14 @@ float CropStaminaRegeneration(float newAttributeValue,
 {
   const BaseActorValues baseValues = GetValues(actor);
   const ActorValues& actorValues = actor->GetActorValues();
-  const float rate = actor->IsBlockActive()
-    ? actorValues.staminaRate
-    : std::max(baseValues.staminaRate, actorValues.staminaRate);
+  const float rate = (actor->IsBlockActive()
+                        ? actorValues.staminaRate
+                        : std::max(baseValues.staminaRate,
+                                   actorValues.staminaRate)) +
+    WornRegenBonus(*actor, espm::ActorValue::StaminaRate);
   const float rateMult =
-    std::max(baseValues.staminaRateMult, actorValues.staminaRateMult);
+    std::max(baseValues.staminaRateMult, actorValues.staminaRateMult) +
+    WornRegenBonus(*actor, espm::ActorValue::StaminaRateMult);
   const float oldPercentage = actorValues.staminaPercentage;
   const bool hasActiveMagicEffects = !actor->GetActiveMagicEffects().Empty();
   return CropRegeneration(newAttributeValue, secondsAfterLastRegen, rate,
