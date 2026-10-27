@@ -2842,9 +2842,11 @@ export class GreymarchBridge {
             var look = at.map(function (n: number) { return Math.round(n); }).join(",") + "," + Math.round(ax) + "," + Math.round(az);
             if (look !== this.greymarchForgeGhostLook && now >= (this.greymarchForgeGhostTurnNext || 0)) {
                 this.greymarchForgeGhostLook = look; this.greymarchForgeGhostTurnNext = now + 33;
-                var cur = Number(ghost.getAngleZ()); if (!isFinite(cur)) cur = az;
-                var dz = ((((az - cur) % 360) + 540) % 360) - 180; // the short way round
-                ghost.translateTo(at[0], at[1], at[2], ax, 0, cur + dz, 3000, 0);
+                this.greymarchForgeGhostCheck = now + 700; // moving on purpose: not mistaken for a drop
+                var short = function (want: number, cur: number) { if (!isFinite(cur)) return want; return cur + (((((want - cur) % 360) + 540) % 360) - 180); }; // the short way round
+                var curX = NaN, curZ = NaN; try { curX = Number(ghost.getAngleX()); curZ = Number(ghost.getAngleZ()); } catch (e) { /* from the wanted angles */ }
+                // turned at a steady 600 degrees a second towards where the mouse put it (2026-10-26, the owner: snapping there 30 times a second was jerky)
+                ghost.translateTo(at[0], at[1], at[2], short(ax, curX), 0, short(az, curZ), 500, 600);
             }
         } catch (e) { this.greymarchForgeGhostSay(String(e)); this.greymarchForgeGhostDrop(); }
     }
@@ -2854,7 +2856,7 @@ export class GreymarchBridge {
         if (data.reset === true) { this.greymarchForgeGhostYaw = 0; this.greymarchForgeGhostPitch = 0; this.greymarchForgeGhostZoom = 0; return; }
         var dx = Number(data.dx), dy = Number(data.dy), zoom = Number(data.zoom);
         if (isFinite(dx) && Math.abs(dx) <= 4000) this.greymarchForgeGhostYaw = (((this.greymarchForgeGhostYaw || 0) - dx * 0.5) % 360 + 360) % 360;
-        if (isFinite(dy) && Math.abs(dy) <= 4000) this.greymarchForgeGhostPitch = Math.max(-80, Math.min(80, (this.greymarchForgeGhostPitch || 0) + dy * 0.4));
+        if (isFinite(dy) && Math.abs(dy) <= 4000) this.greymarchForgeGhostPitch = (((this.greymarchForgeGhostPitch || 0) + dy * 0.4) % 360 + 360) % 360; // all the way round (2026-10-26, the owner: a piece facing away could not be turned to the smith)
         if (zoom === 1 || zoom === -1) this.greymarchForgeGhostZoom = Math.max(-4, Math.min(6, (this.greymarchForgeGhostZoom || 0) + zoom));
     }
     // collision off on the shown copy (SkyrimPlatform's setCollision, by form id: what the shapeshift puppet and SkyMP's own animations use)

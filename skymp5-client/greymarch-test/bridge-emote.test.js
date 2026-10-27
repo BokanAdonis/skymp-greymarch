@@ -20,7 +20,7 @@ function make(opts = {}) {
   const state = { drawn: false, speed: 0, menu: null, refuse: false };
   const player = {
     playIdle: (idle) => { log.idles.push(idle.id); return !state.refuse; },
-    placeAtMe: (base) => { const n = (log.ghosts || []).length; const g = { base, at: null, rot: null, gone: false, id: 0xff000100 + n, getFormID: () => g.id, getBaseObject: () => ({ getFormID: () => base.id }), blockActivation: (v) => { g.blocked = v; }, setMotionType: (t) => { g.motion = t; g.motions = (g.motions || 0) + 1; }, setPosition: (x, y, z) => { g.at = [x, y, z]; g.moves = (g.moves || 0) + 1; }, setAngle: (a, b, c) => { g.rot = [a, b, c]; }, getAngleZ: () => (g.rot ? g.rot[2] : 0), getPositionX: () => (g.at ? g.at[0] + (g.fell || 0) : 0), getPositionY: () => (g.at ? g.at[1] : 0), getPositionZ: () => (g.at ? g.at[2] - (g.fell || 0) : 0), is3DLoaded: () => !state.no3d, translateTo: (...a) => { (g.turns = g.turns || []).push(a); }, disable() { g.gone = true; }, delete() { g.gone = true; } }; (log.ghosts = log.ghosts || []).push(g); (log.world = log.world || {})[g.id] = g; return g; },
+    placeAtMe: (base) => { const n = (log.ghosts || []).length; const g = { base, at: null, rot: null, gone: false, id: 0xff000100 + n, getFormID: () => g.id, getBaseObject: () => ({ getFormID: () => base.id }), blockActivation: (v) => { g.blocked = v; }, setMotionType: (t) => { g.motion = t; g.motions = (g.motions || 0) + 1; }, setPosition: (x, y, z) => { g.at = [x, y, z]; g.moves = (g.moves || 0) + 1; }, setAngle: (a, b, c) => { g.rot = [a, b, c]; }, getAngleZ: () => (g.rot ? g.rot[2] : 0), getAngleX: () => (g.rot ? g.rot[0] : 0), getPositionX: () => (g.at ? g.at[0] + (g.fell || 0) : 0), getPositionY: () => (g.at ? g.at[1] : 0), getPositionZ: () => (g.at ? g.at[2] - (g.fell || 0) : 0), is3DLoaded: () => !state.no3d, translateTo: (...a) => { (g.turns = g.turns || []).push(a); }, disable() { g.gone = true; }, delete() { g.gone = true; } }; (log.ghosts = log.ghosts || []).push(g); (log.world = log.world || {})[g.id] = g; return g; },
     getActorValue: (n) => (state.av || {})[n] || 0, damageActorValue: (n, v) => { log.damage = (log.damage || []).concat([[n, Math.round(v)]]); state.av[n] -= v; },
     isWeaponDrawn: () => state.drawn, isDead: () => !!state.dead, isOnMount: () => !!state.mounted,
     getHeadingAngle: () => 30, getAngleZ: () => 100, setAngle: (a, b, c) => { log.turned = c; }, setPosition: (x, y, z) => { log.stood = [x, y, z]; }, moveTo: (ref, dx, dy, dz, match) => { log.movedTo = [ref.id, dx, dy, dz, match]; }, getPositionX: () => (log.stood ? log.stood[0] : 480), getPositionY: () => (log.stood ? log.stood[1] : 560), getPositionZ: () => (log.stood ? log.stood[2] : 44),
@@ -653,8 +653,8 @@ test("the forge display holds still: placed ONCE and left to load (placing it ag
   for (let i = 0; i < 20; i++) tick(50);
   assert.strictEqual(g.moves, 2, "then never placed again (that would restart its 3D)");
   const turns = g.turns.length;
-  g.fell = 30; tick(250); g.fell = 0;
-  const back = g.turns.slice(turns).find((a) => a[6] === 3000);
+  g.fell = 30; tick(250); tick(250); g.fell = 0;
+  const back = g.turns.slice(turns).find((a) => a[6] === 500);
   assert.ok(back, "it dropped: moved back with the smooth movement, fast"); assert.deepStrictEqual(back.slice(0, 3), g.at);
   assert.strictEqual(g.motions, asked + 2, "and keyframed again"); assert.strictEqual(g.moves, 2);
   assert.strictEqual(g.gone, false, "still shown");
@@ -688,11 +688,11 @@ test("the forge display stands still and is examined with the mouse (2026-10-26,
   assert.strictEqual(g.turns.length, n0, "still by itself");
   const last = () => g.turns.at(-1);
   s.page({ type: "forge-turn", dx: 60, dy: 0 }); tick(50);
-  assert.strictEqual(Math.round(last()[5]), 150, "dragged 60 px right: turned 30 degrees"); assert.strictEqual(last()[6], 3000, "fast");
+  assert.strictEqual(Math.round(last()[5]), 150, "dragged 60 px right: turned 30 degrees"); assert.deepStrictEqual(last().slice(6), [500, 600], "turned at a steady speed towards it (snapping there was jerky)");
   s.page({ type: "forge-turn", dx: 0, dy: 50 }); tick(50);
   assert.strictEqual(Math.round(last()[3]), 20, "dragged down: tipped 20 degrees");
   s.page({ type: "forge-turn", dx: 0, dy: 5000 }); tick(50); assert.strictEqual(Math.round(last()[3]), 20, "a silly drag is ignored");
-  s.page({ type: "forge-turn", dx: 0, dy: 1000 }); tick(50); assert.strictEqual(Math.round(last()[3]), 80, "tipped at most 80 degrees");
+  s.page({ type: "forge-turn", dx: 0, dy: 400 }); tick(50); assert.strictEqual(((Math.round(last()[3]) % 360) + 360) % 360, 180, "tips all the way over (a piece facing away can be turned to the smith)");
   const y0 = last()[1];
   s.page({ type: "forge-turn", zoom: -1 }); tick(50);
   assert.strictEqual(Math.round(y0 - last()[1]), 10, "the wheel up: 10 units closer");
