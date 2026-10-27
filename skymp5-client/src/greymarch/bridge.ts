@@ -313,6 +313,7 @@ export class GreymarchBridge {
             }
         }
         eq.ids = eq.all.slice(); // the clothes must be put on again
+        eq.redraw = true; // and the body drawn again once they are on (greymarchTick, IRON ARMOR STILL SHOWING)
         eq.resets++;
         this.greymarchLog("reset #" + eq.resets + " (" + why + "): unequipped everything, emptied the inventory, added " + eq.kit.length + " kit item(s)");
     }
@@ -504,6 +505,13 @@ export class GreymarchBridge {
                                 eq.ids.splice(i, 1);
                             }
                         }
+                    }
+                    // IRON ARMOR STILL SHOWING (2026-10-28, the owner: new characters spawn in iron armor and must change race to lose it). The reset takes the game's default gear
+                    // out of the inventory (the log shows only the starting kit), but the body's 3D was never redrawn, so the iron stayed on screen; changing race rebuilds
+                    // the body, which is why that cleared it. After each reset, once the clothes are on and the race menu is closed (it draws the body itself), it is redrawn
+                    if (eq.redraw && eq.ids.length === 0 && !raceMenuOpen) {
+                        eq.redraw = false;
+                        try { if (player.is3DLoaded()) { player.queueNiNodeUpdate(); this.greymarchLog("body redrawn after reset #" + eq.resets); } } catch (rErr) { this.greymarchLog("could not redraw the body: " + rErr); }
                     }
                     // the race menu has just opened: the default armor can come back with it, so take it off again and re-dress
                     // the race menu has just opened: the game's default gear (iron armor) can come with it, so it is REMOVED (the full reset: only the starting kit stays), before the player builds the character
