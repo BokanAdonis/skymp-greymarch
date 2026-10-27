@@ -722,12 +722,16 @@ test("the forge display has its own lamp (2026-10-26, the owner: at night the pi
   assert.strictEqual(l2.gone, true, "the window closes: the lamp goes"); assert.strictEqual(s.log.ghosts[1].gone, true);
 });
 
-test("the forge display is never shown at the smelter (2026-10-26, the owner); other stations show it", () => {
+test("the forge display is never shown at the smelter or the charcoal kiln (2026-10-26, the owner); other stations show it", () => {
   const s = make(); let t = 15_000_000; const tick = (ms = 50) => { t += ms; s.gm.greymarchForgePreviewTick(t); };
   s.state.cam = [480, 560, 150, 0, 1, 0];
   s.say({ customPacketType: "greymarchForgeOpen", station: "smelter", title: "Smelter", ref: 0xc4321 });
   s.page({ type: "forge-preview", key: "5ace4:skyrim.esm" }); tick();
   assert.strictEqual((s.log.ghosts || []).length, 0, "nothing at the smelter");
+  s.page({ type: "forge-close" }); tick();
+  s.say({ customPacketType: "greymarchForgeOpen", station: "kiln", title: "Charcoal Kiln", ref: 0xc4323 });
+  s.page({ type: "forge-preview", key: "33:skyrim.esm" }); tick();
+  assert.strictEqual((s.log.ghosts || []).length, 0, "nothing at the charcoal kiln");
   s.page({ type: "forge-close" }); tick();
   s.say({ customPacketType: "greymarchForgeOpen", station: "tan", title: "Tanning Rack", ref: 0xc4322 });
   s.page({ type: "forge-preview", key: "20:skyrim.esm" }); tick();

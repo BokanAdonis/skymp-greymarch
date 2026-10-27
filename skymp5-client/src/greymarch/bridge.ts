@@ -593,7 +593,7 @@ export class GreymarchBridge {
         if (data && data.type === "forge") { this.greymarchForgeAsk(data); return; } // the forge window asks the server (the SERVER decides and makes the item)
         if (data && data.type === "forge-close") { this.greymarchForgeHide(); return; }
         if (data && data.type === "forge-turn") { this.greymarchForgeTurn(data); return; } // a drag, the wheel or a double-click over the display: the smith examines the piece
-        if (data && data.type === "forge-preview") { if (this.greymarchForgeOn) this.greymarchForgePreviewWant = this.greymarchForgeStation === "smelter" ? "" : String(data.key || "").slice(0, 80); return; } // never at the smelter (2026-10-26, the owner) // the piece picked in the forge window: shown in front of the smith (greymarchForgePreviewTick); only while the window is open
+        if (data && data.type === "forge-preview") { if (this.greymarchForgeOn) this.greymarchForgePreviewWant = (this.greymarchForgeStation === "smelter" || this.greymarchForgeStation === "kiln") ? "" : String(data.key || "").slice(0, 80); return; } // never at the smelter or the charcoal kiln (2026-10-26, the owner) // the piece picked in the forge window: shown in front of the smith (greymarchForgePreviewTick); only while the window is open
         if (data && data.type === "vampire") { this.greymarchVampMenuAsk(data); return; } // the vampire window asks the server (the SERVER decides)
         if (data && data.type === "vampire-close") { this.greymarchVampMenuHide(); return; }
         if (data && data.type === "ledger") { this.greymarchLedgerAsk(data); return; } // the guard ledger asks the server (the SERVER decides)
