@@ -207,15 +207,34 @@ void DX11RenderHandler::OnPaint(CefRefPtr<CefBrowser> browser,
                                 const RectList& dirtyRects, const void* buffer,
                                 int width, int height)
 {
-  if (type == PET_VIEW && m_width == width && m_height == height) {
-    std::unique_lock<std::mutex> _(m_textureLock);
+  if (type != PET_VIEW || width <= 0 || height <= 0) {
+    return;
+  }
 
+  // The size is checked under the lock: the render thread changes it (and
+  // drops the texture) under the same lock, so a size change between the
+  // check and the copy can no longer give a smaller texture than the frame
+  std::unique_lock<std::mutex> _(m_textureLock);
+
+  if (m_width != static_cast<uint32_t>(width) ||
+      m_height != static_cast<uint32_t>(height)) {
+    return;
+  }
+
+  {
     if (!m_pTexture) {
       CreateRenderTexture();
     }
 
     // Under MO2 for some reason, OnPaint called before context initialization
-    if (!m_pContext) {
+    if (!m_pContext || !m_pTexture) {
+      return;
+    }
+
+    D3D11_TEXTURE2D_DESC textureDesc;
+    m_pTexture->GetDesc(&textureDesc);
+    if (textureDesc.Width != static_cast<UINT>(width) ||
+        textureDesc.Height != static_cast<UINT>(height)) {
       return;
     }
 
@@ -224,8 +243,18 @@ void DX11RenderHandler::OnPaint(CefRefPtr<CefBrowser> browser,
       m_pTexture.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &mappedResource);
 
     if (SUCCEEDED(result)) {
+      // Row by row: the driver may pad each row of the texture (RowPitch)
       const auto pDest = static_cast<uint8_t*>(mappedResource.pData);
-      std::memcpy(pDest, buffer, width * height * 4);
+      const auto pSrc = static_cast<const uint8_t*>(buffer);
+      const size_t rowBytes = static_cast<size_t>(width) * 4;
+      if (mappedResource.RowPitch == rowBytes) {
+        std::memcpy(pDest, pSrc, rowBytes * height);
+      } else if (mappedResource.RowPitch > rowBytes) {
+        for (int y = 0; y < height; ++y) {
+          std::memcpy(pDest + static_cast<size_t>(y) * mappedResource.RowPitch,
+                      pSrc + static_cast<size_t>(y) * rowBytes, rowBytes);
+        }
+      }
       m_pContext->Unmap(m_pTexture.Get(), 0);
     } else {
       // We got no mapping, let's drop the context and reset the texture so
@@ -255,20 +284,21 @@ void DX11RenderHandler::GetRenderTargetSize()
       pSrcBuffer->GetDesc(&desc);
 
       if ((m_width != desc.Width || m_height != desc.Height) && m_pParent) {
-        m_width = desc.Width;
-        m_height = desc.Height;
+        {
+          // The size and the texture change together, under the lock OnPaint
+          // copies under
+          std::unique_lock<std::mutex> _(m_textureLock);
+
+          m_width = desc.Width;
+          m_height = desc.Height;
+          m_pTexture.Reset();
+          m_pTextureView.Reset();
+        }
 
         if (isCreateLock) {
           // We now know the size of the viewport, we can let CEF get it
           m_createLock.unlock();
           isCreateLock = false;
-        }
-
-        {
-          std::unique_lock<std::mutex> _(m_textureLock);
-
-          m_pTexture.Reset();
-          m_pTextureView.Reset();
         }
 
         if (m_pParent->GetBrowser())
