@@ -20,7 +20,7 @@ function make(opts = {}) {
   const state = { drawn: false, speed: 0, menu: null, refuse: false };
   const player = {
     playIdle: (idle) => { log.idles.push(idle.id); return !state.refuse; },
-    placeAtMe: (base) => { const n = (log.ghosts || []).length; const g = { base, at: null, rot: null, gone: false, id: 0xff000100 + n, getFormID: () => g.id, getBaseObject: () => ({ getFormID: () => base.id }), blockActivation: (v) => { g.blocked = v; }, setMotionType: (t) => { g.motion = t; }, setPosition: (x, y, z) => { g.at = [x, y, z]; g.moves = (g.moves || 0) + 1; }, setAngle: (a, b, c) => { g.rot = [a, b, c]; }, getAngleZ: () => (g.rot ? g.rot[2] : 0), translateTo: (...a) => { (g.turns = g.turns || []).push(a); }, disable() { g.gone = true; }, delete() { g.gone = true; } }; (log.ghosts = log.ghosts || []).push(g); return g; },
+    placeAtMe: (base) => { const n = (log.ghosts || []).length; const g = { base, at: null, rot: null, gone: false, id: 0xff000100 + n, getFormID: () => g.id, getBaseObject: () => ({ getFormID: () => base.id }), blockActivation: (v) => { g.blocked = v; }, setMotionType: (t) => { g.motion = t; g.motions = (g.motions || 0) + 1; }, setPosition: (x, y, z) => { g.at = [x, y, z]; g.moves = (g.moves || 0) + 1; }, setAngle: (a, b, c) => { g.rot = [a, b, c]; }, getAngleZ: () => (g.rot ? g.rot[2] : 0), getPositionX: () => (g.at ? g.at[0] + (g.fell || 0) : 0), getPositionY: () => (g.at ? g.at[1] : 0), getPositionZ: () => (g.at ? g.at[2] - (g.fell || 0) : 0), is3DLoaded: () => !state.no3d, translateTo: (...a) => { (g.turns = g.turns || []).push(a); }, disable() { g.gone = true; }, delete() { g.gone = true; } }; (log.ghosts = log.ghosts || []).push(g); return g; },
     getActorValue: (n) => (state.av || {})[n] || 0, damageActorValue: (n, v) => { log.damage = (log.damage || []).concat([[n, Math.round(v)]]); state.av[n] -= v; },
     isWeaponDrawn: () => state.drawn, isDead: () => !!state.dead, isOnMount: () => !!state.mounted,
     getHeadingAngle: () => 30, getAngleZ: () => 100, setAngle: (a, b, c) => { log.turned = c; }, setPosition: (x, y, z) => { log.stood = [x, y, z]; }, moveTo: (ref, dx, dy, dz, match) => { log.movedTo = [ref.id, dx, dy, dz, match]; }, getPositionX: () => (log.stood ? log.stood[0] : 480), getPositionY: () => (log.stood ? log.stood[1] : 560), getPositionZ: () => (log.stood ? log.stood[2] : 44),
@@ -633,4 +633,22 @@ test("the forge display (2026-10-26, back with guards): never left behind, never
   s.page({ type: "forge-preview", key: "22:skyrim.esm" }); tick(); const g3 = s.log.ghosts.at(-1); assert.ok(g3 && !g3.gone);
   s.page({ type: "forge-close" }); tick(); assert.strictEqual(g3.gone, true, "the display goes with the window");
   s.page({ type: "forge-preview", key: "23:skyrim.esm" }); const made = s.log.ghosts.length; tick(); assert.strictEqual(s.log.ghosts.length, made, "nothing while closed");
+});
+
+test("the forge display holds still: keyframed only once its 3D is there (asked earlier the game ignores it and the piece fell), and a piece that drops is put back", () => {
+  const s = make(); let t = 7_000_000; const tick = (ms = 50) => { t += ms; s.gm.greymarchForgePreviewTick(t); };
+  s.state.cam = [480, 560, 150, 0, 1, 0];
+  s.say({ customPacketType: "greymarchForgeOpen", title: "Forge", forge: 0xc430a });
+  s.state.no3d = true;
+  s.page({ type: "forge-preview", key: "20:skyrim.esm" }); tick();
+  const g = s.log.ghosts[0]; const asked = g.motions;
+  tick(); tick();
+  assert.strictEqual(g.motions, asked, "not keyframed again before its 3D is there"); assert.ok(g.moves >= 3, "held at the spot meanwhile");
+  s.state.no3d = false; tick();
+  assert.strictEqual(g.motions, asked + 1, "keyframed once its 3D is there"); assert.strictEqual(g.motion, 4);
+  const moves = g.moves; for (let i = 0; i < 20; i++) tick(50);
+  assert.strictEqual(g.moves, moves, "then left alone (no flicker)");
+  g.fell = 30; tick(250); g.fell = 0;
+  assert.strictEqual(g.moves, moves + 1, "it dropped: put back"); assert.strictEqual(g.motions, asked + 2, "and keyframed again");
+  assert.strictEqual(g.gone, false, "still shown");
 });

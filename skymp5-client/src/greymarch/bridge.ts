@@ -2754,11 +2754,11 @@ export class GreymarchBridge {
                         try { baseId = base.getFormID() >>> 0; } catch (e) { /* no base check */ }
                         (this.greymarchForgeGhostIds = this.greymarchForgeGhostIds || []).push({ id: id, base: baseId, g: g });
                         try { g.blockActivation(true); } catch (e) { /* the window holds the keyboard meanwhile */ }
-                        try { g.setMotionType(4, false); } catch (e) { /* keyframed: it does not fall */ }
+                        try { g.setMotionType(4, false); } catch (e) { /* again once its 3D is there (greymarchForgePreviewTick) */ }
                         // a weapon or a piece of armour is made lying down (how it rests when dropped): stood up, so it can be seen
                         var upright = false; try { upright = !!(sp.Weapon.from(base) || sp.Armor.from(base)); } catch (e) { upright = false; }
                         this.greymarchForgeGhost = g; this.greymarchForgeGhostSince = now; this.greymarchForgeGhostTilt = upright ? -90 : 0;
-                        this.greymarchForgeGhostAt = null; this.greymarchForgeGhostTurnNext = 0;
+                        this.greymarchForgeGhostAt = null; this.greymarchForgeGhostTurnNext = 0; this.greymarchForgeGhostReady = false; this.greymarchForgeGhostCheck = 0;
                     }
                 } catch (e) { this.greymarchLog("forge: no display (" + e + ")"); }
             }
@@ -2783,6 +2783,19 @@ export class GreymarchBridge {
             var x = px + fx * d + rx * d * 0.45, y = py + fy * d + ry * d * 0.45, z = pz + fz * d - 6;
             if (Math.hypot(x - pl.getPositionX(), y - pl.getPositionY(), z - pl.getPositionZ()) > 1500) throw new Error("too far from the smith");
             var tilt = this.greymarchForgeGhostTilt || 0, at = this.greymarchForgeGhostAt;
+            // KEYFRAMED ONLY ONCE ITS 3D IS THERE (2026-10-26: asked at once, the game ignored it, the piece fell and dropped out of sight). Until then it is
+            // held at the spot every frame; then keyframed and placed again.
+            if (!this.greymarchForgeGhostReady) {
+                var loaded = true; try { loaded = ghost.is3DLoaded() !== false; } catch (e) { loaded = true; }
+                if (!loaded) { ghost.setPosition(x, y, z); return; }
+                try { ghost.setMotionType(4, false); } catch (e) { /* checked below: a piece that drops is put back */ }
+                this.greymarchForgeGhostReady = true; at = null;
+            }
+            // a piece that moved off its spot anyway (fell, was pushed): keyframed again and put back
+            if (at && now >= (this.greymarchForgeGhostCheck || 0)) {
+                this.greymarchForgeGhostCheck = now + 200;
+                try { if (Math.hypot(ghost.getPositionX() - at[0], ghost.getPositionY() - at[1], ghost.getPositionZ() - at[2]) > 4) { try { ghost.setMotionType(4, false); } catch (e) { /* put back anyway */ } at = null; } } catch (e) { /* no position: next time */ }
+            }
             if (!at || Math.hypot(x - at[0], y - at[1], z - at[2]) > 12) {
                 var face = Math.atan2(-fx, -fy) * 180 / Math.PI; // towards the camera (0 = north, like the game's Z angle)
                 ghost.setPosition(x, y, z);
