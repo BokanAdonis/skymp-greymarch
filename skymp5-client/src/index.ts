@@ -31,6 +31,7 @@ import { SweetTaffyDynamicPerksService } from "./services/services/sweetTaffyDyn
 import { SweetTaffySweetCantDropService } from "./services/services/sweetTaffySweetCantDropService";
 import { SweetTaffyStaticPerksService } from "./services/services/sweetTaffyStaticPerksService";
 import { DisableSkillAdvanceService } from "./services/services/disableSkillAdvanceService";
+import { FallDamageService } from "./services/services/fallDamageService";
 import { DisableFastTravelService } from "./services/services/disableFastTravelService";
 import { DisableDifficultySelectionService } from "./services/services/disableDifficultySelectionService";
 import { SweetTaffyPlayerCombatService } from "./services/services/sweetTaffyPlayerCombatService";
@@ -97,6 +98,7 @@ const main = () => {
       new SweetCameraEnforcementService(sp, controller),
       new SweetTaffyEvalService(sp, controller),
       new DisableSkillAdvanceService(sp, controller),
+      new FallDamageService(sp, controller),
       new DisableFastTravelService(sp, controller),
       new DisableDifficultySelectionService(sp, controller),
       new WorldCleanerService(sp, controller),
