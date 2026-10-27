@@ -1012,7 +1012,36 @@ void MpActor::SendAndSetDeathState(bool isDead, bool shouldTeleport)
   auto position = GetSpawnPoint();
 
   auto respawnMsg = GetDeathStateMsg(position, isDead, shouldTeleport);
-  GetActorToSendTo().SendToUser(respawnMsg, true);
+  auto& deathSendTo = GetActorToSendTo();
+  deathSendTo.SendToUser(respawnMsg, true);
+
+  // GREYMARCH: AN NPC'S DEATH REACHES EVERY GAME THAT SHOWS IT (2026-10-28). The
+  // death went only to the NPC's host (GetActorToSendTo). Hosting moves between
+  // players every few seconds (greymarch/npcHosting.ts in the client), so a death
+  // that came while the NPC changed hands reached a game that no longer ran it:
+  // the new host never heard of it and ran a dead NPC on (the server refused every
+  // hit on it: "it still moves and is invincible"), and the other games moved its
+  // body with that host's movement ("laying down and gliding around"). Now every
+  // game that shows the NPC is told, once each. The teleport in the message names
+  // the NPC (its idx), never the player who gets it. A respawn still goes to the
+  // host only, as before.
+  if (isDead && GetUserId() == Networking::InvalidUserId) {
+    std::vector<Networking::UserId> deathSentTo{ deathSendTo.GetUserId() };
+    for (auto listener : GetActorListeners()) {
+      if (!listener) {
+        continue;
+      }
+      auto& to = listener->GetActorToSendTo();
+      const auto userId = to.GetUserId();
+      if (userId == Networking::InvalidUserId ||
+          std::find(deathSentTo.begin(), deathSentTo.end(), userId) !=
+            deathSentTo.end()) {
+        continue;
+      }
+      deathSentTo.push_back(userId);
+      to.SendToUser(respawnMsg, true);
+    }
+  }
 
   EditChangeForm([&](MpChangeForm& changeForm) {
     changeForm.isDead = isDead;
