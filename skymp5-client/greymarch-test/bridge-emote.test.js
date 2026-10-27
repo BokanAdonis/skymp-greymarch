@@ -39,6 +39,7 @@ function make(opts = {}) {
     Input: { tapKey: (k) => { log.taps = (log.taps || []).concat([k]); if (state.menu === "InventoryMenu" || state.menu === "FavoritesMenu") state.menu = null; }, getMappedKey: (c) => (c === "Tween Menu" ? state.tweenKey || 15 : 0) },
     Utility: { isInMenuMode: () => false },
     browser: { setVisible() {}, setFocused: (v) => log.focused.push(v), isFocused: () => state.focused !== false, executeJavaScript: (js) => { const m = /window\.__gmEmoteRun\((.*)\);$/.exec(js); if (m) log.pages.push(JSON.parse(m[1])); const c = /window\.__gmCraftRun\((.*)\);$/.exec(js); if (c) (log.craft = log.craft || []).push(JSON.parse(c[1])); const fo = /window\.__gmForgeRun\((.*)\);$/.exec(js); if (fo) (log.forge = log.forge || []).push(JSON.parse(fo[1])); } },
+    setCollision(id, on) { (this.__coll = this.__coll || []).push([id, on]); },
     on() {}, storage: {},
   };
   const controller = { on() {}, emitter: { on() {}, emit: (n, m) => { if (n === "sendMessage") { const c = JSON.parse(m.message.contentJsonDump); if (c.customPacketType !== "greymarchLog") log.sent.push(c); } } } };
@@ -648,6 +649,7 @@ test("the forge display holds still: placed ONCE and left to load (placing it ag
   tick(100); assert.strictEqual(g.moves, 2, "not loaded after 3 s: placed once more");
   s.state.no3d = false; tick();
   assert.strictEqual(g.motions, asked + 1, "keyframed once its 3D is there"); assert.strictEqual(g.motion, 4);
+  assert.deepStrictEqual((s.gm.sp.__coll || []).at(-1), [g.id, false], "collision off: the smith cannot push themselves on it");
   for (let i = 0; i < 20; i++) tick(50);
   assert.strictEqual(g.moves, 2, "then never placed again (that would restart its 3D)");
   const turns = g.turns.length;

@@ -2819,6 +2819,7 @@ export class GreymarchBridge {
                 }
                 if (!loaded) return;
                 try { ghost.setMotionType(4, false); } catch (e) { /* checked below: a piece that drops is put back */ }
+                this.greymarchForgeGhostNoCollision(); // the smith cannot bump into it or push themselves off it (2026-10-26, the owner)
                 this.greymarchForgeGhostReady = true; at = this.greymarchForgeGhostAt || [x, y, z];
                 this.greymarchForgeGhostTurnNext = now + 100;
             }
@@ -2828,6 +2829,7 @@ export class GreymarchBridge {
                 var off = 0; try { off = Math.hypot(ghost.getPositionX() - at[0], ghost.getPositionY() - at[1], ghost.getPositionZ() - at[2]); } catch (e) { off = 0; }
                 if (off > 6) {
                     try { ghost.setMotionType(4, false); } catch (e) { /* moved back anyway */ }
+                    this.greymarchForgeGhostNoCollision();
                     this.greymarchForgeGhostLook = ""; // moved back to the spot and the angle below
                     this.greymarchForgeGhostTurnNext = 0;
                 }
@@ -2854,6 +2856,11 @@ export class GreymarchBridge {
         if (isFinite(dx) && Math.abs(dx) <= 4000) this.greymarchForgeGhostYaw = (((this.greymarchForgeGhostYaw || 0) - dx * 0.5) % 360 + 360) % 360;
         if (isFinite(dy) && Math.abs(dy) <= 4000) this.greymarchForgeGhostPitch = Math.max(-80, Math.min(80, (this.greymarchForgeGhostPitch || 0) + dy * 0.4));
         if (zoom === 1 || zoom === -1) this.greymarchForgeGhostZoom = Math.max(-4, Math.min(6, (this.greymarchForgeGhostZoom || 0) + zoom));
+    }
+    // collision off on the shown copy (SkyrimPlatform's setCollision, by form id: what the shapeshift puppet and SkyMP's own animations use)
+    greymarchForgeGhostNoCollision(): any {
+        var id = this.greymarchForgeGhostId; if (!id) return;
+        try { (this.sp as any).setCollision(id, false); } catch (e) { if (!this.greymarchForgeGhostCollSaid) { this.greymarchForgeGhostCollSaid = true; this.greymarchLog("forge: display collision could not be switched off: " + e); } }
     }
     greymarchForgeGhostSay(why: string): any { this.greymarchForgeGhostSaid = (this.greymarchForgeGhostSaid || 0) + 1; if (this.greymarchForgeGhostSaid <= 10) this.greymarchLog("forge: display removed (" + why + ")"); }
     // the copy with this form id, fetched now (good for this frame only), while it is still a copy of the same piece; otherwise null
