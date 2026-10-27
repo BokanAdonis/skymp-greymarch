@@ -1421,7 +1421,14 @@ export class GreymarchBridge {
         var sp = this.sp, self = this;
         if (this.greymarchChainBase === undefined) { try { this.greymarchChainBase = sp.Game.getFormFromFile(0x878, "GreymarchCore.esp") || null; } catch (e) { this.greymarchChainBase = null; } }
         var base = this.greymarchChainBase;
-        if (!base) return false;
+        if (!base) { if (!this.greymarchChainSaid) { this.greymarchChainSaid = true; this.greymarchLog("guards: chain: no GM_PrisonerChain (0x878, GreymarchCore.esp) in this game: drawn on the HUD"); } return false; }
+        // pieces that never showed (no 3D 2 s after they were placed) or a draw that keeps failing: the HUD line instead, so the chain is always seen (2026-10-27: "the chain is still invisible")
+        if (this.greymarchChain3DOff) {
+            var left = this.greymarchChainPools || {};
+            for (var lk in left) { for (var li = 0; li < left[lk].refs.length; li++) { try { left[lk].refs[li].disable(false); left[lk].refs[li].delete(); } catch (lErr) { /* gone */ } } }
+            this.greymarchChainPools = {};
+            return false;
+        }
         var PIECE = 34, CHAIN_SLACK = 1.15, CHAIN_EXTRA = 40, MAX_PIECES = 40;
         var pools = this.greymarchChainPools || (this.greymarchChainPools = {});
         var list = this.greymarchChainList || [], seen: any = {};
@@ -1441,8 +1448,15 @@ export class GreymarchBridge {
                 var gap = Math.hypot(B[0] - A[0], B[1] - A[1], B[2] - A[2]);
                 if (!(gap > 1) || gap > PIECE * MAX_PIECES) continue;
                 seen[key] = true;
-                var pool = pools[key] || (pools[key] = { refs: [], at: "" });
+                var pool = pools[key] || (pools[key] = { refs: [], at: "", made: now, checked: false });
                 var sig = A.concat(B).map(function (n: number) { return Math.round(n / 2); }).join(",");
+                if (!pool.checked && pool.refs.length && now - pool.made > 2000) {
+                    pool.checked = true;
+                    var shown = 0; for (var c = 0; c < pool.refs.length; c++) { try { if (pool.refs[c].is3DLoaded()) shown++; } catch (cErr) { /* gone */ } }
+                    var r0 = pool.refs[0];
+                    this.greymarchLog("guards: chain: " + shown + " of " + pool.refs.length + " pieces have 3D after 2 s (first at " + [r0.getPositionX(), r0.getPositionY(), r0.getPositionZ()].map(function (v: number) { return Math.round(v); }).join(",") + ", prisoner hand at " + A.map(function (v: number) { return Math.round(v); }).join(",") + ")");
+                    if (!shown) { this.greymarchChain3DOff = true; this.greymarchLog("guards: chain: no piece is drawn in this game: the HUD line from now on"); }
+                }
                 if (sig === pool.at) continue; // nothing moved
                 pool.at = sig;
                 var length = Math.max(gap * CHAIN_SLACK, gap + CHAIN_EXTRA);
@@ -1458,7 +1472,11 @@ export class GreymarchBridge {
                     pool.refs[k].setPosition(p0[0], p0[1], p0[2]);
                     pool.refs[k].setAngle(pitch, 0, heading);
                 }
-            } catch (err) { if (pools[key]) { for (var x = 0; x < pools[key].refs.length; x++) { try { pools[key].refs[x].delete(); } catch (xErr) { /* gone */ } } delete pools[key]; } } // a piece went with a cell change: built again next frame
+            } catch (err) {
+                this.greymarchChainErrs = (this.greymarchChainErrs || 0) + 1;
+                if (this.greymarchChainErrs === 1) this.greymarchLog("guards: chain: drawing failed: " + ((err && (err as any).message) || err));
+                if (this.greymarchChainErrs >= 30) { this.greymarchChain3DOff = true; this.greymarchLog("guards: chain: drawing failed 30 times: the HUD line from now on"); }
+                if (pools[key]) { for (var x = 0; x < pools[key].refs.length; x++) { try { pools[key].refs[x].delete(); } catch (xErr) { /* gone */ } } delete pools[key]; } } // a piece went with a cell change: built again next frame
         }
         for (var key2 in pools) {
             if (seen[key2]) continue;
