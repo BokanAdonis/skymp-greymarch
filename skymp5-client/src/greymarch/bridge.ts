@@ -2768,7 +2768,8 @@ export class GreymarchBridge {
                         try { upright = isArmor || !!sp.Weapon.from(base); } catch (e) { upright = isArmor; }
                         this.greymarchForgeGhostYaw = 0; this.greymarchForgeGhostPitch = 0; this.greymarchForgeGhostZoom = 0; this.greymarchForgeGhostLook = ""; // a new piece starts from the front view
                         this.greymarchForgeGhostId = id; this.greymarchForgeGhostBase = baseId; this.greymarchForgeGhostSince = now;
-                        this.greymarchLog("forge: display made " + id.toString(16) + " (base " + baseId.toString(16) + (upright ? ", stood up" : "") + ")"); this.greymarchForgeGhostTilt = upright ? -90 : 0;
+                        this.greymarchLog("forge: display made " + id.toString(16) + " (base " + baseId.toString(16) + (upright ? ", stood up" : "") + ")");
+                        this.greymarchForgeLightMake(); this.greymarchForgeGhostTilt = upright ? -90 : 0;
                         this.greymarchForgeGhostAt = null; this.greymarchForgeGhostTurnNext = 0; this.greymarchForgeGhostReady = false; this.greymarchForgeGhostCheck = 0; this.greymarchForgeGhostPlacedAt = 0;
                     }
                 } catch (e) { this.greymarchLog("forge: no display (" + e + ")"); }
@@ -2779,7 +2780,7 @@ export class GreymarchBridge {
         // it turns with the game's own smooth movement (TranslateTo, to the same spot), asked again every second.
         if (!this.greymarchForgeGhostId) return;
         var ghost = this.greymarchForgeGhostRef(this.greymarchForgeGhostId, this.greymarchForgeGhostBase);
-        if (!ghost) { this.greymarchForgeGhostId = 0; this.greymarchForgeGhostSay("the game no longer has it"); return; } // gone (the sweep lets it go)
+        if (!ghost) { this.greymarchForgeGhostSay("the game no longer has it"); this.greymarchForgeGhostDrop(); return; } // its lamp goes with it // gone (the sweep lets it go)
         try {
             var pl = sp.Game.getPlayer();
             var c: number[] = [];
@@ -2815,6 +2816,7 @@ export class GreymarchBridge {
                     ghost.setAngle(tilt, 0, face);
                     ghost.setPosition(x, y, z);
                     this.greymarchForgeGhostPlacedAt = now; this.greymarchForgeGhostAt = [x, y, z];
+                    this.greymarchForgeLightMove(x, y, z, fx, fy);
                     return;
                 }
                 if (!loaded) return;
@@ -2837,7 +2839,7 @@ export class GreymarchBridge {
             // the camera turned or the wheel moved it: to the new spot; the smith turned it: to the new angle. Both with the smooth movement, fast, at most 30 times
             // a second. It stands still otherwise (2026-10-26, the owner: examined with the mouse, no turning by itself).
             var zoomed = (this.greymarchForgeGhostZoomAt || 0) !== (this.greymarchForgeGhostZoom || 0);
-            if (zoomed || Math.hypot(x - at[0], y - at[1], z - at[2]) > 12) { this.greymarchForgeGhostAt = [x, y, z]; at = this.greymarchForgeGhostAt; this.greymarchForgeGhostZoomAt = this.greymarchForgeGhostZoom || 0; }
+            if (zoomed || Math.hypot(x - at[0], y - at[1], z - at[2]) > 12) { this.greymarchForgeGhostAt = [x, y, z]; at = this.greymarchForgeGhostAt; this.greymarchForgeGhostZoomAt = this.greymarchForgeGhostZoom || 0; this.greymarchForgeLightMove(x, y, z, fx, fy); }
             var ax = tilt + (this.greymarchForgeGhostPitch || 0), az = face + (this.greymarchForgeGhostYaw || 0);
             var look = at.map(function (n: number) { return Math.round(n); }).join(",") + "," + Math.round(ax) + "," + Math.round(az);
             if (look !== this.greymarchForgeGhostLook && now >= (this.greymarchForgeGhostTurnNext || 0)) {
@@ -2864,6 +2866,29 @@ export class GreymarchBridge {
         var id = this.greymarchForgeGhostId; if (!id) return;
         try { (this.sp as any).setCollision(id, false); } catch (e) { if (!this.greymarchForgeGhostCollSaid) { this.greymarchForgeGhostCollSaid = true; this.greymarchLog("forge: display collision could not be switched off: " + e); } }
     }
+    // A LAMP FOR THE DISPLAY (2026-10-26, the owner: at night the piece could hardly be seen). The game's own shadowless, steady, near-white light
+    // (Skyrim.esm DefaultSunlight01NS_NotPortalStrict, 256 units), in this game only, between the smith and the piece and a little above. Kept and
+    // removed exactly like the copy: by its form id and base, in the same list, swept until the game no longer has it.
+    greymarchForgeLightMake(): any {
+        var sp = this.sp;
+        try {
+            var base = sp.Game.getFormFromFile(0x5eae2, "Skyrim.esm"), player = sp.Game.getPlayer();
+            var l = base && player ? player.placeAtMe(base, 1, false, false) : null;
+            if (!l) return;
+            var id = 0, baseId = 0;
+            try { id = l.getFormID() >>> 0; baseId = base.getFormID() >>> 0; } catch (e) { id = 0; }
+            if (!id || !baseId) { try { l.disable(false); } catch (e) { /* - */ } try { l.delete(); } catch (e) { /* - */ } return; }
+            (this.greymarchForgeGhostIds = this.greymarchForgeGhostIds || []).push({ id: id, base: baseId });
+            this.greymarchForgeLightId = id; this.greymarchForgeLightBase = baseId;
+        } catch (e) { if (!this.greymarchForgeLightSaid) { this.greymarchForgeLightSaid = true; this.greymarchLog("forge: no lamp for the display (" + e + ")"); } }
+    }
+    // 40 units from the piece towards the camera (level), 25 up
+    greymarchForgeLightMove(x: number, y: number, z: number, fx: number, fy: number): any {
+        var lid = this.greymarchForgeLightId; if (!lid) return;
+        var l = this.greymarchForgeGhostRef(lid, this.greymarchForgeLightBase); if (!l) return;
+        var hl = Math.hypot(fx, fy) || 1;
+        try { l.setPosition(x - fx / hl * 40, y - fy / hl * 40, z + 25); } catch (e) { /* stays where it was */ }
+    }
     greymarchForgeGhostSay(why: string): any { this.greymarchForgeGhostSaid = (this.greymarchForgeGhostSaid || 0) + 1; if (this.greymarchForgeGhostSaid <= 10) this.greymarchLog("forge: display removed (" + why + ")"); }
     // the copy with this form id, fetched now (good for this frame only), while it is still a copy of the same piece; otherwise null
     greymarchForgeGhostRef(id: number, base: number): any {
@@ -2875,6 +2900,8 @@ export class GreymarchBridge {
     }
     // the shown copy goes (disabled and deleted); it stays in the list, so the sweep makes sure
     greymarchForgeGhostDrop(): any {
+        var lid = this.greymarchForgeLightId; this.greymarchForgeLightId = 0;
+        if (lid) { var l = this.greymarchForgeGhostRef(lid, this.greymarchForgeLightBase); if (l) { try { l.disable(false); } catch (e) { /* the sweep */ } try { l.delete(); } catch (e) { /* the sweep */ } } this.greymarchForgeGhostNext = 0; }
         var id = this.greymarchForgeGhostId; this.greymarchForgeGhostId = 0;
         if (!id) return;
         var g = this.greymarchForgeGhostRef(id, this.greymarchForgeGhostBase);
@@ -2889,7 +2916,7 @@ export class GreymarchBridge {
         var shown = this.greymarchForgeGhostId, keep: any[] = [];
         for (var i = 0; i < list.length; i++) {
             var e = list[i];
-            if (e.id === shown) { keep.push(e); continue; }
+            if (e.id === shown || (e.id === this.greymarchForgeLightId && e.id)) { keep.push(e); continue; }
             var ref = this.greymarchForgeGhostRef(e.id, e.base);
             if (!ref) continue; // the game no longer has it, or the id is something else now: never touched again
             try { ref.disable(false); } catch (x) { /* again next time */ }

@@ -20,7 +20,7 @@ function make(opts = {}) {
   const state = { drawn: false, speed: 0, menu: null, refuse: false };
   const player = {
     playIdle: (idle) => { log.idles.push(idle.id); return !state.refuse; },
-    placeAtMe: (base) => { const n = (log.ghosts || []).length; const g = { base, at: null, rot: null, gone: false, id: 0xff000100 + n, getFormID: () => g.id, getBaseObject: () => ({ getFormID: () => base.id }), blockActivation: (v) => { g.blocked = v; }, setMotionType: (t) => { g.motion = t; g.motions = (g.motions || 0) + 1; }, setPosition: (x, y, z) => { g.at = [x, y, z]; g.moves = (g.moves || 0) + 1; }, setAngle: (a, b, c) => { g.rot = [a, b, c]; }, getAngleZ: () => (g.rot ? g.rot[2] : 0), getAngleX: () => (g.rot ? g.rot[0] : 0), getPositionX: () => (g.at ? g.at[0] + (g.fell || 0) : 0), getPositionY: () => (g.at ? g.at[1] : 0), getPositionZ: () => (g.at ? g.at[2] - (g.fell || 0) : 0), is3DLoaded: () => !state.no3d, translateTo: (...a) => { (g.turns = g.turns || []).push(a); }, disable() { g.gone = true; }, delete() { g.gone = true; } }; (log.ghosts = log.ghosts || []).push(g); (log.world = log.world || {})[g.id] = g; return g; },
+    placeAtMe: (base) => { const n = (log.ghosts || []).length; const g = { base, at: null, rot: null, gone: false, id: 0xff000100 + n, getFormID: () => g.id, getBaseObject: () => ({ getFormID: () => base.id }), blockActivation: (v) => { g.blocked = v; }, setMotionType: (t) => { g.motion = t; g.motions = (g.motions || 0) + 1; }, setPosition: (x, y, z) => { g.at = [x, y, z]; g.moves = (g.moves || 0) + 1; }, setAngle: (a, b, c) => { g.rot = [a, b, c]; }, getAngleZ: () => (g.rot ? g.rot[2] : 0), getAngleX: () => (g.rot ? g.rot[0] : 0), getPositionX: () => (g.at ? g.at[0] + (g.fell || 0) : 0), getPositionY: () => (g.at ? g.at[1] : 0), getPositionZ: () => (g.at ? g.at[2] - (g.fell || 0) : 0), is3DLoaded: () => !state.no3d, translateTo: (...a) => { (g.turns = g.turns || []).push(a); }, disable() { g.gone = true; }, delete() { g.gone = true; } }; if (base.id === 0x5eae2) { g.id = 0xff100000 + (log.lights || []).length; (log.lights = log.lights || []).push(g); } else (log.ghosts = log.ghosts || []).push(g); (log.world = log.world || {})[g.id] = g; return g; },
     getActorValue: (n) => (state.av || {})[n] || 0, damageActorValue: (n, v) => { log.damage = (log.damage || []).concat([[n, Math.round(v)]]); state.av[n] -= v; },
     isWeaponDrawn: () => state.drawn, isDead: () => !!state.dead, isOnMount: () => !!state.mounted,
     getHeadingAngle: () => 30, getAngleZ: () => 100, setAngle: (a, b, c) => { log.turned = c; }, setPosition: (x, y, z) => { log.stood = [x, y, z]; }, moveTo: (ref, dx, dy, dz, match) => { log.movedTo = [ref.id, dx, dy, dz, match]; }, getPositionX: () => (log.stood ? log.stood[0] : 480), getPositionY: () => (log.stood ? log.stood[1] : 560), getPositionZ: () => (log.stood ? log.stood[2] : 44),
@@ -702,4 +702,21 @@ test("the forge display stands still and is examined with the mouse (2026-10-26,
   assert.deepStrictEqual([Math.round(last()[1]), Math.round(last()[3]), Math.round(last()[5])], [650, 0, 180], "a double-click: back to the front view");
   s.page({ type: "forge-close" }); tick(); const n1 = g.turns.length;
   s.page({ type: "forge-turn", dx: 100 }); tick(); assert.strictEqual(g.turns.length, n1, "nothing once the window is closed");
+});
+
+test("the forge display has its own lamp (2026-10-26, the owner: at night the piece could hardly be seen): the game's steady shadowless light, between the smith and the piece, moved with it, removed with it", () => {
+  const s = make(); let t = 13_000_000; const tick = (ms = 50) => { t += ms; s.gm.greymarchForgePreviewTick(t); };
+  s.state.cam = [480, 560, 150, 0, 1, 0]; // looking north
+  s.say({ customPacketType: "greymarchForgeOpen", title: "Forge", forge: 0xc430a });
+  s.page({ type: "forge-preview", key: "20:skyrim.esm" }); tick();
+  const g = s.log.ghosts[0], l = s.log.lights[0];
+  assert.deepStrictEqual({ id: l.base.id, file: l.base.file }, { id: 0x5eae2, file: "Skyrim.esm" }, "DefaultSunlight01NS_NotPortalStrict");
+  assert.deepStrictEqual(l.at.map(Math.round), [Math.round(g.at[0]), Math.round(g.at[1] - 40), Math.round(g.at[2] + 25)], "40 units towards the smith, 25 up");
+  for (let i = 0; i < 10; i++) tick(50);
+  s.page({ type: "forge-turn", zoom: 1 }); tick(50);
+  assert.strictEqual(Math.round(l.at[1]), Math.round(s.gm.greymarchForgeGhostAt[1] - 40), "moved with the piece");
+  s.page({ type: "forge-preview", key: "21:skyrim.esm" }); tick();
+  assert.strictEqual(l.gone, true, "a new piece: the old lamp goes"); assert.strictEqual(s.log.lights.length, 2); const l2 = s.log.lights[1];
+  s.page({ type: "forge-close" }); tick();
+  assert.strictEqual(l2.gone, true, "the window closes: the lamp goes"); assert.strictEqual(s.log.ghosts[1].gone, true);
 });
