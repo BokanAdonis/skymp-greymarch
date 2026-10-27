@@ -331,3 +331,21 @@ test("the drain costs the server names go on the spell records (GreymarchCamera.
   assert.deepStrictEqual(old.log.sent.filter((m) => m.op === "cost"), [], "an older DLL: the server keeps correcting");
   assert.strictEqual(old.log.lines.filter((l) => /GreymarchCamera.dll 1.5 missing/.test(l)).length, 1, "said once");
 });
+
+test("the Spells balance tab's costs go on the spell records too (GreymarchCamera.dll), each told back as greymarchSpellCost; one no longer named gets its own cost back", () => {
+  const calls = [];
+  const s = make({ native: (cls, fn, self, spell, cost) => { calls.push([fn, spell.id, cost]); return cost < 0 ? 41 : cost; } });
+  const tick = () => { s.gm.greymarchSpellCostNext = 0; s.gm.greymarchSpellCostTick(); };
+  const told = () => s.log.sent.filter((m) => m.customPacketType === "greymarchSpellCost");
+  tick(); assert.deepStrictEqual(calls, [], "nothing named: nothing touched");
+  s.say({ customPacketType: "greymarchSpellCosts", costs: { "12fce:Skyrim.esm": 20, "12fcd:Skyrim.esm": 4 } });
+  tick(); tick();
+  assert.deepStrictEqual(calls, [["SetSpellCost", 0x12fce, 20], ["SetSpellCost", 0x12fcd, 4]], "each set once");
+  assert.deepStrictEqual(told().map((m) => [m.spell, m.cost]), [["12fce:Skyrim.esm", 20], ["12fcd:Skyrim.esm", 4]]);
+  s.say({ customPacketType: "greymarchSpellCosts", costs: { "12fce:Skyrim.esm": 30 } }); tick();
+  assert.deepStrictEqual(calls.slice(-2), [["SetSpellCost", 0x12fce, 30], ["SetSpellCost", 0x12fcd, -1]], "changed, and Flames back to its own");
+  assert.deepStrictEqual(told().slice(-2).map((m) => [m.spell, m.cost]), [["12fce:Skyrim.esm", 30], ["12fcd:Skyrim.esm", null]]);
+  const old = make({ native: () => { throw new Error("no such function"); } });
+  old.say({ customPacketType: "greymarchSpellCosts", costs: { "12fce:Skyrim.esm": 20 } }); old.gm.greymarchSpellCostTick();
+  assert.deepStrictEqual(old.log.sent.filter((m) => m.customPacketType === "greymarchSpellCost"), [], "an older DLL: nothing told, the server keeps correcting");
+});
