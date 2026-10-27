@@ -137,3 +137,40 @@ test("formView.ts makes a beast look at its spot (the hidden marker) and falls b
 test("no look (SkyMP's own NPCs) is spawned as before", async () => {
   assert.deepStrictEqual(await spawn(null), []);
 });
+
+// "Players cloning" (2026-10-27, live): a person's Resurrect is latent, and a FormView that let go of the spawn while it ran (a second look change in a row) left the
+// resurrected actor standing with no gear and no floating ID. The spawn looks at the mark once more when it ends.
+async function spawnLetGoDuringResurrect(appearance, opts = {}) {
+  const calls = [];
+  const refr = { getFormID: () => 0xff000ac9, setPosition: () => Promise.resolve(), enable: () => { calls.push("enable"); return Promise.resolve(); }, disable: () => { calls.push("disable"); return Promise.resolve(); }, delete: () => calls.push("delete"), getBaseObject: () => ({}), setMotionType: () => { calls.push("keyframed"); if (opts.letGo) opts.letGo(); return Promise.resolve(); } };
+  let mod;
+  const actor = { resurrect: () => { calls.push("resurrect"); if (opts.letGo) opts.letGo(); return Promise.resolve(); } };
+  const mods = {
+    skyrimPlatform: { ObjectReference: { from: () => refr }, Game: { getFormEx: () => refr }, Actor: { from: () => (opts.notActor ? null : actor) }, MotionType: { Keyframed: 4 } },
+    "../sync/appearance": { applyTints() {} },
+    "../sync/movement": {},
+    "../extensions/objectReferenceEx": { ObjectReferenceEx: { dealWithRef() {} } },
+  };
+  mod = { exports: {} };
+  new Function("require", "exports", "module", js)((p) => mods[p], mod.exports, mod);
+  if (opts.markDuringLastStep) opts.letGo = () => mod.exports.gmAbandonedSpawns.set(0xff000ac9, () => calls.push("unprotect"));
+  new mod.exports.SpawnProcess(appearance, [0, 0, 0], 0xff000ac9, () => calls.push("callback"));
+  await new Promise((r) => setTimeout(r, 20));
+  return { calls, left: mod.exports.gmAbandonedSpawns.size };
+}
+
+test("a person's spawn its FormView let go of DURING the Resurrect is removed when the Resurrect ends, not handed back (the untagged, gearless 'Stranger' copy)", async () => {
+  const { calls, left } = await spawnLetGoDuringResurrect({ raceId: 0x13746, headpartIds: [1], tints: [] }, { markDuringLastStep: true });
+  assert.deepStrictEqual(calls, ["enable", "resurrect", "disable", "delete", "unprotect"]);
+  assert.strictEqual(left, 0, "the mark is used up");
+});
+
+test("the same for a non-actor reference let go of while it is made keyframed", async () => {
+  const { calls } = await spawnLetGoDuringResurrect(null, { markDuringLastStep: true, notActor: true });
+  assert.deepStrictEqual(calls, ["enable", "keyframed", "disable", "delete", "unprotect"]);
+});
+
+test("a spawn nobody let go of still ends in its callback, and is not removed", async () => {
+  const { calls } = await spawnLetGoDuringResurrect({ raceId: 0x13746, headpartIds: [1], tints: [] });
+  assert.deepStrictEqual(calls, ["enable", "resurrect", "callback"]);
+});
