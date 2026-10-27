@@ -313,7 +313,7 @@ export class GreymarchBridge {
             }
         }
         eq.ids = eq.all.slice(); // the clothes must be put on again
-        eq.redraw = true; // and the body drawn again once they are on (greymarchTick, IRON ARMOR STILL SHOWING)
+        eq.redrawAt = [Date.now(), Date.now() + 1000]; // and the body drawn again once they are on, and a second later (greymarchTick, IRON ARMOR STILL SHOWING)
         eq.resets++;
         this.greymarchLog("reset #" + eq.resets + " (" + why + "): unequipped everything, emptied the inventory, added " + eq.kit.length + " kit item(s)");
     }
@@ -508,16 +508,21 @@ export class GreymarchBridge {
                     }
                     // IRON ARMOR STILL SHOWING (2026-10-28, the owner: new characters spawn in iron armor and must change race to lose it). The reset takes the game's default gear
                     // out of the inventory (the log shows only the starting kit), but the body's 3D was never redrawn, so the iron stayed on screen; changing race rebuilds
-                    // the body, which is why that cleared it. After each reset, once the clothes are on and the race menu is closed (it draws the body itself), it is redrawn
-                    if (eq.redraw && eq.ids.length === 0 && !raceMenuOpen) {
-                        eq.redraw = false;
-                        try { if (player.is3DLoaded()) { player.queueNiNodeUpdate(); this.greymarchLog("body redrawn after reset #" + eq.resets); } } catch (rErr) { this.greymarchLog("could not redraw the body: " + rErr); }
+                    // the body, which is why that cleared it. After each reset, once the clothes are on, it is redrawn, and again a second later. In the race menu too
+                    // (2026-10-28, the owner's second log: the redraw waited for the menu to close, and the menu's preview kept the iron while they built the character;
+                    // the menu redraws the body at every slider, so a redraw there is what it does itself)
+                    if (eq.redrawAt && eq.redrawAt.length && eq.ids.length === 0) {
+                        for (var rd = eq.redrawAt.length - 1; rd >= 0; rd--) {
+                            if (eq.redrawAt[rd] > now) continue;
+                            eq.redrawAt.splice(rd, 1);
+                            try { if (player.is3DLoaded()) { player.queueNiNodeUpdate(); this.greymarchLog("body redrawn after reset #" + eq.resets + (raceMenuOpen ? " (race menu open)" : "")); } } catch (rErr) { this.greymarchLog("could not redraw the body: " + rErr); }
+                        }
                     }
                     // the race menu has just opened: the default armor can come back with it, so take it off again and re-dress
                     // the race menu has just opened: the game's default gear (iron armor) can come with it, so it is REMOVED (the full reset: only the starting kit stays), before the player builds the character
                     if (raceMenuOpen && !eq.menuOpened) { eq.menuOpened = true; this.greymarchReset(eq, player, "race menu opened"); }
                     if (!raceMenuOpen && eq.menuOpened && !eq.menuClosed) { eq.menuClosed = true; eq.pending.push(now + 600, now + 3000, now + 8000); this.greymarchLog("race menu closed: clean-ups scheduled"); }
-                    if (eq.menuClosed && eq.pending.length === 0 && eq.ids.length === 0) this.greymarchEquip = null;
+                    if (eq.menuClosed && eq.pending.length === 0 && eq.ids.length === 0 && !(eq.redrawAt && eq.redrawAt.length)) this.greymarchEquip = null;
                 }
             }
             if (tr) {
