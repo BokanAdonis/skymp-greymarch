@@ -2755,12 +2755,17 @@ export class GreymarchBridge {
                         (this.greymarchForgeGhostIds = this.greymarchForgeGhostIds || []).push({ id: id, base: baseId, g: g });
                         try { g.blockActivation(true); } catch (e) { /* the window holds the keyboard meanwhile */ }
                         try { g.setMotionType(4, false); } catch (e) { /* keyframed: it does not fall */ }
-                        this.greymarchForgeGhost = g; this.greymarchForgeGhostSince = now;
+                        // a weapon or a piece of armour is made lying down (how it rests when dropped): stood up, so it can be seen
+                        var upright = false; try { upright = !!(sp.Weapon.from(base) || sp.Armor.from(base)); } catch (e) { upright = false; }
+                        this.greymarchForgeGhost = g; this.greymarchForgeGhostSince = now; this.greymarchForgeGhostTilt = upright ? -90 : 0;
+                        this.greymarchForgeGhostAt = null; this.greymarchForgeGhostTurnNext = 0;
                     }
                 } catch (e) { this.greymarchLog("forge: no display (" + e + ")"); }
             }
         }
         this.greymarchForgeGhostSweep(now);
+        // Placed ONCE (SetPosition every frame redraws the piece: it flickered, 2026-10-26) and again only if the spot moves (the camera turned);
+        // it turns with the game's own smooth movement (TranslateTo, to the same spot), asked again every second.
         var ghost = this.greymarchForgeGhost; if (!ghost) return;
         try {
             var pl = sp.Game.getPlayer();
@@ -2774,12 +2779,23 @@ export class GreymarchBridge {
                 px = pl.getPositionX(); py = pl.getPositionY(); pz = pl.getPositionZ() + 110; fx = Math.sin(a); fy = Math.cos(a); fz = 0;
             }
             var hl = Math.hypot(fx, fy) || 1, rx = fy / hl, ry = -fx / hl; // the camera's right, level
-            var d = 75;
-            var x = px + fx * d + rx * d * 0.5, y = py + fy * d + ry * d * 0.5, z = pz + fz * d - 4;
-            if (Math.hypot(x - pl.getPositionX(), y - pl.getPositionY(), z - pl.getPositionZ()) > 600) throw new Error("too far from the smith");
-            ghost.setPosition(x, y, z);
-            ghost.setAngle(0, 0, ((now - (this.greymarchForgeGhostSince || now)) / 25) % 360);
-        } catch (e) { this.greymarchForgeGhostDrop(); }
+            var d = 90;
+            var x = px + fx * d + rx * d * 0.45, y = py + fy * d + ry * d * 0.45, z = pz + fz * d - 6;
+            if (Math.hypot(x - pl.getPositionX(), y - pl.getPositionY(), z - pl.getPositionZ()) > 1500) throw new Error("too far from the smith");
+            var tilt = this.greymarchForgeGhostTilt || 0, at = this.greymarchForgeGhostAt;
+            if (!at || Math.hypot(x - at[0], y - at[1], z - at[2]) > 12) {
+                var face = Math.atan2(-fx, -fy) * 180 / Math.PI; // towards the camera (0 = north, like the game's Z angle)
+                ghost.setPosition(x, y, z);
+                ghost.setAngle(tilt, 0, ((face % 360) + 360) % 360);
+                this.greymarchForgeGhostAt = [x, y, z]; at = this.greymarchForgeGhostAt;
+                this.greymarchForgeGhostTurnNext = now + 150; // the piece's 3D is there first
+            }
+            if (now >= (this.greymarchForgeGhostTurnNext || 0)) {
+                this.greymarchForgeGhostTurnNext = now + 1000;
+                var cur = Number(ghost.getAngleZ()); if (!isFinite(cur)) cur = 0;
+                try { ghost.translateTo(at[0], at[1], at[2], tilt, 0, cur + 50, 1, 40); } catch (e) { /* no turn: it still stands there */ }
+            }
+        } catch (e) { if (!this.greymarchForgeGhostSaid) { this.greymarchForgeGhostSaid = true; this.greymarchLog("forge: display removed (" + e + ")"); } this.greymarchForgeGhostDrop(); }
     }
     // the shown copy goes (disabled and deleted); it stays in the list, so the sweep makes sure
     greymarchForgeGhostDrop(): any {

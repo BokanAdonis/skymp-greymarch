@@ -20,7 +20,7 @@ function make(opts = {}) {
   const state = { drawn: false, speed: 0, menu: null, refuse: false };
   const player = {
     playIdle: (idle) => { log.idles.push(idle.id); return !state.refuse; },
-    placeAtMe: (base) => { const n = (log.ghosts || []).length; const g = { base, at: null, rot: null, gone: false, id: 0xff000100 + n, getFormID: () => g.id, getBaseObject: () => ({ getFormID: () => base.id }), blockActivation: (v) => { g.blocked = v; }, setMotionType: (t) => { g.motion = t; }, setPosition: (x, y, z) => { g.at = [x, y, z]; }, setAngle: (a, b, c) => { g.rot = [a, b, c]; }, disable() { g.gone = true; }, delete() { g.gone = true; } }; (log.ghosts = log.ghosts || []).push(g); return g; },
+    placeAtMe: (base) => { const n = (log.ghosts || []).length; const g = { base, at: null, rot: null, gone: false, id: 0xff000100 + n, getFormID: () => g.id, getBaseObject: () => ({ getFormID: () => base.id }), blockActivation: (v) => { g.blocked = v; }, setMotionType: (t) => { g.motion = t; }, setPosition: (x, y, z) => { g.at = [x, y, z]; g.moves = (g.moves || 0) + 1; }, setAngle: (a, b, c) => { g.rot = [a, b, c]; }, getAngleZ: () => (g.rot ? g.rot[2] : 0), translateTo: (...a) => { (g.turns = g.turns || []).push(a); }, disable() { g.gone = true; }, delete() { g.gone = true; } }; (log.ghosts = log.ghosts || []).push(g); return g; },
     getActorValue: (n) => (state.av || {})[n] || 0, damageActorValue: (n, v) => { log.damage = (log.damage || []).concat([[n, Math.round(v)]]); state.av[n] -= v; },
     isWeaponDrawn: () => state.drawn, isDead: () => !!state.dead, isOnMount: () => !!state.mounted,
     getHeadingAngle: () => 30, getAngleZ: () => 100, setAngle: (a, b, c) => { log.turned = c; }, setPosition: (x, y, z) => { log.stood = [x, y, z]; }, moveTo: (ref, dx, dy, dz, match) => { log.movedTo = [ref.id, dx, dy, dz, match]; }, getPositionX: () => (log.stood ? log.stood[0] : 480), getPositionY: () => (log.stood ? log.stood[1] : 560), getPositionZ: () => (log.stood ? log.stood[2] : 44),
@@ -603,7 +603,12 @@ test("the forge display (2026-10-26, back with guards): never left behind, never
   s.say({ customPacketType: "greymarchForgeOpen", title: "Forge", forge: 0xc430a });
   s.page({ type: "forge-preview", key: "20:skyrim.esm" }); tick();
   const g1 = s.log.ghosts[0]; assert.ok(g1 && !g1.gone && g1.blocked === true && g1.motion === 4);
-  assert.ok(g1.at && g1.rot, "placed in front of the camera and turning");
+  assert.ok(g1.at && g1.rot, "placed in front of the camera");
+  for (let i = 0; i < 60; i++) tick(50);
+  assert.strictEqual(g1.moves, 1, "placed ONCE: moving it every frame redraws it (it flickered)");
+  assert.ok(g1.turns && g1.turns.length >= 2, "turned with the game's smooth movement, asked every second");
+  const tr = g1.turns.at(-1); assert.deepStrictEqual(tr.slice(0, 3), g1.at, "turning in place"); assert.strictEqual(tr[5], g1.rot[2] + 50); assert.strictEqual(tr[7], 40, "slowly");
+  assert.strictEqual(g1.rot[0], 0, "not a weapon or armour: as it is");
   let again = 0; world[g1.id] = { getBaseObject: () => ({ getFormID: () => 0x20 }), disable() {}, delete() { again++; } }; // the game keeps the form after a delete (its cell unloaded)
   // a new pick: the old copy goes, the new one is shown
   s.page({ type: "forge-preview", key: "21:skyrim.esm" }); tick();
@@ -612,14 +617,20 @@ test("the forge display (2026-10-26, back with guards): never left behind, never
   tick(2100); assert.strictEqual(again, 2, "deleted again"); tick(2100); assert.strictEqual(again, 3, "and again while the game has it");
   delete world[g1.id]; tick(2100); tick(2100); assert.strictEqual(again, 3, "gone: let go");
   assert.strictEqual(g2.gone, false, "the shown copy is not swept");
+  // a weapon stands up (it is made lying down, how it rests when dropped)
+  s.gm.sp.Weapon = { from: (f) => (f && f.id === 0x21 ? f : null) }; s.gm.sp.Armor = { from: () => null };
+  s.page({ type: "forge-preview", key: "21:skyrim.esm" }); s.page({ type: "forge-preview", key: "20:skyrim.esm" }); tick(); s.page({ type: "forge-preview", key: "21:skyrim.esm" }); tick();
+  const gw = s.log.ghosts.at(-1); assert.strictEqual(gw.rot[0], -90, "a weapon is stood up");
+  assert.ok(s.log.ghosts.slice(0, -1).every((g) => g.gone), "only one copy at a time");
+  const g2b = gw;
   // too far from the smith (a teleport): removed
-  s.gm.sp.Game.getPlayer().getPositionX = () => 99999; tick(); assert.strictEqual(g2.gone, true, "too far: removed");
+  s.gm.sp.Game.getPlayer().getPositionX = () => 99999; tick(); assert.strictEqual(g2b.gone, true, "too far: removed");
   // its id given to something else since (another base): never touched
-  let touched = 0; world[g2.id] = { getBaseObject: () => ({ getFormID: () => 0x999 }), disable() { touched++; }, delete() { touched++; } };
+  let touched = 0; world[g2b.id] = { getBaseObject: () => ({ getFormID: () => 0x999 }), disable() { touched++; }, delete() { touched++; } };
   tick(2100); tick(2100); assert.strictEqual(touched, 0, "an id now used by something else is left alone");
   // the window closes with a copy shown: it goes
   s.gm.sp.Game.getPlayer().getPositionX = () => 480;
-  s.page({ type: "forge-preview", key: "22:skyrim.esm" }); tick(); const g3 = s.log.ghosts[2]; assert.ok(g3 && !g3.gone);
+  s.page({ type: "forge-preview", key: "22:skyrim.esm" }); tick(); const g3 = s.log.ghosts.at(-1); assert.ok(g3 && !g3.gone);
   s.page({ type: "forge-close" }); tick(); assert.strictEqual(g3.gone, true, "the display goes with the window");
-  s.page({ type: "forge-preview", key: "23:skyrim.esm" }); tick(); assert.strictEqual(s.log.ghosts.length, 3, "nothing while closed");
+  s.page({ type: "forge-preview", key: "23:skyrim.esm" }); const made = s.log.ghosts.length; tick(); assert.strictEqual(s.log.ghosts.length, made, "nothing while closed");
 });
