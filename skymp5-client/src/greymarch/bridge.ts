@@ -191,7 +191,7 @@ export class GreymarchBridge {
         if (type === "greymarchWolfForm") { if (this.greymarchWolfWant !== !!msg.on) this.greymarchLog("wolf: the server says " + (msg.on ? "changed" : "no (change back)")); this.greymarchWolfWant = !!msg.on; if (msg.on) { this.greymarchWolfWordAt = Date.now(); this.greymarchWolfAlpha = !!msg.alpha; this.greymarchWolfPup = !msg.alpha && !!msg.pup; this.greymarchWolfKind = msg.kind && GM_WOLF_FORMS[msg.kind] && msg.kind !== "black" && msg.kind !== "polar" ? String(msg.kind) : this.greymarchWolfAlpha ? "alpha" : this.greymarchWolfPup ? "pup" : ""; this.greymarchWolfBearRace = msg.bear && Number(msg.race) > 0 ? Number(msg.race) >>> 0 : 0; if (this.greymarchWolfBearRace) this.greymarchWolfBearSeen = this.greymarchWolfBearRace; this.greymarchWolfBlack = !!this.greymarchWolfBearRace && !!msg.black; this.greymarchWolfPolar = !!this.greymarchWolfBearRace && !!msg.polar; } return; } // (logged only when it changes: the server repeats it every 5 seconds) // the werewolf form (greymarchWolfTick)
         if (type === "greymarchWolfRoar") { if (Number(msg.actor) > 0) (this.greymarchWolfRoarQueue || (this.greymarchWolfRoarQueue = [])).push({ actor: Number(msg.actor), bear: !!msg.bear }); return; } // another player roared nearby: the sound on their NPC (greymarchWolfTick)
         if (type === "greymarchWolfAlphas") { var lists: any = {}; for (var lk in GM_WOLF_LISTS) lists[lk] = Array.isArray(msg[GM_WOLF_LISTS[lk]]) ? msg[GM_WOLF_LISTS[lk]] : []; this.greymarchWolfLists = lists; return; } // the other players in the Alpha form: drawn white (greymarchWolfAlphaOthers)
-        if (type === "greymarchVampire") { this.greymarchVampWant = msg.on ? msg : null; this.greymarchHudToPage("blood", { on: !!msg.on, blood: msg.blood, empty: !!msg.empty }); return; } // a vampire's state: the blood drop and what the game applies (greymarchVampTick)
+        if (type === "greymarchVampire") { this.greymarchVampWant = msg.on ? msg : null; this.greymarchVampCostTold = {}; this.greymarchHudToPage("blood", { on: !!msg.on, blood: msg.blood, empty: !!msg.empty }); return; } // a vampire's state: the blood drop and what the game applies (greymarchVampTick)
         if (type === "greymarchVampLooks") { this.greymarchVampLookList = Array.isArray(msg.vampires) ? msg.vampires : []; if (Number(msg.me) > 0) this.greymarchMeActor = Number(msg.me) >>> 0; return; } // (me: which of them is this player: the ghosts and effects packets that also say so may not have come yet, and without it the player's own eyes and fangs were never put on) // how every vampire in the world looks (eyes and fangs)
         if (type === "greymarchVampFeed") { this.greymarchVampFeedWant = msg.on ? { role: msg.role, partner: msg.partner, at: Date.now(), done: false } : { off: true }; return; } // the feeding scene
         if (type === "greymarchVampMist") { if (!msg.on) this.greymarchVampMistEnd = true; return; } // Mist Form refused or over: the game's own mist is ended
@@ -1148,6 +1148,32 @@ export class GreymarchBridge {
                 try { if (sg && player.hasSpell(sg)) player.removeSpell(sg); } catch (rmErr) { /* gone already */ }
                 this.greymarchLog("vampire: the power " + dk + " taken away again (the server no longer names it)");
             }
+        }
+        // the drain costs the server names (want.costs, { "<hex id>:<plugin>": magicka a second, or a cast for the Lord's drain }: F7's Vampires tab) go on the spell
+        // records in this game through GreymarchCamera.dll (GreymarchCam.SetSpellCost: the record's cost override), so the game charges that number itself and the
+        // magicka bar no longer jumps. Each is told back to the server (greymarchVamp op "cost"), which then stops correcting that drain's magicka; a record this set
+        // that the server no longer names gets its own cost back. An older DLL: the call fails, nothing is told, and the server keeps correcting (its fallback).
+        // Told again after every state packet, so a reconnect or a new cost is reported.
+        var costs: any = want && want.costs && typeof want.costs === "object" ? want.costs : {};
+        var costMine = this.greymarchVampCostMine || (this.greymarchVampCostMine = {});
+        var told = this.greymarchVampCostTold || (this.greymarchVampCostTold = {});
+        for (var cd in costs) {
+            var cw = Math.round(Number(costs[cd]));
+            if (!(cw >= 0) || told[cd] === cw) continue;
+            told[cd] = cw;
+            var cs = this.greymarchVampSpellOf(cd);
+            if (!cs) continue;
+            var got = -1;
+            try { got = Number(sp.callNative("GreymarchCam", "SetSpellCost", undefined, cs, cw)); } catch (cErr) { got = -1; if (!this.greymarchVampCostNoDll) { this.greymarchVampCostNoDll = true; this.greymarchLog("vampire: the drain cost cannot go on the spell (GreymarchCamera.dll 1.5 missing): " + cErr); } }
+            if (got === cw) { costMine[cd] = true; this.greymarchLog("vampire: the drain " + cd + " costs " + cw); this.greymarchVampSend({ op: "cost", spell: cd, cost: cw }); }
+        }
+        for (var ck in costMine) {
+            if (ck in costs) continue;
+            delete costMine[ck]; delete told[ck];
+            var cr = this.greymarchVampSpellOf(ck);
+            try { if (cr) sp.callNative("GreymarchCam", "SetSpellCost", undefined, cr, -1); } catch (rErr) { /* no plugin */ }
+            this.greymarchLog("vampire: the drain " + ck + " back to its own cost");
+            this.greymarchVampSend({ op: "cost", spell: ck, cost: null });
         }
         // no Restoration magic: a Restoration spell put in a hand is taken out of it again
         if (want && want.noRestoration && now >= (this.greymarchVampRestoNext || 0)) {

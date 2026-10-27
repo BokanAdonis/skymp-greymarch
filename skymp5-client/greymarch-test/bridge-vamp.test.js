@@ -36,6 +36,7 @@ function make(opts = {}) {
     Debug: { sendAnimationEvent: (ref, name) => log.events.push([ref.name, name]), notification: (t) => log.notes.push(t) },
     on() {},
   };
+  if (opts.native) sp.callNative = opts.native; // GreymarchCamera.dll's Papyrus functions
   const controller = { on: (n, fn) => { (handlers[n] = handlers[n] || []).push(fn); }, emitter: { on() {}, emit: (n, m) => { if (n === "sendMessage") log.sent.push(JSON.parse(m.message.contentJsonDump)); } } };
   const gm = new mod.exports.GreymarchBridge(sp, controller);
   const fire = (n, e) => (handlers[n] || []).forEach((fn) => fn(e));
@@ -308,4 +309,25 @@ test("the powers the server names are added when the game is missing them, and t
     t += 2000; s.tick();
     assert.deepStrictEqual(s.log.removed, [DG + 0x38ba, 0x8d5bf], "no longer a vampire: what this added goes");
   } finally { Date.now = realNow; }
+});
+
+test("the drain costs the server names go on the spell records (GreymarchCamera.dll), each told back; a record no longer named gets its own cost back; no DLL: nothing told", () => {
+  const calls = [];
+  const s = make({ native: (cls, fn, self, spell, cost) => { calls.push([cls, fn, spell.id, cost]); return cost < 0 ? 17 : cost; } });
+  const told = () => s.log.sent.filter((m) => m.op === "cost");
+  s.say(state({ costs: { "8d5c2:Skyrim.esm": 0 } }));
+  s.tick(); s.tick();
+  assert.deepStrictEqual(calls, [["GreymarchCam", "SetSpellCost", 0x8d5c2, 0]], "set once");
+  assert.deepStrictEqual(told(), [{ customPacketType: "greymarchVamp", op: "cost", spell: "8d5c2:Skyrim.esm", cost: 0 }]);
+  s.say(state({ costs: { "8d5c2:Skyrim.esm": 0 } })); s.tick();
+  assert.strictEqual(told().length, 2, "told again after a state packet (a reconnect)");
+  s.say(state({ costs: { "8d5c2:Skyrim.esm": 4, "19ad7:Dawnguard.esm": 30 } })); s.tick();
+  assert.deepStrictEqual(calls.slice(-2), [["GreymarchCam", "SetSpellCost", 0x8d5c2, 4], ["GreymarchCam", "SetSpellCost", DG + 0x19ad7, 30]]);
+  s.say({ customPacketType: "greymarchVampire", on: false }); s.tick();
+  assert.deepStrictEqual(calls.slice(-2).map((c) => c[3]), [-1, -1], "vampirism gone: both records their own again");
+  assert.deepStrictEqual(told().slice(-2).map((m) => m.cost), [null, null]);
+  const old = make({ native: () => { throw new Error("no such function"); } });
+  old.say(state({ costs: { "8d5c2:Skyrim.esm": 0 } })); old.tick(); old.tick();
+  assert.deepStrictEqual(old.log.sent.filter((m) => m.op === "cost"), [], "an older DLL: the server keeps correcting");
+  assert.strictEqual(old.log.lines.filter((l) => /GreymarchCamera.dll 1.5 missing/.test(l)).length, 1, "said once");
 });
