@@ -25,6 +25,7 @@ const MENU_SCRIPT = "(function(){if(window.__gmMenuSend)return;var f=document.cr
 const PROF_SCRIPT = "(function(){if(window.__gmProfSend)return;var f=document.createElement('iframe');f.id='greymarch-prof-frame';f.src='greymarch-prof.html';f.style.cssText='position:fixed;left:0;top:0;width:100%;height:100%;border:0;z-index:2147483220;background:transparent;display:block;pointer-events:none';f.setAttribute('allowtransparency','true');var ready=false,queue=[];window.addEventListener('message',function(e){if(e.source!==f.contentWindow)return;var d=e.data;if(!d)return;if(d.greymarchReady){ready=true;queue.forEach(function(q){f.contentWindow.postMessage({greymarchIn:q},'*')});queue=[]}else if(d.greymarchOut&&window.skyrimPlatform){window.skyrimPlatform.sendMessage('greymarch',JSON.stringify(d.greymarchOut))}});window.__gmProfSend=function(m){if(m.fn==='show'){f.style.pointerEvents='auto';try{f.focus()}catch(x){}}else if(m.fn==='hide')f.style.pointerEvents='none';if(ready)f.contentWindow.postMessage({greymarchIn:m},'*');else queue.push(m)};document.body.appendChild(f);document.addEventListener('keyup',function(e){if(e.key==='x'||e.key==='X'){try{f.contentWindow.postMessage({greymarchIn:{fn:'release'}},'*')}catch(x){}}});document.addEventListener('keydown',function(e){if(e.key==='Escape'){try{f.contentWindow.postMessage({greymarchIn:{fn:'escape'}},'*')}catch(x){}}})})();";
 const CONNECT_FAIL_MS = 90000; // the connecting screen over the main menu: this long without the character select, it says what to do (greymarchConnectCover)
 const WOLF_MORPH_MS = 4300; // the werewolf transformation: the race changes at the animation's "SetRace" cue, or after this long if the cue is not seen (the cue is about 4.0 s in, animationdatasinglefile.txt)
+const TGM_CARRY = 100000; // staff TGM: carry weight added while it is on (no carry limit, like the console's tgm), taken off again when it is switched off
 const WOLF_KEY_WAIT_MS = 600; // Z with Beast Form equipped: how long the game gets to cast it before the press itself is reported (greymarchWolfTick)
 const SHAPE_REST_MS = 800, SHAPE_POWER_REST_MS = 1600; // a creature's attacks: the rest after a normal and after a power attack (the server allows the same pace)
 const SHAPE_LAND_MS = 450; // a creature's swing is reported this long after it starts (about when it lands)
@@ -437,6 +438,7 @@ export class GreymarchBridge {
         if (this.greymarchMenuEscAt && Date.now() - this.greymarchMenuEscAt > 700) { this.greymarchMenuEscAt = 0; this.greymarchMenuHide(); } // Esc, and the menu page did not close itself
         this.greymarchToastTick(Date.now());
         this.greymarchEffects(); // staff effects: noclip, speed, frozen, ghosts (cheap: does real work every 400 ms)
+        this.greymarchTgmFrame(); // TGM: full magicka and stamina and no shout cooldown, every frame
         this.greymarchHungerDrive(); // hunger: the stagger, regeneration off while starving
         this.greymarchNoticeTick(); // plain notices from the server, the game's own top-left message
         this.greymarchStandUpTick(Date.now()); // the server asked the player to get up from their furniture (the end of a won mining game)
@@ -2057,6 +2059,21 @@ export class GreymarchBridge {
             this.greymarchLog("shape: changing back failed at step '" + step + "': " + uErr);
         }
     }
+    // TGM, every frame (the game ignores Debug.SetGodMode in release, 2026-10-27): the player's own magicka and stamina are put back to full the moment they drop and the
+    // shout cooldown is cleared, so neither bar visibly drains and shouts can be used back to back. Health is never touched: other players can still hurt and kill a staff
+    // member with TGM on. The carry weight bonus (TGM_CARRY) is switched with TGM in greymarchEffects.
+    greymarchTgmFrame(): any {
+        if (!this.greymarchFxWant || !this.greymarchFxWant.tgm) return;
+        try {
+            var player = this.sp.Game.getPlayer();
+            if (!player) return;
+            if (player.getActorValuePercentage("Magicka") < 1) player.restoreActorValue("Magicka", 100000);
+            if (player.getActorValuePercentage("Stamina") < 1) player.restoreActorValue("Stamina", 100000);
+            if (player.getVoiceRecoveryTime() > 0) player.setVoiceRecoveryTime(0);
+        } catch (err) {
+            if (!this.greymarchTgmErr) { this.greymarchTgmErr = true; this.greymarchLog("staff: TGM refill error (shown once): " + err); }
+        }
+    }
     // Staff effects, applied in the update phase. Each is switched on or off only when it CHANGES, so the game is never fought with.
     greymarchEffects(): any {
         var now = Date.now();
@@ -2077,6 +2094,7 @@ export class GreymarchBridge {
                 // TGM: the game's own god mode, what the console's tgm switches (Debug.SetGodMode): no drain, no shout cooldown, no carry limit, no arrows used. The server still
                 // works out other players' hits, so it never protects against them (God above is the switch that does).
                 if (!!want.tgm !== have.tgm) { try { sp.Debug.setGodMode(!!want.tgm); } catch (tErr) { this.greymarchLog("staff: SetGodMode is not available (" + tErr + "), TGM relies on the server refill"); } have.tgm = !!want.tgm; this.greymarchLog("staff: TGM " + (want.tgm ? "on" : "off")); }
+                if (!!want.tgm !== !!have.tgmCarry) { try { player.modActorValue("CarryWeight", want.tgm ? TGM_CARRY : -TGM_CARRY); have.tgmCarry = !!want.tgm; } catch (cErr) { this.greymarchLog("staff: TGM carry weight failed (" + cErr + ")"); have.tgmCarry = !!want.tgm; } }
                 if (want.frozen !== have.frozen) {
                     if (want.frozen) sp.Game.disablePlayerControls(true, true, true, true, true, true, true, true, 0); else sp.Game.enablePlayerControls(true, true, true, true, true, true, true, true, 0);
                     have.frozen = want.frozen;
