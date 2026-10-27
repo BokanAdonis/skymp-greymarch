@@ -635,21 +635,27 @@ test("the forge display (2026-10-26, back with guards): never left behind, never
   s.page({ type: "forge-preview", key: "23:skyrim.esm" }); const made = s.log.ghosts.length; tick(); assert.strictEqual(s.log.ghosts.length, made, "nothing while closed");
 });
 
-test("the forge display holds still: keyframed only once its 3D is there (asked earlier the game ignores it and the piece fell), and a piece that drops is put back", () => {
+test("the forge display holds still: placed ONCE and left to load (placing it again restarts its 3D: it never loaded, 2026-10-26), keyframed once its 3D is there, and a piece that drops is moved back smoothly", () => {
   const s = make(); let t = 7_000_000; const tick = (ms = 50) => { t += ms; s.gm.greymarchForgePreviewTick(t); };
   s.state.cam = [480, 560, 150, 0, 1, 0];
   s.say({ customPacketType: "greymarchForgeOpen", title: "Forge", forge: 0xc430a });
   s.state.no3d = true;
   s.page({ type: "forge-preview", key: "20:skyrim.esm" }); tick();
   const g = s.log.ghosts[0]; const asked = g.motions;
-  tick(); tick();
-  assert.strictEqual(g.motions, asked, "not keyframed again before its 3D is there"); assert.ok(g.moves >= 3, "held at the spot meanwhile");
+  for (let i = 0; i < 40; i++) tick(50);
+  assert.strictEqual(g.moves, 1, "placed once and left to load: not placed again every frame");
+  assert.strictEqual(g.motions, asked, "not keyframed before its 3D is there");
+  for (let i = 0; i < 20; i++) tick(50);
+  tick(100); assert.strictEqual(g.moves, 2, "not loaded after 3 s: placed once more");
   s.state.no3d = false; tick();
   assert.strictEqual(g.motions, asked + 1, "keyframed once its 3D is there"); assert.strictEqual(g.motion, 4);
-  const moves = g.moves; for (let i = 0; i < 20; i++) tick(50);
-  assert.strictEqual(g.moves, moves, "then left alone (no flicker)");
+  for (let i = 0; i < 20; i++) tick(50);
+  assert.strictEqual(g.moves, 2, "then never placed again (that would restart its 3D)");
+  const turns = g.turns.length;
   g.fell = 30; tick(250); g.fell = 0;
-  assert.strictEqual(g.moves, moves + 1, "it dropped: put back"); assert.strictEqual(g.motions, asked + 2, "and keyframed again");
+  const back = g.turns.slice(turns).find((a) => a[6] === 3000);
+  assert.ok(back, "it dropped: moved back with the smooth movement, fast"); assert.deepStrictEqual(back.slice(0, 3), g.at);
+  assert.strictEqual(g.motions, asked + 2, "and keyframed again"); assert.strictEqual(g.moves, 2);
   assert.strictEqual(g.gone, false, "still shown");
 });
 

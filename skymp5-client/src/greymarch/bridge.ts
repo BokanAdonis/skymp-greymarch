@@ -2766,7 +2766,7 @@ export class GreymarchBridge {
                         var upright = false; try { upright = !!(sp.Weapon.from(base) || sp.Armor.from(base)); } catch (e) { upright = false; }
                         this.greymarchForgeGhostId = id; this.greymarchForgeGhostBase = baseId; this.greymarchForgeGhostSince = now;
                         this.greymarchLog("forge: display made " + id.toString(16) + " (base " + baseId.toString(16) + (upright ? ", stood up" : "") + ")"); this.greymarchForgeGhostTilt = upright ? -90 : 0;
-                        this.greymarchForgeGhostAt = null; this.greymarchForgeGhostTurnNext = 0; this.greymarchForgeGhostReady = false; this.greymarchForgeGhostCheck = 0;
+                        this.greymarchForgeGhostAt = null; this.greymarchForgeGhostTurnNext = 0; this.greymarchForgeGhostReady = false; this.greymarchForgeGhostCheck = 0; this.greymarchForgeGhostPlacedAt = 0;
                     }
                 } catch (e) { this.greymarchLog("forge: no display (" + e + ")"); }
             }
@@ -2801,29 +2801,43 @@ export class GreymarchBridge {
                 var st = ""; try { st = "at " + [ghost.getPositionX(), ghost.getPositionY(), ghost.getPositionZ()].map(r0).join(",") + " 3D " + ghost.is3DLoaded() + " on " + !ghost.isDisabled(); } catch (e) { st = "? (" + e + ")"; }
                 this.greymarchLog("forge: display " + st + " | spot " + [x, y, z].map(r0).join(",") + " | camera " + [px, py, pz].map(r0).join(",") + " looking " + [fx, fy, fz].map(function (n: number) { return n.toFixed(2); }).join(",") + (c.length === 6 ? "" : " (no plugin)") + " | smith " + [pl.getPositionX(), pl.getPositionY(), pl.getPositionZ()].map(r0).join(",") + " | ready " + !!this.greymarchForgeGhostReady);
             }
-            // KEYFRAMED ONLY ONCE ITS 3D IS THERE (2026-10-26: asked at once, the game ignored it, the piece fell and dropped out of sight). Until then it is
-            // held at the spot every frame; then keyframed and placed again.
+            var face = (((Math.atan2(-fx, -fy) * 180 / Math.PI) % 360) + 360) % 360; // towards the camera (0 = north, like the game's Z angle)
+            // PLACED ONCE, THEN LEFT TO LOAD (2026-10-26, from the log: SetPosition restarts the piece's 3D, so placing it every frame while waiting kept
+            // it from ever loading: "3D false" for 15 s, nothing to see). Placed again only if it has not loaded after 3 s. Once its 3D is there it is
+            // keyframed (asked earlier the game ignores it and the piece falls); every move after that is the game's smooth movement (TranslateTo),
+            // which keeps the 3D.
             if (!this.greymarchForgeGhostReady) {
-                var loaded = true; try { loaded = ghost.is3DLoaded() !== false; } catch (e) { loaded = true; }
-                if (!loaded) { ghost.setPosition(x, y, z); return; }
+                var loaded = false; try { loaded = ghost.is3DLoaded() === true; } catch (e) { loaded = false; }
+                if (!this.greymarchForgeGhostPlacedAt || (!loaded && now - this.greymarchForgeGhostPlacedAt > 3000)) {
+                    ghost.setAngle(tilt, 0, face);
+                    ghost.setPosition(x, y, z);
+                    this.greymarchForgeGhostPlacedAt = now; this.greymarchForgeGhostAt = [x, y, z];
+                    return;
+                }
+                if (!loaded) return;
                 try { ghost.setMotionType(4, false); } catch (e) { /* checked below: a piece that drops is put back */ }
-                this.greymarchForgeGhostReady = true; at = null;
+                this.greymarchForgeGhostReady = true; at = this.greymarchForgeGhostAt || [x, y, z];
+                this.greymarchForgeGhostTurnNext = now + 100;
             }
-            // a piece that moved off its spot anyway (fell, was pushed): keyframed again and put back
-            if (at && now >= (this.greymarchForgeGhostCheck || 0)) {
+            // a piece that moved off its spot anyway (fell, was pushed): keyframed again and moved back fast
+            if (now >= (this.greymarchForgeGhostCheck || 0)) {
                 this.greymarchForgeGhostCheck = now + 200;
-                try { if (Math.hypot(ghost.getPositionX() - at[0], ghost.getPositionY() - at[1], ghost.getPositionZ() - at[2]) > 4) { try { ghost.setMotionType(4, false); } catch (e) { /* put back anyway */ } at = null; } } catch (e) { /* no position: next time */ }
+                var off = 0; try { off = Math.hypot(ghost.getPositionX() - at[0], ghost.getPositionY() - at[1], ghost.getPositionZ() - at[2]); } catch (e) { off = 0; }
+                if (off > 6) {
+                    try { ghost.setMotionType(4, false); } catch (e) { /* moved back anyway */ }
+                    ghost.translateTo(at[0], at[1], at[2], tilt, 0, face, 3000, 0);
+                    this.greymarchForgeGhostTurnNext = now + 400;
+                }
             }
-            if (!at || Math.hypot(x - at[0], y - at[1], z - at[2]) > 12) {
-                var face = Math.atan2(-fx, -fy) * 180 / Math.PI; // towards the camera (0 = north, like the game's Z angle)
-                ghost.setPosition(x, y, z);
-                ghost.setAngle(tilt, 0, ((face % 360) + 360) % 360);
+            // the camera turned: to the new spot, fast
+            if (Math.hypot(x - at[0], y - at[1], z - at[2]) > 12) {
+                ghost.translateTo(x, y, z, tilt, 0, face, 3000, 0);
                 this.greymarchForgeGhostAt = [x, y, z]; at = this.greymarchForgeGhostAt;
-                this.greymarchForgeGhostTurnNext = now + 150; // the piece's 3D is there first
+                this.greymarchForgeGhostTurnNext = now + 400;
             }
             if (now >= (this.greymarchForgeGhostTurnNext || 0)) {
                 this.greymarchForgeGhostTurnNext = now + 1000;
-                var cur = Number(ghost.getAngleZ()); if (!isFinite(cur)) cur = 0;
+                var cur = Number(ghost.getAngleZ()); if (!isFinite(cur)) cur = face;
                 try { ghost.translateTo(at[0], at[1], at[2], tilt, 0, cur + 50, 1, 40); } catch (e) { /* no turn: it still stands there */ }
             }
         } catch (e) { this.greymarchForgeGhostSay(String(e)); this.greymarchForgeGhostDrop(); }
