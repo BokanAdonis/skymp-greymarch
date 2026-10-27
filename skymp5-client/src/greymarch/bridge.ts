@@ -428,7 +428,7 @@ export class GreymarchBridge {
         this.greymarchBuildCamTick(Date.now()); // the build system's free camera: the preview where the camera looks
         this.greymarchChopTick(Date.now()); // sitting at a chopping block: the server counts the chops (XP, firewood)
         this.greymarchForgeTick(Date.now()); // after the forge window closed: the smith is surely out of the forge's animation
-        this.greymarchForgePreviewTick(Date.now()); // removes a preview copy an older version left
+        this.greymarchForgePreviewTick(Date.now()); // the forge's display of the picked piece: made, turned and always removed (never left behind)
         this.greymarchPointerGuard(Date.now()); // a window that holds the mouse always has its pointer (the game's Cursor Menu)
         this.greymarchHotkeyTick(Date.now()); // a window hotkey whose key-up the game never sent
         this.greymarchMiniActivateTick(); // a mini game won: the thing is used again (the server lets it through)
@@ -592,7 +592,7 @@ export class GreymarchBridge {
         if (data && data.type === "craft-close") { this.greymarchCraftHide(); return; }
         if (data && data.type === "forge") { this.greymarchForgeAsk(data); return; } // the forge window asks the server (the SERVER decides and makes the item)
         if (data && data.type === "forge-close") { this.greymarchForgeHide(); return; }
-        if (data && data.type === "forge-preview") return; // no preview in the world any more: the copies could be picked up (free items); asks from an older page are ignored
+        if (data && data.type === "forge-preview") { if (this.greymarchForgeOn) this.greymarchForgePreviewWant = String(data.key || "").slice(0, 80); return; } // the piece picked in the forge window: shown in front of the smith (greymarchForgePreviewTick); only while the window is open
         if (data && data.type === "vampire") { this.greymarchVampMenuAsk(data); return; } // the vampire window asks the server (the SERVER decides)
         if (data && data.type === "vampire-close") { this.greymarchVampMenuHide(); return; }
         if (data && data.type === "ledger") { this.greymarchLedgerAsk(data); return; } // the guard ledger asks the server (the SERVER decides)
@@ -2728,13 +2728,90 @@ export class GreymarchBridge {
         if (this.greymarchForgeAnim) return; // opened again meanwhile
         try { var p2 = sp.Game.getPlayer(); if (p2) sp.Debug.sendAnimationEvent(p2, "IdleForceDefaultState"); } catch (e) { /* nothing to free */ }
     }
-    // THE PREVIEW IS GONE (2026-10-25): a copy of the picked piece in the world could be left behind and picked up (free items). Nothing is placed any more;
-    // this only removes a copy an older version of this game may still have made.
+    // THE DISPLAY (back 2026-10-26, the owner: smiths show customers the piece). The piece picked in the forge window, as a copy in this game only, floating
+    // on the right of the screen in front of the camera and slowly turning, like the game's own crafting menu. Before (removed 2026-10-25) copies were left
+    // behind and picked up: free items. Now each copy is guarded:
+    //  - it cannot be used or picked up: the game's BlockActivation, and keyframed (it does not fall, it cannot be grabbed or knocked away);
+    //  - it lives only while the forge window is open and stays at the smith: the window closed, a new piece picked, too far from the player or the
+    //    frame's move failing (a cell change) and it is removed;
+    //  - it is never forgotten: every copy made is kept by its form id and base, and checked every 2 s until the game no longer has it (a copy in a cell
+    //    that unloaded is deleted when the cell is back). A form id the game gave to something else since (the base differs) is let go, never touched.
     greymarchForgePreviewTick(now: number): any {
-        var ghost = this.greymarchForgeGhost;
-        if (!ghost) return;
-        this.greymarchForgeGhost = null;
-        try { ghost.disable(false); ghost.delete(); } catch (e) { /* gone */ }
+        var sp = this.sp, want = this.greymarchForgePreviewWant;
+        if (!this.greymarchForgeOn) want = this.greymarchForgeGhost ? "" : null; // no window, no display
+        if (want !== undefined && want !== null) {
+            this.greymarchForgePreviewWant = null;
+            this.greymarchForgeGhostDrop();
+            var m = /^([0-9a-f]{1,8}):([^:]{1,64})$/i.exec(want);
+            if (m && this.greymarchForgeOn) {
+                try {
+                    var base = sp.Game.getFormFromFile(parseInt(m[1], 16), m[2]);
+                    var player = sp.Game.getPlayer();
+                    var g = base && player ? player.placeAtMe(base, 1, false, false) : null;
+                    if (g) {
+                        var id = 0, baseId = 0;
+                        try { id = g.getFormID() >>> 0; } catch (e) { /* kept by its handle only */ }
+                        try { baseId = base.getFormID() >>> 0; } catch (e) { /* no base check */ }
+                        (this.greymarchForgeGhostIds = this.greymarchForgeGhostIds || []).push({ id: id, base: baseId, g: g });
+                        try { g.blockActivation(true); } catch (e) { /* the window holds the keyboard meanwhile */ }
+                        try { g.setMotionType(4, false); } catch (e) { /* keyframed: it does not fall */ }
+                        this.greymarchForgeGhost = g; this.greymarchForgeGhostSince = now;
+                    }
+                } catch (e) { this.greymarchLog("forge: no display (" + e + ")"); }
+            }
+        }
+        this.greymarchForgeGhostSweep(now);
+        var ghost = this.greymarchForgeGhost; if (!ghost) return;
+        try {
+            var pl = sp.Game.getPlayer();
+            var c: number[] = [];
+            try { for (var i = 0; i < 6; i++) c.push(Number(sp.callNative("GreymarchCam", "GetCamera", undefined, i))); } catch (e) { c = []; }
+            var px: number, py: number, pz: number, fx: number, fy: number, fz: number;
+            if (c.length === 6 && c.every(function (n) { return isFinite(n); }) && Math.hypot(c[3], c[4], c[5]) > 0.01) {
+                var len = Math.hypot(c[3], c[4], c[5]); px = c[0]; py = c[1]; pz = c[2]; fx = c[3] / len; fy = c[4] / len; fz = c[5] / len;
+            } else { // no camera plugin: from the player's eyes, the way they face
+                var a = pl.getAngleZ() * Math.PI / 180;
+                px = pl.getPositionX(); py = pl.getPositionY(); pz = pl.getPositionZ() + 110; fx = Math.sin(a); fy = Math.cos(a); fz = 0;
+            }
+            var hl = Math.hypot(fx, fy) || 1, rx = fy / hl, ry = -fx / hl; // the camera's right, level
+            var d = 75;
+            var x = px + fx * d + rx * d * 0.5, y = py + fy * d + ry * d * 0.5, z = pz + fz * d - 4;
+            if (Math.hypot(x - pl.getPositionX(), y - pl.getPositionY(), z - pl.getPositionZ()) > 600) throw new Error("too far from the smith");
+            ghost.setPosition(x, y, z);
+            ghost.setAngle(0, 0, ((now - (this.greymarchForgeGhostSince || now)) / 25) % 360);
+        } catch (e) { this.greymarchForgeGhostDrop(); }
+    }
+    // the shown copy goes (disabled and deleted); it stays in the list, so the sweep makes sure
+    greymarchForgeGhostDrop(): any {
+        var g = this.greymarchForgeGhost; this.greymarchForgeGhost = null;
+        if (!g) return;
+        try { g.disable(false); } catch (e) { /* the sweep */ }
+        try { g.delete(); } catch (e) { /* the sweep */ }
+        this.greymarchForgeGhostNext = 0; // sweep at once
+    }
+    // every 2 s: each copy this game made that is not the one shown is disabled and deleted again, until the game no longer has its form
+    greymarchForgeGhostSweep(now: number): any {
+        var list = this.greymarchForgeGhostIds;
+        if (!list || !list.length || now < (this.greymarchForgeGhostNext || 0)) return;
+        this.greymarchForgeGhostNext = now + 2000;
+        var sp = this.sp, shown = this.greymarchForgeGhost, keep: any[] = [];
+        for (var i = 0; i < list.length; i++) {
+            var e = list[i];
+            if (e.g === shown) { keep.push(e); continue; }
+            var ref: any = null;
+            if (e.id && e.base) { // by its form id, only while that id is still a copy of the same piece
+                try { var f = sp.Game.getFormEx(e.id); ref = f ? sp.ObjectReference.from(f) : null; } catch (x) { ref = null; }
+                if (!ref) continue; // the game no longer has it: done
+                var same = false; try { var b = ref.getBaseObject(); same = !!b && (b.getFormID() >>> 0) === e.base; } catch (x) { same = false; }
+                if (!same) continue; // the id is something else now (or cannot be checked): never touched
+            } else ref = e.g; // no form id or base: only the handle
+            try { ref.disable(false); } catch (x) { /* again next time */ }
+            try { ref.delete(); } catch (x) { /* again next time */ }
+            e.tries = (e.tries || 0) + 1;
+            if (!(e.id && e.base) && e.tries >= 3) continue; // a handle alone cannot be checked: three tries
+            keep.push(e);
+        }
+        this.greymarchForgeGhostIds = keep.slice(-200);
     }
     // THE POINTER. SkyrimPlatform draws it through the game's Cursor Menu, which it opens when a page takes the focus (BrowserApiTilted SetFocused) and only
     // then: something that closes the Cursor Menu while a page has the focus (moving the player onto a forge, a game menu closing) leaves the window without a
