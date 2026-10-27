@@ -20,7 +20,7 @@ function make(opts = {}) {
   const state = { drawn: false, speed: 0, menu: null, refuse: false };
   const player = {
     playIdle: (idle) => { log.idles.push(idle.id); return !state.refuse; },
-    placeAtMe: (base) => { const n = (log.ghosts || []).length; const g = { base, at: null, rot: null, gone: false, id: 0xff000100 + n, getFormID: () => g.id, getBaseObject: () => ({ getFormID: () => base.id }), blockActivation: (v) => { g.blocked = v; }, setMotionType: (t) => { g.motion = t; g.motions = (g.motions || 0) + 1; }, setPosition: (x, y, z) => { g.at = [x, y, z]; g.moves = (g.moves || 0) + 1; }, setAngle: (a, b, c) => { g.rot = [a, b, c]; }, getAngleZ: () => (g.rot ? g.rot[2] : 0), getPositionX: () => (g.at ? g.at[0] + (g.fell || 0) : 0), getPositionY: () => (g.at ? g.at[1] : 0), getPositionZ: () => (g.at ? g.at[2] - (g.fell || 0) : 0), is3DLoaded: () => !state.no3d, translateTo: (...a) => { (g.turns = g.turns || []).push(a); }, disable() { g.gone = true; }, delete() { g.gone = true; } }; (log.ghosts = log.ghosts || []).push(g); return g; },
+    placeAtMe: (base) => { const n = (log.ghosts || []).length; const g = { base, at: null, rot: null, gone: false, id: 0xff000100 + n, getFormID: () => g.id, getBaseObject: () => ({ getFormID: () => base.id }), blockActivation: (v) => { g.blocked = v; }, setMotionType: (t) => { g.motion = t; g.motions = (g.motions || 0) + 1; }, setPosition: (x, y, z) => { g.at = [x, y, z]; g.moves = (g.moves || 0) + 1; }, setAngle: (a, b, c) => { g.rot = [a, b, c]; }, getAngleZ: () => (g.rot ? g.rot[2] : 0), getPositionX: () => (g.at ? g.at[0] + (g.fell || 0) : 0), getPositionY: () => (g.at ? g.at[1] : 0), getPositionZ: () => (g.at ? g.at[2] - (g.fell || 0) : 0), is3DLoaded: () => !state.no3d, translateTo: (...a) => { (g.turns = g.turns || []).push(a); }, disable() { g.gone = true; }, delete() { g.gone = true; } }; (log.ghosts = log.ghosts || []).push(g); (log.world = log.world || {})[g.id] = g; return g; },
     getActorValue: (n) => (state.av || {})[n] || 0, damageActorValue: (n, v) => { log.damage = (log.damage || []).concat([[n, Math.round(v)]]); state.av[n] -= v; },
     isWeaponDrawn: () => state.drawn, isDead: () => !!state.dead, isOnMount: () => !!state.mounted,
     getHeadingAngle: () => 30, getAngleZ: () => 100, setAngle: (a, b, c) => { log.turned = c; }, setPosition: (x, y, z) => { log.stood = [x, y, z]; }, moveTo: (ref, dx, dy, dz, match) => { log.movedTo = [ref.id, dx, dy, dz, match]; }, getPositionX: () => (log.stood ? log.stood[0] : 480), getPositionY: () => (log.stood ? log.stood[1] : 560), getPositionZ: () => (log.stood ? log.stood[2] : 44),
@@ -31,9 +31,9 @@ function make(opts = {}) {
   const actors = {}; for (const local of Object.values(opts.others || {})) actors[local] = faceLog(local.toString(16));
   const sp = {
     printConsole() {}, writeLogs: (n, l) => log.lines.push(l),
-    Game: { getPlayer: () => player, getFormEx: (id) => ({ id }), getFormFromFile: (id, file) => (file === "Missing.esp" ? null : { id, file, getFormID: () => id }), forceThirdPerson: () => { log.thirdPerson++; }, disablePlayerControls: (...a) => (log.controls = log.controls || []).push(["off", ...a]), enablePlayerControls: (...a) => (log.controls = log.controls || []).push(["on", ...a]) },
+    Game: { getPlayer: () => player, getFormEx: (id) => (log.world && log.world[id] ? (log.world[id].gone ? null : log.world[id]) : { id }), getFormFromFile: (id, file) => (file === "Missing.esp" ? null : { id, file, getFormID: () => id }), forceThirdPerson: () => { log.thirdPerson++; }, disablePlayerControls: (...a) => (log.controls = log.controls || []).push(["off", ...a]), enablePlayerControls: (...a) => (log.controls = log.controls || []).push(["on", ...a]) },
     callNative: (cls, fn, self, a, b) => { (log.natives = log.natives || []).push([cls, fn, a]); if (cls !== "GreymarchCam" || state.noDll) throw new Error("Native function not found"); if (fn === "GetFurnitureMarker") return state.marker ? state.marker[b] : -99999; if (fn === "SetFreeCamera") { state.free = !!a; return true; } if (fn === "IsFreeCamera") return !!state.free; if (fn === "GetCamera") return (state.cam || [0, 0, 0, 0, 1, 0])[a]; return undefined; },
-    Idle: { from: (f) => f || null }, ObjectReference: { from: (f) => (f && f.id ? { id: f.id, getPositionX: () => 500, getPositionY: () => 600, getPositionZ: () => 10, getAngleZ: () => 90 } : null) }, Actor: { from: (f) => (f && actors[f.id]) || null }, Potion: { from: (f) => (f && f.potion) || null },
+    Idle: { from: (f) => f || null }, ObjectReference: { from: (f) => (f && f.setPosition ? f : f && f.id ? { id: f.id, getPositionX: () => 500, getPositionY: () => 600, getPositionZ: () => 10, getAngleZ: () => 90 } : null) }, Actor: { from: (f) => (f && actors[f.id]) || null }, Potion: { from: (f) => (f && f.potion) || null },
     Debug: { sendAnimationEvent: (ref, name) => log.events.push(name), notification: (t) => log.notes.push(t) },
     Ui: { isMenuOpen: (name) => name === state.menu },
     Input: { tapKey: (k) => { log.taps = (log.taps || []).concat([k]); if (state.menu === "InventoryMenu" || state.menu === "FavoritesMenu") state.menu = null; }, getMappedKey: (c) => (c === "Tween Menu" ? state.tweenKey || 15 : 0) },
@@ -597,7 +597,7 @@ test("the forge display (2026-10-26, back with guards): never left behind, never
   const s = make(); let t = 5_000_000; const tick = (ms = 50) => { t += ms; s.gm.greymarchForgePreviewTick(t); };
   // the game's forms by id (a copy deleted from a cell that unloaded is still there)
   s.state.cam = [480, 560, 150, 0, 1, 0]; // the camera at the smith, looking north
-  const world = {}; s.gm.sp.Game.getFormEx = (id) => world[id] || null; s.gm.sp.ObjectReference.from = (f) => f || null;
+  const world = {}; const was = s.gm.sp.Game.getFormEx; s.gm.sp.Game.getFormEx = (id) => (id in world ? world[id] : was(id)); s.gm.sp.ObjectReference.from = (f) => f || null;
   s.page({ type: "forge-preview", key: "20:skyrim.esm" }); tick();
   assert.strictEqual((s.log.ghosts || []).length, 0, "nothing is placed while the window is closed");
   s.say({ customPacketType: "greymarchForgeOpen", title: "Forge", forge: 0xc430a });
@@ -612,10 +612,10 @@ test("the forge display (2026-10-26, back with guards): never left behind, never
   let again = 0; world[g1.id] = { getBaseObject: () => ({ getFormID: () => 0x20 }), disable() {}, delete() { again++; } }; // the game keeps the form after a delete (its cell unloaded)
   // a new pick: the old copy goes, the new one is shown
   s.page({ type: "forge-preview", key: "21:skyrim.esm" }); tick();
-  assert.strictEqual(g1.gone, true); assert.strictEqual(again, 1, "swept at once"); const g2 = s.log.ghosts[1]; assert.ok(g2 && !g2.gone);
+  assert.strictEqual(again, 2, "the old copy is deleted (fetched by its id), and swept at once"); const g2 = s.log.ghosts[1]; assert.ok(g2 && !g2.gone);
   // the old copy is still in the game: the sweep deletes it again, until it is gone
-  tick(2100); assert.strictEqual(again, 2, "deleted again"); tick(2100); assert.strictEqual(again, 3, "and again while the game has it");
-  delete world[g1.id]; tick(2100); tick(2100); assert.strictEqual(again, 3, "gone: let go");
+  tick(2100); assert.strictEqual(again, 3, "deleted again"); tick(2100); assert.strictEqual(again, 4, "and again while the game has it");
+  delete world[g1.id]; tick(2100); tick(2100); assert.strictEqual(again, 4, "gone: let go");
   assert.strictEqual(g2.gone, false, "the shown copy is not swept");
   // a weapon stands up (it is made lying down, how it rests when dropped)
   s.gm.sp.Weapon = { from: (f) => (f && f.id === 0x21 ? f : null) }; s.gm.sp.Armor = { from: () => null };
@@ -651,4 +651,22 @@ test("the forge display holds still: keyframed only once its 3D is there (asked 
   g.fell = 30; tick(250); g.fell = 0;
   assert.strictEqual(g.moves, moves + 1, "it dropped: put back"); assert.strictEqual(g.motions, asked + 2, "and keyframed again");
   assert.strictEqual(g.gone, false, "still shown");
+});
+
+test("the forge display is only ever reached by its form id, fetched each frame: a handle from an earlier frame is refused by the game (Invalid _skyrimPlatform_indexInPool, 2026-10-26)", () => {
+  const s = make(); let t = 9_000_000; const tick = (ms = 50) => { t += ms; s.gm.greymarchForgePreviewTick(t); };
+  s.state.cam = [480, 560, 150, 0, 1, 0];
+  s.say({ customPacketType: "greymarchForgeOpen", title: "Forge", forge: 0xc430a });
+  s.page({ type: "forge-preview", key: "20:skyrim.esm" }); tick();
+  const g = s.log.ghosts[0];
+  // from now on the handle placeAtMe gave is stale, like in the game: only a fresh fetch by id works
+  const stale = () => { throw new Error("SP3NativeValueCasts::JsObjectToNativeObject - Invalid _skyrimPlatform_indexInPool"); };
+  const fresh = { ...g }; for (const k of ["setPosition", "setAngle", "translateTo", "disable", "delete", "setMotionType", "getAngleZ", "getPositionX", "getPositionY", "getPositionZ"]) { const own = g[k]; fresh[k] = (...a) => own(...a); g[k] = stale; }
+  s.gm.sp.Game.getFormEx = (id) => (id === g.id ? (fresh.gone || g.gone ? null : fresh) : { id });
+  const ok = fresh.setPosition; let used = 0; fresh.setPosition = (...a) => { used++; return ok(...a); };
+  for (let i = 0; i < 40; i++) tick(50);
+  assert.strictEqual(s.gm.greymarchForgeGhostId, g.id, "still shown");
+  assert.ok(!s.log.lines.some((l) => /display removed/.test(l)), "never removed for a stale handle");
+  s.page({ type: "forge-close" }); tick();
+  assert.strictEqual(g.gone, true, "deleted through a fresh fetch when the window closes");
 });

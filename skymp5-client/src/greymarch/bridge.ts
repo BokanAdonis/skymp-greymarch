@@ -2736,9 +2736,12 @@ export class GreymarchBridge {
     //    frame's move failing (a cell change) and it is removed;
     //  - it is never forgotten: every copy made is kept by its form id and base, and checked every 2 s until the game no longer has it (a copy in a cell
     //    that unloaded is deleted when the cell is back). A form id the game gave to something else since (the base differs) is let go, never touched.
+    //  - ONLY BY ITS FORM ID, fetched again on every frame: a game object SkyrimPlatform hands over is good for the frame it was fetched in only ("Invalid
+    //    _skyrimPlatform_indexInPool" on the next, 2026-10-26: the display was removed at once, and the old version's deletes through such a handle failed,
+    //    which is how its copies were left on the floor). A copy whose id cannot be read is deleted in the frame it was made.
     greymarchForgePreviewTick(now: number): any {
         var sp = this.sp, want = this.greymarchForgePreviewWant;
-        if (!this.greymarchForgeOn) want = this.greymarchForgeGhost ? "" : null; // no window, no display
+        if (!this.greymarchForgeOn) want = this.greymarchForgeGhostId ? "" : null; // no window, no display
         if (want !== undefined && want !== null) {
             this.greymarchForgePreviewWant = null;
             this.greymarchForgeGhostDrop();
@@ -2748,16 +2751,19 @@ export class GreymarchBridge {
                     var base = sp.Game.getFormFromFile(parseInt(m[1], 16), m[2]);
                     var player = sp.Game.getPlayer();
                     var g = base && player ? player.placeAtMe(base, 1, false, false) : null;
+                    var id = 0, baseId = 0;
                     if (g) {
-                        var id = 0, baseId = 0;
-                        try { id = g.getFormID() >>> 0; } catch (e) { /* kept by its handle only */ }
-                        try { baseId = base.getFormID() >>> 0; } catch (e) { /* no base check */ }
-                        (this.greymarchForgeGhostIds = this.greymarchForgeGhostIds || []).push({ id: id, base: baseId, g: g });
+                        try { id = g.getFormID() >>> 0; } catch (e) { id = 0; }
+                        try { baseId = base.getFormID() >>> 0; } catch (e) { baseId = 0; }
+                        if (!id || !baseId) { try { g.disable(false); } catch (e) { /* - */ } try { g.delete(); } catch (e) { /* - */ } g = null; this.greymarchLog("forge: display not kept (no form id)"); }
+                    }
+                    if (g) {
+                        (this.greymarchForgeGhostIds = this.greymarchForgeGhostIds || []).push({ id: id, base: baseId });
                         try { g.blockActivation(true); } catch (e) { /* the window holds the keyboard meanwhile */ }
                         try { g.setMotionType(4, false); } catch (e) { /* again once its 3D is there (greymarchForgePreviewTick) */ }
                         // a weapon or a piece of armour is made lying down (how it rests when dropped): stood up, so it can be seen
                         var upright = false; try { upright = !!(sp.Weapon.from(base) || sp.Armor.from(base)); } catch (e) { upright = false; }
-                        this.greymarchForgeGhost = g; this.greymarchForgeGhostSince = now; this.greymarchForgeGhostTilt = upright ? -90 : 0;
+                        this.greymarchForgeGhostId = id; this.greymarchForgeGhostBase = baseId; this.greymarchForgeGhostSince = now; this.greymarchForgeGhostTilt = upright ? -90 : 0;
                         this.greymarchForgeGhostAt = null; this.greymarchForgeGhostTurnNext = 0; this.greymarchForgeGhostReady = false; this.greymarchForgeGhostCheck = 0;
                     }
                 } catch (e) { this.greymarchLog("forge: no display (" + e + ")"); }
@@ -2766,7 +2772,9 @@ export class GreymarchBridge {
         this.greymarchForgeGhostSweep(now);
         // Placed ONCE (SetPosition every frame redraws the piece: it flickered, 2026-10-26) and again only if the spot moves (the camera turned);
         // it turns with the game's own smooth movement (TranslateTo, to the same spot), asked again every second.
-        var ghost = this.greymarchForgeGhost; if (!ghost) return;
+        if (!this.greymarchForgeGhostId) return;
+        var ghost = this.greymarchForgeGhostRef(this.greymarchForgeGhostId, this.greymarchForgeGhostBase);
+        if (!ghost) { this.greymarchForgeGhostId = 0; this.greymarchForgeGhostSay("the game no longer has it"); return; } // gone (the sweep lets it go)
         try {
             var pl = sp.Game.getPlayer();
             var c: number[] = [];
@@ -2808,14 +2816,23 @@ export class GreymarchBridge {
                 var cur = Number(ghost.getAngleZ()); if (!isFinite(cur)) cur = 0;
                 try { ghost.translateTo(at[0], at[1], at[2], tilt, 0, cur + 50, 1, 40); } catch (e) { /* no turn: it still stands there */ }
             }
-        } catch (e) { if (!this.greymarchForgeGhostSaid) { this.greymarchForgeGhostSaid = true; this.greymarchLog("forge: display removed (" + e + ")"); } this.greymarchForgeGhostDrop(); }
+        } catch (e) { this.greymarchForgeGhostSay(String(e)); this.greymarchForgeGhostDrop(); }
+    }
+    greymarchForgeGhostSay(why: string): any { this.greymarchForgeGhostSaid = (this.greymarchForgeGhostSaid || 0) + 1; if (this.greymarchForgeGhostSaid <= 10) this.greymarchLog("forge: display removed (" + why + ")"); }
+    // the copy with this form id, fetched now (good for this frame only), while it is still a copy of the same piece; otherwise null
+    greymarchForgeGhostRef(id: number, base: number): any {
+        var sp = this.sp, ref: any = null;
+        try { var f = sp.Game.getFormEx(id); ref = f ? sp.ObjectReference.from(f) : null; } catch (x) { ref = null; }
+        if (!ref) return null;
+        try { var b = ref.getBaseObject(); if (!b || (b.getFormID() >>> 0) !== base) return null; } catch (x) { return null; }
+        return ref;
     }
     // the shown copy goes (disabled and deleted); it stays in the list, so the sweep makes sure
     greymarchForgeGhostDrop(): any {
-        var g = this.greymarchForgeGhost; this.greymarchForgeGhost = null;
-        if (!g) return;
-        try { g.disable(false); } catch (e) { /* the sweep */ }
-        try { g.delete(); } catch (e) { /* the sweep */ }
+        var id = this.greymarchForgeGhostId; this.greymarchForgeGhostId = 0;
+        if (!id) return;
+        var g = this.greymarchForgeGhostRef(id, this.greymarchForgeGhostBase);
+        if (g) { try { g.disable(false); } catch (e) { /* the sweep */ } try { g.delete(); } catch (e) { /* the sweep */ } }
         this.greymarchForgeGhostNext = 0; // sweep at once
     }
     // every 2 s: each copy this game made that is not the one shown is disabled and deleted again, until the game no longer has its form
@@ -2823,21 +2840,14 @@ export class GreymarchBridge {
         var list = this.greymarchForgeGhostIds;
         if (!list || !list.length || now < (this.greymarchForgeGhostNext || 0)) return;
         this.greymarchForgeGhostNext = now + 2000;
-        var sp = this.sp, shown = this.greymarchForgeGhost, keep: any[] = [];
+        var shown = this.greymarchForgeGhostId, keep: any[] = [];
         for (var i = 0; i < list.length; i++) {
             var e = list[i];
-            if (e.g === shown) { keep.push(e); continue; }
-            var ref: any = null;
-            if (e.id && e.base) { // by its form id, only while that id is still a copy of the same piece
-                try { var f = sp.Game.getFormEx(e.id); ref = f ? sp.ObjectReference.from(f) : null; } catch (x) { ref = null; }
-                if (!ref) continue; // the game no longer has it: done
-                var same = false; try { var b = ref.getBaseObject(); same = !!b && (b.getFormID() >>> 0) === e.base; } catch (x) { same = false; }
-                if (!same) continue; // the id is something else now (or cannot be checked): never touched
-            } else ref = e.g; // no form id or base: only the handle
+            if (e.id === shown) { keep.push(e); continue; }
+            var ref = this.greymarchForgeGhostRef(e.id, e.base);
+            if (!ref) continue; // the game no longer has it, or the id is something else now: never touched again
             try { ref.disable(false); } catch (x) { /* again next time */ }
             try { ref.delete(); } catch (x) { /* again next time */ }
-            e.tries = (e.tries || 0) + 1;
-            if (!(e.id && e.base) && e.tries >= 3) continue; // a handle alone cannot be checked: three tries
             keep.push(e);
         }
         this.greymarchForgeGhostIds = keep.slice(-200);
