@@ -2763,7 +2763,9 @@ export class GreymarchBridge {
                         try { g.blockActivation(true); } catch (e) { /* the window holds the keyboard meanwhile */ }
                         try { g.setMotionType(4, false); } catch (e) { /* again once its 3D is there (greymarchForgePreviewTick) */ }
                         // a weapon or a piece of armour is made lying down (how it rests when dropped): stood up, so it can be seen
-                        var upright = false; try { upright = !!(sp.Weapon.from(base) || sp.Armor.from(base)); } catch (e) { upright = false; }
+                        var isArmor = false, upright = false; try { isArmor = !!sp.Armor.from(base); } catch (e) { isArmor = false; }
+                        try { upright = isArmor || !!sp.Weapon.from(base); } catch (e) { upright = isArmor; }
+                        this.greymarchForgeGhostSway = isArmor; this.greymarchForgeGhostSwaySide = 1; // armour turns side to side, facing the smith (2026-10-26, the owner); the rest turns round
                         this.greymarchForgeGhostId = id; this.greymarchForgeGhostBase = baseId; this.greymarchForgeGhostSince = now;
                         this.greymarchLog("forge: display made " + id.toString(16) + " (base " + baseId.toString(16) + (upright ? ", stood up" : "") + ")"); this.greymarchForgeGhostTilt = upright ? -90 : 0;
                         this.greymarchForgeGhostAt = null; this.greymarchForgeGhostTurnNext = 0; this.greymarchForgeGhostReady = false; this.greymarchForgeGhostCheck = 0; this.greymarchForgeGhostPlacedAt = 0;
@@ -2836,9 +2838,17 @@ export class GreymarchBridge {
                 this.greymarchForgeGhostTurnNext = now + 400;
             }
             if (now >= (this.greymarchForgeGhostTurnNext || 0)) {
-                this.greymarchForgeGhostTurnNext = now + 1000;
                 var cur = Number(ghost.getAngleZ()); if (!isFinite(cur)) cur = face;
-                try { ghost.translateTo(at[0], at[1], at[2], tilt, 0, cur + 50, 1, 40); } catch (e) { /* no turn: it still stands there */ }
+                if (this.greymarchForgeGhostSway) {
+                    // to 35 degrees one side of facing the smith, then the other: about two seconds each way
+                    var side = this.greymarchForgeGhostSwaySide || 1; this.greymarchForgeGhostSwaySide = -side;
+                    var want = face + side * 35, delta = ((((want - cur) % 360) + 540) % 360) - 180; // the short way round
+                    this.greymarchForgeGhostTurnNext = now + 2200;
+                    try { ghost.translateTo(at[0], at[1], at[2], tilt, 0, cur + delta, 1, 35); } catch (e) { /* no turn: it still stands there */ }
+                } else {
+                    this.greymarchForgeGhostTurnNext = now + 1000;
+                    try { ghost.translateTo(at[0], at[1], at[2], tilt, 0, cur + 50, 1, 40); } catch (e) { /* no turn: it still stands there */ }
+                }
             }
         } catch (e) { this.greymarchForgeGhostSay(String(e)); this.greymarchForgeGhostDrop(); }
     }

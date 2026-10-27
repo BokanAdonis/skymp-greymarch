@@ -676,3 +676,17 @@ test("the forge display is only ever reached by its form id, fetched each frame:
   s.page({ type: "forge-close" }); tick();
   assert.strictEqual(g.gone, true, "deleted through a fresh fetch when the window closes");
 });
+
+test("the forge display: armour turns side to side, facing the smith (2026-10-26, the owner); a weapon turns round", () => {
+  const s = make(); let t = 11_000_000; const tick = (ms = 50) => { t += ms; s.gm.greymarchForgePreviewTick(t); };
+  s.state.cam = [480, 560, 150, 0, 1, 0]; // looking north: facing the smith is 180
+  s.gm.sp.Armor = { from: (f) => (f && f.id === 0x30 ? f : null) }; s.gm.sp.Weapon = { from: (f) => (f && f.id === 0x31 ? f : null) };
+  s.say({ customPacketType: "greymarchForgeOpen", title: "Forge", forge: 0xc430a });
+  s.page({ type: "forge-preview", key: "30:skyrim.esm" }); for (let i = 0; i < 100; i++) tick(50);
+  const a = s.log.ghosts.at(-1); assert.strictEqual(a.rot[0], -90, "armour stood up");
+  const sway = a.turns.filter((x) => x[6] === 1).map((x) => Math.round(x[5]));
+  assert.ok(sway.length >= 2, "it turns"); assert.ok(sway.includes(215) && sway.includes(145), "35 degrees each side of facing the smith: " + sway);
+  s.page({ type: "forge-preview", key: "31:skyrim.esm" }); for (let i = 0; i < 60; i++) tick(50);
+  const w = s.log.ghosts.at(-1); const spin = w.turns.filter((x) => x[6] === 1);
+  assert.ok(spin.length >= 2 && spin.every((x) => x[5] === w.rot[2] + 50), "a weapon keeps turning round");
+});
