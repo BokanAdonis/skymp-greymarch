@@ -80,8 +80,11 @@ export const CONSOLE_BLOCKED = [
 const OPEN_ON_RELEASE = [65, 35, 48, 64, 66, 37]; // F7, H, B, F6, F8, K: their windows open when the key is let go (greymarchKey)
 const FORGE_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmForgeRun").split("greymarch-prof").join("greymarch-forge").split("2147483220").join("2147483225"); // the Greymarch forge window: the same loader, another page
 const CRAFT_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmCraftRun").split("greymarch-prof").join("greymarch-craft").split("2147483220").join("2147483224"); // the crafting panel (a station was used): the same loader, another page
+const CLICK_GUARD_MS = 400; // after a window closes, attacks and drawing a weapon are ignored this long: the click on its X is not a swing (greymarchClickGuard)
+const MINI_KEEP_MS = 3500; // a mini game window kept up between logs (the chopping block) closes if the next does not come within this
 const MINIGAME_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmMiniRun").split("greymarch-prof").join("greymarch-minigame").split("2147483220").join("2147483226"); // the profession mini games (gamemode minigames.js): the same loader, another page, over the others
-const LEDGER_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmLedgerRun").split("greymarch-prof").join("greymarch-ledger").split("2147483220").join("2147483223"); // the guard ledger (/reports): the same loader, another page
+const LEDGER_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmLedgerRun").split("greymarch-prof").join("greymarch-ledger").split("2147483220").join("2147483223"); // the guard ledger (/reports)
+const SCRIBE_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmScribeRun").split("greymarch-prof").join("greymarch-scribe").split("2147483220").join("2147483227"); // the scribe's desk (/scribe): letters and books: the same loader, another page
 
 // Which way the camera faces, in degrees the Skyrim way (0 = north, 90 = east). Skyrim Platform has no camera call, so 24 points on a wide ring round the head are
 // put through worldPointToScreenPoint: the camera faces where the points in front of it cross the middle of the screen. null = could not tell (looking straight up or down).
@@ -199,6 +202,7 @@ export class GreymarchBridge {
         if (type === "greymarchWolfFeed") { this.greymarchWolfFeedAt = Date.now(); return; } // the wolf fed (a kill or a corpse): the feeding animation (greymarchWolfTick)
         if (type === "greymarchChanceryReply") { this.greymarchChanceryToPage("reply", msg); return; } // the chancery window (/chancery)
         if (type === "greymarchChanceryOpen") { this.greymarchChanceryShow(); return; }
+        if (type === "greymarchEmote") { if (typeof msg.emote === "string" && msg.emote.length < 40) this.greymarchServerEmote = { id: msg.emote, ms: Math.max(500, Math.min(30000, Number(msg.ms) || 4000)), at: Date.now() }; return; } // the server asks for an emote (a Harvester or Chef kneeling at a salt deposit): played in greymarchEmoteTick
         if (type === "greymarchMinigame") { this.greymarchMiniShow(msg); return; } // a profession mini game before the work (gamemode minigames.js)
         if (type === "greymarchMinigameDone") { this.greymarchMiniDone(msg); return; }
         if (type === "greymarchForgeOpen") { this.greymarchForgeShow(msg); return; } // a forge was used (gamemode forgemenu.js): the Greymarch forge window instead of the game's menu
@@ -210,6 +214,8 @@ export class GreymarchBridge {
         if (type === "greymarchVampMenuOpen") { this.greymarchVampMenuShow(); return; }
         if (type === "greymarchLedgerReply") { this.greymarchLedgerToPage("reply", msg); return; } // the guard ledger (/reports)
         if (type === "greymarchLedgerOpen") { this.greymarchLedgerShow(); return; }
+        if (type === "greymarchScribeReply") { this.greymarchScribeToPage("reply", msg); return; } // the scribe's desk (/scribe)
+        if (type === "greymarchScribeOpen") { this.greymarchScribeShow(); return; }
         if (type === "greymarchProfReply") { this.greymarchLog("prof: the server's answer arrived (rid " + msg.rid + ", ok " + msg.ok + ")"); this.greymarchProfToPage("reply", msg); return; } // the professions window (K)
         if (type === "greymarchCombatMod") { var cm = Number(msg.mult); this.greymarchCombatWant = cm >= 0.1 && cm <= 3 ? cm : 1; return; } // the damage multiplier for what is in hand (professions: a weapon above your rank hits weaker, a Brawler's fists hit harder)
         if (type === "greymarchMenuEvent" && msg.type === "body" && Number(msg.looking) > 0 && !this.greymarchMenuOn) { this.greymarchMenuShow({ mode: "open", looking: Number(msg.looking) }); return; } // E on the body of a dead wild animal (gamemode wildlifesystem.js): the menu opens on it to take what is on it
@@ -329,7 +335,7 @@ export class GreymarchBridge {
         this.greymarchToPage("hide");
         this.sp.browser.setFocused(false);
         this.greymarchScreenUp = false;
-        this.sp.browser.setVisible(!!this.greymarchCraftOn || !!this.greymarchForgeOn || !!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchEmoteOn || !!this.greymarchGuardsHud || !!(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchCraftOn || this.greymarchForgeOn)); // stays visible (but never focused) while the voice display is on; the staff panel keeps it up and focused
+        this.sp.browser.setVisible(!!this.greymarchCraftOn || !!this.greymarchForgeOn || !!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchEmoteOn || !!this.greymarchGuardsHud || !!(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchScribeOn || this.greymarchCraftOn || this.greymarchForgeOn)); // stays visible (but never focused) while the voice display is on; the staff panel keeps it up and focused
         if (this.greymarchAdminOn) this.sp.browser.setFocused(true);
         this.greymarchChatShow();
         this.greymarchReportLoadOrder();
@@ -437,11 +443,12 @@ export class GreymarchBridge {
         this.greymarchBuildCamTick(Date.now()); // the build system's free camera: the preview where the camera looks
         this.greymarchChopTick(Date.now()); // sitting at a chopping block: the server counts the chops (XP, firewood)
         this.greymarchForgeTick(Date.now()); // after the forge window closed: the smith is surely out of the forge's animation
-        this.greymarchForgePreviewTick(Date.now()); // removes a preview copy an older version left
+        this.greymarchForgePreviewTick(Date.now()); // the forge's display of the picked piece: made, turned and always removed (never left behind)
         this.greymarchPointerGuard(Date.now()); // a window that holds the mouse always has its pointer (the game's Cursor Menu)
         this.greymarchHotkeyTick(Date.now()); // a window hotkey whose key-up the game never sent
         this.greymarchConsoleTick(Date.now()); // the console (~) is closed the frame it opens
         this.greymarchMiniActivateTick(); // a mini game won: the thing is used again (the server lets it through)
+        this.greymarchClickGuardTick(); // the click that closed a window is not a swing
         this.greymarchMagicBlockDrive(); // NPC raise-the-dead and summons: ended at once
         this.greymarchShapeDrive(); // a creature form as an NPC: moved every frame like SkyMP moves other players; other players' creature attacks
         this.greymarchShapeTick(); // a creature form staff put the player in (a goat, a giant ...): the server decides, the body is changed here
@@ -574,7 +581,7 @@ export class GreymarchBridge {
         try { var talking = {}; if (hud) for (var ti = 0; ti < ids.length; ti++) talking[ids[ti]] = 1; (Function("return this")() as any).__gmSpeaking = talking; } catch (e) { /* the names stay unmarked */ }
         this.greymarchHudOn = hud;
         // the page is shown (never focused) while the display is on, hidden when it is off; the select screen and the veil decide for themselves while they are up
-        if (changed && !this.greymarchScreenUp) { try { this.sp.browser.setVisible(!!this.greymarchCraftOn || !!this.greymarchForgeOn || hud || !!this.greymarchChatOn || !!this.greymarchEmoteOn || !!this.greymarchGuardsHud || !!(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchCraftOn || this.greymarchForgeOn)); if (!this.greymarchChatTyping && !this.greymarchPanelHasKeys()) this.sp.browser.setFocused(false); } catch (err) { /* nothing to do */ } }
+        if (changed && !this.greymarchScreenUp) { try { this.sp.browser.setVisible(!!this.greymarchCraftOn || !!this.greymarchForgeOn || hud || !!this.greymarchChatOn || !!this.greymarchEmoteOn || !!this.greymarchGuardsHud || !!(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchScribeOn || this.greymarchCraftOn || this.greymarchForgeOn)); if (!this.greymarchChatTyping && !this.greymarchPanelHasKeys()) this.sp.browser.setFocused(false); } catch (err) { /* nothing to do */ } }
     }
     greymarchBrowserMessage(e: any): any {
         if (!e.arguments || e.arguments[0] !== "greymarch") return;
@@ -596,16 +603,19 @@ export class GreymarchBridge {
         if (data && data.type === "chancery") { this.greymarchChanceryAsk(data); return; } // the chancery window asks the server (the SERVER decides)
         if (data && data.type === "chancery-close") { this.greymarchChanceryHide(); return; }
         if (data && data.type === "minigame-shown") { this.greymarchMiniSend("greymarchMinigameShown", { token: data.token }); return; } // the mini game window is up
-        if (data && data.type === "minigame-result") { this.greymarchMiniSend("greymarchMinigameResult", { token: data.token, ok: data.ok === true }); this.greymarchMiniHide(); return; }
+        if (data && data.type === "minigame-result") { this.greymarchMiniSend("greymarchMinigameResult", { token: data.token, ok: data.ok === true }); if (this.greymarchMiniKeep) { this.greymarchMiniKeptAt = Date.now(); return; } this.greymarchMiniHide(); return; } // keep: the window waits for the server's word (greymarchMiniDone)
         if (data && data.type === "craft") { this.greymarchCraftAsk(data); return; } // the crafting panel asks the server (the SERVER decides and makes the item)
         if (data && data.type === "craft-close") { this.greymarchCraftHide(); return; }
         if (data && data.type === "forge") { this.greymarchForgeAsk(data); return; } // the forge window asks the server (the SERVER decides and makes the item)
         if (data && data.type === "forge-close") { this.greymarchForgeHide(); return; }
-        if (data && data.type === "forge-preview") return; // no preview in the world any more: the copies could be picked up (free items); asks from an older page are ignored
+        if (data && data.type === "forge-turn") { this.greymarchForgeTurn(data); return; } // a drag, the wheel or a double-click over the display: the smith examines the piece
+        if (data && data.type === "forge-preview") { if (this.greymarchForgeOn) this.greymarchForgePreviewWant = (this.greymarchForgeStation === "smelter" || this.greymarchForgeStation === "kiln") ? "" : String(data.key || "").slice(0, 80); return; } // never at the smelter or the charcoal kiln (2026-10-26, the owner) // the piece picked in the forge window: shown in front of the smith (greymarchForgePreviewTick); only while the window is open
         if (data && data.type === "vampire") { this.greymarchVampMenuAsk(data); return; } // the vampire window asks the server (the SERVER decides)
         if (data && data.type === "vampire-close") { this.greymarchVampMenuHide(); return; }
         if (data && data.type === "ledger") { this.greymarchLedgerAsk(data); return; } // the guard ledger asks the server (the SERVER decides)
         if (data && data.type === "ledger-close") { this.greymarchLedgerHide(); return; }
+        if (data && data.type === "scribe") { this.greymarchScribeAsk(data); return; } // the scribe's desk asks the server (the SERVER decides)
+        if (data && data.type === "scribe-close") { this.greymarchScribeHide(); return; }
         if (data && data.type === "emote") { this.greymarchEmotePlayWanted = { id: data.id, at: Date.now() }; return; } // the emote wheel: play one (greymarchEmoteTick checks it is on the list)
         if (data && data.type === "emote-stop") { this.greymarchEmoteStopWanted = Date.now(); this.greymarchFaceClearWanted = Date.now(); return; } // the middle of the wheel: the emote and the face
         if (data && data.type === "emote-close") { this.greymarchEmoteHide(); return; }
@@ -684,9 +694,10 @@ export class GreymarchBridge {
         this.greymarchAdminToPage("show", mode === "tester" || mode === "dungeons" || mode === "encounters" || mode === "build" ? mode : true);
     }
     greymarchAdminHide(): any {
+        if (this.greymarchAdminOn) this.greymarchClickGuard(); // the click that closed it is not a swing
         this.greymarchAdminOn = false;
         this.greymarchAdminToPage("hide", true);
-        if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchCraftOn || !!this.greymarchForgeOn || !!this.greymarchHudOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchEmoteOn || !!this.greymarchGuardsHud || !!(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchCraftOn || this.greymarchForgeOn)); }
+        if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchCraftOn || !!this.greymarchForgeOn || !!this.greymarchHudOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchEmoteOn || !!this.greymarchGuardsHud || !!(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchScribeOn || this.greymarchCraftOn || this.greymarchForgeOn)); }
     }
     greymarchAdminSend(data: any): any {
         var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchAdmin", rid: data.rid, op: data.op, args: data.args }) };
@@ -695,7 +706,7 @@ export class GreymarchBridge {
     // F7 opens the panel (the page itself closes it with F7 or Escape). Escape also closes it from here, because the game un-focuses the browser on Escape.
     greymarchKey(e: any): any {
         if (this.greymarchBuildCam && this.greymarchBuildCamKey(e)) return; // the build system's free camera has the keys it uses
-        if (this.greymarchEmoteNow && this.greymarchEmoteNow.kind === "loop" && (e.code === 17 || e.code === 30 || e.code === 31 || e.code === 32 || e.code === 57)) { var mvDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (mvDown && e.isUp !== true) this.greymarchEmoteStopWanted = Date.now(); } // W A S D or Space ends an emote that lasts (greymarchEmoteTick)
+        if (this.greymarchEmoteNow && this.greymarchEmoteNow.kind === "loop" && !this.greymarchEmoteNow.meal && (e.code === 17 || e.code === 30 || e.code === 31 || e.code === 32 || e.code === 57)) { var mvDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (mvDown && e.isUp !== true) this.greymarchEmoteStopWanted = Date.now(); } // W A S D or Space ends an emote that lasts (greymarchEmoteTick)
         if (e.code === 19) { var rDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (e.isUp === true) rDown = false; if (rDown && !this.greymarchKey19 && this.greymarchWolfOn && !this.greymarchChatTyping) this.greymarchWolfRoarAt = Date.now(); this.greymarchKey19 = rDown; return; } // R: the werewolf roars (greymarchWolfTick; only while changed)
         if (e.code === 44) { var zDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (e.isUp === true) zDown = false; if (zDown && !this.greymarchKey44 && !this.greymarchChatTyping) { if (this.greymarchWolfOn) this.greymarchWolfBackAt = Date.now(); else this.greymarchWolfKeyAt = Date.now(); } this.greymarchKey44 = zDown; return; } // Z while changed: ask the server to change back (greymarchWolfTick)
         if (e.code === 256 || e.code === 257) { var mDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (e.isUp === true) mDown = false; if (mDown && !this["greymarchKey" + e.code]) this.greymarchShapeButton(e.code === 257); this["greymarchKey" + e.code] = mDown; return; } // mouse buttons: a creature's attacks (greymarchShapeTick)
@@ -724,6 +735,7 @@ export class GreymarchBridge {
         else if (e.code === 1 && this.greymarchChanceryOn) this.greymarchChanceryHide();
         else if (e.code === 1 && this.greymarchVampMenuOn) this.greymarchVampMenuHide();
         else if (e.code === 1 && this.greymarchLedgerOn) this.greymarchLedgerHide();
+        else if (e.code === 1 && this.greymarchScribeOn) this.greymarchScribeHide();
         else if (e.code === 1 && this.greymarchMiniOn) this.greymarchMiniToPage("escape", true); // Esc gives the mini game up (the page sends the loss)
         else if (e.code === 1 && this.greymarchCraftOn) this.greymarchCraftHide();
         else if (e.code === 1 && this.greymarchForgeOn) this.greymarchForgeHide();
@@ -736,7 +748,7 @@ export class GreymarchBridge {
         else if (code === 48 && !this.greymarchAdminOn && !this.greymarchMenuOn && !this.greymarchChatTyping && !this.greymarchPanelHasKeys()) { if (this.greymarchEmoteOn) this.greymarchEmoteHide(); this.greymarchAdminShow("build"); } // B: the staff panel straight on its Build tab (GM and up; for anyone else the page closes again at once)
         else if (code === 64 && !this.greymarchAdminOn && !this.greymarchMenuOn && !this.greymarchChatTyping) { if (this.greymarchEmoteOn) this.greymarchEmoteHide(); this.greymarchAdminShow("dungeons"); } // F6: the staff panel straight on its Dungeons tab (GM and up; the server checks the "dungeons" command, the page closes it with F6)
         else if (code === 66 && !this.greymarchAdminOn && !this.greymarchMenuOn && !this.greymarchChatTyping) this.greymarchAdminShow("tester"); // F8: the same panel as the tester menu (teleports, items, NPCs; the server gives testers those commands on the test server only)
-        else if (code === 37 && !this.greymarchChatTyping && !this.greymarchEmoteOn && !(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchCraftOn || this.greymarchForgeOn)) this.greymarchProfWanted = Date.now(); // K opens the professions window from the update phase (greymarchProfPending), where the game's menus can be asked about (the page itself closes it with K or Esc, like the staff panel with F7)
+        else if (code === 37 && !this.greymarchChatTyping && !this.greymarchEmoteOn && !(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchScribeOn || this.greymarchCraftOn || this.greymarchForgeOn)) this.greymarchProfWanted = Date.now(); // K opens the professions window from the update phase (greymarchProfPending), where the game's menus can be asked about (the page itself closes it with K or Esc, like the staff panel with F7)
     }
     // a missed key-up (the game did not send it): once the key reads as up, the hotkey opens anyway (every frame, from greymarchTick)
     greymarchHotkeyTick(now: number): any {
@@ -2073,7 +2085,7 @@ export class GreymarchBridge {
     greymarchToastTick(now: any): any {
         if (!this.greymarchToastUntil || now < this.greymarchToastUntil) return;
         this.greymarchToastUntil = 0;
-        if (!this.greymarchAdminOn && !this.greymarchMenuOn && !this.greymarchHudOn && !this.greymarchChatOn && !this.greymarchGuardsHud && !(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchCraftOn || this.greymarchForgeOn) && !this.greymarchScreenUp) { try { this.sp.browser.setVisible(false); } catch (e2) { /* fine */ } }
+        if (!this.greymarchAdminOn && !this.greymarchMenuOn && !this.greymarchHudOn && !this.greymarchChatOn && !this.greymarchGuardsHud && !(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchScribeOn || this.greymarchCraftOn || this.greymarchForgeOn) && !this.greymarchScreenUp) { try { this.sp.browser.setVisible(false); } catch (e2) { /* fine */ } }
     }
     // KILL: staff kill a character from THEIR OWN game, which is the one thing every SkyMP build lets a game do to its own character.
     greymarchKillMe(): any {
@@ -2290,7 +2302,7 @@ export class GreymarchBridge {
         }
     }
     greymarchMenuShow(arg: any): any {
-        if (this.greymarchScreenUp || this.greymarchAdminOn || this.greymarchMenuOn || (this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchCraftOn || this.greymarchForgeOn)) return; // not over the select screen, the staff panel, the professions window, or itself
+        if (this.greymarchScreenUp || this.greymarchAdminOn || this.greymarchMenuOn || (this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchScribeOn || this.greymarchCraftOn || this.greymarchForgeOn)) return; // not over the select screen, the staff panel, the professions window, or itself
         this.greymarchMenuOn = true;
         this.sp.browser.setVisible(true);
         this.sp.browser.setFocused(true);
@@ -2299,7 +2311,7 @@ export class GreymarchBridge {
     // HOLD X: look at a player and hold X, and the menu for THAT player appears; let go of X over an option to pick it (the page does the picking: it gets "release").
     // Not looking at a player: nothing opens (a short hint says why). The page is shown and focused while it is up, so the mouse is a cursor.
     greymarchMenuHold(): any {
-        if (this.greymarchScreenUp || this.greymarchAdminOn || this.greymarchMenuOn || (this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchCraftOn || this.greymarchForgeOn)) return;
+        if (this.greymarchScreenUp || this.greymarchAdminOn || this.greymarchMenuOn || (this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchScribeOn || this.greymarchCraftOn || this.greymarchForgeOn)) return;
         var looking = 0, isObject = false;
         try {
             var ref = this.sp.Game.getCurrentCrosshairRef();
@@ -2332,10 +2344,11 @@ export class GreymarchBridge {
     }
     greymarchMenuHide(): any {
         if (!this.greymarchMenuOn) return;
+        this.greymarchClickGuard(); // the click that closed it is not a swing
         this.greymarchMenuOn = false;
         this.greymarchMenuToPage("hide", true);
         this.greymarchMenuEscAt = 0;
-        if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchCraftOn || !!this.greymarchForgeOn || !!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchChatOn || !!this.greymarchEmoteOn || !!this.greymarchGuardsHud || !!(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchCraftOn || this.greymarchForgeOn)); }
+        if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchCraftOn || !!this.greymarchForgeOn || !!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchChatOn || !!this.greymarchEmoteOn || !!this.greymarchGuardsHud || !!(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchScribeOn || this.greymarchCraftOn || this.greymarchForgeOn)); }
     }
     // ---- THE PROFESSIONS WINDOW (K). The page is Platform/UI/greymarch-prof.html; the SERVER decides what a profession allows, the ranks and the XP.
     greymarchProfToPage(fn: any, arg: any): any {
@@ -2356,17 +2369,18 @@ export class GreymarchBridge {
         this.greymarchProfShow();
     }
     greymarchProfShow(): any {
-        if (this.greymarchScreenUp || this.greymarchAdminOn || this.greymarchMenuOn || (this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchCraftOn || this.greymarchForgeOn) || this.greymarchChatTyping) return; // not over the select screen, the other panels, or while typing
+        if (this.greymarchScreenUp || this.greymarchAdminOn || this.greymarchMenuOn || (this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchScribeOn || this.greymarchCraftOn || this.greymarchForgeOn) || this.greymarchChatTyping) return; // not over the select screen, the other panels, or while typing
         this.greymarchProfOn = true;
         this.sp.browser.setVisible(true);
         this.sp.browser.setFocused(true);
         this.greymarchProfToPage("show", true);
     }
     greymarchProfHide(): any {
-        if (!(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchCraftOn || this.greymarchForgeOn)) return;
+        if (!(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchScribeOn || this.greymarchCraftOn || this.greymarchForgeOn)) return;
+        this.greymarchClickGuard(); // the click that closed it is not a swing
         this.greymarchProfOn = false;
         this.greymarchProfToPage("hide", true);
-        if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchCraftOn || !!this.greymarchForgeOn || !!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchEmoteOn || !!this.greymarchGuardsHud || !!(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchCraftOn || this.greymarchForgeOn)); }
+        if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchCraftOn || !!this.greymarchForgeOn || !!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchEmoteOn || !!this.greymarchGuardsHud || !!(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchScribeOn || this.greymarchCraftOn || this.greymarchForgeOn)); }
     }
     greymarchProfSend(data: any): any {
         this.greymarchLog("prof: window asks the server (rid " + data.rid + ", " + data.op + ")");
@@ -2383,7 +2397,7 @@ export class GreymarchBridge {
         }
     }
     greymarchChanceryShow(): any {
-        if (this.greymarchScreenUp || this.greymarchAdminOn || this.greymarchMenuOn || this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchCraftOn || this.greymarchForgeOn) return; // not over the select screen or the other panels
+        if (this.greymarchScreenUp || this.greymarchAdminOn || this.greymarchMenuOn || this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchScribeOn || this.greymarchCraftOn || this.greymarchForgeOn) return; // not over the select screen or the other panels
         this.greymarchChanceryOn = true;
         this.sp.browser.setVisible(true);
         this.sp.browser.setFocused(true);
@@ -2391,9 +2405,10 @@ export class GreymarchBridge {
     }
     greymarchChanceryHide(): any {
         if (!this.greymarchChanceryOn) return;
+        this.greymarchClickGuard(); // the click that closed it is not a swing
         this.greymarchChanceryOn = false;
         this.greymarchChanceryToPage("hide", true);
-        if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchCraftOn || !!this.greymarchForgeOn || !!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchEmoteOn || !!this.greymarchGuardsHud || !!this.greymarchProfOn || !!this.greymarchVampMenuOn || !!this.greymarchLedgerOn); }
+        if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchCraftOn || !!this.greymarchForgeOn || !!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchEmoteOn || !!this.greymarchGuardsHud || !!this.greymarchProfOn || !!this.greymarchVampMenuOn || !!this.greymarchLedgerOn || !!this.greymarchScribeOn); }
     }
     greymarchChanceryAsk(data: any): any {
         var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchChancery", rid: data.rid, op: data.op, args: data.args }) };
@@ -2410,7 +2425,7 @@ export class GreymarchBridge {
         }
     }
     greymarchVampMenuShow(): any {
-        if (this.greymarchScreenUp || this.greymarchAdminOn || this.greymarchMenuOn || this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchCraftOn || this.greymarchForgeOn) return; // not over the select screen or the other panels
+        if (this.greymarchScreenUp || this.greymarchAdminOn || this.greymarchMenuOn || this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchScribeOn || this.greymarchCraftOn || this.greymarchForgeOn) return; // not over the select screen or the other panels
         this.greymarchVampMenuOn = true;
         this.sp.browser.setVisible(true);
         this.sp.browser.setFocused(true);
@@ -2418,9 +2433,10 @@ export class GreymarchBridge {
     }
     greymarchVampMenuHide(): any {
         if (!this.greymarchVampMenuOn) return;
+        this.greymarchClickGuard(); // the click that closed it is not a swing
         this.greymarchVampMenuOn = false;
         this.greymarchVampMenuToPage("hide", true);
-        if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchCraftOn || !!this.greymarchForgeOn || !!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchEmoteOn || !!this.greymarchGuardsHud || !!this.greymarchProfOn || !!this.greymarchChanceryOn || !!this.greymarchLedgerOn); }
+        if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchCraftOn || !!this.greymarchForgeOn || !!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchEmoteOn || !!this.greymarchGuardsHud || !!this.greymarchProfOn || !!this.greymarchChanceryOn || !!this.greymarchLedgerOn || !!this.greymarchScribeOn); }
     }
     greymarchVampMenuAsk(data: any): any {
         var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchVampMenu", rid: data.rid, op: data.op }) };
@@ -2437,8 +2453,8 @@ export class GreymarchBridge {
         }
     }
     greymarchLedgerShow(): any {
-        if (this.greymarchScreenUp || this.greymarchAdminOn || this.greymarchMenuOn || this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchCraftOn || this.greymarchForgeOn) { // not over the select screen or the other panels
-            this.greymarchLog("ledger: not opened, " + [this.greymarchScreenUp ? "the select screen" : "", this.greymarchAdminOn ? "the staff panel" : "", this.greymarchMenuOn ? "the X menu" : "", this.greymarchProfOn ? "the K window" : "", this.greymarchChanceryOn ? "the chancery" : "", this.greymarchVampMenuOn ? "the vampire window" : "", this.greymarchLedgerOn ? "the ledger itself" : ""].filter(Boolean).join(", ") + " is marked open");
+        if (this.greymarchScreenUp || this.greymarchAdminOn || this.greymarchMenuOn || this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchScribeOn || this.greymarchCraftOn || this.greymarchForgeOn) { // not over the select screen or the other panels
+            this.greymarchLog("ledger: not opened, " + [this.greymarchScreenUp ? "the select screen" : "", this.greymarchAdminOn ? "the staff panel" : "", this.greymarchMenuOn ? "the X menu" : "", this.greymarchProfOn ? "the K window" : "", this.greymarchChanceryOn ? "the chancery" : "", this.greymarchVampMenuOn ? "the vampire window" : "", this.greymarchLedgerOn ? "the ledger itself" : "", this.greymarchScribeOn ? "the scribe's desk" : ""].filter(Boolean).join(", ") + " is marked open");
             return;
         }
         this.greymarchLog("ledger: opened");
@@ -2449,8 +2465,37 @@ export class GreymarchBridge {
     }
     greymarchLedgerHide(): any {
         if (!this.greymarchLedgerOn) return;
+        this.greymarchClickGuard(); // the click that closed it is not a swing
         this.greymarchLedgerOn = false;
         this.greymarchLedgerToPage("hide", true);
+        if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchCraftOn || !!this.greymarchForgeOn || !!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchEmoteOn || !!this.greymarchGuardsHud || !!this.greymarchProfOn || !!this.greymarchChanceryOn || !!this.greymarchVampMenuOn); }
+    }
+    // ---- THE SCRIBE'S DESK (/scribe or /write). The page is Platform/UI/greymarch-scribe.html; the SERVER decides everything (gamemode/src/scribe.js, off unless
+    // greymarch-data/scribe.on exists), which opens it ({ customPacketType: "greymarchScribeOpen" }). Built like the guard ledger; the requests carry args.
+    greymarchScribeToPage(fn: any, arg: any): any {
+        var json = JSON.stringify({ fn: fn, arg: arg }).replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
+        try {
+            this.sp.browser.executeJavaScript(SCRIBE_SCRIPT + "window.__gmScribeRun(" + json + ");");
+        } catch (err) {
+            this.sp.printConsole("[greymarch] could not reach the scribe's desk: " + err);
+        }
+    }
+    greymarchScribeShow(): any {
+        if (this.greymarchScreenUp || this.greymarchAdminOn || this.greymarchMenuOn || this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchScribeOn || this.greymarchCraftOn || this.greymarchForgeOn) { // not over the select screen or the other panels
+            this.greymarchLog("scribe: not opened, " + [this.greymarchScreenUp ? "the select screen" : "", this.greymarchAdminOn ? "the staff panel" : "", this.greymarchMenuOn ? "the X menu" : "", this.greymarchProfOn ? "the K window" : "", this.greymarchChanceryOn ? "the chancery" : "", this.greymarchVampMenuOn ? "the vampire window" : "", this.greymarchLedgerOn ? "the guard ledger" : "", this.greymarchScribeOn ? "the desk itself" : "", this.greymarchCraftOn ? "the crafting panel" : "", this.greymarchForgeOn ? "the forge window" : ""].filter(Boolean).join(", ") + " is marked open");
+            return;
+        }
+        this.greymarchLog("scribe: opened");
+        this.greymarchScribeOn = true;
+        this.sp.browser.setVisible(true);
+        this.sp.browser.setFocused(true);
+        this.greymarchScribeToPage("show", true);
+    }
+    greymarchScribeHide(): any {
+        if (!this.greymarchScribeOn) return;
+        this.greymarchClickGuard(); // the click that closed it is not a swing
+        this.greymarchScribeOn = false;
+        this.greymarchScribeToPage("hide", true);
         if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchCraftOn || !!this.greymarchForgeOn || !!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchEmoteOn || !!this.greymarchGuardsHud || !!this.greymarchProfOn || !!this.greymarchChanceryOn || !!this.greymarchVampMenuOn); }
     }
     // ---- THE CRAFTING PANEL. The page is Platform/UI/greymarch-craft.html; the SERVER decides everything (gamemode/src/craftsys.js), which opens it when a station is used
@@ -2465,7 +2510,7 @@ export class GreymarchBridge {
     }
     greymarchCraftShow(msg: any): any {
         if (this.greymarchCraftOn) { this.greymarchCraftToPage("show", msg); return; } // another station: the open panel lists its recipes
-        if (this.greymarchScreenUp || this.greymarchAdminOn || this.greymarchMenuOn || this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchForgeOn) return; // not over the select screen or the other panels (the forge window included: closing a panel on top of it took its mouse away)
+        if (this.greymarchScreenUp || this.greymarchAdminOn || this.greymarchMenuOn || this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchScribeOn || this.greymarchForgeOn) return; // not over the select screen or the other panels (the forge window included: closing a panel on top of it took its mouse away)
         this.greymarchLog("craft: opened at " + String((msg && msg.station) || "?"));
         this.greymarchCraftOn = true;
         this.sp.browser.setVisible(true);
@@ -2487,25 +2532,33 @@ export class GreymarchBridge {
         if (this.greymarchScreenUp) return; // the select screen: the server lets the work through once it sees no window (or the player tries again)
         this.greymarchLog("minigame: " + String((msg && msg.kind) || "?") + " (level " + String((msg && msg.level) || 1) + ")");
         this.greymarchMiniOn = true;
+        // keep (gamemode professions.js, the chopping block): the window stays up between one log and the next; the server's greymarchMinigameDone { keep: true }
+        // says another is coming, anything else closes it, and with no next one within MINI_KEEP_MS it closes by itself (greymarchMiniActivateTick)
+        this.greymarchMiniKeep = msg.keep === true; this.greymarchMiniKeptAt = 0;
         this.sp.browser.setVisible(true);
         this.sp.browser.setFocused(true);
-        this.greymarchMiniToPage("show", { token: msg.token, kind: msg.kind, level: msg.level, quick: msg.quick === true, recipe: msg.recipe || null, animal: msg.animal || "", ore: msg.ore || "" }); // recipe: the Chef's dish and ingredients; animal: the Hunter's kill (its coat); ore: the Miner's vein
+        this.greymarchMiniToPage("show", { token: msg.token, kind: msg.kind, level: msg.level, quick: msg.quick === true, recipe: msg.recipe || null, animal: msg.animal || "", ore: msg.ore || "", keep: msg.keep === true }); // recipe: the Chef's dish and ingredients; animal: the Hunter's kill (its coat); ore: the Miner's vein
         // the character acts it out: kneeling over the body to skin it (the emote wheel's "Search a body"; the other work has the game's own animation already:
         // the forge, the pot, the chopping block, the vein)
-        if (msg.kind === "skin") { this.greymarchEmotePlayWanted = { id: "searchbody", at: Date.now() }; this.greymarchMiniActing = true; }
+        // the server names it (msg.emote: examine for mining, searchbody for skinning); an older server: skinning kneels
+        var mEm = emoteMod.emoteById(typeof msg.emote === "string" ? msg.emote : msg.kind === "skin" ? "searchbody" : "");
+        if (mEm && mEm.kind !== "face") { this.greymarchEmotePlayWanted = { id: mEm.id, at: Date.now() }; this.greymarchMiniActing = true; }
     }
     greymarchMiniHide(): any {
         if (this.greymarchMiniActing && !this.greymarchMiniOn) { this.greymarchMiniActing = false; this.greymarchEmoteStopWanted = Date.now(); }
+        this.greymarchMiniKeep = false; this.greymarchMiniKeptAt = 0;
         if (!this.greymarchMiniOn) return;
+        this.greymarchClickGuard(); // the click that closed it is not a swing
         this.greymarchMiniOn = false;
         this.greymarchMiniToPage("hide", true);
-        if (!this.greymarchScreenUp && !this.greymarchPanelHasKeys()) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchCraftOn || !!this.greymarchForgeOn || !!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchEmoteOn || !!this.greymarchGuardsHud || !!this.greymarchProfOn || !!this.greymarchChanceryOn || !!this.greymarchVampMenuOn || !!this.greymarchLedgerOn); }
+        if (!this.greymarchScreenUp && !this.greymarchPanelHasKeys()) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchCraftOn || !!this.greymarchForgeOn || !!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchEmoteOn || !!this.greymarchGuardsHud || !!this.greymarchProfOn || !!this.greymarchChanceryOn || !!this.greymarchVampMenuOn || !!this.greymarchLedgerOn || !!this.greymarchScribeOn); }
     }
     greymarchMiniSend(type: string, body: any): any {
         var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify(Object.assign({ customPacketType: type }, body)) };
         this.controller.emitter.emit("sendMessage", { message: message, reliability: "reliable" });
     }
     greymarchMiniDone(msg: any): any {
+        if (msg && msg.keep === true && this.greymarchMiniOn && this.greymarchMiniKeep) { this.greymarchMiniKeptAt = Date.now(); return; } // the next log is coming: the window stays up (the page shows how this one went)
         this.greymarchMiniHide();
         var acted = !!this.greymarchMiniActing;
         if (acted) { this.greymarchMiniActing = false; this.greymarchEmoteStopWanted = Date.now(); } // up again before the body menu opens
@@ -2513,7 +2566,26 @@ export class GreymarchBridge {
         if (msg && msg.text) { try { this.sp.Debug.notification(String(msg.text)); } catch (e) { /* the page showed it already */ } }
     }
     // the thing the player won a mini game for is used again, from the update phase (Papyrus calls)
+    // THE CLICK GUARD (2026-10-26, the owner: closing the guard ledger or the scribe's desk with its X drew the sword or raised the fists). When a window that
+    // held the mouse closes, the game gets the mouse back with that same click still to come, and takes it for a swing. So for CLICK_GUARD_MS after a window
+    // closes, the player's fighting controls (attack, draw a weapon) are switched off, from the update phase, and then on again unless something else of
+    // ours holds them (a meal being eaten, a staff freeze).
+    greymarchClickGuard(): any { this.greymarchClickGuardUntil = Date.now() + CLICK_GUARD_MS; this.greymarchClickGuardWanted = true; }
+    greymarchClickGuardTick(): any {
+        var sp = this.sp, now = Date.now();
+        if (this.greymarchClickGuardWanted && !this.greymarchClickGuardOn) {
+            this.greymarchClickGuardWanted = false;
+            try { sp.Game.disablePlayerControls(false, true, false, false, false, false, false, false, 0); this.greymarchClickGuardOn = true; } catch (e) { /* no guard this time */ }
+        }
+        if (this.greymarchClickGuardOn && now >= (this.greymarchClickGuardUntil || 0)) {
+            this.greymarchClickGuardOn = false; this.greymarchClickGuardWanted = false;
+            var fx = this.greymarchFxHave;
+            if (!this.greymarchMealLocked && !(fx && fx.frozen)) { try { sp.Game.enablePlayerControls(false, true, false, false, false, false, false, false, 0); } catch (e) { /* the next frame */ } }
+        }
+    }
     greymarchMiniActivateTick(): any {
+        // a window kept up between logs with no next one in time: closed, so it never holds the keys for nothing
+        if (this.greymarchMiniOn && this.greymarchMiniKeptAt && Date.now() - this.greymarchMiniKeptAt > MINI_KEEP_MS) { this.greymarchLog("minigame: no next one, the window closes"); this.greymarchMiniHide(); }
         var want = this.greymarchMiniActivate;
         if (!want || Date.now() < want.at) return; // a moment after the kneel ends
         this.greymarchMiniActivate = null;
@@ -2529,9 +2601,10 @@ export class GreymarchBridge {
     }
     greymarchCraftHide(): any {
         if (!this.greymarchCraftOn) return;
+        this.greymarchClickGuard(); // the click that closed it is not a swing
         this.greymarchCraftOn = false;
         this.greymarchCraftToPage("hide", true);
-        if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchEmoteOn || !!this.greymarchGuardsHud || !!this.greymarchProfOn || !!this.greymarchChanceryOn || !!this.greymarchVampMenuOn || !!this.greymarchLedgerOn || !!this.greymarchForgeOn); }
+        if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchEmoteOn || !!this.greymarchGuardsHud || !!this.greymarchProfOn || !!this.greymarchChanceryOn || !!this.greymarchVampMenuOn || !!this.greymarchLedgerOn || !!this.greymarchScribeOn || this.greymarchScribeOn || !!this.greymarchForgeOn); }
     }
     // ---- THE GREYMARCH FORGE WINDOW. The page is Platform/UI/greymarch-forge.html; the SERVER decides everything (gamemode/src/forgemenu.js). Using a forge, the server
     // keeps the game's menu shut and opens this ({ customPacketType: "greymarchForgeOpen" }) for a game that said it has it ("greymarchForgeReady", sent on entering the world).
@@ -2549,7 +2622,7 @@ export class GreymarchBridge {
         var station = (msg && typeof msg.station === "string" && msg.station) || "forge";
         var page = { station: station, title: (msg && typeof msg.title === "string" && msg.title) || (station === "forge" ? "Forge" : "") };
         if (this.greymarchForgeOn) { this.greymarchForgeToPage("show", page); return; }
-        if (this.greymarchScreenUp || this.greymarchAdminOn || this.greymarchMenuOn || this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchCraftOn) return; // not over the select screen or the other panels
+        if (this.greymarchScreenUp || this.greymarchAdminOn || this.greymarchMenuOn || this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchScribeOn || this.greymarchCraftOn) return; // not over the select screen or the other panels
         this.greymarchLog(station === "forge" ? "forge: opened" : "station window: opened, " + station);
         this.greymarchForgeOn = true;
         this.greymarchForgeStation = station;
@@ -2561,11 +2634,12 @@ export class GreymarchBridge {
     }
     greymarchForgeHide(): any {
         if (!this.greymarchForgeOn) return;
+        this.greymarchClickGuard(); // the click that closed it is not a swing
         this.greymarchForgeOn = false;
         this.greymarchForgeToPage("hide", true);
         this.greymarchForgeAnimEnd();
         this.greymarchForgePreviewWant = ""; // the preview goes with the window
-        if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchEmoteOn || !!this.greymarchGuardsHud || !!this.greymarchProfOn || !!this.greymarchChanceryOn || !!this.greymarchVampMenuOn || !!this.greymarchLedgerOn || !!this.greymarchCraftOn); }
+        if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchEmoteOn || !!this.greymarchGuardsHud || !!this.greymarchProfOn || !!this.greymarchChanceryOn || !!this.greymarchVampMenuOn || !!this.greymarchLedgerOn || !!this.greymarchScribeOn || this.greymarchScribeOn || !!this.greymarchCraftOn); }
     }
     // At the forge like the game's own menu: the smith turns to the forge and does the forge's hammering (the game's IdleBlackSmithForgeEnter, what the
     // forge furniture plays) while the window is open, and steps out of it (IdleChairExitStart, the forge's exit) when it closes. SkyMP passes the player's
@@ -2671,13 +2745,205 @@ export class GreymarchBridge {
         if (this.greymarchForgeAnim) return; // opened again meanwhile
         try { var p2 = sp.Game.getPlayer(); if (p2) sp.Debug.sendAnimationEvent(p2, "IdleForceDefaultState"); } catch (e) { /* nothing to free */ }
     }
-    // THE PREVIEW IS GONE (2026-10-25): a copy of the picked piece in the world could be left behind and picked up (free items). Nothing is placed any more;
-    // this only removes a copy an older version of this game may still have made.
+    // THE DISPLAY (back 2026-10-26, the owner: smiths show customers the piece). The piece picked in the forge window, as a copy in this game only, floating
+    // on the right of the screen in front of the camera and slowly turning, like the game's own crafting menu. Before (removed 2026-10-25) copies were left
+    // behind and picked up: free items. Now each copy is guarded:
+    //  - it cannot be used or picked up: the game's BlockActivation, and keyframed (it does not fall, it cannot be grabbed or knocked away);
+    //  - it lives only while the forge window is open and stays at the smith: the window closed, a new piece picked, too far from the player or the
+    //    frame's move failing (a cell change) and it is removed;
+    //  - it is never forgotten: every copy made is kept by its form id and base, and checked every 2 s until the game no longer has it (a copy in a cell
+    //    that unloaded is deleted when the cell is back). A form id the game gave to something else since (the base differs) is let go, never touched.
+    //  - ONLY BY ITS FORM ID, fetched again on every frame: a game object SkyrimPlatform hands over is good for the frame it was fetched in only ("Invalid
+    //    _skyrimPlatform_indexInPool" on the next, 2026-10-26: the display was removed at once, and the old version's deletes through such a handle failed,
+    //    which is how its copies were left on the floor). A copy whose id cannot be read is deleted in the frame it was made.
     greymarchForgePreviewTick(now: number): any {
-        var ghost = this.greymarchForgeGhost;
-        if (!ghost) return;
-        this.greymarchForgeGhost = null;
-        try { ghost.disable(false); ghost.delete(); } catch (e) { /* gone */ }
+        var sp = this.sp, want = this.greymarchForgePreviewWant;
+        if (!this.greymarchForgeOn) want = this.greymarchForgeGhostId ? "" : null; // no window, no display
+        if (want !== undefined && want !== null) {
+            this.greymarchForgePreviewWant = null;
+            this.greymarchForgeGhostDrop();
+            this.greymarchForgeGhostDiag = 0; if (want) this.greymarchLog("forge: display asked for " + want);
+            var m = /^([0-9a-f]{1,8}):([^:]{1,64})$/i.exec(want);
+            if (m && this.greymarchForgeOn) {
+                try {
+                    var base = sp.Game.getFormFromFile(parseInt(m[1], 16), m[2]);
+                    var player = sp.Game.getPlayer();
+                    var g = base && player ? player.placeAtMe(base, 1, false, false) : null;
+                    var id = 0, baseId = 0;
+                    if (g) {
+                        try { id = g.getFormID() >>> 0; } catch (e) { id = 0; }
+                        try { baseId = base.getFormID() >>> 0; } catch (e) { baseId = 0; }
+                        if (!id || !baseId) { try { g.disable(false); } catch (e) { /* - */ } try { g.delete(); } catch (e) { /* - */ } g = null; this.greymarchLog("forge: display not kept (no form id)"); }
+                    }
+                    if (g) {
+                        (this.greymarchForgeGhostIds = this.greymarchForgeGhostIds || []).push({ id: id, base: baseId });
+                        try { g.blockActivation(true); } catch (e) { /* the window holds the keyboard meanwhile */ }
+                        try { g.setMotionType(4, false); } catch (e) { /* again once its 3D is there (greymarchForgePreviewTick) */ }
+                        // a weapon or a piece of armour is made lying down (how it rests when dropped): stood up, so it can be seen
+                        var isArmor = false, upright = false; try { isArmor = !!sp.Armor.from(base); } catch (e) { isArmor = false; }
+                        try { upright = isArmor || !!sp.Weapon.from(base); } catch (e) { upright = isArmor; }
+                        this.greymarchForgeGhostYaw = 0; this.greymarchForgeGhostPitch = 0; this.greymarchForgeGhostZoom = 0; this.greymarchForgeGhostLook = ""; // a new piece starts from the front view
+                        this.greymarchForgeGhostId = id; this.greymarchForgeGhostBase = baseId; this.greymarchForgeGhostSince = now;
+                        this.greymarchLog("forge: display made " + id.toString(16) + " (base " + baseId.toString(16) + (upright ? ", stood up" : "") + ")");
+                        this.greymarchForgeLightMake(); this.greymarchForgeGhostTilt = upright ? -90 : 0;
+                        this.greymarchForgeGhostAt = null; this.greymarchForgeGhostTurnNext = 0; this.greymarchForgeGhostReady = false; this.greymarchForgeGhostCheck = 0; this.greymarchForgeGhostPlacedAt = 0;
+                    }
+                } catch (e) { this.greymarchLog("forge: no display (" + e + ")"); }
+            }
+        }
+        this.greymarchForgeGhostSweep(now);
+        // Placed ONCE (SetPosition every frame redraws the piece: it flickered, 2026-10-26) and again only if the spot moves (the camera turned);
+        // it turns with the game's own smooth movement (TranslateTo, to the same spot), asked again every second.
+        if (!this.greymarchForgeGhostId) return;
+        var ghost = this.greymarchForgeGhostRef(this.greymarchForgeGhostId, this.greymarchForgeGhostBase);
+        if (!ghost) { this.greymarchForgeGhostSay("the game no longer has it"); this.greymarchForgeGhostDrop(); return; } // its lamp goes with it // gone (the sweep lets it go)
+        try {
+            var pl = sp.Game.getPlayer();
+            var c: number[] = [];
+            try { for (var i = 0; i < 6; i++) c.push(Number(sp.callNative("GreymarchCam", "GetCamera", undefined, i))); } catch (e) { c = []; }
+            var px: number, py: number, pz: number, fx: number, fy: number, fz: number;
+            if (c.length === 6 && c.every(function (n) { return isFinite(n); }) && Math.hypot(c[3], c[4], c[5]) > 0.01) {
+                var len = Math.hypot(c[3], c[4], c[5]); px = c[0]; py = c[1]; pz = c[2]; fx = c[3] / len; fy = c[4] / len; fz = c[5] / len;
+            } else { // no camera plugin: from the player's eyes, the way they face
+                var a = pl.getAngleZ() * Math.PI / 180;
+                px = pl.getPositionX(); py = pl.getPositionY(); pz = pl.getPositionZ() + 110; fx = Math.sin(a); fy = Math.cos(a); fz = 0;
+            }
+            var hl = Math.hypot(fx, fy) || 1, rx = fy / hl, ry = -fx / hl; // the camera's right, level
+            var d = 90 + (this.greymarchForgeGhostZoom || 0) * 10; // the wheel: 50 (close) to 150 (far)
+            var x = px + fx * d + rx * d * 0.45, y = py + fy * d + ry * d * 0.45, z = pz + fz * d - 6;
+            if (Math.hypot(x - pl.getPositionX(), y - pl.getPositionY(), z - pl.getPositionZ()) > 1500) throw new Error("too far from the smith");
+            var tilt = this.greymarchForgeGhostTilt || 0, at = this.greymarchForgeGhostAt;
+            // what happens to it, logged for the first 6 seconds (twice a second): where it is, where it should be, the camera, the smith
+            var dn = this.greymarchForgeGhostDiag || 0;
+            if (dn < 12 && now >= (this.greymarchForgeGhostDiagAt || 0)) {
+                this.greymarchForgeGhostDiag = dn + 1; this.greymarchForgeGhostDiagAt = now + 500;
+                var r0 = function (n: number) { return Math.round(n); };
+                var st = ""; try { st = "at " + [ghost.getPositionX(), ghost.getPositionY(), ghost.getPositionZ()].map(r0).join(",") + " 3D " + ghost.is3DLoaded() + " on " + !ghost.isDisabled(); } catch (e) { st = "? (" + e + ")"; }
+                this.greymarchLog("forge: display " + st + " | spot " + [x, y, z].map(r0).join(",") + " | camera " + [px, py, pz].map(r0).join(",") + " looking " + [fx, fy, fz].map(function (n: number) { return n.toFixed(2); }).join(",") + (c.length === 6 ? "" : " (no plugin)") + " | smith " + [pl.getPositionX(), pl.getPositionY(), pl.getPositionZ()].map(r0).join(",") + " | ready " + !!this.greymarchForgeGhostReady);
+            }
+            var face = (((Math.atan2(-fx, -fy) * 180 / Math.PI) % 360) + 360) % 360; // towards the camera (0 = north, like the game's Z angle)
+            // PLACED ONCE, THEN LEFT TO LOAD (2026-10-26, from the log: SetPosition restarts the piece's 3D, so placing it every frame while waiting kept
+            // it from ever loading: "3D false" for 15 s, nothing to see). Placed again only if it has not loaded after 3 s. Once its 3D is there it is
+            // keyframed (asked earlier the game ignores it and the piece falls); every move after that is the game's smooth movement (TranslateTo),
+            // which keeps the 3D.
+            if (!this.greymarchForgeGhostReady) {
+                var loaded = false; try { loaded = ghost.is3DLoaded() === true; } catch (e) { loaded = false; }
+                if (!this.greymarchForgeGhostPlacedAt || (!loaded && now - this.greymarchForgeGhostPlacedAt > 3000)) {
+                    ghost.setAngle(tilt, 0, face);
+                    ghost.setPosition(x, y, z);
+                    this.greymarchForgeGhostPlacedAt = now; this.greymarchForgeGhostAt = [x, y, z];
+                    this.greymarchForgeLightMove(x, y, z, fx, fy);
+                    return;
+                }
+                if (!loaded) return;
+                try { ghost.setMotionType(4, false); } catch (e) { /* checked below: a piece that drops is put back */ }
+                this.greymarchForgeGhostNoCollision(); // the smith cannot bump into it or push themselves off it (2026-10-26, the owner)
+                this.greymarchForgeGhostReady = true; at = this.greymarchForgeGhostAt || [x, y, z];
+                this.greymarchForgeGhostTurnNext = now + 100;
+            }
+            // a piece that moved off its spot anyway (fell, was pushed): keyframed again and moved back fast
+            if (now >= (this.greymarchForgeGhostCheck || 0)) {
+                this.greymarchForgeGhostCheck = now + 200;
+                var off = 0; try { off = Math.hypot(ghost.getPositionX() - at[0], ghost.getPositionY() - at[1], ghost.getPositionZ() - at[2]); } catch (e) { off = 0; }
+                if (off > 6) {
+                    try { ghost.setMotionType(4, false); } catch (e) { /* moved back anyway */ }
+                    this.greymarchForgeGhostNoCollision();
+                    this.greymarchForgeGhostLook = ""; // moved back to the spot and the angle below
+                    this.greymarchForgeGhostTurnNext = 0;
+                }
+            }
+            // the camera turned or the wheel moved it: to the new spot; the smith turned it: to the new angle. Both with the smooth movement, fast, at most 30 times
+            // a second. It stands still otherwise (2026-10-26, the owner: examined with the mouse, no turning by itself).
+            var zoomed = (this.greymarchForgeGhostZoomAt || 0) !== (this.greymarchForgeGhostZoom || 0);
+            if (zoomed || Math.hypot(x - at[0], y - at[1], z - at[2]) > 12) { this.greymarchForgeGhostAt = [x, y, z]; at = this.greymarchForgeGhostAt; this.greymarchForgeGhostZoomAt = this.greymarchForgeGhostZoom || 0; this.greymarchForgeLightMove(x, y, z, fx, fy); }
+            var ax = tilt + (this.greymarchForgeGhostPitch || 0), az = face + (this.greymarchForgeGhostYaw || 0);
+            var look = at.map(function (n: number) { return Math.round(n); }).join(",") + "," + Math.round(ax) + "," + Math.round(az);
+            if (look !== this.greymarchForgeGhostLook && now >= (this.greymarchForgeGhostTurnNext || 0)) {
+                this.greymarchForgeGhostLook = look; this.greymarchForgeGhostTurnNext = now + 33;
+                this.greymarchForgeGhostCheck = now + 700; // moving on purpose: not mistaken for a drop
+                var short = function (want: number, cur: number) { if (!isFinite(cur)) return want; return cur + (((((want - cur) % 360) + 540) % 360) - 180); }; // the short way round
+                var curX = NaN, curZ = NaN; try { curX = Number(ghost.getAngleX()); curZ = Number(ghost.getAngleZ()); } catch (e) { /* from the wanted angles */ }
+                // turned at a steady 600 degrees a second towards where the mouse put it (2026-10-26, the owner: snapping there 30 times a second was jerky)
+                ghost.translateTo(at[0], at[1], at[2], short(ax, curX), 0, short(az, curZ), 500, 600);
+            }
+        } catch (e) { this.greymarchForgeGhostSay(String(e)); this.greymarchForgeGhostDrop(); }
+    }
+    // the page's drag (dx, dy in pixels: left / right turns it round, up / down tips it), the wheel (zoom: +1 farther, -1 closer) or a double-click (reset)
+    greymarchForgeTurn(data: any): any {
+        if (!this.greymarchForgeOn || !this.greymarchForgeGhostId) return;
+        if (data.reset === true) { this.greymarchForgeGhostYaw = 0; this.greymarchForgeGhostPitch = 0; this.greymarchForgeGhostZoom = 0; return; }
+        var dx = Number(data.dx), dy = Number(data.dy), zoom = Number(data.zoom);
+        if (isFinite(dx) && Math.abs(dx) <= 4000) this.greymarchForgeGhostYaw = (((this.greymarchForgeGhostYaw || 0) - dx * 0.5) % 360 + 360) % 360;
+        if (isFinite(dy) && Math.abs(dy) <= 4000) this.greymarchForgeGhostPitch = (((this.greymarchForgeGhostPitch || 0) + dy * 0.4) % 360 + 360) % 360; // all the way round (2026-10-26, the owner: a piece facing away could not be turned to the smith)
+        if (zoom === 1 || zoom === -1) this.greymarchForgeGhostZoom = Math.max(-4, Math.min(6, (this.greymarchForgeGhostZoom || 0) + zoom));
+    }
+    // NOTHING COLLIDES WITH THE SHOWN COPY: its 3D on the game's non-collidable layer (15) with powerofthree's Papyrus Extender (a required mod:
+    // PO3_SKSEFunctions.SetCollisionLayer(akRef, asNodeName, aiCollisionLayer), "" = the whole piece). SkyrimPlatform's setCollision did nothing here
+    // (it is for actors): the smith still pushed themselves on the piece (2026-10-26). Needs the 3D, so asked once it is loaded and when it is put back.
+    greymarchForgeGhostNoCollision(): any {
+        var id = this.greymarchForgeGhostId; if (!id) return;
+        var ref = this.greymarchForgeGhostRef(id, this.greymarchForgeGhostBase); if (!ref) return;
+        try { this.sp.callNative("PO3_SKSEFunctions", "SetCollisionLayer", undefined, ref, "", 15); }
+        catch (e) { if (!this.greymarchForgeGhostCollSaid) { this.greymarchForgeGhostCollSaid = true; this.greymarchLog("forge: display collision could not be switched off: " + e); } }
+    }
+    // A LAMP FOR THE DISPLAY (2026-10-26, the owner: at night the piece could hardly be seen). The game's own shadowless, steady, near-white light
+    // (Skyrim.esm DefaultSunlight01NS_NotPortalStrict, 256 units), in this game only, between the smith and the piece and a little above. Kept and
+    // removed exactly like the copy: by its form id and base, in the same list, swept until the game no longer has it.
+    greymarchForgeLightMake(): any {
+        var sp = this.sp;
+        try {
+            var base = sp.Game.getFormFromFile(0x5eae2, "Skyrim.esm"), player = sp.Game.getPlayer();
+            var l = base && player ? player.placeAtMe(base, 1, false, false) : null;
+            if (!l) return;
+            var id = 0, baseId = 0;
+            try { id = l.getFormID() >>> 0; baseId = base.getFormID() >>> 0; } catch (e) { id = 0; }
+            if (!id || !baseId) { try { l.disable(false); } catch (e) { /* - */ } try { l.delete(); } catch (e) { /* - */ } return; }
+            (this.greymarchForgeGhostIds = this.greymarchForgeGhostIds || []).push({ id: id, base: baseId });
+            this.greymarchForgeLightId = id; this.greymarchForgeLightBase = baseId;
+        } catch (e) { if (!this.greymarchForgeLightSaid) { this.greymarchForgeLightSaid = true; this.greymarchLog("forge: no lamp for the display (" + e + ")"); } }
+    }
+    // 40 units from the piece towards the camera (level), 25 up
+    greymarchForgeLightMove(x: number, y: number, z: number, fx: number, fy: number): any {
+        var lid = this.greymarchForgeLightId; if (!lid) return;
+        var l = this.greymarchForgeGhostRef(lid, this.greymarchForgeLightBase); if (!l) return;
+        var hl = Math.hypot(fx, fy) || 1;
+        try { l.setPosition(x - fx / hl * 40, y - fy / hl * 40, z + 25); } catch (e) { /* stays where it was */ }
+    }
+    greymarchForgeGhostSay(why: string): any { this.greymarchForgeGhostSaid = (this.greymarchForgeGhostSaid || 0) + 1; if (this.greymarchForgeGhostSaid <= 10) this.greymarchLog("forge: display removed (" + why + ")"); }
+    // the copy with this form id, fetched now (good for this frame only), while it is still a copy of the same piece; otherwise null
+    greymarchForgeGhostRef(id: number, base: number): any {
+        var sp = this.sp, ref: any = null;
+        try { var f = sp.Game.getFormEx(id); ref = f ? sp.ObjectReference.from(f) : null; } catch (x) { ref = null; }
+        if (!ref) return null;
+        try { var b = ref.getBaseObject(); if (!b || (b.getFormID() >>> 0) !== base) return null; } catch (x) { return null; }
+        return ref;
+    }
+    // the shown copy goes (disabled and deleted); it stays in the list, so the sweep makes sure
+    greymarchForgeGhostDrop(): any {
+        var lid = this.greymarchForgeLightId; this.greymarchForgeLightId = 0;
+        if (lid) { var l = this.greymarchForgeGhostRef(lid, this.greymarchForgeLightBase); if (l) { try { l.disable(false); } catch (e) { /* the sweep */ } try { l.delete(); } catch (e) { /* the sweep */ } } this.greymarchForgeGhostNext = 0; }
+        var id = this.greymarchForgeGhostId; this.greymarchForgeGhostId = 0;
+        if (!id) return;
+        var g = this.greymarchForgeGhostRef(id, this.greymarchForgeGhostBase);
+        if (g) { try { g.disable(false); } catch (e) { /* the sweep */ } try { g.delete(); } catch (e) { /* the sweep */ } }
+        this.greymarchForgeGhostNext = 0; // sweep at once
+    }
+    // every 2 s: each copy this game made that is not the one shown is disabled and deleted again, until the game no longer has its form
+    greymarchForgeGhostSweep(now: number): any {
+        var list = this.greymarchForgeGhostIds;
+        if (!list || !list.length || now < (this.greymarchForgeGhostNext || 0)) return;
+        this.greymarchForgeGhostNext = now + 2000;
+        var shown = this.greymarchForgeGhostId, keep: any[] = [];
+        for (var i = 0; i < list.length; i++) {
+            var e = list[i];
+            if (e.id === shown || (e.id === this.greymarchForgeLightId && e.id)) { keep.push(e); continue; }
+            var ref = this.greymarchForgeGhostRef(e.id, e.base);
+            if (!ref) continue; // the game no longer has it, or the id is something else now: never touched again
+            try { ref.disable(false); } catch (x) { /* again next time */ }
+            try { ref.delete(); } catch (x) { /* again next time */ }
+            keep.push(e);
+        }
+        this.greymarchForgeGhostIds = keep.slice(-200);
     }
     // THE POINTER. SkyrimPlatform draws it through the game's Cursor Menu, which it opens when a page takes the focus (BrowserApiTilted SetFocused) and only
     // then: something that closes the Cursor Menu while a page has the focus (moving the player onto a forge, a game menu closing) leaves the window without a
@@ -2707,6 +2973,10 @@ export class GreymarchBridge {
     }
     greymarchLedgerAsk(data: any): any {
         var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchLedger", rid: data.rid, op: data.op, args: data.args }) };
+        this.controller.emitter.emit("sendMessage", { message: message, reliability: "reliable" });
+    }
+    greymarchScribeAsk(data: any): any {
+        var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchScribe", rid: data.rid, op: data.op, args: data.args }) };
         this.controller.emitter.emit("sendMessage", { message: message, reliability: "reliable" });
     }
     greymarchMenuSend(data: any): any {
@@ -2786,9 +3056,10 @@ export class GreymarchBridge {
     }
     greymarchEmoteHide(): any {
         if (!this.greymarchEmoteOn) return;
+        this.greymarchClickGuard(); // the click that closed it is not a swing
         this.greymarchEmoteOn = false;
         this.greymarchEmoteToPage("hide", true);
-        if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchCraftOn || !!this.greymarchForgeOn || !!this.greymarchHudOn || !!this.greymarchChatOn || !!this.greymarchGuardsHud || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchCraftOn || this.greymarchForgeOn)); }
+        if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchCraftOn || !!this.greymarchForgeOn || !!this.greymarchHudOn || !!this.greymarchChatOn || !!this.greymarchGuardsHud || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchScribeOn || this.greymarchCraftOn || this.greymarchForgeOn)); }
     }
     greymarchEmoteSay(text: string): any { try { this.sp.Debug.notification(text); } catch (e) { /* a hint is a nicety */ } }
     // Every frame (update phase): open the wheel, play or stop an emote, and end a lasting one when the player moves (keys can be rebound, so the speed is watched too) or draws a weapon.
@@ -2813,24 +3084,32 @@ export class GreymarchBridge {
             if (em && now - play.at <= 2000) { if (em.kind === "face") this.greymarchFaceSet(em); else this.greymarchEmotePlay(em); }
         }
         if (this.greymarchFaceClearWanted) { this.greymarchFaceClearWanted = 0; if (this.greymarchFaceMine) this.greymarchFaceSet(null); }
+        this.greymarchServerEmoteTick(now);
         this.greymarchFaceTick(now);
-        // eating, drinking or a potion (greymarchConsumeNote): played once the menu is closed, unless an emote is on or the body is a beast; forgotten after 15 seconds
-        var cw = this.greymarchConsumeWant;
-        if (cw) {
-            if (now - cw.at > 15000) this.greymarchConsumeWant = null;
-            else if (!this.greymarchEmoteNow && !this.greymarchWolfOn && !this.greymarchShapeOn && !this.greymarchInMenu()) { this.greymarchConsumeWant = null; this.greymarchConsumePlay(cw.id, now); }
+        // eating, drinking or a potion (greymarchConsumeNote): played in turn once the menu is closed, unless an emote is on or the body is a beast. Waiting behind a meal
+        // does not count towards the 15 seconds after which one is forgotten (a second meal plays after the first, it never replaces it).
+        var cq = this.greymarchConsumeQueue;
+        if (cq && cq.length) {
+            var eating = !!(this.greymarchEmoteNow && this.greymarchEmoteNow.meal);
+            if (eating) for (var qi = 0; qi < cq.length; qi++) cq[qi].at = now;
+            else {
+                while (cq.length && now - cq[0].at > 15000) cq.shift();
+                if (cq.length && !this.greymarchEmoteNow && !this.greymarchWolfOn && !this.greymarchShapeOn && !this.greymarchInMenu()) { var next = cq.shift(); this.greymarchConsumePlay(next.id, now); }
+            }
         }
+        if (this.greymarchMealLocked && !(this.greymarchEmoteNow && this.greymarchEmoteNow.meal)) this.greymarchMealLock(false, "the meal ended another way"); // never left frozen (a beast form, an emote dropped elsewhere)
         var cur = this.greymarchEmoteNow;
         if (!cur) { this.greymarchEmoteStopWanted = 0; return; }
         var stopWhy = "";
-        if (this.greymarchEmoteStopWanted) { this.greymarchEmoteStopWanted = 0; stopWhy = "stopped"; }
-        else if (this.greymarchWolfOn || this.greymarchShapeOn) { this.greymarchEmoteNow = null; return; } // the body changed: the emote went with it
+        if (this.greymarchEmoteStopWanted && !cur.meal) { this.greymarchEmoteStopWanted = 0; stopWhy = "stopped"; }
+        else if (this.greymarchWolfOn || this.greymarchShapeOn) { this.greymarchEmoteNow = null; if (cur.meal) this.greymarchMealLock(false, "beast form"); return; } // the body changed: the emote went with it
         else if (cur.until && now >= cur.until) stopWhy = "done eating";
         else if (now >= (this.greymarchEmoteCheckAt || 0)) {
             this.greymarchEmoteCheckAt = now + 250;
             try {
                 var player = sp.Game.getPlayer();
-                if (player.isWeaponDrawn()) stopWhy = "weapon drawn";
+                if (cur.meal) { this.greymarchEmoteStopWanted = 0; if (player.isDead()) stopWhy = "died"; } // a meal lasts its full time: moving, a weapon or Stop do not end it (the controls are locked)
+                else if (player.isWeaponDrawn()) stopWhy = "weapon drawn";
                 else if (cur.kind === "loop" && now - cur.at > 700 && player.getAnimationVariableFloat("Speed") > 30) stopWhy = "moved";
             } catch (e) { /* asked again in a moment */ }
         }
@@ -2849,7 +3128,7 @@ export class GreymarchBridge {
                 if (this.greymarchPotionServerDrink(fid)) return; // the server drinking it after the swig: no animation, its effect stays
                 this.greymarchPotionFirstDrink(pot, fid);
             }
-            if (id) this.greymarchConsumeWant = { id: id, at: Date.now() };
+            if (id) { var cq = this.greymarchConsumeQueue || (this.greymarchConsumeQueue = []); if (cq.length < 5) cq.push({ id: id, at: Date.now() }); } // in turn: a meal never replaces the one playing
             if (id === "bread" || id === "mug") this.greymarchConsumeCloseMenu(); // food or a drink: the inventory closes so the meal is seen (a potion leaves it open: several in a row)
         } catch (err) { /* not something eaten */ }
     }
@@ -2918,11 +3197,28 @@ export class GreymarchBridge {
         } catch (err) { ok = false; }
         var n = this.greymarchEmoteLogged = (this.greymarchEmoteLogged || 0) + 1;
         if (n <= 20) this.greymarchLog("eat: " + id + " " + (ok ? "played" : "refused by the game"));
-        if (ok && em.kind === "loop") this.greymarchEmoteNow = { id: em.id, kind: "loop", stop: emoteMod.IDLE_STOP, at: now, until: now + emoteMod.EAT_SECONDS * 1000 };
+        if (ok && em.kind === "loop") { this.greymarchEmoteNow = { id: em.id, kind: "loop", stop: emoteMod.IDLE_STOP, at: now, until: now + emoteMod.EAT_SECONDS * 1000, meal: true }; this.greymarchMealLock(true, id); }
+    }
+    // A MEAL CANNOT BE SKIPPED (the server fills the hunger the moment the food leaves the inventory): while eating or drinking (EAT_SECONDS) the player cannot walk,
+    // jump, fight, sneak or activate; looking around, the camera and the menus stay. The controls come back when the meal is over or ends any other way (death, a beast
+    // form: greymarchEmoteTick also frees them every frame if the meal is gone), never while staff hold the player frozen (greymarchEffects).
+    greymarchMealLock(on: boolean, why: string): any {
+        var sp = this.sp;
+        if (on) {
+            try { sp.Game.disablePlayerControls(true, true, false, false, true, false, true, false, 0); this.greymarchMealLocked = true; } catch (e) { this.greymarchMealLocked = false; return; }
+            this.greymarchCrumb("eat: controls locked (" + why + ")");
+            return;
+        }
+        if (!this.greymarchMealLocked) return;
+        this.greymarchMealLocked = false;
+        if (this.greymarchFxHave && this.greymarchFxHave.frozen) return; // staff froze the player: that lock stays
+        try { sp.Game.enablePlayerControls(true, true, false, false, true, false, true, false, 0); } catch (e) { /* nothing else to try */ }
+        this.greymarchCrumb("eat: controls back (" + why + ")");
     }
     greymarchEmotePlay(em: any): any {
         var sp = this.sp;
         if (this.greymarchWolfOn || this.greymarchShapeOn) { this.greymarchEmoteSay("A beast has no emotes"); return; }
+        if (this.greymarchEmoteNow && this.greymarchEmoteNow.meal) { this.greymarchEmoteSay("Finish eating first"); return; }
         var ok = false, player: any = null;
         try {
             player = sp.Game.getPlayer();
@@ -3090,10 +3386,39 @@ export class GreymarchBridge {
             if (face) this.greymarchFaceApply(mac, face, false);
         }
     }
+    // THE SERVER ASKS FOR AN EMOTE ({ customPacketType: "greymarchEmote", emote: <a wheel emote id>, ms }): played as if picked from the wheel (so everyone sees it) and
+    // ended like the wheel's Stop after ms. Moving, a drawn weapon or anything else that ends it sooner just ends it: the server keeps its own time. Ignored when
+    // the player is dead, in furniture or mounted, mid-meal, or the id is not an emote (faces too).
+    greymarchServerEmoteTick(now: number): any {
+        var want = this.greymarchServerEmote;
+        if (want) {
+            this.greymarchServerEmote = null;
+            var em = emoteMod.emoteById(want.id);
+            var why = "";
+            if (!em || em.kind === "face") why = "not an emote";
+            else if (now - want.at > 3000) why = "too late";
+            else if (this.greymarchEmoteNow && this.greymarchEmoteNow.meal) why = "eating";
+            else {
+                try { var pl = this.sp.Game.getPlayer(); if (!pl || pl.isDead()) why = "dead"; else if (pl.getFurnitureReference()) why = "in furniture"; else if (pl.isOnMount()) why = "mounted"; } catch (e) { why = "the player could not be read"; }
+            }
+            if (why) { this.greymarchLog("emote: the server's " + want.id + " ignored (" + why + ")"); }
+            else {
+                this.greymarchEmotePlay(em);
+                var cur = this.greymarchEmoteNow;
+                this.greymarchServerEmoteEnd = cur && cur.id === em.id ? { id: em.id, at: cur.at, until: now + want.ms } : null; // a one-off ends by itself
+            }
+        }
+        var end = this.greymarchServerEmoteEnd;
+        if (!end || now < end.until) return;
+        this.greymarchServerEmoteEnd = null;
+        var now2 = this.greymarchEmoteNow;
+        if (now2 && now2.id === end.id && now2.at === end.at) this.greymarchEmoteEnd("the server's time is up"); // still the same emote: stand up, as Stop does
+    }
     greymarchEmoteEnd(why: string): any {
         var sp = this.sp, cur = this.greymarchEmoteNow;
         this.greymarchEmoteNow = null;
         if (!cur) return;
+        if (cur.meal) this.greymarchMealLock(false, why);
         this.greymarchCrumb("emote end " + cur.id + " (" + why + ")");
         try {
             var player = sp.Game.getPlayer();
@@ -3159,7 +3484,7 @@ export class GreymarchBridge {
     // The chat page answers every "show" (a few seconds apart) with whether it is really typing. If the game thinks otherwise, the game gives way: a keyboard that the page is not using is released,
     // so movement can never stay locked behind a chat that is not open. (An input opened less than a second ago is left alone: the answer may have been sent before it.)
     // The windows that hold the keyboard (and the mouse cursor) while they are open. The chat's keyboard releases leave them alone: releasing it every 2 s took the K window's cursor away (2026-10-18).
-    greymarchPanelHasKeys(): any { return !!(this.greymarchMiniOn || this.greymarchAdminOn || this.greymarchMenuOn || this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchCraftOn || this.greymarchForgeOn || this.greymarchEmoteOn); }
+    greymarchPanelHasKeys(): any { return !!(this.greymarchMiniOn || this.greymarchAdminOn || this.greymarchMenuOn || this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchScribeOn || this.greymarchCraftOn || this.greymarchForgeOn || this.greymarchEmoteOn); }
     // ---- THE FIELD OF VIEW (the chatbox's Settings). Skyrim Platform cannot reach the camera's field of view and the camera never reads the game's settings
     // again, so the value goes into fDefaultWorldFOV / fDefault1stPersonFOV (the Skyrim.ini ones) and Greymarch's SKSE plugin GreymarchCamera.dll (in the game
     // files; launcher repo skse/GreymarchCamera) sees the change within a quarter of a second and puts it on the camera, in any view. (Switching the view and
@@ -3227,17 +3552,18 @@ export class GreymarchBridge {
     // them is still marked open means the mark is stale (the window closed without saying so, or lost the keyboard): the mark is cleared and that window hidden, so the chat opens.
     // While the browser really has the keyboard, the window is open for real and Enter belongs to it.
     greymarchChatStaleWindows(): any {
-        if (!this.greymarchAdminOn && !this.greymarchMenuOn && !this.greymarchProfOn && !this.greymarchChanceryOn && !this.greymarchVampMenuOn && !this.greymarchLedgerOn && !this.greymarchCraftOn && !this.greymarchForgeOn && !this.greymarchEmoteOn) return;
+        if (!this.greymarchAdminOn && !this.greymarchMenuOn && !this.greymarchProfOn && !this.greymarchChanceryOn && !this.greymarchVampMenuOn && !this.greymarchLedgerOn && !this.greymarchScribeOn && !this.greymarchCraftOn && !this.greymarchForgeOn && !this.greymarchEmoteOn) return;
         var focused = true;
         try { focused = !!this.sp.browser.isFocused(); } catch (e) { focused = true; } // cannot tell: leave the window alone
         if (focused) return;
-        this.greymarchLog("chat: Enter reached the game while " + [this.greymarchAdminOn ? "the staff panel" : "", this.greymarchMenuOn ? "the X menu" : "", this.greymarchProfOn ? "the K window" : "", this.greymarchChanceryOn ? "the chancery" : "", this.greymarchVampMenuOn ? "the vampire window" : "", this.greymarchLedgerOn ? "the guard ledger" : "", this.greymarchEmoteOn ? "the emote wheel" : ""].filter(Boolean).join(", ") + " was marked open without the keyboard; closed it so the chat opens");
+        this.greymarchLog("chat: Enter reached the game while " + [this.greymarchAdminOn ? "the staff panel" : "", this.greymarchMenuOn ? "the X menu" : "", this.greymarchProfOn ? "the K window" : "", this.greymarchChanceryOn ? "the chancery" : "", this.greymarchVampMenuOn ? "the vampire window" : "", this.greymarchLedgerOn ? "the guard ledger" : "", this.greymarchScribeOn ? "the scribe's desk" : "", this.greymarchEmoteOn ? "the emote wheel" : ""].filter(Boolean).join(", ") + " was marked open without the keyboard; closed it so the chat opens");
         if (this.greymarchAdminOn) { try { this.greymarchAdminHide(); } catch (e1) { this.greymarchAdminOn = false; } }
         if (this.greymarchMenuOn) { try { this.greymarchMenuHide(); } catch (e2) { this.greymarchMenuOn = false; } }
         if (this.greymarchProfOn) { try { this.greymarchProfHide(); } catch (e3) { this.greymarchProfOn = false; } }
         if (this.greymarchChanceryOn) { try { this.greymarchChanceryHide(); } catch (e4) { this.greymarchChanceryOn = false; } }
         if (this.greymarchVampMenuOn) { try { this.greymarchVampMenuHide(); } catch (e5) { this.greymarchVampMenuOn = false; } }
         if (this.greymarchLedgerOn) { try { this.greymarchLedgerHide(); } catch (e6) { this.greymarchLedgerOn = false; } }
+        if (this.greymarchScribeOn) { try { this.greymarchScribeHide(); } catch (e7) { this.greymarchScribeOn = false; } }
         if (this.greymarchCraftOn) { try { this.greymarchCraftHide(); } catch (e7) { this.greymarchCraftOn = false; } }
         if (this.greymarchForgeOn) { try { this.greymarchForgeHide(); } catch (e8) { this.greymarchForgeOn = false; } }
         if (this.greymarchMiniOn) { try { this.greymarchMiniHide(); } catch (e8) { this.greymarchMiniOn = false; } }

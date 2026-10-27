@@ -20,9 +20,9 @@ function make(opts = {}) {
   const state = { drawn: false, speed: 0, menu: null, refuse: false };
   const player = {
     playIdle: (idle) => { log.idles.push(idle.id); return !state.refuse; },
-    placeAtMe: (base) => { const g = { base, at: null, rot: null, gone: false, setPosition: (x, y, z) => { g.at = [x, y, z]; }, setAngle: (a, b, c) => { g.rot = [a, b, c]; }, disable() { g.gone = true; }, delete() { g.gone = true; } }; (log.ghosts = log.ghosts || []).push(g); return g; },
+    placeAtMe: (base) => { const n = (log.ghosts || []).length; const g = { base, at: null, rot: null, gone: false, id: 0xff000100 + n, getFormID: () => g.id, getBaseObject: () => ({ getFormID: () => base.id }), blockActivation: (v) => { g.blocked = v; }, setMotionType: (t) => { g.motion = t; g.motions = (g.motions || 0) + 1; }, setPosition: (x, y, z) => { g.at = [x, y, z]; g.moves = (g.moves || 0) + 1; }, setAngle: (a, b, c) => { g.rot = [a, b, c]; }, getAngleZ: () => (g.rot ? g.rot[2] : 0), getAngleX: () => (g.rot ? g.rot[0] : 0), getPositionX: () => (g.at ? g.at[0] + (g.fell || 0) : 0), getPositionY: () => (g.at ? g.at[1] : 0), getPositionZ: () => (g.at ? g.at[2] - (g.fell || 0) : 0), is3DLoaded: () => !state.no3d, translateTo: (...a) => { (g.turns = g.turns || []).push(a); }, disable() { g.gone = true; }, delete() { g.gone = true; } }; if (base.id === 0x5eae2) { g.id = 0xff100000 + (log.lights || []).length; (log.lights = log.lights || []).push(g); } else (log.ghosts = log.ghosts || []).push(g); (log.world = log.world || {})[g.id] = g; return g; },
     getActorValue: (n) => (state.av || {})[n] || 0, damageActorValue: (n, v) => { log.damage = (log.damage || []).concat([[n, Math.round(v)]]); state.av[n] -= v; },
-    isWeaponDrawn: () => state.drawn,
+    isWeaponDrawn: () => state.drawn, isDead: () => !!state.dead, isOnMount: () => !!state.mounted,
     getHeadingAngle: () => 30, getAngleZ: () => 100, setAngle: (a, b, c) => { log.turned = c; }, setPosition: (x, y, z) => { log.stood = [x, y, z]; }, moveTo: (ref, dx, dy, dz, match) => { log.movedTo = [ref.id, dx, dy, dz, match]; }, getPositionX: () => (log.stood ? log.stood[0] : 480), getPositionY: () => (log.stood ? log.stood[1] : 560), getPositionZ: () => (log.stood ? log.stood[2] : 44),
     getFurnitureReference: () => (state.furn ? { getFormID: () => state.furn } : null),
     getAnimationVariableFloat: (n) => (n === "Speed" ? state.speed : 0),
@@ -31,14 +31,15 @@ function make(opts = {}) {
   const actors = {}; for (const local of Object.values(opts.others || {})) actors[local] = faceLog(local.toString(16));
   const sp = {
     printConsole() {}, writeLogs: (n, l) => log.lines.push(l),
-    Game: { getPlayer: () => player, getFormEx: (id) => ({ id }), getFormFromFile: (id, file) => (file === "Missing.esp" ? null : { id, file }), forceThirdPerson: () => { log.thirdPerson++; } },
+    Game: { getPlayer: () => player, getFormEx: (id) => (log.world && log.world[id] ? (log.world[id].gone ? null : log.world[id]) : { id }), getFormFromFile: (id, file) => (file === "Missing.esp" ? null : { id, file, getFormID: () => id }), forceThirdPerson: () => { log.thirdPerson++; }, disablePlayerControls: (...a) => (log.controls = log.controls || []).push(["off", ...a]), enablePlayerControls: (...a) => (log.controls = log.controls || []).push(["on", ...a]) },
     callNative: (cls, fn, self, a, b) => { (log.natives = log.natives || []).push([cls, fn, a]); if (cls !== "GreymarchCam" || state.noDll) throw new Error("Native function not found"); if (fn === "GetFurnitureMarker") return state.marker ? state.marker[b] : -99999; if (fn === "SetFreeCamera") { state.free = !!a; return true; } if (fn === "IsFreeCamera") return !!state.free; if (fn === "GetCamera") return (state.cam || [0, 0, 0, 0, 1, 0])[a]; return undefined; },
-    Idle: { from: (f) => f || null }, ObjectReference: { from: (f) => (f && f.id ? { id: f.id, getPositionX: () => 500, getPositionY: () => 600, getPositionZ: () => 10, getAngleZ: () => 90 } : null) }, Actor: { from: (f) => (f && actors[f.id]) || null }, Potion: { from: (f) => (f && f.potion) || null },
+    Idle: { from: (f) => f || null }, ObjectReference: { from: (f) => (f && f.setPosition ? f : f && f.id ? { id: f.id, getPositionX: () => 500, getPositionY: () => 600, getPositionZ: () => 10, getAngleZ: () => 90 } : null) }, Actor: { from: (f) => (f && actors[f.id]) || null }, Potion: { from: (f) => (f && f.potion) || null },
     Debug: { sendAnimationEvent: (ref, name) => log.events.push(name), notification: (t) => log.notes.push(t) },
     Ui: { isMenuOpen: (name) => name === state.menu },
     Input: { tapKey: (k) => { log.taps = (log.taps || []).concat([k]); if (state.menu === "InventoryMenu" || state.menu === "FavoritesMenu") state.menu = null; }, getMappedKey: (c) => (c === "Tween Menu" ? state.tweenKey || 15 : 0) },
     Utility: { isInMenuMode: () => false },
     browser: { setVisible() {}, setFocused: (v) => log.focused.push(v), isFocused: () => state.focused !== false, executeJavaScript: (js) => { const m = /window\.__gmEmoteRun\((.*)\);$/.exec(js); if (m) log.pages.push(JSON.parse(m[1])); const c = /window\.__gmCraftRun\((.*)\);$/.exec(js); if (c) (log.craft = log.craft || []).push(JSON.parse(c[1])); const fo = /window\.__gmForgeRun\((.*)\);$/.exec(js); if (fo) (log.forge = log.forge || []).push(JSON.parse(fo[1])); } },
+    setCollision(id, on) { (this.__coll = this.__coll || []).push([id, on]); },
     on() {}, storage: {},
   };
   const controller = { on() {}, emitter: { on() {}, emit: (n, m) => { if (n === "sendMessage") { const c = JSON.parse(m.message.contentJsonDump); if (c.customPacketType !== "greymarchLog") log.sent.push(c); } } } };
@@ -330,7 +331,7 @@ test("eating, drinking and potions: the matching idle once the menu is closed; e
   s.log.idles.length = 0;
   s.eat("Ale"); s.tick(); assert.deepStrictEqual(s.log.idles, [idleOf("mug")], "the standing drinking idle");
   for (let i = 0; i < 102; i++) s.tick(50); assert.strictEqual(s.gm.greymarchEmoteNow, null, "a drink also takes five seconds"); s.log.idles.length = 0;
-  s.eat("Ale"); s.tick(); s.log.idles.length = 0; s.state.speed = 100; s.tick(800); assert.strictEqual(s.gm.greymarchEmoteNow, null, "walking off ends it early"); s.state.speed = 0; s.log.idles.length = 0;
+  s.eat("Ale"); s.tick(); s.log.idles.length = 0; s.state.speed = 100; s.tick(800); assert.ok(s.gm.greymarchEmoteNow && s.gm.greymarchEmoteNow.meal, "moving does not end a meal"); s.state.speed = 0; for (let i = 0; i < 90; i++) s.tick(50); assert.strictEqual(s.gm.greymarchEmoteNow, null); s.log.idles.length = 0;
   s.eat("Potion of Healing", false); s.tick(); assert.deepStrictEqual(s.log.idles, [idleOf("potion")], "a potion is a quick swig");
   s.eat("Deadly Poison", false, true); s.tick(); assert.strictEqual(s.log.idles.length, 1, "a poison: nothing");
   s.state.drawn = true; s.eat("Apple Pie"); s.tick(); assert.strictEqual(s.log.idles.length, 1, "weapon drawn: nothing");
@@ -377,7 +378,7 @@ test("the build system's free camera: Place in the Build tab turns it on, a prev
   s.state.cam = [1000, 2000, 300, 0, 1, 0]; // at 1000,2000,300 looking north
   s.page({ type: "build-cam", mode: "place", key: "d932f:Skyrim.esm", name: "Blacksmith Forge" }); s.camTick();
   assert.strictEqual(s.state.free, true, "the game's free camera is on");
-  const g = s.log.ghosts[0]; assert.deepStrictEqual(g.base, { id: 0xd932f, file: "Skyrim.esm" });
+  const g = s.log.ghosts[0]; assert.deepStrictEqual({ id: g.base.id, file: g.base.file }, { id: 0xd932f, file: "Skyrim.esm" });
   assert.deepStrictEqual(g.at, [1000, 2400, 300], "400 units ahead"); assert.deepStrictEqual(g.rot, [0, 0, 180], "facing the camera");
   s.key(200, true); s.key(200, false); s.key(205, true); s.key(205, false); s.key(201, true); s.key(201, false); s.camTick(50);
   assert.deepStrictEqual(g.at, [1000, 2440, 310]); assert.deepStrictEqual(g.rot, [0, 0, 195]);
@@ -446,11 +447,11 @@ test("the forge window: the game says it has it on entering the world; the serve
   s.page({ type: "forge", rid: 3, op: "craft", args: { id: 12, qty: 2, tab: "weapons" } });
   assert.deepStrictEqual(s.log.sent.pop(), { customPacketType: "greymarchForge", rid: 3, op: "craft", args: { id: 12, qty: 2, tab: "weapons" } });
   s.say({ customPacketType: "greymarchForgeReply", rid: 3, ok: true }); assert.strictEqual(s.log.forge.pop().fn, "reply");
-  const before = (s.log.ghosts || []).length;
   s.page({ type: "forge-preview", key: "20:skyrim.esm" }); s.at(() => s.gm.greymarchForgePreviewTick(Date.now()));
-  assert.strictEqual((s.log.ghosts || []).length, before, "no copy of the piece is ever placed in the world (it could be picked up)");
+  assert.strictEqual(s.log.ghosts.length, 1, "the picked piece is shown"); assert.strictEqual(s.log.ghosts[0].blocked, true, "it cannot be used or picked up"); assert.strictEqual(s.log.ghosts[0].motion, 4, "keyframed");
   s.key(1, true); s.key(1, false);
   assert.strictEqual(s.gm.greymarchForgeOn, false, "Esc closes it"); assert.strictEqual(s.log.forge.pop().fn, "hide");
+  s.at(() => s.gm.greymarchForgePreviewTick(Date.now())); assert.strictEqual(s.log.ghosts[0].gone, true, "the display goes with the window");
 
   s.at(() => s.gm.greymarchForgeTick(Date.now()));
   assert.strictEqual(s.log.events.pop(), "IdleChairExitStart", "steps out of the forge's animation, on the next frame");
@@ -504,4 +505,235 @@ test("the pointer: while a window holds the mouse and has the focus but the game
   s.state.focused = true; s.page({ type: "forge-close" }); const m = s.log.focused.length;
   s.at(() => s.gm.greymarchPointerGuard(Date.now() + 4000));
   assert.strictEqual(s.log.focused.length, m, "no window open: nothing");
+});
+
+test("a meal cannot be skipped: the controls are locked for its five seconds (not looking, the camera or the menus); moving, a weapon, W or Stop do not end it", () => {
+  const LOCK = [true, true, false, false, true, false, true, false, 0];
+  const s = make();
+  s.eat("Venison Stew"); s.tick();
+  assert.deepStrictEqual(s.log.controls, [["off", ...LOCK]], "movement, fighting, sneaking, activating");
+  s.key(17, true); s.key(17, false); s.state.speed = 120; s.state.drawn = true;
+  s.page({ type: "emote-stop" });
+  for (let i = 0; i < 40; i++) s.tick(50); // 2 s
+  assert.ok(s.gm.greymarchEmoteNow && s.gm.greymarchEmoteNow.meal, "still eating");
+  s.page({ type: "emote", id: "wave" }); s.tick();
+  assert.strictEqual(s.log.notes.at(-1), "Finish eating first", "no wheel emote over a meal");
+  for (let i = 0; i < 70; i++) s.tick(50);
+  assert.strictEqual(s.gm.greymarchEmoteNow, null, "over after five seconds");
+  assert.deepStrictEqual(s.log.controls, [["off", ...LOCK], ["on", ...LOCK]], "and free again (only what the meal locked)");
+  assert.strictEqual(s.log.idles.at(-1), emotes.IDLE_STOP);
+});
+
+test("a second meal waits for the first and plays after it; a meal is never replaced", () => {
+  const s = make();
+  const bread = emotes.emoteById("bread").idle, mug = emotes.emoteById("mug").idle;
+  s.eat("Venison Stew"); s.tick();
+  s.eat("Nord Mead"); s.tick();
+  assert.deepStrictEqual(s.log.idles, [bread], "the drink waits");
+  for (let i = 0; i < 101; i++) s.tick(50);
+  assert.deepStrictEqual(s.log.idles.filter((x) => x !== emotes.IDLE_STOP), [bread, mug], "then plays (waiting did not use up its 15 seconds)");
+  assert.ok(s.gm.greymarchEmoteNow && s.gm.greymarchEmoteNow.id === "mug");
+  assert.strictEqual(s.log.controls.filter((c) => c[0] === "off").length, 2);
+});
+
+test("the controls always come back: death, a beast form, a staff freeze is left alone", () => {
+  const d = make();
+  d.eat("Venison Stew"); d.tick();
+  d.state.dead = true; d.tick(300);
+  assert.strictEqual(d.gm.greymarchEmoteNow, null);
+  assert.strictEqual(d.log.controls.at(-1)[0], "on", "dead: free");
+  const w = make();
+  w.eat("Venison Stew"); w.tick();
+  w.gm.greymarchWolfOn = true; w.tick(); w.tick();
+  assert.strictEqual(w.log.controls.at(-1)[0], "on", "a beast form: free");
+  assert.strictEqual(w.gm.greymarchMealLocked, false);
+  const o = make();
+  o.eat("Venison Stew"); o.tick();
+  o.gm.greymarchEmoteNow = null; o.tick();
+  assert.strictEqual(o.log.controls.at(-1)[0], "on", "the meal dropped any other way: free next frame");
+  const f = make();
+  f.eat("Venison Stew"); f.tick();
+  f.gm.greymarchFxHave = { frozen: true };
+  for (let i = 0; i < 110; i++) f.tick(50);
+  assert.strictEqual(f.log.controls.length, 1, "staff froze the player: the meal does not unfreeze them");
+});
+
+test("potions stay a quick swig: no lock", () => {
+  const s = make();
+  s.eat("Potion of Healing", false); s.tick();
+  assert.strictEqual(s.log.controls, undefined);
+});
+
+test("the server asks for an emote (greymarchEmote, a salt deposit): played like the wheel's, ended like Stop after ms; ignored when dead, in furniture, mounted, eating or unknown", () => {
+  const kneel = emotes.emoteById("searchbody").idle;
+  const s = make();
+  s.say({ customPacketType: "greymarchEmote", emote: "searchbody", ms: 4000 });
+  assert.deepStrictEqual(s.log.idles, [], "nothing from the packet handler");
+  s.tick();
+  assert.deepStrictEqual(s.log.idles, [kneel], "kneels");
+  assert.strictEqual(s.log.thirdPerson, 1, "as from the wheel");
+  for (let i = 0; i < 70; i++) s.tick(50); // 3.5 s
+  assert.deepStrictEqual(s.log.idles, [kneel], "still kneeling");
+  for (let i = 0; i < 12; i++) s.tick(50);
+  assert.deepStrictEqual(s.log.idles, [kneel, emotes.IDLE_STOP], "up after 4 s, the way Stop does it");
+  assert.strictEqual(s.gm.greymarchEmoteNow, null);
+  const m = make();
+  m.say({ customPacketType: "greymarchEmote", emote: "searchbody", ms: 4000 }); m.tick();
+  m.state.speed = 120; m.tick(800);
+  assert.strictEqual(m.gm.greymarchEmoteNow, null, "walked off: it just ends");
+  m.state.speed = 0; m.log.idles.length = 0;
+  m.say({ customPacketType: "greymarchEmote", emote: "pray", ms: 4000 }); m.tick();
+  for (let i = 0; i < 100; i++) m.tick(50);
+  assert.deepStrictEqual(m.log.idles, [emotes.emoteById("pray").idle, emotes.IDLE_STOP], "an emote picked again later is not ended by an old timer");
+  const no = (setup, emote) => { const x = make(); setup(x); x.say({ customPacketType: "greymarchEmote", emote, ms: 4000 }); x.tick(); return x.log.idles.length; };
+  assert.strictEqual(no((x) => { x.state.dead = true; }, "searchbody"), 0, "dead");
+  assert.strictEqual(no((x) => { x.state.furn = 0x1234; }, "searchbody"), 0, "in furniture");
+  assert.strictEqual(no((x) => { x.state.mounted = true; }, "searchbody"), 0, "mounted");
+  assert.strictEqual(no(() => {}, "explode"), 0, "unknown");
+  assert.strictEqual(no(() => {}, "fangs"), 0, "a face is not an emote here");
+  assert.strictEqual(no((x) => { x.eat("Venison Stew"); x.tick(); x.log.idles.length = 0; }, "searchbody"), 0, "eating");
+});
+
+test("the forge display (2026-10-26, back with guards): never left behind, never picked up; a copy the game still has is deleted again until it is gone; an id now used by something else is never touched", () => {
+  const s = make(); let t = 5_000_000; const tick = (ms = 50) => { t += ms; s.gm.greymarchForgePreviewTick(t); };
+  // the game's forms by id (a copy deleted from a cell that unloaded is still there)
+  s.state.cam = [480, 560, 150, 0, 1, 0]; // the camera at the smith, looking north
+  const world = {}; const was = s.gm.sp.Game.getFormEx; s.gm.sp.Game.getFormEx = (id) => (id in world ? world[id] : was(id)); s.gm.sp.ObjectReference.from = (f) => f || null;
+  s.page({ type: "forge-preview", key: "20:skyrim.esm" }); tick();
+  assert.strictEqual((s.log.ghosts || []).length, 0, "nothing is placed while the window is closed");
+  s.say({ customPacketType: "greymarchForgeOpen", title: "Forge", forge: 0xc430a });
+  s.page({ type: "forge-preview", key: "20:skyrim.esm" }); tick();
+  const g1 = s.log.ghosts[0]; assert.ok(g1 && !g1.gone && g1.blocked === true && g1.motion === 4);
+  assert.ok(g1.at && g1.rot, "placed in front of the camera");
+  for (let i = 0; i < 60; i++) tick(50);
+  assert.strictEqual(g1.moves, 1, "placed ONCE: moving it every frame redraws it (it flickered)");
+  assert.ok(g1.turns && g1.turns.length === 1, "set to its front view once (the smooth movement), then it stands still: " + (g1.turns || []).length);
+  assert.strictEqual(g1.rot[0], 0, "not a weapon or armour: as it is");
+  let again = 0; world[g1.id] = { getBaseObject: () => ({ getFormID: () => 0x20 }), disable() {}, delete() { again++; } }; // the game keeps the form after a delete (its cell unloaded)
+  // a new pick: the old copy goes, the new one is shown
+  s.page({ type: "forge-preview", key: "21:skyrim.esm" }); tick();
+  assert.strictEqual(again, 2, "the old copy is deleted (fetched by its id), and swept at once"); const g2 = s.log.ghosts[1]; assert.ok(g2 && !g2.gone);
+  // the old copy is still in the game: the sweep deletes it again, until it is gone
+  tick(2100); assert.strictEqual(again, 3, "deleted again"); tick(2100); assert.strictEqual(again, 4, "and again while the game has it");
+  delete world[g1.id]; tick(2100); tick(2100); assert.strictEqual(again, 4, "gone: let go");
+  assert.strictEqual(g2.gone, false, "the shown copy is not swept");
+  // a weapon stands up (it is made lying down, how it rests when dropped)
+  s.gm.sp.Weapon = { from: (f) => (f && f.id === 0x21 ? f : null) }; s.gm.sp.Armor = { from: () => null };
+  s.page({ type: "forge-preview", key: "21:skyrim.esm" }); s.page({ type: "forge-preview", key: "20:skyrim.esm" }); tick(); s.page({ type: "forge-preview", key: "21:skyrim.esm" }); tick();
+  const gw = s.log.ghosts.at(-1); assert.strictEqual(gw.rot[0], -90, "a weapon is stood up");
+  assert.ok(s.log.ghosts.slice(0, -1).every((g) => g.gone), "only one copy at a time");
+  const g2b = gw;
+  // too far from the smith (a teleport): removed
+  s.gm.sp.Game.getPlayer().getPositionX = () => 99999; tick(); assert.strictEqual(g2b.gone, true, "too far: removed");
+  // its id given to something else since (another base): never touched
+  let touched = 0; world[g2b.id] = { getBaseObject: () => ({ getFormID: () => 0x999 }), disable() { touched++; }, delete() { touched++; } };
+  tick(2100); tick(2100); assert.strictEqual(touched, 0, "an id now used by something else is left alone");
+  // the window closes with a copy shown: it goes
+  s.gm.sp.Game.getPlayer().getPositionX = () => 480;
+  s.page({ type: "forge-preview", key: "22:skyrim.esm" }); tick(); const g3 = s.log.ghosts.at(-1); assert.ok(g3 && !g3.gone);
+  s.page({ type: "forge-close" }); tick(); assert.strictEqual(g3.gone, true, "the display goes with the window");
+  s.page({ type: "forge-preview", key: "23:skyrim.esm" }); const made = s.log.ghosts.length; tick(); assert.strictEqual(s.log.ghosts.length, made, "nothing while closed");
+});
+
+test("the forge display holds still: placed ONCE and left to load (placing it again restarts its 3D: it never loaded, 2026-10-26), keyframed once its 3D is there, and a piece that drops is moved back smoothly", () => {
+  const s = make(); let t = 7_000_000; const tick = (ms = 50) => { t += ms; s.gm.greymarchForgePreviewTick(t); };
+  s.state.cam = [480, 560, 150, 0, 1, 0];
+  s.say({ customPacketType: "greymarchForgeOpen", title: "Forge", forge: 0xc430a });
+  s.state.no3d = true;
+  s.page({ type: "forge-preview", key: "20:skyrim.esm" }); tick();
+  const g = s.log.ghosts[0]; const asked = g.motions;
+  for (let i = 0; i < 40; i++) tick(50);
+  assert.strictEqual(g.moves, 1, "placed once and left to load: not placed again every frame");
+  assert.strictEqual(g.motions, asked, "not keyframed before its 3D is there");
+  for (let i = 0; i < 20; i++) tick(50);
+  tick(100); assert.strictEqual(g.moves, 2, "not loaded after 3 s: placed once more");
+  s.state.no3d = false; tick();
+  assert.strictEqual(g.motions, asked + 1, "keyframed once its 3D is there"); assert.strictEqual(g.motion, 4);
+  const coll = s.log.natives.filter((n) => n[0] === "PO3_SKSEFunctions" && n[1] === "SetCollisionLayer").at(-1);
+  assert.ok(coll && coll[2] && coll[2].id === g.id, "its 3D put on the non-collidable layer (the Papyrus Extender): the smith cannot push themselves on it");
+  for (let i = 0; i < 20; i++) tick(50);
+  assert.strictEqual(g.moves, 2, "then never placed again (that would restart its 3D)");
+  const turns = g.turns.length;
+  g.fell = 30; tick(250); tick(250); g.fell = 0;
+  const back = g.turns.slice(turns).find((a) => a[6] === 500);
+  assert.ok(back, "it dropped: moved back with the smooth movement, fast"); assert.deepStrictEqual(back.slice(0, 3), g.at);
+  assert.strictEqual(g.motions, asked + 2, "and keyframed again"); assert.strictEqual(g.moves, 2);
+  assert.strictEqual(g.gone, false, "still shown");
+});
+
+test("the forge display is only ever reached by its form id, fetched each frame: a handle from an earlier frame is refused by the game (Invalid _skyrimPlatform_indexInPool, 2026-10-26)", () => {
+  const s = make(); let t = 9_000_000; const tick = (ms = 50) => { t += ms; s.gm.greymarchForgePreviewTick(t); };
+  s.state.cam = [480, 560, 150, 0, 1, 0];
+  s.say({ customPacketType: "greymarchForgeOpen", title: "Forge", forge: 0xc430a });
+  s.page({ type: "forge-preview", key: "20:skyrim.esm" }); tick();
+  const g = s.log.ghosts[0];
+  // from now on the handle placeAtMe gave is stale, like in the game: only a fresh fetch by id works
+  const stale = () => { throw new Error("SP3NativeValueCasts::JsObjectToNativeObject - Invalid _skyrimPlatform_indexInPool"); };
+  const fresh = { ...g }; for (const k of ["setPosition", "setAngle", "translateTo", "disable", "delete", "setMotionType", "getAngleZ", "getPositionX", "getPositionY", "getPositionZ"]) { const own = g[k]; fresh[k] = (...a) => own(...a); g[k] = stale; }
+  s.gm.sp.Game.getFormEx = (id) => (id === g.id ? (fresh.gone || g.gone ? null : fresh) : { id });
+  const ok = fresh.setPosition; let used = 0; fresh.setPosition = (...a) => { used++; return ok(...a); };
+  for (let i = 0; i < 40; i++) tick(50);
+  assert.strictEqual(s.gm.greymarchForgeGhostId, g.id, "still shown");
+  assert.ok(!s.log.lines.some((l) => /display removed/.test(l)), "never removed for a stale handle");
+  s.page({ type: "forge-close" }); tick();
+  assert.strictEqual(g.gone, true, "deleted through a fresh fetch when the window closes");
+});
+
+test("the forge display stands still and is examined with the mouse (2026-10-26, the owner): a drag turns it round or tips it, the wheel brings it closer or farther, a double-click puts it back", () => {
+  const s = make(); let t = 11_000_000; const tick = (ms = 50) => { t += ms; s.gm.greymarchForgePreviewTick(t); };
+  s.state.cam = [480, 560, 150, 0, 1, 0]; // looking north: facing the smith is 180
+  s.say({ customPacketType: "greymarchForgeOpen", title: "Forge", forge: 0xc430a });
+  s.page({ type: "forge-preview", key: "30:skyrim.esm" }); for (let i = 0; i < 40; i++) tick(50);
+  const g = s.log.ghosts.at(-1); const n0 = g.turns.length;
+  for (let i = 0; i < 40; i++) tick(50);
+  assert.strictEqual(g.turns.length, n0, "still by itself");
+  const last = () => g.turns.at(-1);
+  s.page({ type: "forge-turn", dx: 60, dy: 0 }); tick(50);
+  assert.strictEqual(Math.round(last()[5]), 150, "dragged 60 px right: turned 30 degrees"); assert.deepStrictEqual(last().slice(6), [500, 600], "turned at a steady speed towards it (snapping there was jerky)");
+  s.page({ type: "forge-turn", dx: 0, dy: 50 }); tick(50);
+  assert.strictEqual(Math.round(last()[3]), 20, "dragged down: tipped 20 degrees");
+  s.page({ type: "forge-turn", dx: 0, dy: 5000 }); tick(50); assert.strictEqual(Math.round(last()[3]), 20, "a silly drag is ignored");
+  s.page({ type: "forge-turn", dx: 0, dy: 400 }); tick(50); assert.strictEqual(((Math.round(last()[3]) % 360) + 360) % 360, 180, "tips all the way over (a piece facing away can be turned to the smith)");
+  const y0 = last()[1];
+  s.page({ type: "forge-turn", zoom: -1 }); tick(50);
+  assert.strictEqual(Math.round(y0 - last()[1]), 10, "the wheel up: 10 units closer");
+  for (let i = 0; i < 20; i++) s.page({ type: "forge-turn", zoom: -1 }); tick(50);
+  assert.strictEqual(Math.round(last()[1] - (560 + 50)), 0, "no closer than 50 from the camera");
+  s.page({ type: "forge-turn", reset: true }); tick(50);
+  assert.deepStrictEqual([Math.round(last()[1]), Math.round(last()[3]), Math.round(last()[5])], [650, 0, 180], "a double-click: back to the front view");
+  s.page({ type: "forge-close" }); tick(); const n1 = g.turns.length;
+  s.page({ type: "forge-turn", dx: 100 }); tick(); assert.strictEqual(g.turns.length, n1, "nothing once the window is closed");
+});
+
+test("the forge display has its own lamp (2026-10-26, the owner: at night the piece could hardly be seen): the game's steady shadowless light, between the smith and the piece, moved with it, removed with it", () => {
+  const s = make(); let t = 13_000_000; const tick = (ms = 50) => { t += ms; s.gm.greymarchForgePreviewTick(t); };
+  s.state.cam = [480, 560, 150, 0, 1, 0]; // looking north
+  s.say({ customPacketType: "greymarchForgeOpen", title: "Forge", forge: 0xc430a });
+  s.page({ type: "forge-preview", key: "20:skyrim.esm" }); tick();
+  const g = s.log.ghosts[0], l = s.log.lights[0];
+  assert.deepStrictEqual({ id: l.base.id, file: l.base.file }, { id: 0x5eae2, file: "Skyrim.esm" }, "DefaultSunlight01NS_NotPortalStrict");
+  assert.deepStrictEqual(l.at.map(Math.round), [Math.round(g.at[0]), Math.round(g.at[1] - 40), Math.round(g.at[2] + 25)], "40 units towards the smith, 25 up");
+  for (let i = 0; i < 10; i++) tick(50);
+  s.page({ type: "forge-turn", zoom: 1 }); tick(50);
+  assert.strictEqual(Math.round(l.at[1]), Math.round(s.gm.greymarchForgeGhostAt[1] - 40), "moved with the piece");
+  s.page({ type: "forge-preview", key: "21:skyrim.esm" }); tick();
+  assert.strictEqual(l.gone, true, "a new piece: the old lamp goes"); assert.strictEqual(s.log.lights.length, 2); const l2 = s.log.lights[1];
+  s.page({ type: "forge-close" }); tick();
+  assert.strictEqual(l2.gone, true, "the window closes: the lamp goes"); assert.strictEqual(s.log.ghosts[1].gone, true);
+});
+
+test("the forge display is never shown at the smelter or the charcoal kiln (2026-10-26, the owner); other stations show it", () => {
+  const s = make(); let t = 15_000_000; const tick = (ms = 50) => { t += ms; s.gm.greymarchForgePreviewTick(t); };
+  s.state.cam = [480, 560, 150, 0, 1, 0];
+  s.say({ customPacketType: "greymarchForgeOpen", station: "smelter", title: "Smelter", ref: 0xc4321 });
+  s.page({ type: "forge-preview", key: "5ace4:skyrim.esm" }); tick();
+  assert.strictEqual((s.log.ghosts || []).length, 0, "nothing at the smelter");
+  s.page({ type: "forge-close" }); tick();
+  s.say({ customPacketType: "greymarchForgeOpen", station: "kiln", title: "Charcoal Kiln", ref: 0xc4323 });
+  s.page({ type: "forge-preview", key: "33:skyrim.esm" }); tick();
+  assert.strictEqual((s.log.ghosts || []).length, 0, "nothing at the charcoal kiln");
+  s.page({ type: "forge-close" }); tick();
+  s.say({ customPacketType: "greymarchForgeOpen", station: "tan", title: "Tanning Rack", ref: 0xc4322 });
+  s.page({ type: "forge-preview", key: "20:skyrim.esm" }); tick();
+  assert.strictEqual(s.log.ghosts.length, 1, "the tanning rack shows its pieces");
 });

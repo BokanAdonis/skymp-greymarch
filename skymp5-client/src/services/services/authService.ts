@@ -239,10 +239,13 @@ export class AuthService extends ClientListener {
       case 'greymarchVampLord':
       case 'greymarchVampMenuReply':
       case 'greymarchVampMenuOpen':
+      case 'greymarchEmote': // the server asks for an emote (gamemode: a salt deposit)
       case 'greymarchMinigame': // a profession mini game before the work (gamemode minigames.js)
       case 'greymarchMinigameDone':
       case 'greymarchLedgerReply': // the guard ledger (/reports, gamemode reports.js)
       case 'greymarchLedgerOpen':
+      case 'greymarchScribeReply': // the scribe's desk (/scribe, gamemode scribe.js)
+      case 'greymarchScribeOpen':
       case 'greymarchWolfAlphas':
       case 'greymarchWolfRoar':
         this.gm.greymarchPacket(msgContent);

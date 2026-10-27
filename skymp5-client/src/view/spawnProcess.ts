@@ -8,6 +8,9 @@ import { ObjectReferenceEx } from "../extensions/objectReferenceEx";
 // enabled it afterwards anyway: an NPC nobody owned, a damageable copy of the player that never went away (the "clone" other players saw when someone changed). The
 // FormView now marks such a spawn here instead of deleting it; the spawn sees the mark before it enables or resurrects, and disables and deletes the actor itself
 // (then calls onGone, which drops the world cleaner's protection). The callback is not called for it.
+// The mark is looked at once more when the spawn ends (finish): a person's Resurrect is latent too, and a FormView that let go of the actor DURING it (a second look
+// change in a row: a Vampire Lord or a creature form going on and off, 2026-10-27 on live) left it standing, resurrected and enabled, with no gear and no floating
+// ID, named "Stranger" by the names pass: the "players cloning" report. finish() removes it the same way.
 export const gmAbandonedSpawns = new Map<number, () => void>();
 const gmAbandon = (refrId: number): boolean => {
   const onGone = gmAbandonedSpawns.get(refrId);
@@ -78,24 +81,30 @@ export class SpawnProcess {
     // watching game crashed in a werewolf turn clip (hkbClipGenerator "WW TurnRight60", SkyrimSE.exe+0A8C590) the moment a player was drawn as the werewolf
     // (2026-10-18 the black bear, 2026-10-19 #YERB in the College). A person's look is resurrected as before.
     if (ac && beastLook) {
-      this.callback();
+      this.finish(refrId);
       return;
     }
     // GREYMARCH: NO RESURRECT FOR A SERVER NPC (2026-10-24, greymarch/npcHosting.ts LOCKED HEIGHT). A deer, an elk or a bandit the server made (no player look) was
     // just placed, so it is alive; Resurrect rebuilt its body while it was still coming in, and some came out of it with their height locked: they ran flat
     // through the air and into hills. A player's look is resurrected as before.
     if (ac && serverNpc) {
-      this.callback();
+      this.finish(refrId);
       return;
     }
     if (ac) {
       return ac.resurrect().then(() => {
-        this.callback();
+        this.finish(refrId);
       });
     }
 
     ObjectReferenceEx.dealWithRef(refr, refr.getBaseObject()!);
 
-    return refr.setMotionType(MotionType.Keyframed, true).then(this.callback);
+    return refr.setMotionType(MotionType.Keyframed, true).then(() => this.finish(refrId));
+  }
+
+  // GREYMARCH: the spawn is done: handed to its FormView, unless the FormView let go of it while the last step ran (see gmAbandonedSpawns)
+  private finish(refrId: number) {
+    if (gmAbandon(refrId)) return;
+    this.callback();
   }
 }
