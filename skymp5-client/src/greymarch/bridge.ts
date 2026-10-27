@@ -2745,6 +2745,7 @@ export class GreymarchBridge {
         if (want !== undefined && want !== null) {
             this.greymarchForgePreviewWant = null;
             this.greymarchForgeGhostDrop();
+            this.greymarchForgeGhostDiag = 0; if (want) this.greymarchLog("forge: display asked for " + want);
             var m = /^([0-9a-f]{1,8}):([^:]{1,64})$/i.exec(want);
             if (m && this.greymarchForgeOn) {
                 try {
@@ -2763,7 +2764,8 @@ export class GreymarchBridge {
                         try { g.setMotionType(4, false); } catch (e) { /* again once its 3D is there (greymarchForgePreviewTick) */ }
                         // a weapon or a piece of armour is made lying down (how it rests when dropped): stood up, so it can be seen
                         var upright = false; try { upright = !!(sp.Weapon.from(base) || sp.Armor.from(base)); } catch (e) { upright = false; }
-                        this.greymarchForgeGhostId = id; this.greymarchForgeGhostBase = baseId; this.greymarchForgeGhostSince = now; this.greymarchForgeGhostTilt = upright ? -90 : 0;
+                        this.greymarchForgeGhostId = id; this.greymarchForgeGhostBase = baseId; this.greymarchForgeGhostSince = now;
+                        this.greymarchLog("forge: display made " + id.toString(16) + " (base " + baseId.toString(16) + (upright ? ", stood up" : "") + ")"); this.greymarchForgeGhostTilt = upright ? -90 : 0;
                         this.greymarchForgeGhostAt = null; this.greymarchForgeGhostTurnNext = 0; this.greymarchForgeGhostReady = false; this.greymarchForgeGhostCheck = 0;
                     }
                 } catch (e) { this.greymarchLog("forge: no display (" + e + ")"); }
@@ -2791,6 +2793,14 @@ export class GreymarchBridge {
             var x = px + fx * d + rx * d * 0.45, y = py + fy * d + ry * d * 0.45, z = pz + fz * d - 6;
             if (Math.hypot(x - pl.getPositionX(), y - pl.getPositionY(), z - pl.getPositionZ()) > 1500) throw new Error("too far from the smith");
             var tilt = this.greymarchForgeGhostTilt || 0, at = this.greymarchForgeGhostAt;
+            // what happens to it, logged for the first 6 seconds (twice a second): where it is, where it should be, the camera, the smith
+            var dn = this.greymarchForgeGhostDiag || 0;
+            if (dn < 12 && now >= (this.greymarchForgeGhostDiagAt || 0)) {
+                this.greymarchForgeGhostDiag = dn + 1; this.greymarchForgeGhostDiagAt = now + 500;
+                var r0 = function (n: number) { return Math.round(n); };
+                var st = ""; try { st = "at " + [ghost.getPositionX(), ghost.getPositionY(), ghost.getPositionZ()].map(r0).join(",") + " 3D " + ghost.is3DLoaded() + " on " + !ghost.isDisabled(); } catch (e) { st = "? (" + e + ")"; }
+                this.greymarchLog("forge: display " + st + " | spot " + [x, y, z].map(r0).join(",") + " | camera " + [px, py, pz].map(r0).join(",") + " looking " + [fx, fy, fz].map(function (n: number) { return n.toFixed(2); }).join(",") + (c.length === 6 ? "" : " (no plugin)") + " | smith " + [pl.getPositionX(), pl.getPositionY(), pl.getPositionZ()].map(r0).join(",") + " | ready " + !!this.greymarchForgeGhostReady);
+            }
             // KEYFRAMED ONLY ONCE ITS 3D IS THERE (2026-10-26: asked at once, the game ignored it, the piece fell and dropped out of sight). Until then it is
             // held at the spot every frame; then keyframed and placed again.
             if (!this.greymarchForgeGhostReady) {
