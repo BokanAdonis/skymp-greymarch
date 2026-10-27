@@ -66,6 +66,7 @@ const VAMP_MENU_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmVampRun").s
 const OPEN_ON_RELEASE = [65, 35, 48, 64, 66, 37]; // F7, H, B, F6, F8, K: their windows open when the key is let go (greymarchKey)
 const FORGE_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmForgeRun").split("greymarch-prof").join("greymarch-forge").split("2147483220").join("2147483225"); // the Greymarch forge window: the same loader, another page
 const CRAFT_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmCraftRun").split("greymarch-prof").join("greymarch-craft").split("2147483220").join("2147483224"); // the crafting panel (a station was used): the same loader, another page
+const CLICK_GUARD_MS = 400; // after a window closes, attacks and drawing a weapon are ignored this long: the click on its X is not a swing (greymarchClickGuard)
 const MINI_KEEP_MS = 3500; // a mini game window kept up between logs (the chopping block) closes if the next does not come within this
 const MINIGAME_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmMiniRun").split("greymarch-prof").join("greymarch-minigame").split("2147483220").join("2147483226"); // the profession mini games (gamemode minigames.js): the same loader, another page, over the others
 const LEDGER_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmLedgerRun").split("greymarch-prof").join("greymarch-ledger").split("2147483220").join("2147483223"); // the guard ledger (/reports)
@@ -431,6 +432,7 @@ export class GreymarchBridge {
         this.greymarchPointerGuard(Date.now()); // a window that holds the mouse always has its pointer (the game's Cursor Menu)
         this.greymarchHotkeyTick(Date.now()); // a window hotkey whose key-up the game never sent
         this.greymarchMiniActivateTick(); // a mini game won: the thing is used again (the server lets it through)
+        this.greymarchClickGuardTick(); // the click that closed a window is not a swing
         this.greymarchMagicBlockDrive(); // NPC raise-the-dead and summons: ended at once
         this.greymarchShapeDrive(); // a creature form as an NPC: moved every frame like SkyMP moves other players; other players' creature attacks
         this.greymarchShapeTick(); // a creature form staff put the player in (a goat, a giant ...): the server decides, the body is changed here
@@ -675,6 +677,7 @@ export class GreymarchBridge {
         this.greymarchAdminToPage("show", mode === "tester" || mode === "dungeons" || mode === "encounters" || mode === "build" ? mode : true);
     }
     greymarchAdminHide(): any {
+        if (this.greymarchAdminOn) this.greymarchClickGuard(); // the click that closed it is not a swing
         this.greymarchAdminOn = false;
         this.greymarchAdminToPage("hide", true);
         if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchCraftOn || !!this.greymarchForgeOn || !!this.greymarchHudOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchEmoteOn || !!this.greymarchGuardsHud || !!(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchScribeOn || this.greymarchCraftOn || this.greymarchForgeOn)); }
@@ -2324,6 +2327,7 @@ export class GreymarchBridge {
     }
     greymarchMenuHide(): any {
         if (!this.greymarchMenuOn) return;
+        this.greymarchClickGuard(); // the click that closed it is not a swing
         this.greymarchMenuOn = false;
         this.greymarchMenuToPage("hide", true);
         this.greymarchMenuEscAt = 0;
@@ -2356,6 +2360,7 @@ export class GreymarchBridge {
     }
     greymarchProfHide(): any {
         if (!(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchScribeOn || this.greymarchCraftOn || this.greymarchForgeOn)) return;
+        this.greymarchClickGuard(); // the click that closed it is not a swing
         this.greymarchProfOn = false;
         this.greymarchProfToPage("hide", true);
         if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchCraftOn || !!this.greymarchForgeOn || !!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchEmoteOn || !!this.greymarchGuardsHud || !!(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchScribeOn || this.greymarchCraftOn || this.greymarchForgeOn)); }
@@ -2383,6 +2388,7 @@ export class GreymarchBridge {
     }
     greymarchChanceryHide(): any {
         if (!this.greymarchChanceryOn) return;
+        this.greymarchClickGuard(); // the click that closed it is not a swing
         this.greymarchChanceryOn = false;
         this.greymarchChanceryToPage("hide", true);
         if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchCraftOn || !!this.greymarchForgeOn || !!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchEmoteOn || !!this.greymarchGuardsHud || !!this.greymarchProfOn || !!this.greymarchVampMenuOn || !!this.greymarchLedgerOn || !!this.greymarchScribeOn); }
@@ -2410,6 +2416,7 @@ export class GreymarchBridge {
     }
     greymarchVampMenuHide(): any {
         if (!this.greymarchVampMenuOn) return;
+        this.greymarchClickGuard(); // the click that closed it is not a swing
         this.greymarchVampMenuOn = false;
         this.greymarchVampMenuToPage("hide", true);
         if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchCraftOn || !!this.greymarchForgeOn || !!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchEmoteOn || !!this.greymarchGuardsHud || !!this.greymarchProfOn || !!this.greymarchChanceryOn || !!this.greymarchLedgerOn || !!this.greymarchScribeOn); }
@@ -2441,6 +2448,7 @@ export class GreymarchBridge {
     }
     greymarchLedgerHide(): any {
         if (!this.greymarchLedgerOn) return;
+        this.greymarchClickGuard(); // the click that closed it is not a swing
         this.greymarchLedgerOn = false;
         this.greymarchLedgerToPage("hide", true);
         if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchCraftOn || !!this.greymarchForgeOn || !!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchEmoteOn || !!this.greymarchGuardsHud || !!this.greymarchProfOn || !!this.greymarchChanceryOn || !!this.greymarchVampMenuOn); }
@@ -2468,6 +2476,7 @@ export class GreymarchBridge {
     }
     greymarchScribeHide(): any {
         if (!this.greymarchScribeOn) return;
+        this.greymarchClickGuard(); // the click that closed it is not a swing
         this.greymarchScribeOn = false;
         this.greymarchScribeToPage("hide", true);
         if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchCraftOn || !!this.greymarchForgeOn || !!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchEmoteOn || !!this.greymarchGuardsHud || !!this.greymarchProfOn || !!this.greymarchChanceryOn || !!this.greymarchVampMenuOn); }
@@ -2522,6 +2531,7 @@ export class GreymarchBridge {
         if (this.greymarchMiniActing && !this.greymarchMiniOn) { this.greymarchMiniActing = false; this.greymarchEmoteStopWanted = Date.now(); }
         this.greymarchMiniKeep = false; this.greymarchMiniKeptAt = 0;
         if (!this.greymarchMiniOn) return;
+        this.greymarchClickGuard(); // the click that closed it is not a swing
         this.greymarchMiniOn = false;
         this.greymarchMiniToPage("hide", true);
         if (!this.greymarchScreenUp && !this.greymarchPanelHasKeys()) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchCraftOn || !!this.greymarchForgeOn || !!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchEmoteOn || !!this.greymarchGuardsHud || !!this.greymarchProfOn || !!this.greymarchChanceryOn || !!this.greymarchVampMenuOn || !!this.greymarchLedgerOn || !!this.greymarchScribeOn); }
@@ -2539,6 +2549,23 @@ export class GreymarchBridge {
         if (msg && msg.text) { try { this.sp.Debug.notification(String(msg.text)); } catch (e) { /* the page showed it already */ } }
     }
     // the thing the player won a mini game for is used again, from the update phase (Papyrus calls)
+    // THE CLICK GUARD (2026-10-26, the owner: closing the guard ledger or the scribe's desk with its X drew the sword or raised the fists). When a window that
+    // held the mouse closes, the game gets the mouse back with that same click still to come, and takes it for a swing. So for CLICK_GUARD_MS after a window
+    // closes, the player's fighting controls (attack, draw a weapon) are switched off, from the update phase, and then on again unless something else of
+    // ours holds them (a meal being eaten, a staff freeze).
+    greymarchClickGuard(): any { this.greymarchClickGuardUntil = Date.now() + CLICK_GUARD_MS; this.greymarchClickGuardWanted = true; }
+    greymarchClickGuardTick(): any {
+        var sp = this.sp, now = Date.now();
+        if (this.greymarchClickGuardWanted && !this.greymarchClickGuardOn) {
+            this.greymarchClickGuardWanted = false;
+            try { sp.Game.disablePlayerControls(false, true, false, false, false, false, false, false, 0); this.greymarchClickGuardOn = true; } catch (e) { /* no guard this time */ }
+        }
+        if (this.greymarchClickGuardOn && now >= (this.greymarchClickGuardUntil || 0)) {
+            this.greymarchClickGuardOn = false; this.greymarchClickGuardWanted = false;
+            var fx = this.greymarchFxHave;
+            if (!this.greymarchMealLocked && !(fx && fx.frozen)) { try { sp.Game.enablePlayerControls(false, true, false, false, false, false, false, false, 0); } catch (e) { /* the next frame */ } }
+        }
+    }
     greymarchMiniActivateTick(): any {
         // a window kept up between logs with no next one in time: closed, so it never holds the keys for nothing
         if (this.greymarchMiniOn && this.greymarchMiniKeptAt && Date.now() - this.greymarchMiniKeptAt > MINI_KEEP_MS) { this.greymarchLog("minigame: no next one, the window closes"); this.greymarchMiniHide(); }
@@ -2557,6 +2584,7 @@ export class GreymarchBridge {
     }
     greymarchCraftHide(): any {
         if (!this.greymarchCraftOn) return;
+        this.greymarchClickGuard(); // the click that closed it is not a swing
         this.greymarchCraftOn = false;
         this.greymarchCraftToPage("hide", true);
         if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchEmoteOn || !!this.greymarchGuardsHud || !!this.greymarchProfOn || !!this.greymarchChanceryOn || !!this.greymarchVampMenuOn || !!this.greymarchLedgerOn || !!this.greymarchScribeOn || this.greymarchScribeOn || !!this.greymarchForgeOn); }
@@ -2589,6 +2617,7 @@ export class GreymarchBridge {
     }
     greymarchForgeHide(): any {
         if (!this.greymarchForgeOn) return;
+        this.greymarchClickGuard(); // the click that closed it is not a swing
         this.greymarchForgeOn = false;
         this.greymarchForgeToPage("hide", true);
         this.greymarchForgeAnimEnd();
@@ -2818,6 +2847,7 @@ export class GreymarchBridge {
     }
     greymarchEmoteHide(): any {
         if (!this.greymarchEmoteOn) return;
+        this.greymarchClickGuard(); // the click that closed it is not a swing
         this.greymarchEmoteOn = false;
         this.greymarchEmoteToPage("hide", true);
         if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchCraftOn || !!this.greymarchForgeOn || !!this.greymarchHudOn || !!this.greymarchChatOn || !!this.greymarchGuardsHud || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchScribeOn || this.greymarchCraftOn || this.greymarchForgeOn)); }
