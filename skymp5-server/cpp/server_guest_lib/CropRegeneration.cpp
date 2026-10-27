@@ -132,7 +132,8 @@ float CropHealthRegeneration(float newAttributeValue,
   const float rateMult =
     std::max(baseValues.healRateMult, actorValues.healRateMult) +
     WornRegenBonus(*actor,
-                   espm::ActorValue::HealRateMult_or_CombatHealthRegenMultMod);
+                   espm::ActorValue::HealRateMult_or_CombatHealthRegenMultMod) +
+    actor->GetRegenBonus().health;
   const float oldPercentage = actorValues.healthPercentage;
   const bool hasActiveMagicEffects = !actor->GetActiveMagicEffects().Empty();
   return CropRegeneration(newAttributeValue, secondsAfterLastRegen, rate,
@@ -151,7 +152,8 @@ float CropMagickaRegeneration(float newAttributeValue,
     std::max(baseValues.magickaRateMult, actorValues.magickaRateMult) +
     WornRegenBonus(*actor,
                    espm::ActorValue::
-                     MagickaRateMult_or_CombatHealthRegenMultPowerMod);
+                     MagickaRateMult_or_CombatHealthRegenMultPowerMod) +
+    actor->GetRegenBonus().magicka;
   const float oldPercentage = actorValues.magickaPercentage;
   const bool hasActiveMagicEffects = !actor->GetActiveMagicEffects().Empty();
   return CropRegeneration(newAttributeValue, secondsAfterLastRegen, rate,
@@ -170,7 +172,8 @@ float CropStaminaRegeneration(float newAttributeValue,
     WornRegenBonus(*actor, espm::ActorValue::StaminaRate);
   const float rateMult =
     std::max(baseValues.staminaRateMult, actorValues.staminaRateMult) +
-    WornRegenBonus(*actor, espm::ActorValue::StaminaRateMult);
+    WornRegenBonus(*actor, espm::ActorValue::StaminaRateMult) +
+    actor->GetRegenBonus().stamina;
   const float oldPercentage = actorValues.staminaPercentage;
   const bool hasActiveMagicEffects = !actor->GetActiveMagicEffects().Empty();
   return CropRegeneration(newAttributeValue, secondsAfterLastRegen, rate,

@@ -17,6 +17,7 @@
 #include "LastAnimEventBinding.h"
 #include "LocationalDataBinding.h"
 #include "MaxVitalsBinding.h"
+#include "RegenBonusBinding.h"
 #include "NeighborsBinding.h"
 #include "OnlinePlayersBinding.h"
 #include "PercentagesBinding.h"
@@ -46,6 +47,7 @@ PropertyBindingFactory::CreateStandardPropertyBindings()
   result["locationalData"] = std::make_shared<LocationalDataBinding>();
   result["maxVitals"] = std::make_shared<MaxVitalsBinding>(); // GREYMARCH
   result["damageMult"] = std::make_shared<DamageMultBinding>(); // GREYMARCH
+  result["regenBonus"] = std::make_shared<RegenBonusBinding>(); // GREYMARCH
   result["greymarchBalance"] =
     std::make_shared<GreymarchBalanceBinding>(); // GREYMARCH
   result["neighbors"] = std::make_shared<NeighborsBinding>();

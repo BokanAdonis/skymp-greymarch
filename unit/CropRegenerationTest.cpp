@@ -269,3 +269,60 @@ TEST_CASE("A worn Fortify Magicka/Health/Stamina Regen enchantment lets the "
   p.DestroyActor(0xff000000);
   DoDisconnect(p, 0);
 }
+
+TEST_CASE("The regeneration bonus the gamemode sets (a vampire rank's) lets "
+          "the faster regeneration through the crop",
+          "[CropRegeneration]")
+{
+  PartOne& p = GetPartOne();
+  DoConnect(p, 0);
+  p.CreateActor(0xff000000, { 0, 0, 0 }, 0, 0x3c);
+  p.SetUserActor(0, 0xff000000);
+  auto& ac = p.worldState.GetFormAt<MpActor>(0xff000000);
+
+  uint32_t baseId = ac.GetBaseId();
+  auto appearance = ac.GetAppearance();
+  uint32_t raceId = appearance ? appearance->raceId : 0;
+  BaseActorValues baseValues =
+    GetBaseActorValues(&p.worldState, baseId, raceId, {});
+
+  ac.SetPercentages({ 0.0f, 0.0f, 0.0f });
+  ac.SetEquipment(Equipment());
+  const float time = 1.0f;
+  const float plainMagicka = CropMagickaRegeneration(1.0f, time, &ac);
+
+  MpActor::RegenBonus bonus;
+  bonus.magicka = 45.f;
+  ac.SetRegenBonus(bonus);
+  const float expectedMagicka = baseValues.magickaRate *
+    (baseValues.magickaRateMult + 45.f) * time / 10000.0f;
+  REQUIRE_THAT(CropMagickaRegeneration(1.0f, time, &ac),
+               Catch::Matchers::WithinAbs(expectedMagicka, 0.000001f));
+  REQUIRE(expectedMagicka > plainMagicka);
+  // health and stamina are not touched by a magicka bonus
+  const float expectedHealth =
+    baseValues.healRate * baseValues.healRateMult * time / 10000.0f;
+  REQUIRE_THAT(CropHealthRegeneration(1.0f, time, &ac),
+               Catch::Matchers::WithinAbs(expectedHealth, 0.000001f));
+
+  // with a worn Ring of Recovery too, both count
+  Equipment eq;
+  eq.inv.entries.push_back(
+    Inventory::Entry(kRingMagickaRate03, 1, kRegenTestWorn));
+  ac.SetEquipment(eq);
+  const float both = baseValues.magickaRate *
+    (baseValues.magickaRateMult + 45.f +
+     WornRegenBonus(ac, kMagickaRateMult)) *
+    time / 10000.0f;
+  REQUIRE_THAT(CropMagickaRegeneration(1.0f, time, &ac),
+               Catch::Matchers::WithinAbs(both, 0.000001f));
+
+  ac.SetRegenBonus(MpActor::RegenBonus());
+  REQUIRE_THAT(CropMagickaRegeneration(1.0f, time, &ac),
+               Catch::Matchers::WithinAbs(both - expectedMagicka + plainMagicka,
+                                          0.000001f));
+
+  ac.SetEquipment(Equipment());
+  p.DestroyActor(0xff000000);
+  DoDisconnect(p, 0);
+}

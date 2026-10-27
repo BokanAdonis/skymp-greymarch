@@ -22,6 +22,8 @@
 #include <fmt/ranges.h>
 #include <spdlog/spdlog.h>
 #include <algorithm>
+#include <chrono>
+#include <unordered_map>
 #include <unordered_set>
 
 #include "CustomPacketMessage.h"
@@ -785,6 +787,47 @@ void ActionListener::OnCustomEvent(const RawMessageData& rawMsgData,
   }
 }
 
+namespace {
+// GREYMARCH: a line in the log when the regeneration limit takes back what a
+// player's game reported (the bar snapping back), at most once per 10 seconds
+// per actor and vital, with what the limit counted: the gamemode's bonus, the
+// worn enchantments' bonus and how many worn items the server knows of
+void LogRegenCrop(MpActor* actor, espm::ActorValue av, float reported,
+                  float allowed)
+{
+  static std::unordered_map<uint64_t, std::chrono::steady_clock::time_point>
+    g_lastLog;
+  const auto now = std::chrono::steady_clock::now();
+  const uint64_t key = (static_cast<uint64_t>(actor->GetFormId()) << 16) |
+    static_cast<uint64_t>(static_cast<uint16_t>(av));
+  auto it = g_lastLog.find(key);
+  if (it != g_lastLog.end() && now - it->second < std::chrono::seconds(10)) {
+    return;
+  }
+  g_lastLog[key] = now;
+
+  size_t worn = 0;
+  for (const auto& entry : actor->GetEquipment().inv.entries) {
+    if (entry.GetWorn() != Inventory::Worn::None) {
+      ++worn;
+    }
+  }
+  const auto& bonus = actor->GetRegenBonus();
+  spdlog::info(
+    "Regeneration limit {:x}: actor value {} reported {} allowed {} "
+    "(gamemode bonus health {} magicka {} stamina {}; worn enchantments "
+    "health {} magicka {} stamina {}; {} worn items)",
+    actor->GetFormId(), static_cast<int32_t>(av), reported, allowed,
+    bonus.health, bonus.magicka, bonus.stamina,
+    WornRegenBonus(*actor,
+                   espm::ActorValue::HealRateMult_or_CombatHealthRegenMultMod),
+    WornRegenBonus(*actor,
+                   espm::ActorValue::
+                     MagickaRateMult_or_CombatHealthRegenMultPowerMod),
+    WornRegenBonus(*actor, espm::ActorValue::StaminaRateMult), worn);
+}
+}
+
 void ActionListener::OnChangeValues(const RawMessageData& rawMsgData,
                                     const ChangeValuesMessage& msg)
 {
@@ -834,6 +877,7 @@ void ActionListener::OnChangeValues(const RawMessageData& rawMsgData,
     if (!MathUtils::IsNearlyEqual(newVal, *inputVal)) {
       outVal = newVal;
       sendOutMsg = true;
+      LogRegenCrop(actor, av, *inputVal, newVal);
     }
 
     actor->SetPercentage(av, newVal);

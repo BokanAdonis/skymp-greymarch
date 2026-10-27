@@ -187,6 +187,18 @@ public:
   // Brawler). 1 = no change. Not saved: the gamemode sets it again.
   void SetGreymarchDamageMult(float mult) noexcept;
   float GetGreymarchDamageMult() const noexcept;
+  // GREYMARCH: regeneration the gamemode grants this actor, in percent added
+  // to HealRateMult / MagickaRateMult / StaminaRateMult (a vampire rank's
+  // magicka regeneration). The server's regeneration limit counts it, as the
+  // player's game does. 0 = none. Not saved: the gamemode sets it again.
+  struct RegenBonus
+  {
+    float health = 0.f;
+    float magicka = 0.f;
+    float stamina = 0.f;
+  };
+  void SetRegenBonus(const RegenBonus& bonus) noexcept;
+  const RegenBonus& GetRegenBonus() const noexcept;
   NiPoint3 GetViewDirection() const;
   void IncreaseBlockCount() noexcept;
   void ResetBlockCount() noexcept;
