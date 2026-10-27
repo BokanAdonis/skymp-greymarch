@@ -592,6 +592,7 @@ export class GreymarchBridge {
         if (data && data.type === "craft-close") { this.greymarchCraftHide(); return; }
         if (data && data.type === "forge") { this.greymarchForgeAsk(data); return; } // the forge window asks the server (the SERVER decides and makes the item)
         if (data && data.type === "forge-close") { this.greymarchForgeHide(); return; }
+        if (data && data.type === "forge-turn") { this.greymarchForgeTurn(data); return; } // a drag, the wheel or a double-click over the display: the smith examines the piece
         if (data && data.type === "forge-preview") { if (this.greymarchForgeOn) this.greymarchForgePreviewWant = String(data.key || "").slice(0, 80); return; } // the piece picked in the forge window: shown in front of the smith (greymarchForgePreviewTick); only while the window is open
         if (data && data.type === "vampire") { this.greymarchVampMenuAsk(data); return; } // the vampire window asks the server (the SERVER decides)
         if (data && data.type === "vampire-close") { this.greymarchVampMenuHide(); return; }
@@ -2765,7 +2766,7 @@ export class GreymarchBridge {
                         // a weapon or a piece of armour is made lying down (how it rests when dropped): stood up, so it can be seen
                         var isArmor = false, upright = false; try { isArmor = !!sp.Armor.from(base); } catch (e) { isArmor = false; }
                         try { upright = isArmor || !!sp.Weapon.from(base); } catch (e) { upright = isArmor; }
-                        this.greymarchForgeGhostSway = isArmor; this.greymarchForgeGhostSwaySide = 1; // armour turns side to side, facing the smith (2026-10-26, the owner); the rest turns round
+                        this.greymarchForgeGhostYaw = 0; this.greymarchForgeGhostPitch = 0; this.greymarchForgeGhostZoom = 0; this.greymarchForgeGhostLook = ""; // a new piece starts from the front view
                         this.greymarchForgeGhostId = id; this.greymarchForgeGhostBase = baseId; this.greymarchForgeGhostSince = now;
                         this.greymarchLog("forge: display made " + id.toString(16) + " (base " + baseId.toString(16) + (upright ? ", stood up" : "") + ")"); this.greymarchForgeGhostTilt = upright ? -90 : 0;
                         this.greymarchForgeGhostAt = null; this.greymarchForgeGhostTurnNext = 0; this.greymarchForgeGhostReady = false; this.greymarchForgeGhostCheck = 0; this.greymarchForgeGhostPlacedAt = 0;
@@ -2791,7 +2792,7 @@ export class GreymarchBridge {
                 px = pl.getPositionX(); py = pl.getPositionY(); pz = pl.getPositionZ() + 110; fx = Math.sin(a); fy = Math.cos(a); fz = 0;
             }
             var hl = Math.hypot(fx, fy) || 1, rx = fy / hl, ry = -fx / hl; // the camera's right, level
-            var d = 90;
+            var d = 90 + (this.greymarchForgeGhostZoom || 0) * 10; // the wheel: 50 (close) to 150 (far)
             var x = px + fx * d + rx * d * 0.45, y = py + fy * d + ry * d * 0.45, z = pz + fz * d - 6;
             if (Math.hypot(x - pl.getPositionX(), y - pl.getPositionY(), z - pl.getPositionZ()) > 1500) throw new Error("too far from the smith");
             var tilt = this.greymarchForgeGhostTilt || 0, at = this.greymarchForgeGhostAt;
@@ -2827,30 +2828,32 @@ export class GreymarchBridge {
                 var off = 0; try { off = Math.hypot(ghost.getPositionX() - at[0], ghost.getPositionY() - at[1], ghost.getPositionZ() - at[2]); } catch (e) { off = 0; }
                 if (off > 6) {
                     try { ghost.setMotionType(4, false); } catch (e) { /* moved back anyway */ }
-                    ghost.translateTo(at[0], at[1], at[2], tilt, 0, face, 3000, 0);
-                    this.greymarchForgeGhostTurnNext = now + 400;
+                    this.greymarchForgeGhostLook = ""; // moved back to the spot and the angle below
+                    this.greymarchForgeGhostTurnNext = 0;
                 }
             }
-            // the camera turned: to the new spot, fast
-            if (Math.hypot(x - at[0], y - at[1], z - at[2]) > 12) {
-                ghost.translateTo(x, y, z, tilt, 0, face, 3000, 0);
-                this.greymarchForgeGhostAt = [x, y, z]; at = this.greymarchForgeGhostAt;
-                this.greymarchForgeGhostTurnNext = now + 400;
-            }
-            if (now >= (this.greymarchForgeGhostTurnNext || 0)) {
-                var cur = Number(ghost.getAngleZ()); if (!isFinite(cur)) cur = face;
-                if (this.greymarchForgeGhostSway) {
-                    // to 35 degrees one side of facing the smith, then the other: about two seconds each way
-                    var side = this.greymarchForgeGhostSwaySide || 1; this.greymarchForgeGhostSwaySide = -side;
-                    var want = face + side * 35, delta = ((((want - cur) % 360) + 540) % 360) - 180; // the short way round
-                    this.greymarchForgeGhostTurnNext = now + 2200;
-                    try { ghost.translateTo(at[0], at[1], at[2], tilt, 0, cur + delta, 1, 35); } catch (e) { /* no turn: it still stands there */ }
-                } else {
-                    this.greymarchForgeGhostTurnNext = now + 1000;
-                    try { ghost.translateTo(at[0], at[1], at[2], tilt, 0, cur + 50, 1, 40); } catch (e) { /* no turn: it still stands there */ }
-                }
+            // the camera turned or the wheel moved it: to the new spot; the smith turned it: to the new angle. Both with the smooth movement, fast, at most 30 times
+            // a second. It stands still otherwise (2026-10-26, the owner: examined with the mouse, no turning by itself).
+            var zoomed = (this.greymarchForgeGhostZoomAt || 0) !== (this.greymarchForgeGhostZoom || 0);
+            if (zoomed || Math.hypot(x - at[0], y - at[1], z - at[2]) > 12) { this.greymarchForgeGhostAt = [x, y, z]; at = this.greymarchForgeGhostAt; this.greymarchForgeGhostZoomAt = this.greymarchForgeGhostZoom || 0; }
+            var ax = tilt + (this.greymarchForgeGhostPitch || 0), az = face + (this.greymarchForgeGhostYaw || 0);
+            var look = at.map(function (n: number) { return Math.round(n); }).join(",") + "," + Math.round(ax) + "," + Math.round(az);
+            if (look !== this.greymarchForgeGhostLook && now >= (this.greymarchForgeGhostTurnNext || 0)) {
+                this.greymarchForgeGhostLook = look; this.greymarchForgeGhostTurnNext = now + 33;
+                var cur = Number(ghost.getAngleZ()); if (!isFinite(cur)) cur = az;
+                var dz = ((((az - cur) % 360) + 540) % 360) - 180; // the short way round
+                ghost.translateTo(at[0], at[1], at[2], ax, 0, cur + dz, 3000, 0);
             }
         } catch (e) { this.greymarchForgeGhostSay(String(e)); this.greymarchForgeGhostDrop(); }
+    }
+    // the page's drag (dx, dy in pixels: left / right turns it round, up / down tips it), the wheel (zoom: +1 farther, -1 closer) or a double-click (reset)
+    greymarchForgeTurn(data: any): any {
+        if (!this.greymarchForgeOn || !this.greymarchForgeGhostId) return;
+        if (data.reset === true) { this.greymarchForgeGhostYaw = 0; this.greymarchForgeGhostPitch = 0; this.greymarchForgeGhostZoom = 0; return; }
+        var dx = Number(data.dx), dy = Number(data.dy), zoom = Number(data.zoom);
+        if (isFinite(dx) && Math.abs(dx) <= 4000) this.greymarchForgeGhostYaw = (((this.greymarchForgeGhostYaw || 0) - dx * 0.5) % 360 + 360) % 360;
+        if (isFinite(dy) && Math.abs(dy) <= 4000) this.greymarchForgeGhostPitch = Math.max(-80, Math.min(80, (this.greymarchForgeGhostPitch || 0) + dy * 0.4));
+        if (zoom === 1 || zoom === -1) this.greymarchForgeGhostZoom = Math.max(-4, Math.min(6, (this.greymarchForgeGhostZoom || 0) + zoom));
     }
     greymarchForgeGhostSay(why: string): any { this.greymarchForgeGhostSaid = (this.greymarchForgeGhostSaid || 0) + 1; if (this.greymarchForgeGhostSaid <= 10) this.greymarchLog("forge: display removed (" + why + ")"); }
     // the copy with this form id, fetched now (good for this frame only), while it is still a copy of the same piece; otherwise null

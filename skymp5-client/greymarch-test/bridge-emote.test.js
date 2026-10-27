@@ -606,8 +606,7 @@ test("the forge display (2026-10-26, back with guards): never left behind, never
   assert.ok(g1.at && g1.rot, "placed in front of the camera");
   for (let i = 0; i < 60; i++) tick(50);
   assert.strictEqual(g1.moves, 1, "placed ONCE: moving it every frame redraws it (it flickered)");
-  assert.ok(g1.turns && g1.turns.length >= 2, "turned with the game's smooth movement, asked every second");
-  const tr = g1.turns.at(-1); assert.deepStrictEqual(tr.slice(0, 3), g1.at, "turning in place"); assert.strictEqual(tr[5], g1.rot[2] + 50); assert.strictEqual(tr[7], 40, "slowly");
+  assert.ok(g1.turns && g1.turns.length === 1, "set to its front view once (the smooth movement), then it stands still: " + (g1.turns || []).length);
   assert.strictEqual(g1.rot[0], 0, "not a weapon or armour: as it is");
   let again = 0; world[g1.id] = { getBaseObject: () => ({ getFormID: () => 0x20 }), disable() {}, delete() { again++; } }; // the game keeps the form after a delete (its cell unloaded)
   // a new pick: the old copy goes, the new one is shown
@@ -677,16 +676,28 @@ test("the forge display is only ever reached by its form id, fetched each frame:
   assert.strictEqual(g.gone, true, "deleted through a fresh fetch when the window closes");
 });
 
-test("the forge display: armour turns side to side, facing the smith (2026-10-26, the owner); a weapon turns round", () => {
+test("the forge display stands still and is examined with the mouse (2026-10-26, the owner): a drag turns it round or tips it, the wheel brings it closer or farther, a double-click puts it back", () => {
   const s = make(); let t = 11_000_000; const tick = (ms = 50) => { t += ms; s.gm.greymarchForgePreviewTick(t); };
   s.state.cam = [480, 560, 150, 0, 1, 0]; // looking north: facing the smith is 180
-  s.gm.sp.Armor = { from: (f) => (f && f.id === 0x30 ? f : null) }; s.gm.sp.Weapon = { from: (f) => (f && f.id === 0x31 ? f : null) };
   s.say({ customPacketType: "greymarchForgeOpen", title: "Forge", forge: 0xc430a });
-  s.page({ type: "forge-preview", key: "30:skyrim.esm" }); for (let i = 0; i < 100; i++) tick(50);
-  const a = s.log.ghosts.at(-1); assert.strictEqual(a.rot[0], -90, "armour stood up");
-  const sway = a.turns.filter((x) => x[6] === 1).map((x) => Math.round(x[5]));
-  assert.ok(sway.length >= 2, "it turns"); assert.ok(sway.includes(215) && sway.includes(145), "35 degrees each side of facing the smith: " + sway);
-  s.page({ type: "forge-preview", key: "31:skyrim.esm" }); for (let i = 0; i < 60; i++) tick(50);
-  const w = s.log.ghosts.at(-1); const spin = w.turns.filter((x) => x[6] === 1);
-  assert.ok(spin.length >= 2 && spin.every((x) => x[5] === w.rot[2] + 50), "a weapon keeps turning round");
+  s.page({ type: "forge-preview", key: "30:skyrim.esm" }); for (let i = 0; i < 40; i++) tick(50);
+  const g = s.log.ghosts.at(-1); const n0 = g.turns.length;
+  for (let i = 0; i < 40; i++) tick(50);
+  assert.strictEqual(g.turns.length, n0, "still by itself");
+  const last = () => g.turns.at(-1);
+  s.page({ type: "forge-turn", dx: 60, dy: 0 }); tick(50);
+  assert.strictEqual(Math.round(last()[5]), 150, "dragged 60 px right: turned 30 degrees"); assert.strictEqual(last()[6], 3000, "fast");
+  s.page({ type: "forge-turn", dx: 0, dy: 50 }); tick(50);
+  assert.strictEqual(Math.round(last()[3]), 20, "dragged down: tipped 20 degrees");
+  s.page({ type: "forge-turn", dx: 0, dy: 5000 }); tick(50); assert.strictEqual(Math.round(last()[3]), 20, "a silly drag is ignored");
+  s.page({ type: "forge-turn", dx: 0, dy: 1000 }); tick(50); assert.strictEqual(Math.round(last()[3]), 80, "tipped at most 80 degrees");
+  const y0 = last()[1];
+  s.page({ type: "forge-turn", zoom: -1 }); tick(50);
+  assert.strictEqual(Math.round(y0 - last()[1]), 10, "the wheel up: 10 units closer");
+  for (let i = 0; i < 20; i++) s.page({ type: "forge-turn", zoom: -1 }); tick(50);
+  assert.strictEqual(Math.round(last()[1] - (560 + 50)), 0, "no closer than 50 from the camera");
+  s.page({ type: "forge-turn", reset: true }); tick(50);
+  assert.deepStrictEqual([Math.round(last()[1]), Math.round(last()[3]), Math.round(last()[5])], [650, 0, 180], "a double-click: back to the front view");
+  s.page({ type: "forge-close" }); tick(); const n1 = g.turns.length;
+  s.page({ type: "forge-turn", dx: 100 }); tick(); assert.strictEqual(g.turns.length, n1, "nothing once the window is closed");
 });
