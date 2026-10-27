@@ -649,7 +649,8 @@ test("the forge display holds still: placed ONCE and left to load (placing it ag
   tick(100); assert.strictEqual(g.moves, 2, "not loaded after 3 s: placed once more");
   s.state.no3d = false; tick();
   assert.strictEqual(g.motions, asked + 1, "keyframed once its 3D is there"); assert.strictEqual(g.motion, 4);
-  assert.deepStrictEqual((s.gm.sp.__coll || []).at(-1), [g.id, false], "collision off: the smith cannot push themselves on it");
+  const coll = s.log.natives.filter((n) => n[0] === "PO3_SKSEFunctions" && n[1] === "SetCollisionLayer").at(-1);
+  assert.ok(coll && coll[2] && coll[2].id === g.id, "its 3D put on the non-collidable layer (the Papyrus Extender): the smith cannot push themselves on it");
   for (let i = 0; i < 20; i++) tick(50);
   assert.strictEqual(g.moves, 2, "then never placed again (that would restart its 3D)");
   const turns = g.turns.length;

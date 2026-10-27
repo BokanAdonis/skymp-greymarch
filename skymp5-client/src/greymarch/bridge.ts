@@ -2861,10 +2861,14 @@ export class GreymarchBridge {
         if (isFinite(dy) && Math.abs(dy) <= 4000) this.greymarchForgeGhostPitch = (((this.greymarchForgeGhostPitch || 0) + dy * 0.4) % 360 + 360) % 360; // all the way round (2026-10-26, the owner: a piece facing away could not be turned to the smith)
         if (zoom === 1 || zoom === -1) this.greymarchForgeGhostZoom = Math.max(-4, Math.min(6, (this.greymarchForgeGhostZoom || 0) + zoom));
     }
-    // collision off on the shown copy (SkyrimPlatform's setCollision, by form id: what the shapeshift puppet and SkyMP's own animations use)
+    // NOTHING COLLIDES WITH THE SHOWN COPY: its 3D on the game's non-collidable layer (15) with powerofthree's Papyrus Extender (a required mod:
+    // PO3_SKSEFunctions.SetCollisionLayer(akRef, asNodeName, aiCollisionLayer), "" = the whole piece). SkyrimPlatform's setCollision did nothing here
+    // (it is for actors): the smith still pushed themselves on the piece (2026-10-26). Needs the 3D, so asked once it is loaded and when it is put back.
     greymarchForgeGhostNoCollision(): any {
         var id = this.greymarchForgeGhostId; if (!id) return;
-        try { (this.sp as any).setCollision(id, false); } catch (e) { if (!this.greymarchForgeGhostCollSaid) { this.greymarchForgeGhostCollSaid = true; this.greymarchLog("forge: display collision could not be switched off: " + e); } }
+        var ref = this.greymarchForgeGhostRef(id, this.greymarchForgeGhostBase); if (!ref) return;
+        try { this.sp.callNative("PO3_SKSEFunctions", "SetCollisionLayer", undefined, ref, "", 15); }
+        catch (e) { if (!this.greymarchForgeGhostCollSaid) { this.greymarchForgeGhostCollSaid = true; this.greymarchLog("forge: display collision could not be switched off: " + e); } }
     }
     // A LAMP FOR THE DISPLAY (2026-10-26, the owner: at night the piece could hardly be seen). The game's own shadowless, steady, near-white light
     // (Skyrim.esm DefaultSunlight01NS_NotPortalStrict, 256 units), in this game only, between the smith and the piece and a little above. Kept and
