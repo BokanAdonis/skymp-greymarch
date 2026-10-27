@@ -63,6 +63,20 @@ const VAMP_OWN_TEETH = { male: 0x51631, female: 0x5150f }; // MaleMouthHumanoidD
 const CHANCERY_SCRIPT =PROF_SCRIPT.split("__gmProfSend").join("__gmChanceryRun").split("greymarch-prof").join("greymarch-chancery").split("2147483220").join("2147483221"); // the chancery window (/chancery): the same loader, another page
 const EMOTE_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmEmoteRun").split("greymarch-prof").join("greymarch-emote").split("2147483220").join("2147483223").split("e.key==='x'||e.key==='X'").join("e.key==='g'||e.key==='G'"); // the emote wheel (G): the same loader, another page; letting go of G inside the page is a release too
 const VAMP_MENU_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmVampRun").split("greymarch-prof").join("greymarch-vampire").split("2147483220").join("2147483222"); // the vampire window (/vampire): the same loader, another page
+// THE CONSOLE (~) IS SHUT for every player, staff too (staff have F7). Its menus are closed the frame they open (greymarchConsoleTick) and the commands
+// that cheat do nothing even when typed anyway (a mod's ConsoleUtil, a "bat" file, sStartingConsoleCommand in Skyrim.ini): greymarchConsoleLock.
+export const CONSOLE_MENUS = ["Console", "Console Native UI Menu"];
+const CONSOLE_KEY = 41; // ~ (DIK_GRAVE): pressed again to close the console when GreymarchCamera.dll is older than 1.3 (no CloseMenu)
+// SkyMP's own consoleCommandsService already sends these to the server, which refuses them (consoleCommandsAllowed is never set): left to it
+const CONSOLE_SKYMP = ["additem", "equipitem", "placeatme", "disable", "mp"];
+export const CONSOLE_BLOCKED = [
+    "coc", "cow", "moveto", "movetoqt", "setpos", "setangle", "tmm", "tcl", "tfc", "tgm", "tim", "tai", "tcai", "tdetect", // places, god mode, noclip, the map, the AI
+    "kill", "killall", "resurrect", "setav", "modav", "forceav", "restoreav", "damageav", "setgs", "sgtm", "setlevel", "setscale", "setessential", // actor values, life and death
+    "addperk", "removeperk", "addspell", "removespell", "psb", "addshout", "teachword", "unlockword", "advskill", "incpcs", // perks, spells, skills
+    "removeitem", "removeallitems", "duplicateallitems", "unequipitem", "lock", "unlock", "setownership", "openactorcontainer", "enable", "markfordelete", // items, doors, containers
+    "setcrimegold", "addtofaction", "removefromfaction", "removefromallfactions", "setfactionrank", "setrelationshiprank", "setplayerteammate", // crime and factions
+    "setstage", "caqs", "completequest", "resetquest", "startquest", "stopquest", "setpqv", "sexchange", "setrace", "placeleveledactoratme", "sw", "fw", "bat", // quests, body, spawns, weather, batch files
+];
 const OPEN_ON_RELEASE = [65, 35, 48, 64, 66, 37]; // F7, H, B, F6, F8, K: their windows open when the key is let go (greymarchKey)
 const FORGE_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmForgeRun").split("greymarch-prof").join("greymarch-forge").split("2147483220").join("2147483225"); // the Greymarch forge window: the same loader, another page
 const CRAFT_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmCraftRun").split("greymarch-prof").join("greymarch-craft").split("2147483220").join("2147483224"); // the crafting panel (a station was used): the same loader, another page
@@ -109,6 +123,7 @@ export class GreymarchBridge {
         this.controller.emitter.on("greymarchStage", (text: string) => this.greymarchLog(text)); // other services report where the game is, for the server log
         this.controller.emitter.on("greymarchEar", (e: any) => { if (e && typeof e.name === "string" && isFinite(e.x) && isFinite(e.y) && isFinite(e.z)) { const m = this.greymarchEarsSeen || (this.greymarchEarsSeen = {}); m[e.name] = { x: e.x, y: e.y, z: e.z, at: Date.now(), localId: Number(e.id) || 0 }; } }); // where each named player's head is in the world (where their voice comes from: greymarchEarsTick), and which character this game draws for them (their mouth moves while they talk: greymarchLipTick)
         this.controller.emitter.on("greymarchHead", (e: any) => { const m = this.greymarchHeads || (this.greymarchHeads = {}); m[e.name] = { x: e.x, y: e.y, at: Date.now() }; this.greymarchRes = { w: e.rw, h: e.rh }; }); // where each named player's head is on screen (for the microphone icon)
+        try { this.greymarchConsoleLock(); } catch (clErr) { /* the menu is still closed every frame */ } // the console (~): the commands that cheat do nothing, from the first frame (the main menu too: "update" does not run there)
     }
 
     // STRAIGHT INTO THE SERVER. Started by the launcher (it sets "greymarch-autoplay"), the game must never offer Skyrim's own main menu: New Game or
@@ -425,6 +440,7 @@ export class GreymarchBridge {
         this.greymarchForgePreviewTick(Date.now()); // removes a preview copy an older version left
         this.greymarchPointerGuard(Date.now()); // a window that holds the mouse always has its pointer (the game's Cursor Menu)
         this.greymarchHotkeyTick(Date.now()); // a window hotkey whose key-up the game never sent
+        this.greymarchConsoleTick(Date.now()); // the console (~) is closed the frame it opens
         this.greymarchMiniActivateTick(); // a mini game won: the thing is used again (the server lets it through)
         this.greymarchMagicBlockDrive(); // NPC raise-the-dead and summons: ended at once
         this.greymarchShapeDrive(); // a creature form as an NPC: moved every frame like SkyMP moves other players; other players' creature attacks
@@ -3086,6 +3102,51 @@ export class GreymarchBridge {
             if (!ok) sp.Debug.sendAnimationEvent(player, cur.stop === emoteMod.OFFSET_STOP ? "OffsetStop" : cur.stop === emoteMod.DRUNK_STOP ? "DrunkStop" : "IdleStop"); // the stop event itself
         } catch (err) { /* the next movement ends it anyway */ }
         if ((this.greymarchEmoteLogged || 0) <= 20) this.greymarchLog("emote: " + cur.id + " ended (" + why + ")");
+    }
+    // THE CONSOLE (~). SkyrimPlatform's findConsoleCommand swaps a command's code for ours, and ours answering false means the game's own never runs:
+    // so each command in CONSOLE_BLOCKED only says it is disabled, and the attempt goes to the server (gamemode consoleguard.js, the staff Log tab).
+    // Papyrus natives (Debug.toggleCollisions, setActorValue: the staff noclip and speed) are other code and keep working. A command this game does not have is skipped.
+    greymarchConsoleLock(): any {
+        var sp = this.sp, done = 0, missing = [];
+        if (typeof sp.findConsoleCommand !== "function") return; // an old SkyrimPlatform: only the menu is closed
+        for (var i = 0; i < CONSOLE_BLOCKED.length; i++) {
+            var name = CONSOLE_BLOCKED[i];
+            if (CONSOLE_SKYMP.indexOf(name) >= 0) continue;
+            try {
+                var cmd = sp.findConsoleCommand(name);
+                if (!cmd) { missing.push(name); continue; }
+                cmd.execute = this.greymarchConsoleRefuse(name);
+                done++;
+            } catch (e) { missing.push(name); }
+        }
+        this.greymarchConsoleLocked = done;
+        try { sp.writeLogs("greymarch", "console: " + done + " commands locked" + (missing.length ? " (not in this game: " + missing.join(", ") + ")" : "")); } catch (e) { /* only a log line (not sent: the server is not there yet) */ }
+    }
+    greymarchConsoleRefuse(name: string): any {
+        return () => {
+            try { this.sp.printConsole("Console commands are disabled on Greymarch."); } catch (e) { /* the console may be gone already */ }
+            this.greymarchConsoleReport("command", name);
+            return false; // the game's own command never runs
+        };
+    }
+    // At most one report a few seconds per kind (and per command), so a held key or a batch file cannot flood the server.
+    greymarchConsoleReport(op: string, name?: string): any {
+        var now = Date.now(), key = op + ":" + (name || ""), seen = this.greymarchConsoleSent || (this.greymarchConsoleSent = {});
+        if (now - (seen[key] || 0) < 5000) return;
+        seen[key] = now;
+        this.greymarchConsoleTries = (this.greymarchConsoleTries || 0) + 1;
+        if (this.greymarchConsoleTries <= 20) this.greymarchLog("console: " + (op === "opened" ? "the console was opened, closed it" : "refused '" + name + "'"));
+        try { this.controller.emitter.emit("sendMessage", { message: { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchConsole", op: op, name: name || "" }) }, reliability: "reliable" }); } catch (e) { /* the log line has it */ }
+    }
+    // Every frame: an open console is closed through GreymarchCamera.dll 1.3 (CloseMenu, as the forge window closes the Crafting Menu). on("menuOpen") sees it
+    // too, but Skyrim functions cannot be called from it, so the update loop does it. Without CloseMenu the console key is pressed again (once a second at most).
+    greymarchConsoleTick(now: number): any {
+        var sp = this.sp, open = "";
+        for (var i = 0; i < CONSOLE_MENUS.length && !open; i++) { try { if (sp.Ui.isMenuOpen(CONSOLE_MENUS[i])) open = CONSOLE_MENUS[i]; } catch (e) { /* a menu this game does not know */ } }
+        if (!open) { this.greymarchConsoleOpen = false; return; }
+        var shut = false; try { shut = !!sp.callNative("GreymarchCam", "CloseMenu", undefined, open); } catch (e) { shut = false; }
+        if (!shut && now >= (this.greymarchConsoleTapNext || 0)) { this.greymarchConsoleTapNext = now + 1000; try { sp.Input.tapKey(CONSOLE_KEY); } catch (e) { /* the commands are locked anyway */ } }
+        if (!this.greymarchConsoleOpen) { this.greymarchConsoleOpen = true; this.greymarchConsoleReport("opened"); }
     }
     // The game's menus and the console: Y does nothing while any of them is up (typing a "y" in the console must not open the chat).
     greymarchInMenu(): any {
