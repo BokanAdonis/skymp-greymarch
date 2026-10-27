@@ -24,7 +24,7 @@ import { getMovement } from "../sync/movementGet";
 import { lastTryHost, tryHost } from "./hostAttempts";
 import { ModelApplyUtils } from "./modelApplyUtils";
 import { localIdToRemoteId, getViewFromStorage } from "./worldViewMisc";
-import { flatStep, FLAT_STEPS, REGROUND_EVERY_MS } from "../greymarch/npcHosting";
+import { flatStep, FLAT_STEPS, REGROUND_EVERY_MS, regroundExempt } from "../greymarch/npcHosting";
 import { CHECK_EVERY_MS as GM_HOST_CHECK_MS, shouldRelease, pickTarget, markReleased, isReleased, withoutHosted, shouldReleaseUnloaded, movementDead, buildWhileDead, BODY_KILL_EVERY_MS } from "../greymarch/npcHosting";
 import { SpApiInteractor } from "../services/spApiInteractor";
 import { WorldCleanerService } from "../services/services/worldCleanerService";
@@ -1036,7 +1036,9 @@ export class FormView {
       // this game runs near its player: its height and the player's, to the breadcrumbs file
       // GREYMARCH: LOCKED HEIGHT (greymarch/npcHosting.ts): far each second with no height change, three times in a row: dropped back onto the ground
       const gmNow = [npc.getPositionX(), npc.getPositionY(), npc.getPositionZ()];
-      this.gmFlatSteps = flatStep(this.gmLastPos, gmNow) ? this.gmFlatSteps + 1 : 0;
+      // a giant or a mammoth is never rebuilt (regroundExempt): its charge passed the flat test
+      const gmRaceName = (() => { try { const r = npc.getRace(); return r ? r.getName() : ""; } catch (e) { return ""; } })();
+      this.gmFlatSteps = flatStep(this.gmLastPos, gmNow) && !regroundExempt(gmRaceName) ? this.gmFlatSteps + 1 : 0;
       this.gmLastPos = gmNow;
       if (this.gmFlatSteps >= FLAT_STEPS && Date.now() - this.gmRegroundAt >= REGROUND_EVERY_MS) {
         this.gmRegroundAt = Date.now(); this.gmFlatSteps = 0;

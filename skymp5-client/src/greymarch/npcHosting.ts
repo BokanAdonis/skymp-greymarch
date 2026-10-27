@@ -77,6 +77,13 @@ export function flatStep(prev: number[] | null, now: number[]): boolean {
   return moved >= FLAT_MIN_MOVE && Math.abs(now[2] - prev[2]) < FLAT_MAX_DZ;
 }
 
+// NO REGROUND FOR A GIANT OR A MAMMOTH (2026-10-28, the owner's breadcrumbs): a giant fought on open ground passed the flat test while it charged and was rebuilt
+// four times in 90 s; the first rebuild dropped it and spawned it again ("it jolts a little forward and reloads into the game"). The locked height was seen on
+// deer, elk and bandits, never on these. Judged by the race's name ("Giant", "Mammoth"), so every giant an encounter places is covered.
+export function regroundExempt(raceName: unknown): boolean {
+  return /\b(giant|mammoth)\b/i.test(String(raceName || ""));
+}
+
 const releasedUntil = new Map<number, number>(); // remote id -> until when this game does not ask to host it
 export function markReleased(remoteId: number, now: number): void { releasedUntil.set(remoteId >>> 0, now + RELEASE_HOLD_MS); }
 export function isReleased(remoteId: number, now: number): boolean {

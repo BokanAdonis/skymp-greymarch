@@ -121,3 +121,9 @@ test("a server NPC is made persistent again (made temporary for one test, it flo
   const flat = formView.split(String.fromCharCode(10)).map((l) => l.trim()).join(" ");
   assert.ok(flat.includes("if (gmBeastLookNow) { const atSpot = spawnAtSpot(baseForm, spawnPosition, spawnRotation);"), "a beast look: persistent as before");
 });
+
+test("no reground for a giant or a mammoth (2026-10-28: a giant charging on open ground was rebuilt four times in 90 s and once dropped and spawned again)", () => {
+  for (const n of ["Giant", "giant", "Mammoth", "Frost Giant"]) assert.strictEqual(H.regroundExempt(n), true, n);
+  for (const n of ["Elk", "Deer", "Nord", "Wolf", "Frostbite Spider", "Mudcrab", "Giantess Spider", "", null, undefined]) assert.strictEqual(H.regroundExempt(n), false, String(n));
+  assert.ok(formView.includes("this.gmFlatSteps = flatStep(this.gmLastPos, gmNow) && !regroundExempt(gmRaceName) ? this.gmFlatSteps + 1 : 0;"), "the flat count never grows for them, so they are never rebuilt");
+});
