@@ -162,3 +162,8 @@ test("a lunge is carried by its animation, not placed by the frames too (2026-10
   assert.ok(fn.indexOf("if (now < this.gmPuppetLungeUntil) return \"\";") > lunge && fn.indexOf("if (now < this.gmPuppetLungeUntil) return \"\";") < apply, "and none is applied while it lasts");
   assert.match(formView, /const GM_PUPPET_LUNGE_MS = \d+;/);
 });
+
+test("a hunting animal is not placed ahead of its frame (2026-10-28, the owner's clip: wolves teleported on the player)", () => {
+  const fn = formView.slice(formView.indexOf("private gmPuppetMove("), formView.indexOf("private tryHostIfNeed("));
+  assert.ok(fn.includes("speed: f.hunt === 1 ? 0 : f.speed"));
+});

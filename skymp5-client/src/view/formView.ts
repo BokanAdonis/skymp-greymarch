@@ -1022,7 +1022,9 @@ export class FormView {
     } else {
       if (f.at === this.gmPuppetAt && now - this.movState.lastApply < 1000) return "";
       this.gmPuppetAt = f.at;
-      m = { ...model.movement, pos: [f.pos[0], f.pos[1], f.pos[2]], rot: [0, 0, f.heading], runMode: f.anim === "run" ? "Running" : f.anim === "walk" ? "Walking" : "Standing", direction: 0, speed: f.speed, isInJumpState: false, isSneaking: false, isBlocking: false, isWeapDrawn: f.hunt === 1 || f.anim === "attack", ...(typeof f.hp === "number" ? { healthPercentage: Math.max(0.02, f.hp) } : {}) };
+      m = { ...model.movement, pos: [f.pos[0], f.pos[1], f.pos[2]], rot: [0, 0, f.heading], runMode: f.anim === "run" ? "Running" : f.anim === "walk" ? "Walking" : "Standing", direction: 0, speed: f.hunt === 1 ? 0 : f.speed, isInJumpState: false, isSneaking: false, isBlocking: false, isWeapDrawn: f.hunt === 1 || f.anim === "attack", ...(typeof f.hp === "number" ? { healthPercentage: Math.max(0.02, f.hp) } : {}) };
+      // speed 0 while hunting (2026-10-28, the owner's clip: wolves teleported on the player): SkyMP places a moving one a fifth of a second AHEAD of its frame
+      // (lag for a player); a wolf that stopped at the player was put past them, then pulled back. Hunting, it goes where the server has it
       // the server's health on the bar (2026-10-28). Never 0 here: at 0 the game held it dying, and the server's death then came as a quiet one (the owner:
       // no death sound); the death itself comes from the server (applyDeathState). isWeapDrawn: hunting, it stands in its fighting stance (the owner: no
       // attack animations; a creature attacks only from there)
