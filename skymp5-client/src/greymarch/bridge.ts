@@ -2376,7 +2376,9 @@ export class GreymarchBridge {
                 if (!Array.isArray(f) || f.length < 7) continue;
                 const id = Number(f[0]);
                 if (!(id > 0) || ![f[1], f[2], f[3], f[4], f[5]].every((n: any) => typeof n === "number" && isFinite(n))) continue;
-                frames[String(id)] = { pos: [f[1], f[2], f[3]], heading: f[4], speed: f[5], anim: String(f[6]).slice(0, 12), at: now };
+                // f[7]: the server's health, 0..1 (2026-10-28: the bar of a server-driven animal; an older server sends seven values)
+                const hp = typeof f[7] === "number" && isFinite(f[7]) ? Math.max(0, Math.min(1, f[7])) : undefined;
+                frames[String(id)] = { pos: [f[1], f[2], f[3]], heading: f[4], speed: f[5], anim: String(f[6]).slice(0, 12), at: now, ...(hp !== undefined ? { hp } : {}) };
             }
             if ((this.greymarchBeastSweepAt || 0) < now - 10000) {
                 this.greymarchBeastSweepAt = now;

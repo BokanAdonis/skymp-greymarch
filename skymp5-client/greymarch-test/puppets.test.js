@@ -89,3 +89,20 @@ test("a server-driven animal's own AI never runs or fights, and a dead one is ne
   const dead = fn.indexOf("if (model.isDead || ac.isDead()) return \"\";");
   assert.ok(dead > 0 && dead < fn.indexOf("applyMovement(refr, m as Movement, false)"), "a body: nothing is played on it");
 });
+
+test("a server-driven animal's health bar follows the server's health in its frames (2026-10-28, the owner: it died but its bar never went down)", () => {
+  const B = bridgeClass();
+  const storage = {};
+  const self = { sp: { storage } };
+  const gl = Function("return this")();
+  delete gl.__gmBeastFrames;
+  try {
+    B.prototype.greymarchBeastFrames.call(self, { f: [[0xff0000c1, 1, 2, 3, 0, 0, "idle", 0.42], [0xff0000c2, 1, 2, 3, 0, 0, "idle"], [0xff0000c3, 1, 2, 3, 0, 0, "idle", 7]] });
+    const fr = gl.__gmBeastFrames;
+    assert.strictEqual(fr[String(0xff0000c1)].hp, 0.42);
+    assert.strictEqual(fr[String(0xff0000c2)].hp, undefined, "an older server: no health, the bar as before");
+    assert.strictEqual(fr[String(0xff0000c3)].hp, 1, "kept to 0..1");
+  } finally { delete gl.__gmBeastFrames; }
+  const fn = formView.slice(formView.indexOf("private gmPuppetMove("), formView.indexOf("private tryHostIfNeed("));
+  assert.ok(fn.includes('...(typeof f.hp === "number" ? { healthPercentage: f.hp } : {})'), "the movement played carries it (applyMovement sets the bar)");
+});

@@ -997,7 +997,7 @@ export class FormView {
     }
     try { if (ac.isInCombat()) ac.stopCombat(); } catch (e) { /* next frame */ }
     // the bridge's frames: through the global first (see bridge.ts greymarchBeastFrames, 2026-10-28), storage as before
-    const frames = ((Function("return this")() as any).__gmBeastFrames || storage["greymarchBeastFrames"] || {}) as Record<string, { pos: number[]; heading: number; speed: number; anim: string; at: number }>;
+    const frames = ((Function("return this")() as any).__gmBeastFrames || storage["greymarchBeastFrames"] || {}) as Record<string, { pos: number[]; heading: number; speed: number; anim: string; at: number; hp?: number }>;
     const f = frames[String(this.remoteRefrId)];
     const now = Date.now();
     // breadcrumbs (2026-10-28, animals that never moved): the first frame played for this animal, or, 3 s after it was first seen, that none was found
@@ -1011,7 +1011,7 @@ export class FormView {
     } else {
       if (f.at === this.gmPuppetAt && now - this.movState.lastApply < 1000) return "";
       this.gmPuppetAt = f.at;
-      m = { ...model.movement, pos: [f.pos[0], f.pos[1], f.pos[2]], rot: [0, 0, f.heading], runMode: f.anim === "run" ? "Running" : f.anim === "walk" ? "Walking" : "Standing", direction: 0, speed: f.speed, isInJumpState: false, isSneaking: false, isBlocking: false, isWeapDrawn: false };
+      m = { ...model.movement, pos: [f.pos[0], f.pos[1], f.pos[2]], rot: [0, 0, f.heading], runMode: f.anim === "run" ? "Running" : f.anim === "walk" ? "Walking" : "Standing", direction: 0, speed: f.speed, isInJumpState: false, isSneaking: false, isBlocking: false, isWeapDrawn: false, ...(typeof f.hp === "number" ? { healthPercentage: f.hp } : {}) }; // the server's health on the bar (2026-10-28)
     }
     this.movState.lastApply = now;
     try {
