@@ -1,5 +1,6 @@
 import { Actor, ActorBase, Cell, Race, createText, Debug, destroyText, Form, FormType, Game, Keyword, NetImmerse, ObjectReference, once, printConsole, setTextColor, setTextPos, setTextSize, setTextString, storage, TESModPlatform, Utility, WorldSpace, worldPointToScreenPoint, writeLogs } from "skyrimPlatform";
 import { setDefaultAnimsDisabled, applyAnimation, allowAttackAnim } from "../sync/animation";
+const GM_PUPPET_LUNGE_MS = 1100; // a server-driven animal's lunge: its animation moves it this long, not the frames (gmPuppetMove, 2026-10-28)
 import { Appearance, applyAppearance } from "../sync/appearance";
 import { isBadMenuShown, applyEquipment } from "../sync/equipment";
 import { RespawnNeededError } from "../lib/errors";
@@ -1004,6 +1005,16 @@ export class FormView {
     if (!this.gmPuppetSeenAt) this.gmPuppetSeenAt = now;
     if (f && !this.gmPuppetCrumbed) { this.gmPuppetCrumbed = true; gmCrumb("puppet " + gmHex(this.remoteRefrId as number) + ": first frame " + f.anim + " to " + f.pos.map(Math.round).join(" ") + " (it stands at " + [refr.getPositionX(), refr.getPositionY(), refr.getPositionZ()].map(Math.round).join(" ") + ")"); }
     if (!f && !this.gmPuppetCrumbed && now - this.gmPuppetSeenAt > 3000) { this.gmPuppetCrumbed = true; const keys = Object.keys(frames); gmCrumb("puppet " + gmHex(this.remoteRefrId as number) + ": no frame after 3 s; frames held for " + keys.length + " animal(s)" + (keys.length ? ", e.g. " + Number(keys[0]).toString(16) : "")); }
+    // A LUNGE (2026-10-28, the owner's clip: a wolf leapt past the player and slid back): the lunge's own animation carries the animal forward, so for its
+    // length it is not placed by the frames too (it was placed by the server at the end of the leap AND carried on by the animation: past the player);
+    // afterwards the frames take it again where the server has it
+    if (f && f.anim === "attack" && f.at !== this.gmPuppetAttackAt && typeof f.ev === "string" && /power|lunge/i.test(f.ev) && this.movState.everApplied) {
+      this.gmPuppetAttackAt = f.at;
+      this.gmPuppetLungeUntil = now + GM_PUPPET_LUNGE_MS;
+      try { allowAttackAnim(ac.getFormID(), f.ev); Debug.sendAnimationEvent(ac, f.ev); } catch (e) { /* the server already counted the bite */ }
+      return "";
+    }
+    if (now < this.gmPuppetLungeUntil) return "";
     let m: Movement | null = null;
     if (!f) {
       if (this.movState.everApplied) return "";
@@ -1129,6 +1140,7 @@ export class FormView {
   private gmPuppetAt = 0;
   private gmPuppetAttackAt = 0;
   private gmPuppetAttackCrumbed = false; // breadcrumbs: the first attack played
+  private gmPuppetLungeUntil = 0; // a lunge's animation moves it until then (gmPuppetMove)
 
   private tryHostIfNeed(ac: Actor, remoteId: number) {
     if (isReleased(remoteId, Date.now())) return false; // GREYMARCH: this game handed it to a closer player a moment ago (greymarch/npcHosting.ts)

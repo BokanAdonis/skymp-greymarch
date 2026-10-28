@@ -153,3 +153,12 @@ test("a server-driven animal's attack is its creature's own event from the serve
     assert.strictEqual(fr[String(0xff0000e4)].ev, undefined, "only an attack");
   } finally { delete gl.__gmBeastFrames; }
 });
+
+test("a lunge is carried by its animation, not placed by the frames too (2026-10-28, the owner's clip: the wolf leapt past the player and slid back)", () => {
+  const fn = formView.slice(formView.indexOf("private gmPuppetMove("), formView.indexOf("private tryHostIfNeed("));
+  const lunge = fn.indexOf("/power|lunge/i.test(f.ev)");
+  const apply = fn.indexOf("applyMovement(refr");
+  assert.ok(lunge > 0 && lunge < apply, "a lunge is played before any movement is applied");
+  assert.ok(fn.indexOf("if (now < this.gmPuppetLungeUntil) return \"\";") > lunge && fn.indexOf("if (now < this.gmPuppetLungeUntil) return \"\";") < apply, "and none is applied while it lasts");
+  assert.match(formView, /const GM_PUPPET_LUNGE_MS = \d+;/);
+});
