@@ -168,6 +168,7 @@ export class GreymarchBridge {
     greymarchPacket(msg: any): any {
         var type = msg.customPacketType;
         // GREYMARCH: staff panel traffic is handled first (and quietly: ghosts arrive every few seconds)
+        if (type === "greymarchAdminReply" && this.greymarchStaffReply(msg)) return; // the staff check before F7 opens, or a staff-only refusal
         if (type === "greymarchAdminReply") { var brids = this.greymarchBuildRids; if (brids && brids[msg.rid]) { delete brids[msg.rid]; this.greymarchBuildCamSay(msg.ok ? (msg.data && msg.data.message) || "Done." : String(msg.error || "That did not work.")); return; } this.greymarchAdminToPage("reply", msg); return; }
         if (type === "greymarchNotice") { if (msg.title) { this.greymarchToast(msg); return; } var nq = this.greymarchNoticeQueue || (this.greymarchNoticeQueue = []); if (nq.length < 20) nq.push(String(msg.text).slice(0, 300)); return; } // a plain notice: the game's own top-left message, shown from the update phase (greymarchNoticeTick: Debug.notification does nothing from here)
         if (type === "greymarchStandUp") { this.greymarchStandUpWanted = Date.now(); return; } // get up from the furniture the player is in (gamemode professions.js, after a won mining game): done in greymarchStandUpTick
@@ -720,6 +721,32 @@ export class GreymarchBridge {
         var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchAdmin", rid: data.rid, op: data.op, args: data.args }) };
         this.controller.emitter.emit("sendMessage", { message: message, reliability: "reliable" });
     }
+    // F7, H, B and F6 are for STAFF. Unless the server already said yes, the game asks it first ({ op: "check" }) and opens the panel only on a yes,
+    // so a player with no rank sees nothing at all. The yes is remembered; a later refusal marked staffOnly (rank taken away, off duty) forgets it and
+    // closes the panel. The server refuses a player with no rank everything anyway (gamemode admin.js), whatever this game does.
+    greymarchStaffOpen(mode?: any): any {
+        if (this.greymarchStaffOk) { this.greymarchAdminShow(mode); return; }
+        var rid = 1100000000 + (this.greymarchStaffRidN = (this.greymarchStaffRidN || 0) + 1);
+        this.greymarchStaffAsk = { rid: rid, mode: mode, at: Date.now() };
+        this.greymarchAdminSend({ rid: rid, op: "check", args: {} });
+    }
+    // a staff panel reply: true when it was the answer to greymarchStaffOpen's question (nothing else to do with it)
+    greymarchStaffReply(msg: any): boolean {
+        var ask = this.greymarchStaffAsk;
+        if (ask && msg.rid === ask.rid) {
+            this.greymarchStaffAsk = null;
+            this.greymarchStaffOk = msg.ok === true;
+            if (!this.greymarchStaffOk) { this.greymarchLog("staff panel: not opened, the server says no (" + msg.error + ")"); return true; }
+            if (Date.now() - ask.at < 5000 && !this.greymarchAdminOn && !this.greymarchMenuOn && !this.greymarchChatTyping) { if (this.greymarchEmoteOn) this.greymarchEmoteHide(); this.greymarchAdminShow(ask.mode); }
+            return true;
+        }
+        if (msg.staffOnly === true) {
+            this.greymarchStaffOk = false;
+            if (this.greymarchAdminOn) { this.greymarchAdminHide(); var nq = this.greymarchNoticeQueue || (this.greymarchNoticeQueue = []); if (nq.length < 20) nq.push(String(msg.error || "The staff panel is for staff only.").slice(0, 300)); }
+            this.greymarchLog("staff panel: closed, the server says staff only (" + msg.error + ")");
+        }
+        return false;
+    }
     // F7 opens the panel (the page itself closes it with F7 or Escape). Escape also closes it from here, because the game un-focuses the browser on Escape.
     greymarchKey(e: any): any {
         if (this.greymarchBuildCam && this.greymarchBuildCamKey(e)) return; // the build system's free camera has the keys it uses
@@ -760,10 +787,10 @@ export class GreymarchBridge {
     }
     // a window hotkey let go (greymarchKey): what it opens, checked now (the state may have changed while it was held)
     greymarchHotkeyOpen(code: number): any {
-        if (code === 65 && !this.greymarchAdminOn && !this.greymarchMenuOn) { if (this.greymarchEmoteOn) this.greymarchEmoteHide(); this.greymarchAdminShow(); }
-        else if (code === 35 && !this.greymarchAdminOn && !this.greymarchMenuOn && !this.greymarchChatTyping && !this.greymarchPanelHasKeys()) { if (this.greymarchEmoteOn) this.greymarchEmoteHide(); this.greymarchAdminShow("encounters"); } // H: the staff panel straight on its Encounters tab (GM and up; for anyone else the page closes again at once; the page closes it with H)
-        else if (code === 48 && !this.greymarchAdminOn && !this.greymarchMenuOn && !this.greymarchChatTyping && !this.greymarchPanelHasKeys()) { if (this.greymarchEmoteOn) this.greymarchEmoteHide(); this.greymarchAdminShow("build"); } // B: the staff panel straight on its Build tab (GM and up; for anyone else the page closes again at once)
-        else if (code === 64 && !this.greymarchAdminOn && !this.greymarchMenuOn && !this.greymarchChatTyping) { if (this.greymarchEmoteOn) this.greymarchEmoteHide(); this.greymarchAdminShow("dungeons"); } // F6: the staff panel straight on its Dungeons tab (GM and up; the server checks the "dungeons" command, the page closes it with F6)
+        if (code === 65 && !this.greymarchAdminOn && !this.greymarchMenuOn) { if (this.greymarchEmoteOn) this.greymarchEmoteHide(); this.greymarchStaffOpen(); } // F7: staff only (greymarchStaffOpen asks the server first)
+        else if (code === 35 && !this.greymarchAdminOn && !this.greymarchMenuOn && !this.greymarchChatTyping && !this.greymarchPanelHasKeys()) { if (this.greymarchEmoteOn) this.greymarchEmoteHide(); this.greymarchStaffOpen("encounters"); } // H: the staff panel straight on its Encounters tab (GM and up; staff below GM see the page close again at once; the page closes it with H)
+        else if (code === 48 && !this.greymarchAdminOn && !this.greymarchMenuOn && !this.greymarchChatTyping && !this.greymarchPanelHasKeys()) { if (this.greymarchEmoteOn) this.greymarchEmoteHide(); this.greymarchStaffOpen("build"); } // B: the staff panel straight on its Build tab (GM and up; staff below GM see the page close again at once)
+        else if (code === 64 && !this.greymarchAdminOn && !this.greymarchMenuOn && !this.greymarchChatTyping) { if (this.greymarchEmoteOn) this.greymarchEmoteHide(); this.greymarchStaffOpen("dungeons"); } // F6: the staff panel straight on its Dungeons tab (GM and up; the server checks the "dungeons" command, the page closes it with F6)
         else if (code === 66 && !this.greymarchAdminOn && !this.greymarchMenuOn && !this.greymarchChatTyping) this.greymarchAdminShow("tester"); // F8: the same panel as the tester menu (teleports, items, NPCs; the server gives testers those commands on the test server only)
         else if (code === 37 && !this.greymarchChatTyping && !this.greymarchEmoteOn && !(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchScribeOn || this.greymarchCraftOn || this.greymarchForgeOn)) this.greymarchProfWanted = Date.now(); // K opens the professions window from the update phase (greymarchProfPending), where the game's menus can be asked about (the page itself closes it with K or Esc, like the staff panel with F7)
     }

@@ -208,6 +208,7 @@ test("F8 opens the staff panel page as the tester menu; F7 as the staff panel", 
   s.gm.sp.browser = { setVisible() {}, setFocused() {} };
   s.gm.greymarchKey({ code: 66, isDown: true }); s.gm.greymarchKey({ code: 66, isUp: true });
   assert.deepStrictEqual(shown.pop(), ["show", "tester"]);
+  s.gm.greymarchStaffOk = true; // staff, as the server already said (bridge-staff-only.test.js: otherwise F7 asks first)
   s.gm.greymarchAdminOn = false;
   s.gm.greymarchKey({ code: 65, isDown: true }); s.gm.greymarchKey({ code: 65, isUp: true });
   assert.deepStrictEqual(shown.pop(), ["show", true]);

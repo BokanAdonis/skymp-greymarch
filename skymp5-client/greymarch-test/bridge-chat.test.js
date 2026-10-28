@@ -419,6 +419,7 @@ test("K typed into a game menu (the race menu's name box, the console) is a lett
 test("window hotkeys open on release: F7, H, B, F6, F8 and K hold nothing while down; a key-up the game never sent opens it once the key reads as up; still held, it waits", () => {
   const { gm } = make();
   const shows = []; gm.greymarchAdminShow = (mode) => { shows.push(mode || "staff"); };
+  gm.greymarchStaffOk = true; // the server already said this is staff (bridge-staff-only.test.js: otherwise F7, H, B and F6 ask first)
   gm.greymarchKey({ code: 48, isDown: true });
   assert.deepStrictEqual(shows, [], "B down: nothing yet (the page would never see it go up and the browser would repeat the letter)");
   gm.greymarchKey({ code: 48, isDown: false });
