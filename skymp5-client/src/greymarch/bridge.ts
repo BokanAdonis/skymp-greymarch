@@ -25,6 +25,8 @@ const MENU_SCRIPT = "(function(){if(window.__gmMenuSend)return;var f=document.cr
 const PROF_SCRIPT = "(function(){if(window.__gmProfSend)return;var f=document.createElement('iframe');f.id='greymarch-prof-frame';f.src='greymarch-prof.html';f.style.cssText='position:fixed;left:0;top:0;width:100%;height:100%;border:0;z-index:2147483220;background:transparent;display:block;pointer-events:none';f.setAttribute('allowtransparency','true');var ready=false,queue=[];window.addEventListener('message',function(e){if(e.source!==f.contentWindow)return;var d=e.data;if(!d)return;if(d.greymarchReady){ready=true;queue.forEach(function(q){f.contentWindow.postMessage({greymarchIn:q},'*')});queue=[]}else if(d.greymarchOut&&window.skyrimPlatform){window.skyrimPlatform.sendMessage('greymarch',JSON.stringify(d.greymarchOut))}});window.__gmProfSend=function(m){if(m.fn==='show'){f.style.pointerEvents='auto';try{f.focus()}catch(x){}}else if(m.fn==='hide')f.style.pointerEvents='none';if(ready)f.contentWindow.postMessage({greymarchIn:m},'*');else queue.push(m)};document.body.appendChild(f);document.addEventListener('keyup',function(e){if(e.key==='x'||e.key==='X'){try{f.contentWindow.postMessage({greymarchIn:{fn:'release'}},'*')}catch(x){}}});document.addEventListener('keydown',function(e){if(e.key==='Escape'){try{f.contentWindow.postMessage({greymarchIn:{fn:'escape'}},'*')}catch(x){}}})})();";
 const CONNECT_FAIL_MS = 90000; // the connecting screen over the main menu: this long without the character select, it says what to do (greymarchConnectCover)
 const WOLF_MORPH_MS = 4300; // the werewolf transformation: the race changes at the animation's "SetRace" cue, or after this long if the cue is not seen (the cue is about 4.0 s in, animationdatasinglefile.txt)
+const DOOR_NAMES_PER_PASS = 8; // property door labels renamed per pass (greymarchDoorNamesApply); the rest follow 250 ms later
+const DOOR_FORM_TYPE = 29; // FormType.Door
 const TGM_CARRY = 100000; // staff TGM: carry weight added while it is on (no carry limit, like the console's tgm), taken off again when it is switched off
 const WOLF_KEY_WAIT_MS = 600; // Z with Beast Form equipped: how long the game gets to cast it before the press itself is reported (greymarchWolfTick)
 const SHAPE_REST_MS = 800, SHAPE_POWER_REST_MS = 1600; // a creature's attacks: the rest after a normal and after a power attack (the server allows the same pace)
@@ -3784,18 +3786,29 @@ export class GreymarchBridge {
     }    greymarchDoorNamesApply(now: any): any {
         if (now < (this.greymarchDoorNamesNext || 0)) return;
         this.greymarchDoorNamesNext = now + 3000;
+        // SAFE NAMING (2026-10-28): every game froze right after the world loaded while naming 125 owned doors in one go, on a plain room door (fe01ad6f, JK's
+        // Palace of the Kings) the game does not keep in memory. Now a door is only named when it really is a door with that id and its 3D is loaded (a door
+        // further away is named when the player comes near), at most DOOR_NAMES_PER_PASS per pass, with a crash breadcrumb before each, so a door that ever hangs
+        // the game again is the last line of greymarch-crumbs-logs.txt.
+        var budget = DOOR_NAMES_PER_PASS;
         var want = this.greymarchDoorNames || {};
         var done = this.greymarchDoorNamesDone || (this.greymarchDoorNamesDone = {});
         var orig = this.greymarchDoorOrig || (this.greymarchDoorOrig = {}); // the game's own name of each door we have renamed
         var sp = this.sp;
         for (var id in want) {
+            if (budget <= 0) { this.greymarchDoorNamesNext = now + 250; break; } // more to do: the next pass comes sooner
             var w = want[id];
             var label = typeof w === "string" ? w : String((w && w.label) || "");
             var owner = typeof w === "string" ? "" : String((w && w.owner) || "");
             var local = misc.remoteIdToLocalId(Number(id));
             if (!local) continue;
             var o: any = null;
+            var looked = this.greymarchDoorLooked || (this.greymarchDoorLooked = {});
+            if (!looked[id]) { looked[id] = 1; this.greymarchCrumb("door name: first look-up of " + Number(id).toString(16)); } // once per door, not every pass
             try { o = sp.ObjectReference.from(sp.Game.getFormEx(local)); } catch (e0) { o = null; }
+            var isDoor = false;
+            try { isDoor = !!o && (o.getFormID() >>> 0) === (local >>> 0) && !!o.getBaseObject() && o.getBaseObject().getType() === DOOR_FORM_TYPE && o.is3DLoaded(); } catch (eD) { isDoor = false; }
+            if (o && !isDoor) continue; // not a loaded door with that id (yet): tried again on a later pass
             if (!o) {
                 if (!this.greymarchDoorMiss) this.greymarchDoorMiss = {};
                 if (!this.greymarchDoorMiss[id]) { this.greymarchDoorMiss[id] = 1; this.greymarchLog("props: door " + Number(id).toString(16) + " is not loaded here (local " + local.toString(16) + ")"); }
@@ -3806,6 +3819,8 @@ export class GreymarchBridge {
                 var base = label || orig[id];
                 var text = owner ? base + " - Owned by: " + owner : base; // one line: a line break in a display name is not reliably drawn by the game's prompt
                 if (text.length && String(o.getDisplayName()) !== text) {
+                    budget--;
+                    this.greymarchCrumb("door name: rename " + Number(id).toString(16));
                     o.setDisplayName(text, true);
                     if (done[id] !== text) this.greymarchLog("props: door " + Number(id).toString(16) + " (local " + local.toString(16) + ") named '" + text + "', reads back '" + String(o.getDisplayName()) + "'"); // once per change, so the server log shows whether the game kept the name
                 }

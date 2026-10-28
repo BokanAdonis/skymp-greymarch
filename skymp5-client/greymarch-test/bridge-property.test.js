@@ -10,7 +10,7 @@ const src = fs.readFileSync(path.join(__dirname, "..", "src", "greymarch", "brid
 const js = ts.transpileModule(src, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2019 } }).outputText;
 
 function make() {
-  const log = { js: [], visible: [], focused: [], notes: [], lines: [], names: new Map() };
+  const log = { js: [], visible: [], focused: [], notes: [], lines: [], names: new Map(), crumbs: [] };
   const misc = { remoteIdToLocalId: (id) => (id === 0xdead ? 0 : id + 0x1000), localIdToRemoteId: (id) => (id >= 0x1000 ? id - 0x1000 : 0), getViewFromStorage: () => null };
   const mods = { "../messages": { MsgType: { CustomPacket: 77 } }, "../view/worldViewMisc": misc, "../sync/appearance": {}, "../services/services/remoteServer": { RemoteServer: {} }, "../services/services/singlePlayerService": { SinglePlayerService: {} } };
   const mod = { exports: {} };
@@ -18,7 +18,7 @@ function make() {
   let crosshair = null;
   const objs = new Map();
   const objectFor = (local) => {
-    if (!objs.has(local)) objs.set(local, { local, name: "Door " + local.toString(16), getDisplayName() { return this.name; }, setDisplayName(n) { if (this.fail) throw new Error("no"); this.name = n; log.names.set(local, n); return true; } });
+    if (!objs.has(local)) objs.set(local, { local, name: "Door " + local.toString(16), type: 29, loaded: true, getFormID() { return local; }, getBaseObject() { const ty = this.type; return { getType: () => ty }; }, is3DLoaded() { return this.loaded; }, getDisplayName() { return this.name; }, setDisplayName(n) { if (this.fail) throw new Error("no"); this.name = n; log.names.set(local, n); return true; } });
     return objs.get(local);
   };
   const sp = {
@@ -32,6 +32,7 @@ function make() {
   };
   const controller = { on() {}, emitter: { on() {}, emit() {} } };
   const gm = new mod.exports.GreymarchBridge(sp, controller);
+  gm.greymarchCrumb = (c) => log.crumbs.push(c);
   const toPage = () => log.js.filter((x) => x.includes("__gmMenuSend(")).map((x) => JSON.parse(x.slice(x.lastIndexOf("__gmMenuSend(") + 13).replace(/\);$/, "")));
   const look = (localId, baseType) => { crosshair = { getFormID: () => localId, getBaseObject: () => (baseType === undefined ? null : { getType: () => baseType }) }; };
   return { gm, log, toPage, look, objectFor };
@@ -120,4 +121,29 @@ test("a redesignation, a new owner and a removed owner all change what the door 
   gm.greymarchPacket({ customPacketType: "greymarchProps", doors: { 512: { label: "", owner: "" } } }); // nothing left but the base name
   gm.greymarchDoorNamesApply(10004);
   assert.strictEqual(objectFor(0x1200).name, "Door 1200", "back to the game's own name");
+});
+
+test("door names, safely (2026-10-28: games froze naming 125 doors at once): only a loaded door with that id, at most 8 per pass with the rest 250 ms later, a breadcrumb before each", () => {
+  const { gm, objectFor, log } = make();
+  const doors = {};
+  for (let i = 0; i < 12; i++) doors[0x600 + i] = { label: "House " + i, owner: "Alda Ring" };
+  doors[0x700] = { label: "Not a door", owner: "" };
+  doors[0x701] = { label: "Far room", owner: "" };
+  objectFor(0x1700).type = 24; // a static, not a door
+  objectFor(0x1701).loaded = false; // a door whose cell is not loaded here
+  gm.greymarchPacket({ customPacketType: "greymarchProps", doors });
+  gm.greymarchDoorNamesApply(10000);
+  assert.strictEqual(log.crumbs.filter((c) => c.startsWith("door name: rename")).length, 8, "eight renamed in the first pass");
+  assert.strictEqual(objectFor(0x1608).name, "Door 1608", "the ninth waits");
+  assert.deepStrictEqual(log.crumbs.slice(0, 2), ["door name: first look-up of 600", "door name: rename 600"], "the breadcrumb comes before the game is touched");
+  gm.greymarchDoorNamesApply(10200);
+  assert.strictEqual(objectFor(0x1608).name, "Door 1608", "the next pass comes 250 ms later, not sooner");
+  gm.greymarchDoorNamesApply(10250);
+  for (let i = 0; i < 12; i++) assert.strictEqual(objectFor(0x1600 + i).name, "House " + i + " - Owned by: Alda Ring");
+  assert.strictEqual(objectFor(0x1700).name, "Door 1700", "something that is not a door is never renamed");
+  assert.strictEqual(objectFor(0x1701).name, "Door 1701", "a door that is not loaded is left alone");
+  objectFor(0x1701).loaded = true;
+  gm.greymarchDoorNamesApply(13250);
+  assert.strictEqual(objectFor(0x1701).name, "Far room", "and named once it loads");
+  assert.strictEqual(log.crumbs.filter((c) => c === "door name: first look-up of 701").length, 1, "the look-up breadcrumb is written once per door, not every pass");
 });
