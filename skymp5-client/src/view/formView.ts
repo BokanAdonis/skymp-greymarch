@@ -1,9 +1,14 @@
 import { Actor, ActorBase, Cell, Race, createText, Debug, destroyText, Form, FormType, Game, Keyword, NetImmerse, ObjectReference, once, printConsole, setTextColor, setTextPos, setTextSize, setTextString, storage, TESModPlatform, Utility, WorldSpace, worldPointToScreenPoint, writeLogs } from "skyrimPlatform";
 import { setDefaultAnimsDisabled, applyAnimation, allowAttackAnim } from "../sync/animation";
+const GM_PUPPET_MINE_FRESH_MS = 2500; // the server's word that an animal hunts this player holds this long (it repeats it at least once a second)
+const GM_PUPPET_LOCAL_EVERY_MS = 100; // a hunting animal is moved here this often
+const GM_PUPPET_REPORT_EVERY_MS = 200; // and its place reported this often
+const GM_PUPPET_HOLD = 140; // in a fight it waits until the player is this far past its reach (the server's HOLD, wildlifebrain.js)
 const GM_PUPPET_LUNGE_MS = 1100; // a server-driven animal's lunge: its animation moves it this long, not the frames (gmPuppetMove, 2026-10-28)
 import { Appearance, applyAppearance } from "../sync/appearance";
 import { isBadMenuShown, applyEquipment } from "../sync/equipment";
 import { RespawnNeededError } from "../lib/errors";
+import { MsgType } from "../messages";
 import { FormModel } from "./model";
 import { applyMovement } from "../sync/movementApply";
 import { Movement } from "../sync/movement";
@@ -998,7 +1003,7 @@ export class FormView {
     }
     try { if (ac.isInCombat()) ac.stopCombat(); } catch (e) { /* next frame */ }
     // the bridge's frames: through the global first (see bridge.ts greymarchBeastFrames, 2026-10-28), storage as before
-    const frames = ((Function("return this")() as any).__gmBeastFrames || storage["greymarchBeastFrames"] || {}) as Record<string, { pos: number[]; heading: number; speed: number; anim: string; at: number; hp?: number; hunt?: number; ev?: string }>;
+    const frames = ((Function("return this")() as any).__gmBeastFrames || storage["greymarchBeastFrames"] || {}) as Record<string, { pos: number[]; heading: number; speed: number; anim: string; at: number; hp?: number; hunt?: number; ev?: string; mine?: number; reach?: number; run?: number }>;
     const f = frames[String(this.remoteRefrId)];
     const now = Date.now();
     // breadcrumbs (2026-10-28, animals that never moved): the first frame played for this animal, or, 3 s after it was first seen, that none was found
@@ -1014,7 +1019,10 @@ export class FormView {
       try { allowAttackAnim(ac.getFormID(), f.ev); Debug.sendAnimationEvent(ac, f.ev); } catch (e) { /* the server already counted the bite */ }
       return "";
     }
-    if (now < this.gmPuppetLungeUntil) return "";
+    if (now < this.gmPuppetLungeUntil) { if (f && f.mine === 1) this.gmPuppetReport(refr, now); return ""; }
+    // IT HUNTS THIS PLAYER (2026-10-28, the owner: the wolves still teleported): this game moves it, toward where the player really is (the server knows that
+    // a moment late), and reports where it is; the server still decides every bite and lunge
+    if (f && f.mine === 1 && f.hunt === 1 && now - f.at < GM_PUPPET_MINE_FRESH_MS && this.movState.everApplied) return this.gmPuppetDriveLocal(refr, ac, model, f, now);
     let m: Movement | null = null;
     if (!f) {
       if (this.movState.everApplied) return "";
@@ -1052,6 +1060,60 @@ export class FormView {
       if (!this.gmPuppetAttackCrumbed) { this.gmPuppetAttackCrumbed = true; let drawn = "?"; try { drawn = String(ac.isWeaponDrawn()); } catch (e) { /* unknown */ } gmCrumb("puppet " + gmHex(this.remoteRefrId as number) + ": first attack played: " + ev + " (fighting stance " + drawn + ")"); }
     }
     return "";
+  }
+  // GREYMARCH: a server-driven animal that hunts this player, moved here (2026-10-28): it runs toward the player until in reach, then stands facing them and
+  // bites when the server says; in a fight it waits until the player is GM_PUPPET_HOLD past its reach. Its place goes to the server (gmPuppetReport).
+  private gmPuppetDriveLocal(refr: ObjectReference, ac: Actor, model: FormModel, f: { pos: number[]; heading: number; speed: number; anim: string; at: number; hp?: number; ev?: string; reach?: number; run?: number }, now: number): string {
+    if (f.anim === "attack" && f.at !== this.gmPuppetAttackAt) {
+      this.gmPuppetAttackAt = f.at;
+      const ev = f.ev || "attackStart";
+      try { allowAttackAnim(ac.getFormID(), ev); Debug.sendAnimationEvent(ac, ev); } catch (e) { /* the server already counted the bite */ }
+    }
+    if (now - this.gmPuppetLocalAt < GM_PUPPET_LOCAL_EVERY_MS) return "";
+    this.gmPuppetLocalAt = now;
+    const me = Game.getPlayer();
+    if (!me) return "";
+    const px = me.getPositionX(), py = me.getPositionY(), pz = me.getPositionZ();
+    const wx = refr.getPositionX(), wy = refr.getPositionY(), wz = refr.getPositionZ();
+    const dx = px - wx, dy = py - wy;
+    const d = Math.sqrt(dx * dx + dy * dy) || 1;
+    const reach = f.reach || 150, run = f.run || 400;
+    const heading = ((Math.atan2(dx, dy) * 180) / Math.PI + 360) % 360; // Skyrim: 0 is north (+y), clockwise
+    let tx = wx, ty = wy, tz = wz, moving = false;
+    if (d <= reach) this.gmPuppetEngaged = true;
+    else if (!(this.gmPuppetEngaged && d <= reach + GM_PUPPET_HOLD)) {
+      this.gmPuppetEngaged = false;
+      const go = Math.min(d - reach * 0.8, run * 0.2); // a fifth of a second ahead: translateTo gets there at its run speed
+      if (go > 5) { moving = true; tx = wx + (dx / d) * go; ty = wy + (dy / d) * go; tz = wz + (pz - wz) * Math.min(1, go / d); }
+    }
+    const m = { ...model.movement, pos: [tx, ty, tz], rot: [0, 0, heading], runMode: moving ? "Running" : "Standing", direction: 0, speed: 0, isInJumpState: false, isSneaking: false, isBlocking: false, isWeapDrawn: true, ...(typeof f.hp === "number" ? { healthPercentage: Math.max(0.02, f.hp) } : {}) } as Movement;
+    this.movState.lastApply = now;
+    try {
+      applyMovement(refr, m, false);
+      if (!moving && Math.abs(((refr.getAngleZ() - heading + 540) % 360) - 180) > 20) refr.setAngle(0, 0, heading); // standing: it turns to face the player
+    } catch (e) {
+      if (e instanceof RespawnNeededError) {
+        this.lastWorldOrCell = m.worldOrCell;
+        this.destroy();
+        this.refrId = 0;
+        this.appearanceBasedBaseId = 0;
+        return "respawn";
+      }
+      throw e;
+    }
+    if (!this.gmPuppetDriveCrumbed) { this.gmPuppetDriveCrumbed = true; gmCrumb("puppet " + gmHex(this.remoteRefrId as number) + ": hunts this player, moved here (" + Math.round(d) + " away)"); }
+    this.gmPuppetReport(refr, now);
+    return "";
+  }
+  // where this game has a hunting animal, to the server (wildlifesystem.js handlePacket greymarchBeastPos), at most every GM_PUPPET_REPORT_EVERY_MS
+  private gmPuppetReport(refr: ObjectReference, now: number): void {
+    if (now - this.gmPuppetReportAt < GM_PUPPET_REPORT_EVERY_MS) return;
+    this.gmPuppetReportAt = now;
+    try {
+      const pos = [refr.getPositionX(), refr.getPositionY(), refr.getPositionZ()].map((n) => Math.round(n));
+      const message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchBeastPos", id: this.remoteRefrId, pos, h: Math.round(refr.getAngleZ()) }) };
+      SpApiInteractor.getControllerInstance().emitter.emit("sendMessage", { message: message, reliability: "unreliable" } as any);
+    } catch (e) { /* the next one */ }
   }
   // GREYMARCH: an NPC this game hosts, checked once a second (greymarch/npcHosting.ts). "released" when it was handed on.
   private gmHostedTick(refr: ObjectReference): string {
@@ -1143,6 +1205,10 @@ export class FormView {
   private gmPuppetAttackAt = 0;
   private gmPuppetAttackCrumbed = false; // breadcrumbs: the first attack played
   private gmPuppetLungeUntil = 0; // a lunge's animation moves it until then (gmPuppetMove)
+  private gmPuppetLocalAt = 0; // a hunting animal moved here (gmPuppetDriveLocal)
+  private gmPuppetReportAt = 0; // its place last reported
+  private gmPuppetEngaged = false; // in a fight: waits until the player is GM_PUPPET_HOLD past its reach
+  private gmPuppetDriveCrumbed = false; // breadcrumbs: first moved here
 
   private tryHostIfNeed(ac: Actor, remoteId: number) {
     if (isReleased(remoteId, Date.now())) return false; // GREYMARCH: this game handed it to a closer player a moment ago (greymarch/npcHosting.ts)

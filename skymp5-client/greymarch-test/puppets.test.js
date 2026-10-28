@@ -159,11 +159,40 @@ test("a lunge is carried by its animation, not placed by the frames too (2026-10
   const lunge = fn.indexOf("/power|lunge/i.test(f.ev)");
   const apply = fn.indexOf("applyMovement(refr");
   assert.ok(lunge > 0 && lunge < apply, "a lunge is played before any movement is applied");
-  assert.ok(fn.indexOf("if (now < this.gmPuppetLungeUntil) return \"\";") > lunge && fn.indexOf("if (now < this.gmPuppetLungeUntil) return \"\";") < apply, "and none is applied while it lasts");
+  const wait = fn.indexOf("if (now < this.gmPuppetLungeUntil) {");
+  assert.ok(wait > lunge && wait < apply && fn.slice(wait, wait + 200).includes('return ""; }'), "and none is applied while it lasts (its place is still reported when it hunts this player)");
   assert.match(formView, /const GM_PUPPET_LUNGE_MS = \d+;/);
 });
 
 test("a hunting animal is not placed ahead of its frame (2026-10-28, the owner's clip: wolves teleported on the player)", () => {
   const fn = formView.slice(formView.indexOf("private gmPuppetMove("), formView.indexOf("private tryHostIfNeed("));
   assert.ok(fn.includes("speed: f.hunt === 1 ? 0 : f.speed"));
+});
+
+test("an animal that hunts THIS player is moved by this game and its place reported (2026-10-28, the owner: still teleporting; the bigger fix)", () => {
+  const B = bridgeClass();
+  const gl = Function("return this")();
+  delete gl.__gmBeastFrames;
+  try {
+    B.prototype.greymarchBeastFrames.call({ sp: { storage: {} } }, { f: [[0xff0000f1, 1, 2, 3, 0, 0, "run", 1, 1, "", 1, 170, 500], [0xff0000f2, 1, 2, 3, 0, 0, "run", 1, 1], [0xff0000f3, 1, 2, 3, 0, 0, "run", 1, 1, "", 1, "x", 500]] });
+    const fr = gl.__gmBeastFrames;
+    assert.strictEqual(fr[String(0xff0000f1)].mine, 1);
+    assert.strictEqual(fr[String(0xff0000f1)].reach, 170);
+    assert.strictEqual(fr[String(0xff0000f1)].run, 500);
+    assert.strictEqual(fr[String(0xff0000f2)].mine, undefined, "it hunts another player: the server's frames");
+    assert.strictEqual(fr[String(0xff0000f3)].mine, undefined, "only with its numbers");
+  } finally { delete gl.__gmBeastFrames; }
+  const fn = formView.slice(formView.indexOf("private gmPuppetMove("), formView.indexOf("private tryHostIfNeed("));
+  assert.ok(fn.includes("if (f && f.mine === 1 && f.hunt === 1 && now - f.at < GM_PUPPET_MINE_FRESH_MS && this.movState.everApplied) return this.gmPuppetDriveLocal(refr, ac, model, f, now);"), "its own game moves it");
+  const drive = formView.slice(formView.indexOf("private gmPuppetDriveLocal("), formView.indexOf("private gmPuppetReport("));
+  assert.ok(drive.includes("Game.getPlayer()") && drive.includes("applyMovement(refr, m, false)") && drive.includes("this.gmPuppetReport(refr, now)"), "toward where the player really is, reported");
+  assert.ok(drive.includes("Debug.sendAnimationEvent(ac, ev)"), "the server's bites still play");
+  const rep = formView.slice(formView.indexOf("private gmPuppetReport("), formView.indexOf("private gmHostedTick("));
+  assert.ok(rep.includes('customPacketType: "greymarchBeastPos"') && rep.includes("GM_PUPPET_REPORT_EVERY_MS"), "the report, at most every so often");
+});
+
+test("a dying body is not killed again a second later (2026-10-28, the owner: a bark a second after the death sound)", () => {
+  const hosting = fs.readFileSync(path.join(__dirname, "..", "src", "greymarch", "npcHosting.ts"), "utf8");
+  const m = hosting.match(/export const BODY_KILL_EVERY_MS = (\d+);/);
+  assert.ok(m && Number(m[1]) >= 5000, "seconds, not one: the death animation plays out first");
 });

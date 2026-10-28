@@ -30,7 +30,9 @@ export const RELEASE_HOLD_MS = 8000; // a game that let an NPC go does not ask f
 export const ENGAGE_MAX_DIST = 3000; // another player farther than this from the NPC is never made its target
 export const CHECK_EVERY_MS = 1000;
 export const UNLOADED_RELEASE_MS = 2000; // a hosted NPC whose body this game has not loaded for this long is let go (FLOATING NPCs above)
-export const BODY_KILL_EVERY_MS = 1000; // a dead NPC's body shown here is made dead at most this often (BODIES above)
+// a dead NPC's body shown here is made dead at most this often (BODIES above). 6 s since 2026-10-28 (the owner: a wolf barked a second after its death
+// sound): while its death animation plays the game does not count it dead yet, so a second later it was killed again and cried again
+export const BODY_KILL_EVERY_MS = 6000;
 export const FLAT_MIN_MOVE = 250; // LOCKED HEIGHT: a one-second step this long ...
 export const FLAT_MAX_DZ = 1; // ... with less height change than this counts as flat
 export const FLAT_STEPS = 3; // this many flat steps in a row: rebuilt where it stands ("reground")
