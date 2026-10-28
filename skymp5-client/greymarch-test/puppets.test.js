@@ -104,7 +104,7 @@ test("a server-driven animal's health bar follows the server's health in its fra
     assert.strictEqual(fr[String(0xff0000c3)].hp, 1, "kept to 0..1");
   } finally { delete gl.__gmBeastFrames; }
   const fn = formView.slice(formView.indexOf("private gmPuppetMove("), formView.indexOf("private tryHostIfNeed("));
-  assert.ok(fn.includes('...(typeof f.hp === "number" ? { healthPercentage: f.hp } : {})'), "the movement played carries it (applyMovement sets the bar)");
+  assert.ok(fn.includes('...(typeof f.hp === "number" ? { healthPercentage: Math.max(0.02, f.hp) } : {})'), "the movement played carries it (applyMovement sets the bar), never 0 (the death comes from the server, with its sound)");
 });
 
 test("a server-driven animal's attack is let through the anim hook (2026-10-28, the owner: hostile encounter animals did no attack animation)", () => {
@@ -123,4 +123,19 @@ test("a server-driven animal's attack is let through the anim hook (2026-10-28, 
   assert.strictEqual(send("attackStart"), "", "once");
   const fn = formView.slice(formView.indexOf("private gmPuppetMove("), formView.indexOf("private tryHostIfNeed("));
   assert.ok(/allowAttackAnim\(ac\.getFormID\(\), "attackStart"\);\s*Debug\.sendAnimationEvent\(ac, "attackStart"\)/.test(fn), "gmPuppetMove allows its attackStart before sending it");
+});
+
+test("a hunting server-driven animal stands in its fighting stance, where its attack plays (2026-10-28, the owner: still no attack animations)", () => {
+  const B = bridgeClass();
+  const gl = Function("return this")();
+  delete gl.__gmBeastFrames;
+  try {
+    B.prototype.greymarchBeastFrames.call({ sp: { storage: {} } }, { f: [[0xff0000d1, 1, 2, 3, 0, 0, "run", 1, 1], [0xff0000d2, 1, 2, 3, 0, 0, "idle", 1, 0], [0xff0000d3, 1, 2, 3, 0, 0, "idle", 1]] });
+    const fr = gl.__gmBeastFrames;
+    assert.strictEqual(fr[String(0xff0000d1)].hunt, 1);
+    assert.strictEqual(fr[String(0xff0000d2)].hunt, undefined);
+    assert.strictEqual(fr[String(0xff0000d3)].hunt, undefined, "an older server: not hunting");
+  } finally { delete gl.__gmBeastFrames; }
+  const fn = formView.slice(formView.indexOf("private gmPuppetMove("), formView.indexOf("private tryHostIfNeed("));
+  assert.ok(fn.includes('isWeapDrawn: f.hunt === 1 || f.anim === "attack"'), "hunting or attacking: the fighting stance");
 });

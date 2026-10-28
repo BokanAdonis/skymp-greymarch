@@ -997,7 +997,7 @@ export class FormView {
     }
     try { if (ac.isInCombat()) ac.stopCombat(); } catch (e) { /* next frame */ }
     // the bridge's frames: through the global first (see bridge.ts greymarchBeastFrames, 2026-10-28), storage as before
-    const frames = ((Function("return this")() as any).__gmBeastFrames || storage["greymarchBeastFrames"] || {}) as Record<string, { pos: number[]; heading: number; speed: number; anim: string; at: number; hp?: number }>;
+    const frames = ((Function("return this")() as any).__gmBeastFrames || storage["greymarchBeastFrames"] || {}) as Record<string, { pos: number[]; heading: number; speed: number; anim: string; at: number; hp?: number; hunt?: number }>;
     const f = frames[String(this.remoteRefrId)];
     const now = Date.now();
     // breadcrumbs (2026-10-28, animals that never moved): the first frame played for this animal, or, 3 s after it was first seen, that none was found
@@ -1011,7 +1011,10 @@ export class FormView {
     } else {
       if (f.at === this.gmPuppetAt && now - this.movState.lastApply < 1000) return "";
       this.gmPuppetAt = f.at;
-      m = { ...model.movement, pos: [f.pos[0], f.pos[1], f.pos[2]], rot: [0, 0, f.heading], runMode: f.anim === "run" ? "Running" : f.anim === "walk" ? "Walking" : "Standing", direction: 0, speed: f.speed, isInJumpState: false, isSneaking: false, isBlocking: false, isWeapDrawn: false, ...(typeof f.hp === "number" ? { healthPercentage: f.hp } : {}) }; // the server's health on the bar (2026-10-28)
+      m = { ...model.movement, pos: [f.pos[0], f.pos[1], f.pos[2]], rot: [0, 0, f.heading], runMode: f.anim === "run" ? "Running" : f.anim === "walk" ? "Walking" : "Standing", direction: 0, speed: f.speed, isInJumpState: false, isSneaking: false, isBlocking: false, isWeapDrawn: f.hunt === 1 || f.anim === "attack", ...(typeof f.hp === "number" ? { healthPercentage: Math.max(0.02, f.hp) } : {}) };
+      // the server's health on the bar (2026-10-28). Never 0 here: at 0 the game held it dying, and the server's death then came as a quiet one (the owner:
+      // no death sound); the death itself comes from the server (applyDeathState). isWeapDrawn: hunting, it stands in its fighting stance (the owner: no
+      // attack animations; a creature attacks only from there)
     }
     this.movState.lastApply = now;
     try {
@@ -1031,6 +1034,7 @@ export class FormView {
       this.gmPuppetAttackAt = f.at;
       // allowed first: the anim hook blanks attacks on actors with default anims off (2026-10-28, the owner: no attack animations)
       try { allowAttackAnim(ac.getFormID(), "attackStart"); Debug.sendAnimationEvent(ac, "attackStart"); } catch (e) { /* the server already counted the bite */ }
+      if (!this.gmPuppetAttackCrumbed) { this.gmPuppetAttackCrumbed = true; let drawn = "?"; try { drawn = String(ac.isWeaponDrawn()); } catch (e) { /* unknown */ } gmCrumb("puppet " + gmHex(this.remoteRefrId as number) + ": first attack played (fighting stance " + drawn + ")"); }
     }
     return "";
   }
@@ -1122,6 +1126,7 @@ export class FormView {
   private gmPuppetReady = false;
   private gmPuppetAt = 0;
   private gmPuppetAttackAt = 0;
+  private gmPuppetAttackCrumbed = false; // breadcrumbs: the first attack played
 
   private tryHostIfNeed(ac: Actor, remoteId: number) {
     if (isReleased(remoteId, Date.now())) return false; // GREYMARCH: this game handed it to a closer player a moment ago (greymarch/npcHosting.ts)
