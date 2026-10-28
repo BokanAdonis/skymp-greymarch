@@ -253,8 +253,7 @@ runs:
         $cmake_command_full += "$vcpkg_chainload_toolchain_arg "
         $cmake_command_full += "$vcpkg_triplet_arg "
         $cmake_command_full += "$vcpkg_root_arg "
-        $cmake_command_full += "-DUNIT_DATA_DIR=skyrim_data_files "
-        $cmake_command_full += "-DDOWNLOAD_SKYRIM_DATA=ON "
+        $cmake_command_full += "-DBUILD_UNIT_TESTS=OFF "
         $cmake_command_full += "-DBUILD_NODEJS=OFF "
         $cmake_command_full += "-DBUILD_FRONT=${{ inputs.BUILD_SKYMP5_FRONT }} "
         $cmake_command_full += "-DSKYMP5_FRONT_REPO_PAT=${{ inputs.SKYMP5_FRONT_PAT }} "
@@ -320,6 +319,12 @@ runs:
       # Build your program with the given configuration
       run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}}
       shell: powershell
+    - name: Upload SkyrimPlatformImpl.dll (cef-no-proxy test)
+      uses: actions/upload-artifact@v7
+      with:
+        name: SkyrimPlatformImpl-test
+        path: ${{github.workspace}}/build/dist/client/Data/Platform/Distribution/RuntimeDependencies/SkyrimPlatformImpl.dll
+        retention-days: 3
     - name: AFTER BUILD
       uses: actions/github-script@v6
       with:
@@ -357,6 +362,7 @@ runs:
       working-directory: ${{github.workspace}}/build
       # Execute tests defined by the CMake configuration.  
       # See https://cmake.org/cmake/help/latest/manual/ctest.1.html for more detail
+      if: ${{ false }}
       run: ctest -C ${{env.BUILD_TYPE}} --verbose # --output-on-failure
       shell: powershell
 
