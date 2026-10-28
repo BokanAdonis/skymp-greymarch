@@ -2379,7 +2379,8 @@ export class GreymarchBridge {
                 // f[7]: the server's health, 0..1 (2026-10-28: the bar of a server-driven animal; an older server sends seven values)
                 const hp = typeof f[7] === "number" && isFinite(f[7]) ? Math.max(0, Math.min(1, f[7])) : undefined;
                 // f[8]: hunting (1: after a player; formView holds it in its fighting stance, where a creature's attack plays; 2026-10-28)
-                frames[String(id)] = { pos: [f[1], f[2], f[3]], heading: f[4], speed: f[5], anim: String(f[6]).slice(0, 12), at: now, ...(hp !== undefined ? { hp } : {}), ...(f[8] === 1 ? { hunt: 1 } : {}) };
+                frames[String(id)] = { pos: [f[1], f[2], f[3]], heading: f[4], speed: f[5], anim: String(f[6]).slice(0, 12), at: now, ...(hp !== undefined ? { hp } : {}), ...(f[8] === 1 ? { hunt: 1 } : {}), ...(typeof f[9] === "string" && f[9].length < 64 && /^[A-Za-z0-9_]+$/.test(f[9]) && /attack/i.test(f[9]) ? { ev: f[9] } : {}) };
+                // f[9]: on an attack, the creature's own attack event (a creature does not answer a person's "attackStart"; 2026-10-28)
             }
             if ((this.greymarchBeastSweepAt || 0) < now - 10000) {
                 this.greymarchBeastSweepAt = now;

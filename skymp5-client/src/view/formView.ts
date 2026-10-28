@@ -997,7 +997,7 @@ export class FormView {
     }
     try { if (ac.isInCombat()) ac.stopCombat(); } catch (e) { /* next frame */ }
     // the bridge's frames: through the global first (see bridge.ts greymarchBeastFrames, 2026-10-28), storage as before
-    const frames = ((Function("return this")() as any).__gmBeastFrames || storage["greymarchBeastFrames"] || {}) as Record<string, { pos: number[]; heading: number; speed: number; anim: string; at: number; hp?: number; hunt?: number }>;
+    const frames = ((Function("return this")() as any).__gmBeastFrames || storage["greymarchBeastFrames"] || {}) as Record<string, { pos: number[]; heading: number; speed: number; anim: string; at: number; hp?: number; hunt?: number; ev?: string }>;
     const f = frames[String(this.remoteRefrId)];
     const now = Date.now();
     // breadcrumbs (2026-10-28, animals that never moved): the first frame played for this animal, or, 3 s after it was first seen, that none was found
@@ -1033,8 +1033,10 @@ export class FormView {
     if (f && f.anim === "attack" && f.at !== this.gmPuppetAttackAt) {
       this.gmPuppetAttackAt = f.at;
       // allowed first: the anim hook blanks attacks on actors with default anims off (2026-10-28, the owner: no attack animations)
-      try { allowAttackAnim(ac.getFormID(), "attackStart"); Debug.sendAnimationEvent(ac, "attackStart"); } catch (e) { /* the server already counted the bite */ }
-      if (!this.gmPuppetAttackCrumbed) { this.gmPuppetAttackCrumbed = true; let drawn = "?"; try { drawn = String(ac.isWeaponDrawn()); } catch (e) { /* unknown */ } gmCrumb("puppet " + gmHex(this.remoteRefrId as number) + ": first attack played (fighting stance " + drawn + ")"); }
+      // the creature's own attack event from the server (2026-10-28, the owner: still no attack: a creature's body does not answer a person's "attackStart")
+      const ev = f.ev || "attackStart";
+      try { allowAttackAnim(ac.getFormID(), ev); Debug.sendAnimationEvent(ac, ev); } catch (e) { /* the server already counted the bite */ }
+      if (!this.gmPuppetAttackCrumbed) { this.gmPuppetAttackCrumbed = true; let drawn = "?"; try { drawn = String(ac.isWeaponDrawn()); } catch (e) { /* unknown */ } gmCrumb("puppet " + gmHex(this.remoteRefrId as number) + ": first attack played: " + ev + " (fighting stance " + drawn + ")"); }
     }
     return "";
   }

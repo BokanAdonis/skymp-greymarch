@@ -56,7 +56,7 @@ test("a puppet is never hosted and never fights on its own: formView plays the f
   assert.match(fn, /setActorValue\("AttackDamageMult", 0\)/, "its own attack never hurts this player: the server already counted the bite");
   assert.match(fn, /stopCombat\(\)/);
   assert.match(fn, /f\.anim === "run" \? "Running" : f\.anim === "walk" \? "Walking" : "Standing"/);
-  assert.match(fn, /sendAnimationEvent\(ac, "attackStart"\)/);
+  assert.match(fn, /sendAnimationEvent\(ac, ev\)/); // the creature's own attack event, or attackStart (2026-10-28)
   assert.match(fn, /applyMovement\(refr, m as Movement, false\)/);
   assert.match(formView, /\(model as any\)\.greymarchPuppet === true/);
 });
@@ -122,7 +122,7 @@ test("a server-driven animal's attack is let through the anim hook (2026-10-28, 
   assert.strictEqual(send("attackStart"), "attackStart", "allowed: it plays");
   assert.strictEqual(send("attackStart"), "", "once");
   const fn = formView.slice(formView.indexOf("private gmPuppetMove("), formView.indexOf("private tryHostIfNeed("));
-  assert.ok(/allowAttackAnim\(ac\.getFormID\(\), "attackStart"\);\s*Debug\.sendAnimationEvent\(ac, "attackStart"\)/.test(fn), "gmPuppetMove allows its attackStart before sending it");
+  assert.ok(fn.includes('const ev = f.ev || "attackStart";') && fn.includes("try { allowAttackAnim(ac.getFormID(), ev); Debug.sendAnimationEvent(ac, ev);"), "gmPuppetMove allows the creature's attack (the server's, or attackStart) before sending it");
 });
 
 test("a hunting server-driven animal stands in its fighting stance, where its attack plays (2026-10-28, the owner: still no attack animations)", () => {
@@ -138,4 +138,18 @@ test("a hunting server-driven animal stands in its fighting stance, where its at
   } finally { delete gl.__gmBeastFrames; }
   const fn = formView.slice(formView.indexOf("private gmPuppetMove("), formView.indexOf("private tryHostIfNeed("));
   assert.ok(fn.includes('isWeapDrawn: f.hunt === 1 || f.anim === "attack"'), "hunting or attacking: the fighting stance");
+});
+
+test("a server-driven animal's attack is its creature's own event from the server (2026-10-28, the owner: still not fighting)", () => {
+  const B = bridgeClass();
+  const gl = Function("return this")();
+  delete gl.__gmBeastFrames;
+  try {
+    B.prototype.greymarchBeastFrames.call({ sp: { storage: {} } }, { f: [[0xff0000e1, 1, 2, 3, 0, 0, "attack", 1, 1, "attackStart_Attack2"], [0xff0000e2, 1, 2, 3, 0, 0, "attack", 1, 1], [0xff0000e3, 1, 2, 3, 0, 0, "attack", 1, 1, "Kill(); x"], [0xff0000e4, 1, 2, 3, 0, 0, "attack", 1, 1, "IdleForceDefaultState"]] });
+    const fr = gl.__gmBeastFrames;
+    assert.strictEqual(fr[String(0xff0000e1)].ev, "attackStart_Attack2");
+    assert.strictEqual(fr[String(0xff0000e2)].ev, undefined, "an older server: attackStart");
+    assert.strictEqual(fr[String(0xff0000e3)].ev, undefined, "only a plain event name");
+    assert.strictEqual(fr[String(0xff0000e4)].ev, undefined, "only an attack");
+  } finally { delete gl.__gmBeastFrames; }
 });
