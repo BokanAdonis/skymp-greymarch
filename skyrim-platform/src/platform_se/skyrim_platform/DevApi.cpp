@@ -170,6 +170,63 @@ Napi::Value DevApi::WritePlugin(const Napi::CallbackInfo& info)
   return info.Env().Undefined();
 }
 
+namespace {
+constexpr size_t kMaxCharGenPresetSize = 8 * 1024 * 1024;
+
+std::filesystem::path GetCharGenPresetPath(const std::string& name)
+{
+  if (name.empty() || name.size() > 64 ||
+      !ValidateFilename(name, /*allowDots*/ false)) {
+    throw InvalidArgumentException("name", name);
+  }
+  return std::filesystem::path("Data/SKSE/Plugins/CharGen/Presets") /
+    (name + ".jslot");
+}
+}
+
+// "" when the file is not there (RaceMenu missing, or nothing saved yet)
+Napi::Value DevApi::ReadCharGenPreset(const Napi::CallbackInfo& info)
+{
+  auto name = NapiHelper::ExtractString(info[0], "name");
+  auto path = GetCharGenPresetPath(name);
+
+  std::error_code err;
+  if (!std::filesystem::is_regular_file(path, err)) {
+    return Napi::String::New(info.Env(), "");
+  }
+  auto size = std::filesystem::file_size(path, err);
+  if (err || size > kMaxCharGenPresetSize) {
+    throw std::runtime_error("'" + path.string() + "' is too big or unreadable");
+  }
+  return Napi::String::New(info.Env(), Viet::ReadFileIntoString(path));
+}
+
+Napi::Value DevApi::WriteCharGenPreset(const Napi::CallbackInfo& info)
+{
+  auto name = NapiHelper::ExtractString(info[0], "name");
+  auto text = NapiHelper::ExtractString(info[1], "text");
+  auto path = GetCharGenPresetPath(name);
+  if (text.size() > kMaxCharGenPresetSize) {
+    throw std::runtime_error("preset text is too big");
+  }
+
+  std::error_code err;
+  CreateDirectoryRecursive(path.parent_path().string(), err);
+  if (err) {
+    throw std::runtime_error("Failed to create directory " +
+                             path.parent_path().string() + ": " +
+                             err.message());
+  }
+
+  std::ofstream f(path, std::ios::binary);
+  f << text;
+  f.close();
+  if (!f) {
+    throw std::runtime_error("Failed to write into " + path.string());
+  }
+  return info.Env().Undefined();
+}
+
 Napi::Value DevApi::GetPlatformVersion(const Napi::CallbackInfo& info)
 {
   constexpr auto kSkyrimPlatformVersion = "2.9.0";

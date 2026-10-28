@@ -15,6 +15,7 @@ import { LoadGameService } from "../services/services/loadGameService";
 import * as holdMod from "./bodyHold";
 import * as emoteMod from "./emotes";
 import * as templateFixMod from "./templateFix";
+import * as rmMod from "./racemenuLook";
 
 // Runs inside SkyMP's browser page (once). Each shows a page from Platform/UI in an iframe and relays its messages.
 const PAGE_SCRIPT = "(function(){if(window.__gmSend)return;var f=document.createElement('iframe');f.id='greymarch-frame';f.src='greymarch-select.html';f.style.cssText='position:fixed;left:0;top:0;width:100%;height:100%;border:0;z-index:2147483647;background:#05080d;display:none';var ready=false,queue=[];window.addEventListener('message',function(e){if(e.source!==f.contentWindow)return;var d=e.data;if(!d)return;if(d.greymarchReady){ready=true;queue.forEach(function(q){f.contentWindow.postMessage({greymarchIn:q},'*')});queue=[]}else if(d.greymarchOut&&window.skyrimPlatform){window.skyrimPlatform.sendMessage('greymarch',JSON.stringify(d.greymarchOut))}});window.__gmSend=function(m){f.style.display=m.fn==='hide'?'none':'block';if(ready)f.contentWindow.postMessage({greymarchIn:m},'*');else queue.push(m)};document.body.appendChild(f)})();";
@@ -193,6 +194,7 @@ export class GreymarchBridge {
         if (type === "greymarchWolfRoar") { if (Number(msg.actor) > 0) (this.greymarchWolfRoarQueue || (this.greymarchWolfRoarQueue = [])).push({ actor: Number(msg.actor), bear: !!msg.bear }); return; } // another player roared nearby: the sound on their NPC (greymarchWolfTick)
         if (type === "greymarchWolfAlphas") { var lists: any = {}; for (var lk in GM_WOLF_LISTS) lists[lk] = Array.isArray(msg[GM_WOLF_LISTS[lk]]) ? msg[GM_WOLF_LISTS[lk]] : []; this.greymarchWolfLists = lists; return; } // the other players in the Alpha form: drawn white (greymarchWolfAlphaOthers)
         if (type === "greymarchSpellCosts") { this.greymarchSpellCostWant = msg.costs && typeof msg.costs === "object" ? msg.costs : {}; this.greymarchSpellCostTold = {}; return; } // the Spells balance tab's costs (greymarchSpellCostTick)
+        if (type === "greymarchRaceMenuLook") { var rm0 = this.greymarchRmState(); rm0.want = msg.look && typeof msg.look === "object" ? msg.look : {}; rm0.tries = 0; return; } // RaceMenu's extra sliders of this character, kept by the server (greymarchRaceMenuTick)
         if (type === "greymarchVampire") { this.greymarchVampWant = msg.on ? msg : null; this.greymarchVampCostTold = {}; this.greymarchHudToPage("blood", { on: !!msg.on, blood: msg.blood, empty: !!msg.empty }); return; } // a vampire's state: the blood drop and what the game applies (greymarchVampTick)
         if (type === "greymarchVampLooks") { this.greymarchVampLookList = Array.isArray(msg.vampires) ? msg.vampires : []; if (Number(msg.me) > 0) this.greymarchMeActor = Number(msg.me) >>> 0; return; } // (me: which of them is this player: the ghosts and effects packets that also say so may not have come yet, and without it the player's own eyes and fangs were never put on) // how every vampire in the world looks (eyes and fangs)
         if (type === "greymarchVampFeed") { this.greymarchVampFeedWant = msg.on ? { role: msg.role, partner: msg.partner, at: Date.now(), done: false } : { off: true }; return; } // the feeding scene
@@ -456,6 +458,7 @@ export class GreymarchBridge {
         this.greymarchMagicBlockDrive(); // NPC raise-the-dead and summons: ended at once
         this.greymarchShapeDrive(); // a creature form as an NPC: moved every frame like SkyMP moves other players; other players' creature attacks
         this.greymarchShapeTick(); // a creature form staff put the player in (a goat, a giant ...): the server decides, the body is changed here
+        this.greymarchRaceMenuTick(Date.now()); // RaceMenu's extra sliders: sent when the race menu closes, put back after a relog (racemenuLook.ts)
         this.greymarchWolfTick(); // the werewolf form: the game's Beast Form power is the trigger, the server decides, the change is done here
         this.greymarchSpellCostTick(); // the Spells balance tab's costs on the spell records (GreymarchCamera.dll 1.5)
         this.greymarchVampTick(); // a vampire: powers and potions reported, the abilities the server names, no Restoration, the feeding scene
@@ -1373,6 +1376,78 @@ export class GreymarchBridge {
         var out = [], n = base.getNumHeadParts();
         for (var i = 0; i < n; i++) { var hp = base.getNthHeadPart(i); if (hp && hp.getType() === 0) out.push(hp); }
         return out;
+    }
+    // RaceMenu's extra sliders (racemenuLook.ts). A second after the race menu closes, this game exports RaceMenu's preset and sends the RaceMenu-only parts.
+    // The server sends this character's kept parts when it enters the world; 4 seconds after the player's 3D is there (SkyMP has applied the vanilla look
+    // by then) the look the player has now is exported, the kept parts put in and the result loaded. Nothing is loaded when the parts already match,
+    // and nothing while the race menu is open or the body is the werewolf or a creature (done again after changing back).
+    greymarchRmState(): any {
+        return this.greymarchRm || (this.greymarchRm = { menuWas: false, sendAt: 0, want: null, done: null, loadedSince: 0, next: 0, tries: 0, beast: false, said: {} });
+    }
+    greymarchRaceMenuTick(now: number): any {
+        var sp = this.sp, rm = this.greymarchRmState(), open = false;
+        try { open = !!sp.Ui.isMenuOpen("RaceSex Menu"); } catch (mErr) { open = false; }
+        if (rm.menuWas && !open) rm.sendAt = now + 1000; // RaceMenu finishes its own work as the menu closes
+        rm.menuWas = open;
+        if (open) { rm.sendAt = 0; return; } // RaceMenu is the editor while it is open
+        if (this.greymarchWolfOn || this.greymarchShapeOn) { rm.beast = true; rm.loadedSince = 0; return; }
+        if (rm.beast) { rm.beast = false; rm.done = null; rm.tries = 0; } // back in the character's own body: the sliders go on again
+        if (rm.sendAt && now >= rm.sendAt) { rm.sendAt = 0; this.greymarchRaceMenuReport(); return; }
+        if (rm.want === null || now < rm.next) return;
+        rm.next = now + 1000;
+        try {
+            var player = sp.Game.getPlayer();
+            if (!player || !player.is3DLoaded()) { rm.loadedSince = 0; return; }
+            if (!rm.loadedSince) rm.loadedSince = now;
+            if (now - rm.loadedSince < 4000) return;
+            var key = JSON.stringify(rm.want);
+            if (rm.done === key || rm.tries >= 3) return;
+            rm.tries++;
+            var current = this.greymarchRaceMenuExport(player);
+            if (!current) return;
+            if (rmMod.sameRaceMenuParts(current, rm.want)) { rm.done = key; rm.tries = 0; return; }
+            sp.writeCharGenPreset(rmMod.PRESET_NAME, JSON.stringify(rmMod.spliceRaceMenuParts(current, rm.want)));
+            var ok = sp.callNative("CharGen", "LoadCharacterPresetEx", undefined, player, rmMod.PRESET_NAME, null, rmMod.APPLY_ALL);
+            if (!ok) { this.greymarchLog("racemenu: RaceMenu did not load the kept sliders (try " + rm.tries + " of 3)"); return; }
+            rm.done = key; rm.tries = 0;
+            this.greymarchLog("racemenu: sliders put back (" + this.greymarchRaceMenuSay(rm.want) + ")");
+        } catch (err) {
+            this.greymarchLog("racemenu: the sliders could not be put back (try " + rm.tries + " of 3): " + err);
+        }
+    }
+    // RaceMenu's preset of the player's look right now, or null (no RaceMenu, or a SkyrimPlatform without readCharGenPreset). Logged once per reason.
+    greymarchRaceMenuExport(player: any): any {
+        var sp = this.sp, rm = this.greymarchRmState();
+        var say = (why: string) => { if (!rm.said[why]) { rm.said[why] = true; this.greymarchLog("racemenu: " + why); } return null; };
+        if (typeof sp.readCharGenPreset !== "function" || typeof sp.writeCharGenPreset !== "function") return say("this SkyrimPlatform cannot read RaceMenu presets, the extra sliders are not kept");
+        sp.writeCharGenPreset(rmMod.PRESET_NAME, ""); // a failed export is never mistaken for an older one
+        sp.callNative("CharGen", "SaveCharacterPreset", undefined, player, rmMod.PRESET_NAME);
+        var text = sp.readCharGenPreset(rmMod.PRESET_NAME);
+        if (!text) return say("RaceMenu wrote no preset (is RaceMenu installed?)");
+        return JSON.parse(text);
+    }
+    greymarchRaceMenuReport(): any {
+        var rm = this.greymarchRmState();
+        try {
+            var current = this.greymarchRaceMenuExport(this.sp.Game.getPlayer());
+            if (!current) return;
+            var parts = rmMod.pickRaceMenuParts(current);
+            rm.want = parts; rm.done = JSON.stringify(parts); rm.tries = 0; // what the player just made is on the body already
+            var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchRaceMenuLook", look: parts }) };
+            this.controller.emitter.emit("sendMessage", { message: message, reliability: "reliable" });
+            this.greymarchLog("racemenu: sent after the race menu (" + this.greymarchRaceMenuSay(parts) + ")");
+        } catch (err) {
+            this.greymarchLog("racemenu: the sliders could not be read: " + err);
+        }
+    }
+    greymarchRaceMenuSay(parts: any): string {
+        var out = [];
+        if (parts.morphs && parts.morphs.custom) out.push(parts.morphs.custom.length + " extra face sliders");
+        if (parts.morphs && parts.morphs.sculpt) out.push("sculpting");
+        if (parts.transforms) out.push(parts.transforms.length + " body scales");
+        if (parts.bodyMorphs) out.push(parts.bodyMorphs.length + " body morphs");
+        if (parts.overrides || parts.skinOverrides) out.push("overlays");
+        return out.length ? out.join(", ") : "none beyond the vanilla look";
     }
     greymarchVampEyePart(base: any, type: number): any { // the head part of that type a character's base wears now (2: eyes, 0: misc, the teeth)
         var n = base.getNumHeadParts();

@@ -12,6 +12,12 @@ Napi::Value GetPluginSourceCode(const Napi::CallbackInfo& info);
 
 Napi::Value WritePlugin(const Napi::CallbackInfo& info);
 
+// Greymarch: RaceMenu's preset files (Data/SKSE/Plugins/CharGen/Presets/<name>.jslot), the only full export of
+// its extra sliders (CharGen.SaveCharacterPreset / LoadCharacterPresetEx). Nothing else on disk is reachable.
+Napi::Value ReadCharGenPreset(const Napi::CallbackInfo& info);
+
+Napi::Value WriteCharGenPreset(const Napi::CallbackInfo& info);
+
 Napi::Value GetPlatformVersion(const Napi::CallbackInfo& info);
 
 Napi::Value GetJsMemoryUsage(const Napi::CallbackInfo& info);
@@ -51,6 +57,12 @@ inline void Register(Napi::Env env, Napi::Object& exports,
   exports.Set(
     "writePlugin",
     Napi::Function::New(env, NapiHelper::WrapCppExceptions(WritePlugin)));
+  exports.Set("readCharGenPreset",
+              Napi::Function::New(
+                env, NapiHelper::WrapCppExceptions(ReadCharGenPreset)));
+  exports.Set("writeCharGenPreset",
+              Napi::Function::New(
+                env, NapiHelper::WrapCppExceptions(WriteCharGenPreset)));
   exports.Set("getPlatformVersion",
               Napi::Function::New(
                 env, NapiHelper::WrapCppExceptions(GetPlatformVersion)));
