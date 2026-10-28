@@ -14,6 +14,8 @@ export declare function callNative(className: string, functionName: string, self
 export declare function getJsMemoryUsage(): number
 export declare function getPluginSourceCode(pluginName: string, overrideFolder?: string): string // overrideFolder is relative to Data/Platform
 export declare function writePlugin(pluginName: string, newSources: string, overrideFolder?: string): string // overrideFolder is relative to Data/Platform
+export declare function readCharGenPreset(name: string): string // Data/SKSE/Plugins/CharGen/Presets/<name>.jslot, "" when missing (Greymarch)
+export declare function writeCharGenPreset(name: string, text: string): void // Data/SKSE/Plugins/CharGen/Presets/<name>.jslot (Greymarch)
 export declare function getPlatformVersion(): string
 export declare function disableCtrlPrtScnHotkey(): void
 export declare function blockPapyrusEvents(block: boolean): void

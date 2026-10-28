@@ -235,6 +235,7 @@ export class AuthService extends ClientListener {
       case 'greymarchVampire':
       case 'greymarchSpellCosts':
       case 'greymarchVampLooks':
+      case 'greymarchRaceMenuLook':
       case 'greymarchVampFeed':
       case 'greymarchVampMist':
       case 'greymarchVampLord':
