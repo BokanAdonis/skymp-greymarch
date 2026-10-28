@@ -306,5 +306,11 @@ void MyChromiumApp::RunTasks()
 void MyChromiumApp::OnBeforeCommandLineProcessing(
   const CefString& aProcessType, CefRefPtr<CefCommandLine> aCommandLine)
 {
+  // The UI only loads local files and our own servers, so it never needs a
+  // proxy. Chromium 108 crashed reading the Windows proxy settings at startup
+  // on Windows Insider build 26300 (libcef.dll+4068754, CheckForChangesNow).
+  if (!aCommandLine->HasSwitch("no-proxy-server")) {
+    aCommandLine->AppendSwitch("no-proxy-server");
+  }
 }
 }
