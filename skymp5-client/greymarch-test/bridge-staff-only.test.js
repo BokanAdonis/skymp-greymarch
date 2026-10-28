@@ -1,5 +1,5 @@
 "use strict";
-// F7 (and H, B, F6) are for staff: the game asks the server ({ op: "check" }) before it opens the panel, and a player with no rank sees nothing.
+// F7 (and H, B, F6, and F8 for testers) are for staff: the game asks the server ({ op: "check" }) before it opens the panel, and a player with no rank sees nothing.
 // The server refuses them everything anyway (gamemode admin.js); this is the game's half.
 const test = require("node:test");
 const assert = require("node:assert");
@@ -75,10 +75,10 @@ test("a staffOnly refusal while the panel is open (rank taken away, off duty) cl
   assert.strictEqual(b.hidden, 1, "an ordinary refusal changes nothing");
 });
 
-test("wiring: F7, H, B and F6 go through the staff check, F8 (testers) does not; replies reach it first", () => {
+test("wiring: F7, H, B, F6 and F8 (testers) all go through the server check; replies reach it first", () => {
   assert.match(src, /if \(code === 65 && !this\.greymarchAdminOn && !this\.greymarchMenuOn\) \{ if \(this\.greymarchEmoteOn\) this\.greymarchEmoteHide\(\); this\.greymarchStaffOpen\(\); \}/);
-  for (const mode of ["encounters", "build", "dungeons"]) assert.ok(src.includes(`this.greymarchStaffOpen("${mode}"); }`), mode);
-  assert.match(src, /if \(code === 66 [^\n]*this\.greymarchAdminShow\("tester"\);/, "F8 opens as before; the server lets testers in on the test server only");
+  for (const mode of ["encounters", "build", "dungeons", "tester"]) assert.ok(src.includes(`this.greymarchStaffOpen("${mode}"); }`), mode);
+  assert.doesNotMatch(src, /if \(code === 66 [^\n]*this\.greymarchAdminShow\("tester"\)/, "F8 asks too; the server lets testers in on the test server only");
   assert.match(src, /if \(type === "greymarchAdminReply" && this\.greymarchStaffReply\(msg\)\) return;[^\n]*\n\s*if \(type === "greymarchAdminReply"\) \{ var brids/);
   assert.doesNotMatch(src, /greymarchHotkeyOpen[\s\S]{0,200}code === 65[^\n]*greymarchAdminShow\(\)/, "F7 never opens the panel without asking");
 });
