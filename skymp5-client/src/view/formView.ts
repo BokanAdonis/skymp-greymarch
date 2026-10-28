@@ -1,5 +1,5 @@
 import { Actor, ActorBase, Cell, Race, createText, Debug, destroyText, Form, FormType, Game, Keyword, NetImmerse, ObjectReference, once, printConsole, setTextColor, setTextPos, setTextSize, setTextString, storage, TESModPlatform, Utility, WorldSpace, worldPointToScreenPoint, writeLogs } from "skyrimPlatform";
-import { setDefaultAnimsDisabled, applyAnimation } from "../sync/animation";
+import { setDefaultAnimsDisabled, applyAnimation, allowAttackAnim } from "../sync/animation";
 import { Appearance, applyAppearance } from "../sync/appearance";
 import { isBadMenuShown, applyEquipment } from "../sync/equipment";
 import { RespawnNeededError } from "../lib/errors";
@@ -1029,7 +1029,8 @@ export class FormView {
     }
     if (f && f.anim === "attack" && f.at !== this.gmPuppetAttackAt) {
       this.gmPuppetAttackAt = f.at;
-      try { Debug.sendAnimationEvent(ac, "attackStart"); } catch (e) { /* the server already counted the bite */ }
+      // allowed first: the anim hook blanks attacks on actors with default anims off (2026-10-28, the owner: no attack animations)
+      try { allowAttackAnim(ac.getFormID(), "attackStart"); Debug.sendAnimationEvent(ac, "attackStart"); } catch (e) { /* the server already counted the bite */ }
     }
     return "";
   }

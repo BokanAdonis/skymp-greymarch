@@ -303,6 +303,12 @@ const ignoredAnims = new Set<string>([
   "TurnRight",
 ]);
 
+// GREYMARCH: lets one attack event through the hook below on an actor whose default anims are off (2026-10-28, the owner: server-driven encounter
+// animals did no attack animation: gmPuppetMove's attackStart was blanked like any attack the server did not send)
+export const allowAttackAnim = (refrId: number, animEventName: string): void => {
+  allowedAnims.add(refrId + ":" + animEventName);
+};
+
 export const setupHooks = (): void => {
   hooks.sendAnimationEvent.add({
     enter: (ctx) => {

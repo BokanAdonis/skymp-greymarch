@@ -106,3 +106,21 @@ test("a server-driven animal's health bar follows the server's health in its fra
   const fn = formView.slice(formView.indexOf("private gmPuppetMove("), formView.indexOf("private tryHostIfNeed("));
   assert.ok(fn.includes('...(typeof f.hp === "number" ? { healthPercentage: f.hp } : {})'), "the movement played carries it (applyMovement sets the bar)");
 });
+
+test("a server-driven animal's attack is let through the anim hook (2026-10-28, the owner: hostile encounter animals did no attack animation)", () => {
+  const js = ts.transpileModule(read("sync", "animation.ts"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2019 } }).outputText;
+  let hook = null;
+  const sp = new Proxy({}, { get: (_, k) => (k === "hooks" ? { sendAnimationEvent: { add: (h) => { hook = h; } } } : k === "printConsole" ? () => {} : {}) });
+  const mod = { exports: {} };
+  new Function("require", "exports", "module", js)((m) => (m === "skyrimPlatform" ? sp : {}), mod.exports, mod);
+  const A = mod.exports;
+  A.setupHooks();
+  A.setDefaultAnimsDisabled(0xff0000c1, true);
+  const send = (name) => { const ctx = { selfId: 0xff0000c1, animEventName: name }; hook.enter(ctx); return ctx.animEventName; };
+  assert.strictEqual(send("attackStart"), "", "an attack nobody allowed is blanked, as before");
+  A.allowAttackAnim(0xff0000c1, "attackStart");
+  assert.strictEqual(send("attackStart"), "attackStart", "allowed: it plays");
+  assert.strictEqual(send("attackStart"), "", "once");
+  const fn = formView.slice(formView.indexOf("private gmPuppetMove("), formView.indexOf("private tryHostIfNeed("));
+  assert.ok(/allowAttackAnim\(ac\.getFormID\(\), "attackStart"\);\s*Debug\.sendAnimationEvent\(ac, "attackStart"\)/.test(fn), "gmPuppetMove allows its attackStart before sending it");
+});
