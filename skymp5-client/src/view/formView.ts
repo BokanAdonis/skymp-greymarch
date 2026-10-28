@@ -992,9 +992,14 @@ export class FormView {
       try { ac.setActorValue("Aggression", 0); ac.setActorValue("AttackDamageMult", 0); } catch (e) { /* the server still decides every hit */ } // never a fight of its own, never local damage
     }
     try { if (ac.isInCombat()) ac.stopCombat(); } catch (e) { /* next frame */ }
-    const frames = (storage["greymarchBeastFrames"] || {}) as Record<string, { pos: number[]; heading: number; speed: number; anim: string; at: number }>;
+    // the bridge's frames: through the global first (see bridge.ts greymarchBeastFrames, 2026-10-28), storage as before
+    const frames = ((Function("return this")() as any).__gmBeastFrames || storage["greymarchBeastFrames"] || {}) as Record<string, { pos: number[]; heading: number; speed: number; anim: string; at: number }>;
     const f = frames[String(this.remoteRefrId)];
     const now = Date.now();
+    // breadcrumbs (2026-10-28, animals that never moved): the first frame played for this animal, or, 3 s after it was first seen, that none was found
+    if (!this.gmPuppetSeenAt) this.gmPuppetSeenAt = now;
+    if (f && !this.gmPuppetCrumbed) { this.gmPuppetCrumbed = true; gmCrumb("puppet " + gmHex(this.remoteRefrId as number) + ": first frame " + f.anim + " to " + f.pos.map(Math.round).join(" ") + " (it stands at " + [refr.getPositionX(), refr.getPositionY(), refr.getPositionZ()].map(Math.round).join(" ") + ")"); }
+    if (!f && !this.gmPuppetCrumbed && now - this.gmPuppetSeenAt > 3000) { this.gmPuppetCrumbed = true; const keys = Object.keys(frames); gmCrumb("puppet " + gmHex(this.remoteRefrId as number) + ": no frame after 3 s; frames held for " + keys.length + " animal(s)" + (keys.length ? ", e.g. " + Number(keys[0]).toString(16) : "")); }
     let m: Movement | null = null;
     if (!f) {
       if (this.movState.everApplied) return "";
@@ -1099,7 +1104,9 @@ export class FormView {
   }
   public gmIsPlayerLook = false; // GREYMARCH: this view draws a player (another player's character), not an NPC
   private gmHostCheckAt = 0;
-  private gmWasHost = false; // GREYMARCH: this game hosted this NPC at the last update
+  private gmWasHost = false;
+  private gmPuppetSeenAt = 0; // GREYMARCH: when this puppet was first played (its breadcrumbs, gmPuppetMove)
+  private gmPuppetCrumbed = false; // GREYMARCH: this game hosted this NPC at the last update
   private gmDriftAt = 0;
   private gmLastEquipment: any = null; // GREYMARCH: the server's record of what this NPC wears (put back after a rebuild)
   private gmLastPos: number[] | null = null; // GREYMARCH: LOCKED HEIGHT: where this hosted NPC was at the last check

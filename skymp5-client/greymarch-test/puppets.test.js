@@ -60,3 +60,23 @@ test("a puppet is never hosted and never fights on its own: formView plays the f
   assert.match(fn, /applyMovement\(refr, m as Movement, false\)/);
   assert.match(formView, /\(model as any\)\.greymarchPuppet === true/);
 });
+
+test("frames also go through a global, the one object kept in storage too, and formView reads the global first (2026-10-28: the owner's deer never moved though 219 frames were sent); breadcrumbs say what happened", () => {
+  const B = bridgeClass();
+  const storage = {};
+  const crumbs = [];
+  const self = { sp: { storage }, greymarchCrumb: (t) => crumbs.push(t) };
+  const gl = Function("return this")();
+  delete gl.__gmBeastFrames;
+  try {
+    B.prototype.greymarchBeastFrames.call(self, { f: [[0xff0000b8, 1, 2, 3, 0, 100, "walk"]] });
+    assert.ok(gl.__gmBeastFrames && gl.__gmBeastFrames[String(0xff0000b8)], "in the global");
+    assert.strictEqual(storage.greymarchBeastFrames, gl.__gmBeastFrames, "the same object in storage");
+    B.prototype.greymarchBeastFrames.call(self, { f: [[0xff0000b9, 1, 2, 3, 0, 100, "walk"]] });
+    assert.deepStrictEqual(Object.keys(gl.__gmBeastFrames).sort(), [String(0xff0000b8), String(0xff0000b9)].sort(), "kept adding to the one object");
+    assert.deepStrictEqual(crumbs, ["beast: first frames from the server (1 animal(s), e.g. ff0000b8)"], "one breadcrumb");
+  } finally { delete gl.__gmBeastFrames; }
+  const fn = formView.slice(formView.indexOf("private gmPuppetMove("), formView.indexOf("private tryHostIfNeed("));
+  assert.ok(fn.includes('(Function("return this")() as any).__gmBeastFrames || storage["greymarchBeastFrames"]'), "formView reads the global first");
+  assert.ok(fn.includes(": first frame ") && fn.includes(": no frame after 3 s"), "and leaves a breadcrumb either way");
+});

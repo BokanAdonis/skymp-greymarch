@@ -2365,7 +2365,12 @@ export class GreymarchBridge {
         try {
             if (!msg || !Array.isArray(msg.f)) return;
             const st: any = this.sp.storage as any;
-            const frames: any = st["greymarchBeastFrames"] || (st["greymarchBeastFrames"] = {});
+            // GREYMARCH (2026-10-28): the frames also go through a global, as every other value the bridge hands to formView does (__gmBeastHeld, __gmWolfRace):
+            // with storage alone the owner's deer never moved (the server had sent 219 frames). One object, kept in both.
+            const gl: any = Function("return this")();
+            const frames: any = gl.__gmBeastFrames || st["greymarchBeastFrames"] || {};
+            gl.__gmBeastFrames = frames; st["greymarchBeastFrames"] = frames;
+            if (!this.greymarchBeastSeen && typeof this.greymarchCrumb === "function") { this.greymarchBeastSeen = true; this.greymarchCrumb("beast: first frames from the server (" + msg.f.length + " animal(s), e.g. " + (Array.isArray(msg.f[0]) ? Number(msg.f[0][0]).toString(16) : "?") + ")"); }
             const now = Date.now();
             for (const f of msg.f.slice(0, 200)) {
                 if (!Array.isArray(f) || f.length < 7) continue;
