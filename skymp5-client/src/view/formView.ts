@@ -9,6 +9,9 @@ import { Appearance, applyAppearance } from "../sync/appearance";
 import { isBadMenuShown, applyEquipment } from "../sync/equipment";
 import { RespawnNeededError } from "../lib/errors";
 import { MsgType } from "../messages";
+const GM_GROUND_FIX_MS = 8000; // the server's word on where the ground is under an NPC holds this long (gmHostedTick)
+const GM_GROUND_NEAR = 60; // within this of that ground it is on it
+const GM_GROUND_SETTLE_MS = 1500; // after its move was stopped, this long to fall by itself before it is set on the ground
 import { FormModel } from "./model";
 import { applyMovement } from "../sync/movementApply";
 import { Movement } from "../sync/movement";
@@ -1131,8 +1134,8 @@ export class FormView {
       const gmRaceName = (() => { try { const r = npc.getRace(); return r ? r.getName() : ""; } catch (e) { return ""; } })();
       this.gmFlatSteps = flatStep(this.gmLastPos, gmNow) && !regroundExempt(gmRaceName) ? this.gmFlatSteps + 1 : 0;
       this.gmLastPos = gmNow;
-      if (this.gmFlatSteps >= FLAT_STEPS && Date.now() - this.gmRegroundAt >= REGROUND_EVERY_MS) {
-        this.gmRegroundAt = Date.now(); this.gmFlatSteps = 0;
+      if ((this.gmFlatSteps >= FLAT_STEPS || this.gmGroundForce) && Date.now() - this.gmRegroundAt >= REGROUND_EVERY_MS) {
+        this.gmRegroundAt = Date.now(); this.gmFlatSteps = 0; this.gmGroundForce = false;
         // its body rebuilt where it stands (disabled and enabled again), as when the bandits walked their best (2026-10-24). Enabled again, the game draws its
         // gear anew from its outfit lists ("bandits respawn with other loadouts"): the server's record of what it wore is put back on it at once, and once more
         // by the normal gear step (its change count is reset)
@@ -1157,6 +1160,28 @@ export class FormView {
           this.gmDriftAt = Date.now(); gmDriftLeft--;
           gmCrumb("drift " + gmHex(this.remoteRefrId as number) + " base " + gmHex(npc.getBaseObject() ? npc.getBaseObject()!.getFormID() : 0) + ": at " + Math.round(gmNow[0]) + " " + Math.round(gmNow[1]) + ", z " + Math.round(npc.getPositionZ()) + ", cell " + gmCellOf(npc) + " (player " + gmCellOf(me) + ")" + ", player z " + Math.round(me.getPositionZ()) + ", " + Math.round(hd) + " away, combat " + npc.getCombatState() + ", speed " + Math.round(npc.getAnimationVariableFloat("Speed")) + ", jump " + npc.getAnimationVariableBool("bInJumpState") + ", AI " + npc.isAIEnabled());
         }
+      }
+      // GREYMARCH: PUT DOWN BY ITS HOST (2026-10-28, the owner: bandits still walked on air and sank into the ground chasing people). The server saw this NPC
+      // off the ground (gamemode groundclamp.js) and said where the ground is. A stuck move keeps an actor out of its gravity, so the move is stopped first and
+      // it falls by itself; if it is still off a moment later it is rebuilt where it stands, the LOCKED HEIGHT cure above (a position set on it fell back to the
+      // stuck height, 2026-10-24). Done here by its own host, never moved by the server (a move from the server ended its fight). Breadcrumbs: "ground"
+      {
+        const gmGl: any = Function("return this")();
+        const gmFixes: any = gmGl.__gmGroundFix;
+        const gmFix = gmFixes ? gmFixes[String(this.remoteRefrId)] : null;
+        if (gmFix && Date.now() - gmFix.at < GM_GROUND_FIX_MS) {
+          const gmZ = npc.getPositionZ();
+          if (Math.abs(gmZ - gmFix.z) <= GM_GROUND_NEAR) { delete gmFixes[String(this.remoteRefrId)]; }
+          else if (!gmFix.stopped) {
+            gmFix.stopped = Date.now();
+            try { npc.stopTranslation(); } catch (e) { /* it was not moving */ }
+            gmCrumb("ground " + gmHex(this.remoteRefrId as number) + ": " + Math.round(gmZ - gmFix.z) + " off the ground the server knows, its move stopped (it falls by itself)");
+          } else if (!gmFix.placed && Date.now() - gmFix.stopped >= GM_GROUND_SETTLE_MS) {
+            gmFix.placed = true;
+            if (!regroundExempt(gmRaceName)) this.gmGroundForce = true; // rebuilt where it stands at the next check (a giant or a mammoth never: see regroundExempt)
+            gmCrumb("ground " + gmHex(this.remoteRefrId as number) + ": still " + Math.round(gmZ - gmFix.z) + " off, rebuilt where it stands");
+          }
+        } else if (gmFix) { delete gmFixes[String(this.remoteRefrId)]; }
       }
       const others: Actor[] = [];
       const arr = getViewFromStorage()?.getFormViews();
@@ -1197,6 +1222,7 @@ export class FormView {
   private gmLastEquipment: any = null; // GREYMARCH: the server's record of what this NPC wears (put back after a rebuild)
   private gmLastPos: number[] | null = null; // GREYMARCH: LOCKED HEIGHT: where this hosted NPC was at the last check
   private gmFlatSteps = 0;
+  private gmGroundForce = false; // the server saw it off the ground and its stopped move did not bring it down: rebuilt at the next check (gmHostedTick)
   private gmRegroundAt = 0;
   private gmUnloadedSince = 0; // GREYMARCH: since when this game hosts this NPC without having it loaded (0: loaded)
   private gmBodyKillAt = 0;

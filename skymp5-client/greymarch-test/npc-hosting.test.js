@@ -107,7 +107,7 @@ test("locked height: a server NPC is not resurrected at its spawn; one that runs
   assert.ok(skip > 0 && skip < spawn.indexOf("return ac.resurrect()"), "a server NPC (no player look) skips Resurrect");
   assert.ok(spawn.includes("this.resurrect(refrId, beastLook, !appearance)"));
   const tick = formView.slice(formView.indexOf("private gmHostedTick("), formView.indexOf("public gmIsPlayerLook"));
-  assert.ok(tick.includes("this.gmFlatSteps >= FLAT_STEPS && Date.now() - this.gmRegroundAt >= REGROUND_EVERY_MS"));
+  assert.ok(tick.includes("(this.gmFlatSteps >= FLAT_STEPS || this.gmGroundForce) && Date.now() - this.gmRegroundAt >= REGROUND_EVERY_MS"), "flat for 3 s, or the server saw it off the ground (2026-10-28)");
   assert.ok(tick.includes("npc.disable(false).then(") && tick.includes("again.enable(false).then(") && !tick.includes("npc.setPosition("), "rebuilt where it stands (a lift fell back)");
   assert.ok(tick.includes("applyEquipment(ac, gmEq)") && tick.includes("this.eqState = this.getDefaultEquipState();"), "its gear put back after (it was drawn anew: other loadouts)");
   assert.ok(formView.includes("this.gmLastEquipment = model.equipment;"));
@@ -126,4 +126,16 @@ test("no reground for a giant or a mammoth (2026-10-28: a giant charging on open
   for (const n of ["Giant", "giant", "Mammoth", "Frost Giant"]) assert.strictEqual(H.regroundExempt(n), true, n);
   for (const n of ["Elk", "Deer", "Nord", "Wolf", "Frostbite Spider", "Mudcrab", "Giantess Spider", "", null, undefined]) assert.strictEqual(H.regroundExempt(n), false, String(n));
   assert.ok(formView.includes("this.gmFlatSteps = flatStep(this.gmLastPos, gmNow) && !regroundExempt(gmRaceName) ? this.gmFlatSteps + 1 : 0;"), "the flat count never grows for them, so they are never rebuilt");
+});
+
+test("an NPC the server saw off the ground is put down by its host, its fight kept (2026-10-28, the owner: bandits still on air and in the ground)", () => {
+  const bridge = fs.readFileSync(path.join(__dirname, "..", "src", "greymarch", "bridge.ts"), "utf8");
+  assert.ok(bridge.includes('if (type === "greymarchGround")') && bridge.includes("__gmGroundFix"), "the bridge keeps the server's word");
+  const view = fs.readFileSync(path.join(__dirname, "..", "src", "view", "formView.ts"), "utf8");
+  const tick = view.slice(view.indexOf("private gmHostedTick("), view.indexOf("private gmHostedTick(") + 20000);
+  const fix = tick.slice(tick.indexOf("PUT DOWN BY ITS HOST"), tick.indexOf("const others: Actor[] = [];"));
+  assert.ok(fix.includes("npc.stopTranslation()"), "first its stuck move is stopped (it falls by itself)");
+  assert.ok(fix.includes("this.gmGroundForce = true") && fix.includes("GM_GROUND_SETTLE_MS"), "then, still off a moment later, rebuilt where it stands (the LOCKED HEIGHT cure)");
+  assert.ok(tick.includes("(this.gmFlatSteps >= FLAT_STEPS || this.gmGroundForce)"), "the rebuild takes the server's word");
+  assert.ok(!fix.includes("setPosition(") && !fix.includes("moveTo("), "never set at a height (that fell back) or moved away");
 });
