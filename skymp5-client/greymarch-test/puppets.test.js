@@ -80,3 +80,12 @@ test("frames also go through a global, the one object kept in storage too, and f
   assert.ok(fn.includes('(Function("return this")() as any).__gmBeastFrames || storage["greymarchBeastFrames"]'), "formView reads the global first");
   assert.ok(fn.includes(": first frame ") && fn.includes(": no frame after 3 s"), "and leaves a breadcrumb either way");
 });
+
+test("a server-driven animal's own AI never runs or fights, and a dead one is never moved or brought back (2026-10-28, the owner: hit, they jumped back and forth; they could not be killed)", () => {
+  const fn = formView.slice(formView.indexOf("private gmPuppetMove("), formView.indexOf("private tryHostIfNeed("));
+  assert.ok(fn.includes('ac.setActorValue("Confidence", 4)'), "foolhardy: never flees on its own");
+  assert.ok(fn.includes('ac.setActorValue("Assistance", 0)'), "never helps another on its own");
+  assert.ok(fn.includes('ac.setActorValue("Aggression", 0)'), "never fights on its own");
+  const dead = fn.indexOf("if (model.isDead || ac.isDead()) return \"\";");
+  assert.ok(dead > 0 && dead < fn.indexOf("applyMovement(refr, m as Movement, false)"), "a body: nothing is played on it");
+});

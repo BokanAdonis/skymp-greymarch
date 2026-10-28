@@ -987,9 +987,13 @@ export class FormView {
   private gmPuppetMove(refr: ObjectReference, model: FormModel): string {
     const ac = Actor.from(refr);
     if (!ac || !model.movement) return "";
+    // DEAD (2026-10-28: animals that could not be killed): a body is never moved, and its last "alive" frame is never played again (applyMovement would bring it back)
+    if (model.isDead || ac.isDead()) return "";
     if (!this.gmPuppetReady) {
       this.gmPuppetReady = true;
-      try { ac.setActorValue("Aggression", 0); ac.setActorValue("AttackDamageMult", 0); } catch (e) { /* the server still decides every hit */ } // never a fight of its own, never local damage
+      // its own AI never moves it (2026-10-28, the owner's cow clip: hit, it jumped back and forth, its own flight against the server's frames): never a fight
+      // (Aggression 0), never a flight (Confidence 4, foolhardy), never helping another (Assistance 0); only the server's frames move it
+      try { ac.setActorValue("Aggression", 0); ac.setActorValue("Confidence", 4); ac.setActorValue("Assistance", 0); ac.setActorValue("AttackDamageMult", 0); } catch (e) { /* the server still decides every hit */ } // never a fight of its own, never local damage
     }
     try { if (ac.isInCombat()) ac.stopCombat(); } catch (e) { /* next frame */ }
     // the bridge's frames: through the global first (see bridge.ts greymarchBeastFrames, 2026-10-28), storage as before
