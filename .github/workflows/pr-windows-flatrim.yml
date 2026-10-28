@@ -2,7 +2,7 @@ name: PR Windows Flatrim (AE/SE)
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, cef-no-proxy ]
   pull_request:
     branches: [ main ]
   schedule:
