@@ -137,10 +137,10 @@ test("an NPC the server saw off the ground is put down by its host, its fight ke
   const tick = view.slice(view.indexOf("private gmHostedTick("), view.indexOf("private gmHostedTick(") + 20000);
   const fix = tick.slice(tick.indexOf("PUT DOWN BY ITS HOST"), tick.indexOf("const others: Actor[] = [];"));
   assert.ok(fix.includes("npc.stopTranslation()"), "first its stuck move is stopped (it falls by itself)");
-  const stop = fix.indexOf("npc.stopTranslation()"), set = fix.indexOf("npc.setPosition(gmX, gmY, gmGround + GM_GROUND_LIFT)"), rebuild = fix.indexOf("this.gmGroundForce = true");
+  const stop = fix.indexOf("npc.stopTranslation()"), set = fix.indexOf("npc.moveTo(npc, 0, 0, gmGround + GM_GROUND_LIFT - gmZ, false)"), rebuild = fix.indexOf("this.gmGroundForce = true");
   assert.ok(stop > 0 && set > stop && rebuild > set, "its move stopped, then set just over the ground under it, then rebuilt (2026-10-28: the rebuild alone left it up)");
   assert.ok(tick.includes("(this.gmFlatSteps >= FLAT_STEPS || this.gmGroundForce)"), "the rebuild takes the server's word");
-  assert.ok(!fix.includes("moveTo("), "never moved away");
+  assert.ok(!fix.includes("moveTo(me") && !fix.includes("moveTo(target"), "never moved away: only onto itself");
 });
 
 test("breadcrumbs follow a ground word from the server to the host check (2026-10-28: the server told the games and nothing happened)", () => {
@@ -179,6 +179,6 @@ test("a bandit put down keeps its fight: back at its target, weapon drawn, after
   assert.ok(help.includes("npc.startCombat(target)") && help.includes("npc.drawWeapon()"), "back at it, weapon drawn");
   const tick = view.slice(view.indexOf("private gmHostedTick("), view.indexOf("private gmHostedTick(") + 20000);
   assert.ok(tick.includes("this.gmGroundTargetId = t.getFormID()"), "its target remembered when it is first put down");
-  const setAt = tick.indexOf("npc.setPosition(gmX, gmY, gmGround + GM_GROUND_LIFT)"); assert.ok(setAt > 0 && tick.indexOf("this.gmGroundRefight(npc)", setAt) - setAt < 200, "right after it is set down");
+  const setAt = tick.indexOf("npc.moveTo(npc, 0, 0, gmGround + GM_GROUND_LIFT - gmZ, false)"); assert.ok(setAt > 0 && tick.indexOf("this.gmGroundRefight(npc)", setAt) - setAt < 200, "right after it is set down");
   assert.ok(tick.includes("if (ac) this.gmGroundRefight(ac);"), "after it is rebuilt");
 });

@@ -1210,7 +1210,9 @@ export class FormView {
             gmCrumb("ground " + gmHex(this.remoteRefrId as number) + ": " + Math.round(gmOff) + " off the ground under it, its move stopped (it falls by itself)");
           } else if (gmFix.step === 1 && gmNow2 - gmFix.stepAt >= GM_GROUND_SETTLE_MS) {
             gmFix.step = 2; gmFix.stepAt = gmNow2;
-            try { npc.setPosition(gmX, gmY, gmGround + GM_GROUND_LIFT); } catch (e) { /* the next step tries the rebuild */ }
+            // MoveTo onto itself, the ground under it as the offset (2026-10-28, the owner: set down with SetPosition they all went straight back up): MoveTo places
+            // the actor anew, its physics with it, the usual cure for an actor stuck in the air; SetPosition only moved it, still without its gravity
+            try { npc.moveTo(npc, 0, 0, gmGround + GM_GROUND_LIFT - gmZ, false); } catch (e) { /* the next step tries the rebuild */ }
             this.gmGroundRefight(npc); // set down, it dropped its fight and put its weapon away: back at the one it fought
             gmCrumb("ground " + gmHex(this.remoteRefrId as number) + ": still " + Math.round(gmOff) + " off, set just over the ground under it (" + Math.round(gmGround) + ")");
           } else if (gmFix.step === 2 && gmNow2 - gmFix.stepAt >= GM_GROUND_SETTLE_MS) {
