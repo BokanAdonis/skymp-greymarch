@@ -25,7 +25,7 @@ function gmGroundUnder(fix: any, x: number, y: number): number {
   if ([a, b2, c, d].some((v) => typeof v !== "number")) return fix.z;
   return a * (1 - tx) * (1 - ty) + b2 * tx * (1 - ty) + c * (1 - tx) * ty + d * tx * ty;
 }
-const GM_GROUND_SETTLE_MS = 1500; // after its move was stopped, this long to fall by itself before it is set on the ground
+const GM_GROUND_SETTLE_MS = 900; // each step waits this long for the one before (one host check; 1.5 s until 2026-10-28: the owner, "they still float for a pretty long time")
 import { FormModel } from "./model";
 import { applyMovement } from "../sync/movementApply";
 import { Movement } from "../sync/movement";
@@ -1132,6 +1132,16 @@ export class FormView {
       SpApiInteractor.getControllerInstance().emitter.emit("sendMessage", { message: message, reliability: "unreliable" } as any);
     } catch (e) { /* the next one */ }
   }
+  // GREYMARCH: an NPC put down (PUT DOWN BY ITS HOST) goes back at the one it fought, weapon drawn: being set down or rebuilt ended its fight (2026-10-28)
+  private gmGroundRefight(npc: Actor): void {
+    if (!this.gmGroundTargetId) return;
+    try {
+      const target = Actor.from(Game.getFormEx(this.gmGroundTargetId));
+      if (!target || target.isDead()) { this.gmGroundTargetId = 0; return; }
+      if (!npc.isInCombat() || !npc.getCombatTarget()) npc.startCombat(target);
+      if (!npc.isWeaponDrawn()) npc.drawWeapon();
+    } catch (e) { /* the next check tries again */ }
+  }
   // GREYMARCH: an NPC this game hosts, checked once a second (greymarch/npcHosting.ts). "released" when it was handed on.
   private gmHostedTick(refr: ObjectReference): string {
     try {
@@ -1164,6 +1174,7 @@ export class FormView {
               const ac = Actor.from(Game.getFormEx(gmRid));
               if (ac && gmEq) { try { applyEquipment(ac, gmEq); } catch (e) { /* the gear step tries again */ } }
               this.eqState = this.getDefaultEquipState();
+              if (ac) this.gmGroundRefight(ac); // rebuilt, it forgot its fight (2026-10-28): back at the one it fought, weapon drawn
             });
           }).catch(() => { /* the next check tries again */ });
         } catch (e) { /* the next check tries again */ }
@@ -1191,14 +1202,16 @@ export class FormView {
           const gmGround = gmGroundUnder(gmFix, gmX, gmY);
           const gmOff = gmZ - gmGround;
           const gmNow2 = Date.now();
-          if (Math.abs(gmOff) <= GM_GROUND_NEAR) { if (gmFix.step) gmCrumb("ground " + gmHex(this.remoteRefrId as number) + ": down, " + Math.round(gmOff) + " from the ground"); delete gmFixes[gmKey]; }
+          if (Math.abs(gmOff) <= GM_GROUND_NEAR) { if (gmFix.step) { gmCrumb("ground " + gmHex(this.remoteRefrId as number) + ": down, " + Math.round(gmOff) + " from the ground"); if (gmFix.step >= 2) this.gmGroundRefight(npc); } delete gmFixes[gmKey]; }
           else if (!gmFix.step) {
             gmFix.step = 1; gmFix.stepAt = gmNow2;
+            try { const t = npc.getCombatTarget(); if (t && !t.isDead()) this.gmGroundTargetId = t.getFormID(); } catch (e) { /* no fight to keep */ }
             try { npc.stopTranslation(); } catch (e) { /* it was not moving */ }
             gmCrumb("ground " + gmHex(this.remoteRefrId as number) + ": " + Math.round(gmOff) + " off the ground under it, its move stopped (it falls by itself)");
           } else if (gmFix.step === 1 && gmNow2 - gmFix.stepAt >= GM_GROUND_SETTLE_MS) {
             gmFix.step = 2; gmFix.stepAt = gmNow2;
             try { npc.setPosition(gmX, gmY, gmGround + GM_GROUND_LIFT); } catch (e) { /* the next step tries the rebuild */ }
+            this.gmGroundRefight(npc); // set down, it dropped its fight and put its weapon away: back at the one it fought
             gmCrumb("ground " + gmHex(this.remoteRefrId as number) + ": still " + Math.round(gmOff) + " off, set just over the ground under it (" + Math.round(gmGround) + ")");
           } else if (gmFix.step === 2 && gmNow2 - gmFix.stepAt >= GM_GROUND_SETTLE_MS) {
             gmFix.step = 3; gmFix.stepAt = gmNow2;
@@ -1247,6 +1260,7 @@ export class FormView {
   private gmLastPos: number[] | null = null; // GREYMARCH: LOCKED HEIGHT: where this hosted NPC was at the last check
   private gmFlatSteps = 0;
   private gmGroundForce = false; // the server saw it off the ground and its stopped move did not bring it down: rebuilt at the next check (gmHostedTick)
+  private gmGroundTargetId = 0; // the one it fought when it was put down (gmGroundRefight)
   private gmRegroundAt = 0;
   private gmUnloadedSince = 0; // GREYMARCH: since when this game hosts this NPC without having it loaded (0: loaded)
   private gmBodyKillAt = 0;

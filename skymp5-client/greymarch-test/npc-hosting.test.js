@@ -172,3 +172,13 @@ test("the ground under the NPC's own feet is read from the land the server sent,
   const bridge = fs.readFileSync(path.join(__dirname, "..", "src", "greymarch", "bridge.ts"), "utf8");
   assert.ok(bridge.includes("msg.grid.h.length === 25"), "the bridge keeps a well-formed grid only");
 });
+
+test("a bandit put down keeps its fight: back at its target, weapon drawn, after it is set down or rebuilt (2026-10-28, the owner: they came down with no weapon and walked around)", () => {
+  const view = fs.readFileSync(path.join(__dirname, "..", "src", "view", "formView.ts"), "utf8");
+  const help = view.slice(view.indexOf("private gmGroundRefight("), view.indexOf("private gmHostedTick("));
+  assert.ok(help.includes("npc.startCombat(target)") && help.includes("npc.drawWeapon()"), "back at it, weapon drawn");
+  const tick = view.slice(view.indexOf("private gmHostedTick("), view.indexOf("private gmHostedTick(") + 20000);
+  assert.ok(tick.includes("this.gmGroundTargetId = t.getFormID()"), "its target remembered when it is first put down");
+  const setAt = tick.indexOf("npc.setPosition(gmX, gmY, gmGround + GM_GROUND_LIFT)"); assert.ok(setAt > 0 && tick.indexOf("this.gmGroundRefight(npc)", setAt) - setAt < 200, "right after it is set down");
+  assert.ok(tick.includes("if (ac) this.gmGroundRefight(ac);"), "after it is rebuilt");
+});
