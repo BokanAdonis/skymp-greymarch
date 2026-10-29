@@ -23,6 +23,8 @@ export class DropItemService extends ClientListener {
         const isReference: boolean = e.reference !== null;
         if (e.newContainer && e.newContainer.getFormID() === pl.getFormID())
             return;
+        // GREYMARCH breadcrumb (2026-10-28, the owner: a dropped poison came back and the server never heard the drop): every item that leaves the player for nowhere
+        if (isPlayer && noContainer) { try { this.sp.writeLogs("greymarch", "drop seen: " + (e.baseObj ? e.baseObj.getFormID().toString(16) : "?") + " x" + e.numItems + ", reference " + (e.reference ? e.reference.getFormID().toString(16) : "none") + ", inventory menu " + this.sp.Ui.isMenuOpen("InventoryMenu")); } catch (err) { /* a log line only */ } }
         if (!this.sp.Ui.isMenuOpen("InventoryMenu"))
             return;
         if (
@@ -71,6 +73,7 @@ export class DropItemService extends ClientListener {
                 }
             });
 
+            try { this.sp.writeLogs("greymarch", "drop: " + set.size + " of " + baseId.toString(16) + " near, " + numFound + " deleted" + (numFound ? ", telling the server" : ", NOT told to the server (taken for a false drop)")); } catch (err) { /* a log line only */ }
             if (!numFound) {
                 return logTrace(this, "Ignoring item drop as false positive");
             }

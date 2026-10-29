@@ -67,6 +67,8 @@ export class ContainersService extends ClientListener {
                             return msg;
                         });
 
+                    // GREYMARCH breadcrumb (2026-10-28, the owner: what is put into a container comes back): each put or take as it goes to the server
+                    try { this.sp.writeLogs("greymarch", "container " + e.oldContainer.getFormID().toString(16) + " -> " + e.newContainer.getFormID().toString(16) + ": diff " + JSON.stringify(diff.entries) + "; sent " + (msgs.length ? JSON.stringify(msgs) : "nothing")); } catch (err) { /* a log line only */ }
                     msgs.forEach((msg) => this.controller.emitter.emit("sendMessage", {
                         message: msg,
                         reliability: "reliable"

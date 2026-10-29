@@ -339,7 +339,8 @@ export class AuthService extends ClientListener {
 
     const settingsService = this.controller.lookupListener(SettingsService);
 
-    logTrace(this, `onBrowserMessage:`, JSON.stringify(e.arguments));
+    // GREYMARCH: the Greymarch pages (chat, windows) talk several times a second; tracing each one flooded the console (the owner, 2026-10-28)
+    if (!(Array.isArray(e.arguments) && e.arguments[0] === "greymarch")) logTrace(this, `onBrowserMessage:`, JSON.stringify(e.arguments));
 
     const eventKey = e.arguments[0];
     switch (eventKey) {
