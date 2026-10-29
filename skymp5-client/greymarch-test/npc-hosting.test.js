@@ -197,5 +197,13 @@ test("a stuck runner: an NPC in a fight that runs but barely moves is moved onto
 test("an NPC this game runs keeps its gear while it fights: no applyEquipment mid-charge (2026-10-28, the owner: skeletons slid, then ran)", () => {
   const view = fs.readFileSync(path.join(__dirname, "..", "src", "view", "formView.ts"), "utf8");
   const step = view.slice(view.indexOf("if (this.eqState.lastNumChanges !== model.equipment.numChanges)"), view.indexOf("applyEquipment(ac, model.equipment)"));
-  assert.ok(step.includes("!(this.gmWasHost && gmInFight(ac))"), "skipped while its host runs it in a fight; numChanges stays behind so it is put on later");
+  assert.ok(step.includes("!(this.gmWasHost && this.gmGearDone)"), "once its host has dressed it, the server's copy is not put back on it (the armed skeletons lost the weapon in hand and ran on the spot)");
+  assert.ok(view.includes("this.gmGearDone = true;"), "dressed once");
+});
+
+test("a stuck runner that a nudge did not free is rebuilt where it stands the next time (2026-10-28: the armed skeletons stayed stuck)", () => {
+  const view = fs.readFileSync(path.join(__dirname, "..", "src", "view", "formView.ts"), "utf8");
+  const block = view.slice(view.indexOf("A STUCK RUNNER (2026"), view.indexOf("PUT DOWN BY ITS HOST (2026"));
+  assert.ok(block.includes("gmRNow - this.gmRunNudgedAt < GM_RUN_AGAIN_MS ? this.gmRunNudges + 1 : 1"), "counted only when stuck again soon after");
+  assert.ok(block.includes("this.gmRunNudges >= 2 && !regroundExempt(gmRaceName)") && block.includes("this.gmGroundForce = true"), "the second one rebuilds it (never a giant or a mammoth)");
 });

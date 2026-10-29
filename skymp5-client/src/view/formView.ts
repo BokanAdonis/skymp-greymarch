@@ -31,8 +31,7 @@ const GM_RUN_CHECK_MS = 1500;
 const GM_RUN_SPEED = 150;
 const GM_RUN_NEAR = 250;
 const GM_RUN_NUDGE_MS = 8000;
-// in a fight (its gear is not changed then: see the equipment step)
-function gmInFight(ac: Actor): boolean { try { return ac.isInCombat(); } catch (e) { return false; } }
+const GM_RUN_AGAIN_MS = 20000; // stuck again this soon after a nudge: the nudge did not free it, it is rebuilt
 import { FormModel } from "./model";
 import { applyMovement } from "../sync/movementApply";
 import { Movement } from "../sync/movement";
@@ -862,16 +861,19 @@ export class FormView {
           Date.now() - this.eqState.lastEqMoment > 500 &&
           Date.now() - this.spawnMoment > -1 &&
           this.spawnMoment > 0 &&
-          // GREYMARCH: NOT IN THE MIDDLE OF ITS FIGHT (2026-10-28, the owner: encounter skeletons and draugr "slide for a bit then run"). applyEquipment empties the
-          // NPC and dresses it again; an NPC this game runs got that a moment after it spawned (the server's echo of what this game reported) while it charged,
-          // and slid until its run came back. Its host leaves it dressed as it is while it fights; the change is put on after the fight (numChanges stays behind)
-          !(this.gmWasHost && gmInFight(ac)) &&
+          // GREYMARCH: DRESSED ONCE BY ITS HOST (2026-10-28, the owner: encounter skeletons "slide for a bit then run", then: the armed ones "run in place and
+          // sheath their weapon"). applyEquipment empties the NPC and dresses it again. An NPC this game runs got that again when this game took it over and at
+          // the server's echo of its own gear: the weapon was pulled from its hand (SkympFakeUnequip in the breadcrumbs), and an armed fighter's graph stuck,
+          // running on the spot. Once this game hosts it and has dressed it, this game's own gear is the real one (it reports it to the server); the server's
+          // copy is not put back on it (a rebuild still dresses it: "reground")
+          !(this.gmWasHost && this.gmGearDone) &&
           (!gmBeastLook || (!!this.gmBeast && !beastHeld(this.gmBeast, Date.now())))
         ) {
           //if (this.spawnMoment > 0 && Date.now() - this.spawnMoment > 5000) {
           gmCrumb("gear " + gmHex(ac.getFormID()) + (gmBeastLook ? " beast" : ""));
           if (applyEquipment(ac, model.equipment)) {
             this.eqState.lastNumChanges = model.equipment.numChanges;
+            this.gmGearDone = true;
           }
           this.eqState.lastEqMoment = Date.now();
           //}
@@ -1213,10 +1215,18 @@ export class FormView {
             const gmExpect = (gmRSpeed * (gmRNow - this.gmRunAt)) / 1000;
             this.gmRunStuck = gmMoved < gmExpect * 0.25 ? this.gmRunStuck + 1 : 0;
             if (this.gmRunStuck >= 2 && gmRNow - this.gmRunNudgedAt >= GM_RUN_NUDGE_MS) {
+              // a nudge that did not free it (stuck again within GM_RUN_AGAIN_MS) is followed by a rebuild where it stands (gear kept, back in its fight): the
+              // armed skeletons' graphs stayed stuck after being moved onto themselves (2026-10-28)
+              this.gmRunNudges = gmRNow - this.gmRunNudgedAt < GM_RUN_AGAIN_MS ? this.gmRunNudges + 1 : 1;
               this.gmRunStuck = 0; this.gmRunNudgedAt = gmRNow;
-              gmCrumb("stuck run " + gmHex(this.remoteRefrId as number) + " base " + gmHex(npc.getBaseObject() ? npc.getBaseObject()!.getFormID() : 0) + ": speed " + Math.round(gmRSpeed) + ", moved " + Math.round(gmMoved) + " of " + Math.round(gmExpect) + ", target " + gmHex(gmRTarget.getFormID()) + (gmRTarget.getFormID() === 0x14 ? " (me)" : "") + " " + Math.round(gmRGap) + " away, " + Math.round(gmRTarget.getPositionZ() - npc.getPositionZ()) + " higher; moved onto itself");
-              try { this.gmGroundTargetId = gmRTarget.getFormID(); npc.moveTo(npc, 0, 0, 0, false); } catch (e) { /* the next check tries again */ }
-              this.gmGroundRefight(npc);
+              this.gmGroundTargetId = gmRTarget.getFormID();
+              const gmRebuild = this.gmRunNudges >= 2 && !regroundExempt(gmRaceName);
+              gmCrumb("stuck run " + gmHex(this.remoteRefrId as number) + " base " + gmHex(npc.getBaseObject() ? npc.getBaseObject()!.getFormID() : 0) + ": speed " + Math.round(gmRSpeed) + ", moved " + Math.round(gmMoved) + " of " + Math.round(gmExpect) + ", target " + gmHex(gmRTarget.getFormID()) + (gmRTarget.getFormID() === 0x14 ? " (me)" : "") + " " + Math.round(gmRGap) + " away, " + Math.round(gmRTarget.getPositionZ() - npc.getPositionZ()) + " higher, weapon " + (npc.isWeaponDrawn() ? "drawn" : "away") + "; " + (gmRebuild ? "rebuilt where it stands" : "moved onto itself"));
+              if (gmRebuild) { this.gmGroundForce = true; this.gmRunNudges = 0; }
+              else {
+                try { npc.moveTo(npc, 0, 0, 0, false); } catch (e) { /* the next check tries again */ }
+                this.gmGroundRefight(npc);
+              }
             }
           } else this.gmRunStuck = 0;
           this.gmRunPos = gmRP; this.gmRunAt = gmRNow;
@@ -1298,6 +1308,8 @@ export class FormView {
   private gmRunPos: number[] | null = null;
   private gmRunStuck = 0;
   private gmRunNudgedAt = 0;
+  private gmRunNudges = 0; // nudges in a row that did not free it (the second one rebuilds it)
+  private gmGearDone = false; // GREYMARCH: the gear step has dressed it once (its host then leaves its gear alone: DRESSED ONCE BY ITS HOST)
   private gmLastEquipment: any = null; // GREYMARCH: the server's record of what this NPC wears (put back after a rebuild)
   private gmLastPos: number[] | null = null; // GREYMARCH: LOCKED HEIGHT: where this hosted NPC was at the last check
   private gmFlatSteps = 0;
