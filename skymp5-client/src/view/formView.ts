@@ -711,7 +711,12 @@ export class FormView {
         else if (!this.gmHoldSince) this.gmHoldSince = Date.now();
         const gmGiveUp = gmNobody && Date.now() - this.gmHoldSince > GM_HOLD_MAX_MS;
         if (gmGiveUp && !this.gmHoldGaveUp) { this.gmHoldGaveUp = true; gmCrumb("no host " + gmHex(this.refrId) + " (remote " + gmHex(this.remoteRefrId as number) + ") after " + GM_HOLD_MAX_MS + " ms: this game runs it"); }
-        if (model.isHostedByOther || !this.movState.everApplied || (gmNobody && !gmGiveUp)) {
+        // GREYMARCH: NEVER BOTH (2026-10-28, the owner: the armed encounter skeletons moved "very slowly, like it's only the push doing it all"). An NPC this
+        // game runs is moved by its own AI only: the server's movement (translateTo to the place last reported) is not played on it, even when the server's
+        // word says another game hosts it, which pulled it back every update while its AI ran. Breadcrumb "host clash" when the two disagree
+        const gmMineOnly = alreadyHosted && this.movState.everApplied;
+        if (gmMineOnly && model.isHostedByOther && !this.gmClashSaid) { this.gmClashSaid = true; gmCrumb("host clash " + gmHex(this.remoteRefrId as number) + ": this game runs it, the server says another does; its movement is not played here"); }
+        if (!gmMineOnly && (model.isHostedByOther || !this.movState.everApplied || (gmNobody && !gmGiveUp))) {
           // GREYMARCH: NO WEAPON DRAW FOR A BEAST (2026-10-20). A changed werewolf or werebear player counts as "weapon drawn", so SkyMP gave its NPC here
           // setWeaponDrawnMode(1): the game ran ActionDraw, played the idle WerewolfDraw into the beast's animation graph and the watching game crashed in its clip
           // handling (SkyrimSE.exe+0A8C590, the crash of every beast observer case; this one's stack showed ActionDraw, WeapEquip, WerewolfDraw and SetWeaponDrawnMode).
@@ -1309,6 +1314,7 @@ export class FormView {
   private gmRunPos: number[] | null = null;
   private gmRunStuck = 0;
   private gmRunNudgedAt = 0;
+  private gmClashSaid = false; // GREYMARCH: "host clash" written down for it (NEVER BOTH)
   private gmGearDone = false; // GREYMARCH: the gear step has dressed it once (its host then leaves its gear alone: DRESSED ONCE BY ITS HOST)
   private gmLastEquipment: any = null; // GREYMARCH: the server's record of what this NPC wears (put back after a rebuild)
   private gmLastPos: number[] | null = null; // GREYMARCH: LOCKED HEIGHT: where this hosted NPC was at the last check

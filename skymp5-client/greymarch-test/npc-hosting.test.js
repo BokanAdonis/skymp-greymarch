@@ -210,3 +210,10 @@ test("an armed NPC that runs in place gets its animation state reset, when its h
   const block = view.slice(view.indexOf("A STUCK RUNNER, WATCHED"), view.indexOf("PUT DOWN BY ITS HOST (2026"));
   assert.ok(block.includes('getAnimationVariableFloat("SpeedSampled") < 1') && block.includes("Debug.sendAnimationEvent(npc, GM_GRAPH_RESET)"), "when stuck with a still graph");
 });
+
+test("an NPC this game runs is never also moved by the server's movement (2026-10-28, the owner: armed skeletons moved slowly, as if only pushed)", () => {
+  const view = fs.readFileSync(path.join(__dirname, "..", "src", "view", "formView.ts"), "utf8");
+  assert.ok(view.includes("const gmMineOnly = alreadyHosted && this.movState.everApplied;"));
+  assert.ok(view.includes("if (!gmMineOnly && (model.isHostedByOther || !this.movState.everApplied || (gmNobody && !gmGiveUp))) {"), "applyMovement only for an NPC this game does not run");
+  assert.ok(view.includes('gmCrumb("host clash '), "a breadcrumb when the server says another game runs it");
+});

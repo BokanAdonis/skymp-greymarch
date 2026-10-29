@@ -7,7 +7,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 
 const formView = fs.readFileSync(path.join(__dirname, "..", "src", "view", "formView.ts"), "utf8");
-const START = "if (model.isHostedByOther || !this.movState.everApplied || (gmNobody && !gmGiveUp)) {";
+const START = "if (!gmMineOnly && (model.isHostedByOther || !this.movState.everApplied || (gmNobody && !gmGiveUp))) {"; // (gmMineOnly, 2026-10-28: never on an NPC this game runs)
 
 test("only the host's game runs the AI: a game that does not host the NPC keeps playing the server's movement, hosted by another game or by nobody", () => {
   assert.ok(formView.includes(START));
