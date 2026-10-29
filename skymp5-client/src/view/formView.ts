@@ -31,7 +31,6 @@ const GM_RUN_CHECK_MS = 1500;
 const GM_RUN_SPEED = 150;
 const GM_RUN_NEAR = 250;
 const GM_RUN_NUDGE_MS = 8000;
-const GM_RUN_AGAIN_MS = 20000; // stuck again this soon after a nudge: the nudge did not free it, it is rebuilt
 import { FormModel } from "./model";
 import { applyMovement } from "../sync/movementApply";
 import { Movement } from "../sync/movement";
@@ -1199,10 +1198,10 @@ export class FormView {
           gmCrumb("drift " + gmHex(this.remoteRefrId as number) + " base " + gmHex(npc.getBaseObject() ? npc.getBaseObject()!.getFormID() : 0) + ": at " + Math.round(gmNow[0]) + " " + Math.round(gmNow[1]) + ", z " + Math.round(npc.getPositionZ()) + ", cell " + gmCellOf(npc) + " (player " + gmCellOf(me) + ")" + ", player z " + Math.round(me.getPositionZ()) + ", " + Math.round(hd) + " away, combat " + npc.getCombatState() + ", speed " + Math.round(npc.getAnimationVariableFloat("Speed")) + ", jump " + npc.getAnimationVariableBool("bInJumpState") + ", AI " + npc.isAIEnabled());
         }
       }
-      // GREYMARCH: A STUCK RUNNER (2026-10-28, the owner: encounter draugr and skeletons "run in place, or get stuck when running"; breadcrumbs: a skeleton in a
-      // fight ran at speed 299 and moved 20-130 units in 3 s). Checked every GM_RUN_CHECK_MS: an NPC in a fight, running (Speed over GM_RUN_SPEED), not near
-      // its target, that covered less than a quarter of what that speed covers, twice in a row, is nudged: moved onto itself (a fresh place for its pathing
-      // and its character controller) and sent back at its target. At most once each GM_RUN_NUDGE_MS. Breadcrumbs: "stuck run" with its target and the gap
+      // GREYMARCH: A STUCK RUNNER, WATCHED (2026-10-28, the owner: encounter draugr and skeletons "run in place, or get stuck when running"). Checked every
+      // GM_RUN_CHECK_MS: an NPC in a fight, "running" (Speed over GM_RUN_SPEED), not near its target, that covered less than a quarter of what that speed covers,
+      // twice in a row, is written down ("stuck run") with what may explain it. Nothing is done to it: moved onto itself it stayed stuck, and rebuilt it
+      // vanished and came back with other weapons (the owner, 2026-10-28). At most once each GM_RUN_NUDGE_MS
       {
         const gmRNow = Date.now();
         if (gmRNow - this.gmRunAt >= GM_RUN_CHECK_MS) {
@@ -1215,18 +1214,11 @@ export class FormView {
             const gmExpect = (gmRSpeed * (gmRNow - this.gmRunAt)) / 1000;
             this.gmRunStuck = gmMoved < gmExpect * 0.25 ? this.gmRunStuck + 1 : 0;
             if (this.gmRunStuck >= 2 && gmRNow - this.gmRunNudgedAt >= GM_RUN_NUDGE_MS) {
-              // a nudge that did not free it (stuck again within GM_RUN_AGAIN_MS) is followed by a rebuild where it stands (gear kept, back in its fight): the
-              // armed skeletons' graphs stayed stuck after being moved onto themselves (2026-10-28)
-              this.gmRunNudges = gmRNow - this.gmRunNudgedAt < GM_RUN_AGAIN_MS ? this.gmRunNudges + 1 : 1;
               this.gmRunStuck = 0; this.gmRunNudgedAt = gmRNow;
-              this.gmGroundTargetId = gmRTarget.getFormID();
-              const gmRebuild = this.gmRunNudges >= 2 && !regroundExempt(gmRaceName);
-              gmCrumb("stuck run " + gmHex(this.remoteRefrId as number) + " base " + gmHex(npc.getBaseObject() ? npc.getBaseObject()!.getFormID() : 0) + ": speed " + Math.round(gmRSpeed) + ", moved " + Math.round(gmMoved) + " of " + Math.round(gmExpect) + ", target " + gmHex(gmRTarget.getFormID()) + (gmRTarget.getFormID() === 0x14 ? " (me)" : "") + " " + Math.round(gmRGap) + " away, " + Math.round(gmRTarget.getPositionZ() - npc.getPositionZ()) + " higher, weapon " + (npc.isWeaponDrawn() ? "drawn" : "away") + "; " + (gmRebuild ? "rebuilt where it stands" : "moved onto itself"));
-              if (gmRebuild) { this.gmGroundForce = true; this.gmRunNudges = 0; }
-              else {
-                try { npc.moveTo(npc, 0, 0, 0, false); } catch (e) { /* the next check tries again */ }
-                this.gmGroundRefight(npc);
-              }
+              const gmV = (n: string) => { try { return String(Math.round(npc.getAnimationVariableFloat(n) * 100) / 100); } catch (e) { return "?"; } };
+              const gmB = (n: string) => { try { return npc.getAnimationVariableBool(n) ? "1" : "0"; } catch (e) { return "?"; } };
+              let gmLos = "?"; try { gmLos = npc.hasLOS(gmRTarget) ? "yes" : "no"; } catch (e) { gmLos = "?"; }
+              gmCrumb("stuck run " + gmHex(this.remoteRefrId as number) + " base " + gmHex(npc.getBaseObject() ? npc.getBaseObject()!.getFormID() : 0) + ": speed " + Math.round(gmRSpeed) + ", moved " + Math.round(gmMoved) + " of " + Math.round(gmExpect) + ", target " + gmHex(gmRTarget.getFormID()) + (gmRTarget.getFormID() === 0x14 ? " (me)" : "") + " " + Math.round(gmRGap) + " away, " + Math.round(gmRTarget.getPositionZ() - npc.getPositionZ()) + " higher, sees it " + gmLos + ", weapon " + (npc.isWeaponDrawn() ? "drawn" : "away") + ", blocking " + gmB("IsBlocking") + ", direction " + gmV("Direction") + ", sampled " + gmV("SpeedSampled") + ", run " + gmB("IsRunning") + ", sprint " + gmB("IsSprinting") + ", speed mult " + Math.round(npc.getActorValue("SpeedMult")));
             }
           } else this.gmRunStuck = 0;
           this.gmRunPos = gmRP; this.gmRunAt = gmRNow;
@@ -1308,7 +1300,6 @@ export class FormView {
   private gmRunPos: number[] | null = null;
   private gmRunStuck = 0;
   private gmRunNudgedAt = 0;
-  private gmRunNudges = 0; // nudges in a row that did not free it (the second one rebuilds it)
   private gmGearDone = false; // GREYMARCH: the gear step has dressed it once (its host then leaves its gear alone: DRESSED ONCE BY ITS HOST)
   private gmLastEquipment: any = null; // GREYMARCH: the server's record of what this NPC wears (put back after a rebuild)
   private gmLastPos: number[] | null = null; // GREYMARCH: LOCKED HEIGHT: where this hosted NPC was at the last check

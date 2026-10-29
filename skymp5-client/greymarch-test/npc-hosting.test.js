@@ -183,16 +183,7 @@ test("a bandit put down keeps its fight: back at its target, weapon drawn, after
   assert.ok(tick.includes("if (ac) this.gmGroundRefight(ac);"), "after it is rebuilt");
 });
 
-test("a stuck runner: an NPC in a fight that runs but barely moves is moved onto itself and sent back at its target (2026-10-28, the owner: draugr and skeletons ran in place)", () => {
-  const view = fs.readFileSync(path.join(__dirname, "..", "src", "view", "formView.ts"), "utf8");
-  const tick = view.slice(view.indexOf("private gmHostedTick("), view.indexOf("private gmHostedTick(") + 30000);
-  const block = tick.slice(tick.indexOf("A STUCK RUNNER"), tick.indexOf("PUT DOWN BY ITS HOST"));
-  assert.ok(block.includes("gmRSpeed > GM_RUN_SPEED && gmRGap > GM_RUN_NEAR"), "only a running NPC away from its target");
-  assert.ok(block.includes("gmMoved < gmExpect * 0.25") && block.includes("this.gmRunStuck >= 2"), "a quarter of its speed, twice in a row");
-  assert.ok(block.includes("gmRNow - this.gmRunNudgedAt >= GM_RUN_NUDGE_MS"), "not more than once each GM_RUN_NUDGE_MS");
-  assert.ok(block.includes("npc.moveTo(npc, 0, 0, 0, false)") && block.includes("this.gmGroundRefight(npc)"), "moved onto itself and back at its target");
-  assert.ok(block.includes('gmCrumb("stuck run '), "a breadcrumb");
-});
+
 
 test("an NPC this game runs keeps its gear while it fights: no applyEquipment mid-charge (2026-10-28, the owner: skeletons slid, then ran)", () => {
   const view = fs.readFileSync(path.join(__dirname, "..", "src", "view", "formView.ts"), "utf8");
@@ -201,9 +192,12 @@ test("an NPC this game runs keeps its gear while it fights: no applyEquipment mi
   assert.ok(view.includes("this.gmGearDone = true;"), "dressed once");
 });
 
-test("a stuck runner that a nudge did not free is rebuilt where it stands the next time (2026-10-28: the armed skeletons stayed stuck)", () => {
+
+
+test("a stuck runner is only written down, never moved or rebuilt (2026-10-28, the owner: moved it stayed stuck, rebuilt it vanished and came back with other weapons)", () => {
   const view = fs.readFileSync(path.join(__dirname, "..", "src", "view", "formView.ts"), "utf8");
-  const block = view.slice(view.indexOf("A STUCK RUNNER (2026"), view.indexOf("PUT DOWN BY ITS HOST (2026"));
-  assert.ok(block.includes("gmRNow - this.gmRunNudgedAt < GM_RUN_AGAIN_MS ? this.gmRunNudges + 1 : 1"), "counted only when stuck again soon after");
-  assert.ok(block.includes("this.gmRunNudges >= 2 && !regroundExempt(gmRaceName)") && block.includes("this.gmGroundForce = true"), "the second one rebuilds it (never a giant or a mammoth)");
+  const block = view.slice(view.indexOf("A STUCK RUNNER, WATCHED"), view.indexOf("PUT DOWN BY ITS HOST (2026"));
+  assert.ok(block.includes("gmRSpeed > GM_RUN_SPEED && gmRGap > GM_RUN_NEAR") && block.includes("gmMoved < gmExpect * 0.25"), "the same test");
+  assert.ok(block.includes('gmCrumb("stuck run '), "a breadcrumb");
+  assert.ok(!block.includes("moveTo(") && !block.includes("gmGroundForce") && !block.includes("gmGroundRefight"), "nothing done to it");
 });
