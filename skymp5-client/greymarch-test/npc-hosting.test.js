@@ -108,7 +108,9 @@ test("locked height: a server NPC is not resurrected at its spawn; one that runs
   assert.ok(spawn.includes("this.resurrect(refrId, beastLook, !appearance)"));
   const tick = formView.slice(formView.indexOf("private gmHostedTick("), formView.indexOf("public gmIsPlayerLook"));
   assert.ok(tick.includes("(this.gmFlatSteps >= FLAT_STEPS || this.gmGroundForce) && Date.now() - this.gmRegroundAt >= REGROUND_EVERY_MS"), "flat for 3 s, or the server saw it off the ground (2026-10-28)");
-  assert.ok(tick.includes("npc.disable(false).then(") && tick.includes("again.enable(false).then(") && !tick.includes("npc.setPosition("), "rebuilt where it stands (a lift fell back)");
+  assert.ok(tick.includes("npc.disable(false).then(") && tick.includes("again.enable(false).then("), "rebuilt where it stands");
+  const reground = tick.slice(tick.indexOf("if ((this.gmFlatSteps >= FLAT_STEPS || this.gmGroundForce)"), tick.indexOf("if (Date.now() - this.gmDriftAt"));
+  assert.ok(!reground.includes("setPosition("), "the LOCKED HEIGHT rebuild never lifts it (a lift fell back, 2026-10-24)");
   assert.ok(tick.includes("applyEquipment(ac, gmEq)") && tick.includes("this.eqState = this.getDefaultEquipState();"), "its gear put back after (it was drawn anew: other loadouts)");
   assert.ok(formView.includes("this.gmLastEquipment = model.equipment;"));
   assert.ok(tick.includes('", cell " + gmCellOf(npc) + " (player " + gmCellOf(me) + ")"'), "the drift lines say which cell");
@@ -135,9 +137,10 @@ test("an NPC the server saw off the ground is put down by its host, its fight ke
   const tick = view.slice(view.indexOf("private gmHostedTick("), view.indexOf("private gmHostedTick(") + 20000);
   const fix = tick.slice(tick.indexOf("PUT DOWN BY ITS HOST"), tick.indexOf("const others: Actor[] = [];"));
   assert.ok(fix.includes("npc.stopTranslation()"), "first its stuck move is stopped (it falls by itself)");
-  assert.ok(fix.includes("this.gmGroundForce = true") && fix.includes("GM_GROUND_SETTLE_MS"), "then, still off a moment later, rebuilt where it stands (the LOCKED HEIGHT cure)");
+  const stop = fix.indexOf("npc.stopTranslation()"), set = fix.indexOf("npc.setPosition(gmX, gmY, gmGround + GM_GROUND_LIFT)"), rebuild = fix.indexOf("this.gmGroundForce = true");
+  assert.ok(stop > 0 && set > stop && rebuild > set, "its move stopped, then set just over the ground under it, then rebuilt (2026-10-28: the rebuild alone left it up)");
   assert.ok(tick.includes("(this.gmFlatSteps >= FLAT_STEPS || this.gmGroundForce)"), "the rebuild takes the server's word");
-  assert.ok(!fix.includes("setPosition(") && !fix.includes("moveTo("), "never set at a height (that fell back) or moved away");
+  assert.ok(!fix.includes("moveTo("), "never moved away");
 });
 
 test("breadcrumbs follow a ground word from the server to the host check (2026-10-28: the server told the games and nothing happened)", () => {
@@ -151,4 +154,21 @@ test("the ground word reaches the bridge: authService passes greymarchGround on 
   const auth = fs.readFileSync(path.join(__dirname, "..", "src", "services", "services", "authService.ts"), "utf8");
   const sw = auth.slice(auth.indexOf("case 'greymarchGround'"), auth.indexOf("this.gm.greymarchPacket(msgContent)"));
   assert.ok(auth.includes("case 'greymarchGround'") && sw.length > 0 && !sw.includes("break;"), "listed among the packets handed to the bridge");
+});
+
+test("the ground under the NPC's own feet is read from the land the server sent, 5 x 5 heights (2026-10-28: on a steep hillside one height was 100+ too high)", () => {
+  const view = fs.readFileSync(path.join(__dirname, "..", "src", "view", "formView.ts"), "utf8");
+  const src = view.slice(view.indexOf("function gmGroundUnder("), view.indexOf("\n}", view.indexOf("function gmGroundUnder(")) + 2);
+  const js = ts.transpileModule(src + "\nmodule.exports = gmGroundUnder;", { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2019 } }).outputText;
+  const mod = { exports: {} }; new Function("module", "exports", js)(mod, mod.exports);
+  const under = mod.exports;
+  // a hillside falling 1 unit per unit to the east, centred on x 1000
+  const h = []; for (let j = -2; j <= 2; j++) for (let i = -2; i <= 2; i++) h.push(-(1000 + i * 64));
+  const fix = { z: -500, grid: { x: 1000, y: 0, step: 64, h } };
+  assert.strictEqual(under(fix, 1000, 0), -1000, "right under the server's spot");
+  assert.strictEqual(under(fix, 1032, 10), -1032, "between the points");
+  assert.strictEqual(under(fix, 5000, 0), -500, "off the grid: the word's one height");
+  assert.strictEqual(under({ z: -7 }, 0, 0), -7, "no grid (an older server): the word's one height");
+  const bridge = fs.readFileSync(path.join(__dirname, "..", "src", "greymarch", "bridge.ts"), "utf8");
+  assert.ok(bridge.includes("msg.grid.h.length === 25"), "the bridge keeps a well-formed grid only");
 });

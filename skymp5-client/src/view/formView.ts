@@ -10,7 +10,21 @@ import { isBadMenuShown, applyEquipment } from "../sync/equipment";
 import { RespawnNeededError } from "../lib/errors";
 import { MsgType } from "../messages";
 const GM_GROUND_FIX_MS = 8000; // the server's word on where the ground is under an NPC holds this long (gmHostedTick)
-const GM_GROUND_NEAR = 60; // within this of that ground it is on it
+const GM_GROUND_NEAR = 50; // within this of the ground under it, it is on it
+const GM_GROUND_LIFT = 24; // set this far over the ground under it, so it never starts inside a slope
+// the ground under (x, y) from the land the server sent with its word (5 x 5 heights, bilinear between them); the word's one height when there is none
+// or (x, y) is off the grid
+function gmGroundUnder(fix: any, x: number, y: number): number {
+  const g = fix && fix.grid;
+  if (!g) return fix.z;
+  const fx = (x - g.x) / g.step + 2, fy = (y - g.y) / g.step + 2;
+  if (!(fx >= 0 && fx <= 4 && fy >= 0 && fy <= 4)) return fix.z;
+  const ix = Math.min(3, Math.floor(fx)), iy = Math.min(3, Math.floor(fy)), tx = fx - ix, ty = fy - iy;
+  const at = (i: number, j: number) => g.h[j * 5 + i];
+  const a = at(ix, iy), b2 = at(ix + 1, iy), c = at(ix, iy + 1), d = at(ix + 1, iy + 1);
+  if ([a, b2, c, d].some((v) => typeof v !== "number")) return fix.z;
+  return a * (1 - tx) * (1 - ty) + b2 * tx * (1 - ty) + c * (1 - tx) * ty + d * tx * ty;
+}
 const GM_GROUND_SETTLE_MS = 1500; // after its move was stopped, this long to fall by itself before it is set on the ground
 import { FormModel } from "./model";
 import { applyMovement } from "../sync/movementApply";
@@ -1162,27 +1176,36 @@ export class FormView {
         }
       }
       // GREYMARCH: PUT DOWN BY ITS HOST (2026-10-28, the owner: bandits still walked on air and sank into the ground chasing people). The server saw this NPC
-      // off the ground (gamemode groundclamp.js) and said where the ground is. A stuck move keeps an actor out of its gravity, so the move is stopped first and
-      // it falls by itself; if it is still off a moment later it is rebuilt where it stands, the LOCKED HEIGHT cure above (a position set on it fell back to the
-      // stuck height, 2026-10-24). Done here by its own host, never moved by the server (a move from the server ended its fight). Breadcrumbs: "ground"
+      // off the ground (gamemode groundclamp.js) and sent the land around it (5 x 5 heights): the ground under its own feet is read from them (on a steep
+      // hillside one height for the spot was 100+ too high, and the bandit stayed up there). Then, as long as it is still off: its move is stopped (a stuck move
+      // keeps an actor out of its gravity), then it is set just over that ground, then, if it is still up, rebuilt where it stands (the LOCKED HEIGHT cure above).
+      // Done here by its own host, never moved by the server (a move from the server ended its fight). Breadcrumbs: "ground"
       {
         const gmGl: any = Function("return this")();
         const gmFixes: any = gmGl.__gmGroundFix;
-        const gmFix = gmFixes ? gmFixes[String(this.remoteRefrId)] : null;
-        if (gmFix && !gmFix.seen) { gmFix.seen = true; gmCrumb("ground seen " + gmHex(this.remoteRefrId as number) + ": " + Math.round(npc.getPositionZ() - gmFix.z) + " over the ground here, " + Math.round((Date.now() - gmFix.at) / 100) / 10 + " s after the word"); }
+        const gmKey = String(this.remoteRefrId);
+        const gmFix = gmFixes ? gmFixes[gmKey] : null;
+        if (gmFix && !gmFix.seen) { gmFix.seen = true; gmCrumb("ground seen " + gmHex(this.remoteRefrId as number) + ": " + Math.round(npc.getPositionZ() - gmGroundUnder(gmFix, npc.getPositionX(), npc.getPositionY())) + " over the ground under it, " + Math.round((Date.now() - gmFix.at) / 100) / 10 + " s after the word"); }
         if (gmFix && Date.now() - gmFix.at < GM_GROUND_FIX_MS) {
-          const gmZ = npc.getPositionZ();
-          if (Math.abs(gmZ - gmFix.z) <= GM_GROUND_NEAR) { delete gmFixes[String(this.remoteRefrId)]; }
-          else if (!gmFix.stopped) {
-            gmFix.stopped = Date.now();
+          const gmX = npc.getPositionX(), gmY = npc.getPositionY(), gmZ = npc.getPositionZ();
+          const gmGround = gmGroundUnder(gmFix, gmX, gmY);
+          const gmOff = gmZ - gmGround;
+          const gmNow2 = Date.now();
+          if (Math.abs(gmOff) <= GM_GROUND_NEAR) { if (gmFix.step) gmCrumb("ground " + gmHex(this.remoteRefrId as number) + ": down, " + Math.round(gmOff) + " from the ground"); delete gmFixes[gmKey]; }
+          else if (!gmFix.step) {
+            gmFix.step = 1; gmFix.stepAt = gmNow2;
             try { npc.stopTranslation(); } catch (e) { /* it was not moving */ }
-            gmCrumb("ground " + gmHex(this.remoteRefrId as number) + ": " + Math.round(gmZ - gmFix.z) + " off the ground the server knows, its move stopped (it falls by itself)");
-          } else if (!gmFix.placed && Date.now() - gmFix.stopped >= GM_GROUND_SETTLE_MS) {
-            gmFix.placed = true;
+            gmCrumb("ground " + gmHex(this.remoteRefrId as number) + ": " + Math.round(gmOff) + " off the ground under it, its move stopped (it falls by itself)");
+          } else if (gmFix.step === 1 && gmNow2 - gmFix.stepAt >= GM_GROUND_SETTLE_MS) {
+            gmFix.step = 2; gmFix.stepAt = gmNow2;
+            try { npc.setPosition(gmX, gmY, gmGround + GM_GROUND_LIFT); } catch (e) { /* the next step tries the rebuild */ }
+            gmCrumb("ground " + gmHex(this.remoteRefrId as number) + ": still " + Math.round(gmOff) + " off, set just over the ground under it (" + Math.round(gmGround) + ")");
+          } else if (gmFix.step === 2 && gmNow2 - gmFix.stepAt >= GM_GROUND_SETTLE_MS) {
+            gmFix.step = 3; gmFix.stepAt = gmNow2;
             if (!regroundExempt(gmRaceName)) this.gmGroundForce = true; // rebuilt where it stands at the next check (a giant or a mammoth never: see regroundExempt)
-            gmCrumb("ground " + gmHex(this.remoteRefrId as number) + ": still " + Math.round(gmZ - gmFix.z) + " off, rebuilt where it stands");
+            gmCrumb("ground " + gmHex(this.remoteRefrId as number) + ": back up " + Math.round(gmOff) + " off after it was set down, rebuilt where it stands");
           }
-        } else if (gmFix) { delete gmFixes[String(this.remoteRefrId)]; }
+        } else if (gmFix) { delete gmFixes[gmKey]; }
       }
       const others: Actor[] = [];
       const arr = getViewFromStorage()?.getFormViews();
