@@ -349,3 +349,36 @@ test("the Spells balance tab's costs go on the spell records too (GreymarchCamer
   old.say({ customPacketType: "greymarchSpellCosts", costs: { "12fce:Skyrim.esm": 20 } }); old.gm.greymarchSpellCostTick();
   assert.deepStrictEqual(old.log.sent.filter((m) => m.customPacketType === "greymarchSpellCost"), [], "an older DLL: nothing told, the server keeps correcting");
 });
+
+test("another player's head is drawn again after their eyes change, so /eyes leaves no vampire eyes floating on the forehead (2026-10-29); this player's own head is not", () => {
+  const s = make({ others: { 0xff000002: 0x5000 } });
+  const sp = s.gm.sp;
+  const GM = 0x0a000000;
+  const part = (id) => ({ getFormID: () => id, getType: () => 2 });
+  const worn = { me: { 2: 0x111 }, them: { 2: 0x222 } };
+  const redrawn = { me: 0, them: 0 };
+  const body = (name) => ({ name, getRace: () => ({ getFormID: () => 0x13746 }), getBaseObject: () => ({ name, sex: 0 }), changeHeadPart: (hp) => { worn[name][2] = hp.getFormID(); }, regenerateHead: () => {}, is3DLoaded: () => true, queueNiNodeUpdate: () => { redrawn[name]++; } });
+  Object.assign(sp.Game.getPlayer(), body("me"));
+  const them = body("them");
+  sp.Game.getFormEx = (id) => (id === 0x5000 ? them : { id });
+  sp.Actor.from = (f) => f;
+  sp.Game.getFormFromFile = (id, file) => (file === "GreymarchCore.esp" ? { id: GM + id } : file === "Dawnguard.esm" ? { getFormID: () => DG + id } : null);
+  sp.HeadPart = { from: (f) => (f ? part(f.id) : null) };
+  sp.ActorBase = { from: (b) => (b ? { getSex: () => b.sex, getNumHeadParts: () => 1, getNthHeadPart: () => part(worn[b.name][2]), setNthHeadPart: () => {} } : null) };
+  let t = 7_000_000; const realNow = Date.now; Date.now = () => t;
+  const look = (list) => { s.say({ customPacketType: "greymarchVampLooks", vampires: list }); s.tick(); t += 2500; };
+  try {
+    s.say({ customPacketType: "greymarchGhosts", ghosts: [], me: 0xff000001 });
+    look([{ actor: 0xff000001, glow: 2, fangs: false }, { actor: 0xff000002, glow: 2, fangs: false, eyes: "yellow" }]);
+    assert.strictEqual(worn.them[2], GM + 0x82e + 2, "their yellow eyes");
+    assert.strictEqual(redrawn.them, 1);
+    look([{ actor: 0xff000001, glow: 2, fangs: false }, { actor: 0xff000002, glow: 2, fangs: false, eyes: "yellow" }]);
+    assert.strictEqual(redrawn.them, 1, "nothing changed: not drawn again");
+    look([{ actor: 0xff000001, glow: 2, fangs: false }, { actor: 0xff000002, glow: 0, fangs: false, eyes: "yellow" }]);
+    assert.strictEqual(worn.them[2], 0x222, "/eyes: their own eyes");
+    assert.strictEqual(redrawn.them, 2, "and the head drawn again, so the vampire eyes are gone");
+    look([{ actor: 0xff000001, glow: 2, fangs: false }]);
+    assert.strictEqual(redrawn.them, 3, "no longer a vampire: their own eyes put back and the head drawn again");
+    assert.strictEqual(redrawn.me, 0, "this player's own head is left to the game");
+  } finally { Date.now = realNow; }
+});
