@@ -33,6 +33,12 @@ const GM_RUN_NEAR = 250;
 const GM_RUN_NUDGE_MS = 8000;
 // Skyrim's own reset of an actor's animation state (its graph goes back to standing, so the AI's next move starts a real run). It moves nothing and changes no gear
 const GM_GRAPH_RESET = "IdleForceDefaultState";
+// in a fight (DRESSED ONCE BY ITS HOST: an empty-handed NPC takes the server's gear, but not mid-fight)
+function gmInCombat(ac: Actor): boolean { try { return ac.isInCombat(); } catch (e) { return true; } }
+// a weapon in either hand (DRESSED ONCE BY ITS HOST: an NPC with empty hands still takes the server's gear)
+function gmHoldsWeapon(ac: Actor): boolean {
+  try { return !!ac.getEquippedWeapon(false) || !!ac.getEquippedWeapon(true); } catch (e) { return true; }
+}
 import { FormModel } from "./model";
 import { applyMovement } from "../sync/movementApply";
 import { Movement } from "../sync/movement";
@@ -875,8 +881,10 @@ export class FormView {
           // sheath their weapon"). applyEquipment empties the NPC and dresses it again. An NPC this game runs got that again when this game took it over and at
           // the server's echo of its own gear: the weapon was pulled from its hand (SkympFakeUnequip in the breadcrumbs), and an armed fighter's graph stuck,
           // running on the spot. Once this game hosts it and has dressed it, this game's own gear is the real one (it reports it to the server); the server's
-          // copy is not put back on it (a rebuild still dresses it: "reground")
-          !(this.gmWasHost && this.gmGearDone) &&
+          // copy is not put back on it (a rebuild still dresses it: "reground"). UNLESS ITS HANDS ARE EMPTY (2026-10-28, the owner: the Skeleton archer had no
+          // bow): the server equips the weapon the gamemode gave it (npcresolve armFor) only when a game takes it over, after the first dressing; with nothing in
+          // its hands there is no weapon to pull, so that dressing is taken
+          !(this.gmWasHost && this.gmGearDone && (gmHoldsWeapon(ac) || gmInCombat(ac))) && // (empty hands mid-fight: after the fight, so it does not slide)
           (!gmBeastLook || (!!this.gmBeast && !beastHeld(this.gmBeast, Date.now())))
         ) {
           //if (this.spawnMoment > 0 && Date.now() - this.spawnMoment > 5000) {

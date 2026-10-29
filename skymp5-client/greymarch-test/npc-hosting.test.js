@@ -188,7 +188,7 @@ test("a bandit put down keeps its fight: back at its target, weapon drawn, after
 test("an NPC this game runs keeps its gear while it fights: no applyEquipment mid-charge (2026-10-28, the owner: skeletons slid, then ran)", () => {
   const view = fs.readFileSync(path.join(__dirname, "..", "src", "view", "formView.ts"), "utf8");
   const step = view.slice(view.indexOf("if (this.eqState.lastNumChanges !== model.equipment.numChanges)"), view.indexOf("applyEquipment(ac, model.equipment)"));
-  assert.ok(step.includes("!(this.gmWasHost && this.gmGearDone)"), "once its host has dressed it, the server's copy is not put back on it (the armed skeletons lost the weapon in hand and ran on the spot)");
+  assert.ok(step.includes("!(this.gmWasHost && this.gmGearDone && (gmHoldsWeapon(ac) || gmInCombat(ac)))"), "once its host has dressed it, the server's copy is not put back on it (the armed skeletons lost the weapon in hand and ran on the spot)");
   assert.ok(view.includes("this.gmGearDone = true;"), "dressed once");
 });
 
@@ -216,4 +216,10 @@ test("an NPC this game runs is never also moved by the server's movement (2026-1
   assert.ok(view.includes("const gmMineOnly = alreadyHosted && this.movState.everApplied;"));
   assert.ok(view.includes("if (!gmMineOnly && (model.isHostedByOther || !this.movState.everApplied || (gmNobody && !gmGiveUp))) {"), "applyMovement only for an NPC this game does not run");
   assert.ok(view.includes('gmCrumb("host clash '), "a breadcrumb when the server says another game runs it");
+});
+
+test("an NPC its host runs with empty hands still takes the server's gear, out of a fight (2026-10-28, the owner: the Skeleton archer had no bow)", () => {
+  const view = fs.readFileSync(path.join(__dirname, "..", "src", "view", "formView.ts"), "utf8");
+  assert.ok(view.includes("function gmHoldsWeapon(ac: Actor): boolean") && view.includes("ac.getEquippedWeapon(false) || !!ac.getEquippedWeapon(true)"), "a weapon in either hand");
+  assert.ok(view.includes("function gmInCombat(ac: Actor): boolean"));
 });
