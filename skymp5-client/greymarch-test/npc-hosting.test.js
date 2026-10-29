@@ -182,3 +182,14 @@ test("a bandit put down keeps its fight: back at its target, weapon drawn, after
   const setAt = tick.indexOf("npc.moveTo(npc, 0, 0, gmGround + GM_GROUND_LIFT - gmZ, false)"); assert.ok(setAt > 0 && tick.indexOf("this.gmGroundRefight(npc)", setAt) - setAt < 200, "right after it is set down");
   assert.ok(tick.includes("if (ac) this.gmGroundRefight(ac);"), "after it is rebuilt");
 });
+
+test("a stuck runner: an NPC in a fight that runs but barely moves is moved onto itself and sent back at its target (2026-10-28, the owner: draugr and skeletons ran in place)", () => {
+  const view = fs.readFileSync(path.join(__dirname, "..", "src", "view", "formView.ts"), "utf8");
+  const tick = view.slice(view.indexOf("private gmHostedTick("), view.indexOf("private gmHostedTick(") + 30000);
+  const block = tick.slice(tick.indexOf("A STUCK RUNNER"), tick.indexOf("PUT DOWN BY ITS HOST"));
+  assert.ok(block.includes("gmRSpeed > GM_RUN_SPEED && gmRGap > GM_RUN_NEAR"), "only a running NPC away from its target");
+  assert.ok(block.includes("gmMoved < gmExpect * 0.25") && block.includes("this.gmRunStuck >= 2"), "a quarter of its speed, twice in a row");
+  assert.ok(block.includes("gmRNow - this.gmRunNudgedAt >= GM_RUN_NUDGE_MS"), "not more than once each GM_RUN_NUDGE_MS");
+  assert.ok(block.includes("npc.moveTo(npc, 0, 0, 0, false)") && block.includes("this.gmGroundRefight(npc)"), "moved onto itself and back at its target");
+  assert.ok(block.includes('gmCrumb("stuck run '), "a breadcrumb");
+});

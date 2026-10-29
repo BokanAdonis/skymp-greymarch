@@ -26,6 +26,11 @@ function gmGroundUnder(fix: any, x: number, y: number): number {
   return a * (1 - tx) * (1 - ty) + b2 * tx * (1 - ty) + c * (1 - tx) * ty + d * tx * ty;
 }
 const GM_GROUND_SETTLE_MS = 900; // each step waits this long for the one before (one host check; 1.5 s until 2026-10-28: the owner, "they still float for a pretty long time")
+// A STUCK RUNNER (gmHostedTick): checked this often; "running" above this Speed; not when this close to its target (it is fighting there); nudged at most this often
+const GM_RUN_CHECK_MS = 1500;
+const GM_RUN_SPEED = 150;
+const GM_RUN_NEAR = 250;
+const GM_RUN_NUDGE_MS = 8000;
 import { FormModel } from "./model";
 import { applyMovement } from "../sync/movementApply";
 import { Movement } from "../sync/movement";
@@ -1186,6 +1191,31 @@ export class FormView {
           gmCrumb("drift " + gmHex(this.remoteRefrId as number) + " base " + gmHex(npc.getBaseObject() ? npc.getBaseObject()!.getFormID() : 0) + ": at " + Math.round(gmNow[0]) + " " + Math.round(gmNow[1]) + ", z " + Math.round(npc.getPositionZ()) + ", cell " + gmCellOf(npc) + " (player " + gmCellOf(me) + ")" + ", player z " + Math.round(me.getPositionZ()) + ", " + Math.round(hd) + " away, combat " + npc.getCombatState() + ", speed " + Math.round(npc.getAnimationVariableFloat("Speed")) + ", jump " + npc.getAnimationVariableBool("bInJumpState") + ", AI " + npc.isAIEnabled());
         }
       }
+      // GREYMARCH: A STUCK RUNNER (2026-10-28, the owner: encounter draugr and skeletons "run in place, or get stuck when running"; breadcrumbs: a skeleton in a
+      // fight ran at speed 299 and moved 20-130 units in 3 s). Checked every GM_RUN_CHECK_MS: an NPC in a fight, running (Speed over GM_RUN_SPEED), not near
+      // its target, that covered less than a quarter of what that speed covers, twice in a row, is nudged: moved onto itself (a fresh place for its pathing
+      // and its character controller) and sent back at its target. At most once each GM_RUN_NUDGE_MS. Breadcrumbs: "stuck run" with its target and the gap
+      {
+        const gmRNow = Date.now();
+        if (gmRNow - this.gmRunAt >= GM_RUN_CHECK_MS) {
+          const gmRP = [npc.getPositionX(), npc.getPositionY()];
+          let gmRSpeed = 0; try { gmRSpeed = npc.getAnimationVariableFloat("Speed"); } catch (e) { gmRSpeed = 0; }
+          let gmRTarget: Actor | null = null; try { gmRTarget = npc.isInCombat() ? npc.getCombatTarget() : null; } catch (e) { gmRTarget = null; }
+          const gmRGap = gmRTarget ? Math.hypot(gmRTarget.getPositionX() - gmRP[0], gmRTarget.getPositionY() - gmRP[1]) : 0;
+          if (this.gmRunPos && this.gmRunAt && gmRTarget && gmRSpeed > GM_RUN_SPEED && gmRGap > GM_RUN_NEAR) {
+            const gmMoved = Math.hypot(gmRP[0] - this.gmRunPos[0], gmRP[1] - this.gmRunPos[1]);
+            const gmExpect = (gmRSpeed * (gmRNow - this.gmRunAt)) / 1000;
+            this.gmRunStuck = gmMoved < gmExpect * 0.25 ? this.gmRunStuck + 1 : 0;
+            if (this.gmRunStuck >= 2 && gmRNow - this.gmRunNudgedAt >= GM_RUN_NUDGE_MS) {
+              this.gmRunStuck = 0; this.gmRunNudgedAt = gmRNow;
+              gmCrumb("stuck run " + gmHex(this.remoteRefrId as number) + " base " + gmHex(npc.getBaseObject() ? npc.getBaseObject()!.getFormID() : 0) + ": speed " + Math.round(gmRSpeed) + ", moved " + Math.round(gmMoved) + " of " + Math.round(gmExpect) + ", target " + gmHex(gmRTarget.getFormID()) + (gmRTarget.getFormID() === 0x14 ? " (me)" : "") + " " + Math.round(gmRGap) + " away, " + Math.round(gmRTarget.getPositionZ() - npc.getPositionZ()) + " higher; moved onto itself");
+              try { this.gmGroundTargetId = gmRTarget.getFormID(); npc.moveTo(npc, 0, 0, 0, false); } catch (e) { /* the next check tries again */ }
+              this.gmGroundRefight(npc);
+            }
+          } else this.gmRunStuck = 0;
+          this.gmRunPos = gmRP; this.gmRunAt = gmRNow;
+        }
+      }
       // GREYMARCH: PUT DOWN BY ITS HOST (2026-10-28, the owner: bandits still walked on air and sank into the ground chasing people). The server saw this NPC
       // off the ground (gamemode groundclamp.js) and sent the land around it (5 x 5 heights): the ground under its own feet is read from them (on a steep
       // hillside one height for the spot was 100+ too high, and the bandit stayed up there). Then, as long as it is still off: its move is stopped (a stuck move
@@ -1258,6 +1288,10 @@ export class FormView {
   private gmPuppetSeenAt = 0; // GREYMARCH: when this puppet was first played (its breadcrumbs, gmPuppetMove)
   private gmPuppetCrumbed = false; // GREYMARCH: this game hosted this NPC at the last update
   private gmDriftAt = 0;
+  private gmRunAt = 0; // A STUCK RUNNER: when it was last checked, where it was then, checks in a row stuck, when it was last nudged
+  private gmRunPos: number[] | null = null;
+  private gmRunStuck = 0;
+  private gmRunNudgedAt = 0;
   private gmLastEquipment: any = null; // GREYMARCH: the server's record of what this NPC wears (put back after a rebuild)
   private gmLastPos: number[] | null = null; // GREYMARCH: LOCKED HEIGHT: where this hosted NPC was at the last check
   private gmFlatSteps = 0;
