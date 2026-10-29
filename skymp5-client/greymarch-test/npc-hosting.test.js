@@ -201,3 +201,12 @@ test("a stuck runner is only written down, never moved or rebuilt (2026-10-28, t
   assert.ok(block.includes('gmCrumb("stuck run '), "a breadcrumb");
   assert.ok(!block.includes("moveTo(") && !block.includes("gmGroundForce") && !block.includes("gmGroundRefight"), "nothing done to it");
 });
+
+test("an armed NPC that runs in place gets its animation state reset, when its host takes it over and when it is caught stuck (2026-10-28: Speed 334, SpeedSampled 0)", () => {
+  const view = fs.readFileSync(path.join(__dirname, "..", "src", "view", "formView.ts"), "utf8");
+  assert.ok(view.includes('const GM_GRAPH_RESET = "IdleForceDefaultState"'));
+  const start = view.slice(view.indexOf("if (alreadyHosted && !this.gmWasHost) {"), view.indexOf("this.gmWasHost = alreadyHosted;"));
+  assert.ok(start.includes("Debug.sendAnimationEvent(gmHa, GM_GRAPH_RESET)"), "at host start");
+  const block = view.slice(view.indexOf("A STUCK RUNNER, WATCHED"), view.indexOf("PUT DOWN BY ITS HOST (2026"));
+  assert.ok(block.includes('getAnimationVariableFloat("SpeedSampled") < 1') && block.includes("Debug.sendAnimationEvent(npc, GM_GRAPH_RESET)"), "when stuck with a still graph");
+});

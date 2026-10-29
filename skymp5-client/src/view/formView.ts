@@ -31,6 +31,8 @@ const GM_RUN_CHECK_MS = 1500;
 const GM_RUN_SPEED = 150;
 const GM_RUN_NEAR = 250;
 const GM_RUN_NUDGE_MS = 8000;
+// Skyrim's own reset of an actor's animation state (its graph goes back to standing, so the AI's next move starts a real run). It moves nothing and changes no gear
+const GM_GRAPH_RESET = "IdleForceDefaultState";
 import { FormModel } from "./model";
 import { applyMovement } from "../sync/movementApply";
 import { Movement } from "../sync/movement";
@@ -614,7 +616,11 @@ export class FormView {
     // server's movement, so the engine's own ground and gravity drive it from now on
     if (alreadyHosted && !this.gmWasHost) {
       try { Actor.from(refr)?.stopTranslation(); } catch (e) { /* it was not moving */ }
-      gmCrumb("host start " + gmHex(this.refrId) + ": move stopped");
+      // its animation state is reset too (2026-10-28, the owner: the armed encounter skeletons ran in place; breadcrumbs: Speed 334, SpeedSampled 0). Until this
+      // game ran it, its own animations were held back (setDefaultAnimsDisabled), and a run its AI started then never began in its graph
+      let gmReset = false;
+      try { const gmHa = Actor.from(refr); if (gmHa && gmHa.is3DLoaded() && !gmHa.isDead()) { Debug.sendAnimationEvent(gmHa, GM_GRAPH_RESET); gmReset = true; } } catch (e) { /* the stuck-run check resets it later */ }
+      gmCrumb("host start " + gmHex(this.refrId) + ": move stopped" + (gmReset ? ", animation state reset" : ""));
     }
     this.gmWasHost = alreadyHosted;
 
@@ -1200,7 +1206,7 @@ export class FormView {
       }
       // GREYMARCH: A STUCK RUNNER, WATCHED (2026-10-28, the owner: encounter draugr and skeletons "run in place, or get stuck when running"). Checked every
       // GM_RUN_CHECK_MS: an NPC in a fight, "running" (Speed over GM_RUN_SPEED), not near its target, that covered less than a quarter of what that speed covers,
-      // twice in a row, is written down ("stuck run") with what may explain it. Nothing is done to it: moved onto itself it stayed stuck, and rebuilt it
+      // twice in a row, is written down ("stuck run"); when its graph is not moving at all its animation state is reset. It is never moved: moved onto itself it stayed stuck, and rebuilt it
       // vanished and came back with other weapons (the owner, 2026-10-28). At most once each GM_RUN_NUDGE_MS
       {
         const gmRNow = Date.now();
@@ -1217,8 +1223,11 @@ export class FormView {
               this.gmRunStuck = 0; this.gmRunNudgedAt = gmRNow;
               const gmV = (n: string) => { try { return String(Math.round(npc.getAnimationVariableFloat(n) * 100) / 100); } catch (e) { return "?"; } };
               const gmB = (n: string) => { try { return npc.getAnimationVariableBool(n) ? "1" : "0"; } catch (e) { return "?"; } };
+              // its graph is not moving at all while its AI runs (SpeedSampled 0): its animation state is reset (GM_GRAPH_RESET), nothing else is done to it
+              let gmSampled0 = false; try { gmSampled0 = npc.getAnimationVariableFloat("SpeedSampled") < 1; } catch (e) { gmSampled0 = false; }
               let gmLos = "?"; try { gmLos = npc.hasLOS(gmRTarget) ? "yes" : "no"; } catch (e) { gmLos = "?"; }
-              gmCrumb("stuck run " + gmHex(this.remoteRefrId as number) + " base " + gmHex(npc.getBaseObject() ? npc.getBaseObject()!.getFormID() : 0) + ": speed " + Math.round(gmRSpeed) + ", moved " + Math.round(gmMoved) + " of " + Math.round(gmExpect) + ", target " + gmHex(gmRTarget.getFormID()) + (gmRTarget.getFormID() === 0x14 ? " (me)" : "") + " " + Math.round(gmRGap) + " away, " + Math.round(gmRTarget.getPositionZ() - npc.getPositionZ()) + " higher, sees it " + gmLos + ", weapon " + (npc.isWeaponDrawn() ? "drawn" : "away") + ", blocking " + gmB("IsBlocking") + ", direction " + gmV("Direction") + ", sampled " + gmV("SpeedSampled") + ", run " + gmB("IsRunning") + ", sprint " + gmB("IsSprinting") + ", speed mult " + Math.round(npc.getActorValue("SpeedMult")));
+              gmCrumb("stuck run " + gmHex(this.remoteRefrId as number) + " base " + gmHex(npc.getBaseObject() ? npc.getBaseObject()!.getFormID() : 0) + ": speed " + Math.round(gmRSpeed) + ", moved " + Math.round(gmMoved) + " of " + Math.round(gmExpect) + ", target " + gmHex(gmRTarget.getFormID()) + (gmRTarget.getFormID() === 0x14 ? " (me)" : "") + " " + Math.round(gmRGap) + " away, " + Math.round(gmRTarget.getPositionZ() - npc.getPositionZ()) + " higher, sees it " + gmLos + ", weapon " + (npc.isWeaponDrawn() ? "drawn" : "away") + ", blocking " + gmB("IsBlocking") + ", direction " + gmV("Direction") + ", sampled " + gmV("SpeedSampled") + ", run " + gmB("IsRunning") + ", sprint " + gmB("IsSprinting") + ", speed mult " + Math.round(npc.getActorValue("SpeedMult")) + (gmSampled0 ? "; animation state reset" : ""));
+              if (gmSampled0) { try { Debug.sendAnimationEvent(npc, GM_GRAPH_RESET); } catch (e) { /* the next check tries again */ } }
             }
           } else this.gmRunStuck = 0;
           this.gmRunPos = gmRP; this.gmRunAt = gmRNow;
