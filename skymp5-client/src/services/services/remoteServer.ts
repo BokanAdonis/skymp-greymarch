@@ -38,6 +38,7 @@ import { UpdateAppearanceMessage } from '../messages/updateAppearanceMessage';
 import { TeleportMessage } from '../messages/teleportMessage';
 import { DeathStateContainerMessage } from '../messages/deathStateContainerMessage';
 import { RespawnNeededError } from '../../lib/errors';
+import { disableThenDeleteActor } from '../../view/actorDelete';
 import { OpenContainerMessage } from '../messages/openContainerMessage';
 import { ActivateMessage } from '../messages/activateMessage';
 import { ClientListener, CombinedController, Sp } from './clientListener';
@@ -839,8 +840,8 @@ export class RemoteServer extends ClientListener {
           });
         } catch (e) {
           if (e instanceof RespawnNeededError) {
-            actor.disableNoWait(false);
-            actor.delete();
+            // GREYMARCH: disabled first, deleted once that has finished (see view/actorDelete.ts)
+            disableThenDeleteActor(actor);
           } else {
             throw e;
           }

@@ -89,6 +89,7 @@ import { CHECK_EVERY_MS as GM_HOST_CHECK_MS, shouldRelease, pickTarget, markRele
 import { SpApiInteractor } from "../services/spApiInteractor";
 import { WorldCleanerService } from "../services/services/worldCleanerService";
 import { GamemodeUpdateService } from "../services/services/gamemodeUpdateService";
+import { disableThenDeleteActor } from "./actorDelete";
 
 // GREYMARCH: how long a freshly built beast (a werewolf or werebear look) is left alone: no movement, no animation, no gear (see update()); and how long a
 // new werewolf form (__gmWolfRace) must stay the same before the NPC is built again with it
@@ -541,13 +542,17 @@ export class FormView {
       }
       if (refrId >= 0xff000000) {
         const refr = ObjectReference.from(Game.getFormEx(refrId));
-        if (refr) {
-          refr.delete();
-        }
-        SpApiInteractor.getControllerInstance().lookupListener(WorldCleanerService).modWcProtection(refrId, -1);
+        const releaseWcProtection = () => SpApiInteractor.getControllerInstance().lookupListener(WorldCleanerService).modWcProtection(refrId, -1);
         const ac = Actor.from(refr);
         if (ac) {
+          // GREYMARCH: disabled first, deleted once that has finished (see actorDelete.ts); the WorldCleaner protection stays until then
           TESModPlatform.setWeaponDrawnMode(ac, -1);
+          disableThenDeleteActor(ac, releaseWcProtection);
+        } else {
+          if (refr) {
+            refr.delete();
+          }
+          releaseWcProtection();
         }
       }
     })

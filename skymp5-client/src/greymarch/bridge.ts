@@ -9,6 +9,7 @@ import * as moveGetMod from "../sync/movementGet";
 import * as moveApplyMod from "../sync/movementApply";
 import * as animMod from "../sync/animation";
 import { WorldCleanerService } from "../services/services/worldCleanerService";
+import { disableThenDeleteActor } from "../view/actorDelete";
 import { RemoteServer } from "../services/services/remoteServer";
 import { SinglePlayerService } from "../services/services/singlePlayerService";
 import { LoadGameService } from "../services/services/loadGameService";
@@ -1842,8 +1843,12 @@ export class GreymarchBridge {
         this.greymarchShapePuppet = null;
         if (!p) return;
         try { var player = sp.Game.getPlayer(); if (player) sp.Game.setCameraTarget(player); } catch (camErr) { /* the camera is the player's again anyway once the NPC is gone */ }
-        try { var r = sp.ObjectReference.from(sp.Game.getFormEx(p.id)); if (r && r.getFormID() === p.id) { r.disable(false); r.delete(); } } catch (dErr) { /* already gone */ }
-        try { this.controller.lookupListener(WorldCleanerService).modWcProtection(p.id, -1); } catch (wcErr) { /* nothing was protected */ }
+        // The NPC is disabled first and deleted once that has finished (view/actorDelete.ts: deleting an enabled actor crashed the game); protected until then.
+        var self = this, puppetId = p.id;
+        var releaseWc = function () { try { self.controller.lookupListener(WorldCleanerService).modWcProtection(puppetId, -1); } catch (wcErr) { /* nothing was protected */ } };
+        var deleting = false;
+        try { var r = sp.Actor.from(sp.Game.getFormEx(p.id)); if (r && r.getFormID() === p.id) { disableThenDeleteActor(r, releaseWc); deleting = true; } } catch (dErr) { /* already gone */ }
+        if (!deleting) releaseWc();
     }
     // Every frame (greymarchTick): the NPC follows the player's movement exactly as SkyMP moves other players; a respawn is needed after a door or a long way (SkyMP's own rule).
     // The animations other players' creatures should play (their attacks) are played here too.
