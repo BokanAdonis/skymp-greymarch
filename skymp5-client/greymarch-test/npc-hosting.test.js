@@ -146,3 +146,9 @@ test("breadcrumbs follow a ground word from the server to the host check (2026-1
   const view = fs.readFileSync(path.join(__dirname, "..", "src", "view", "formView.ts"), "utf8");
   assert.ok(view.includes('gmCrumb("ground seen "'), "and the host check that finds it");
 });
+
+test("the ground word reaches the bridge: authService passes greymarchGround on (2026-10-28: it was not on the list, so every word was dropped and no bandit came down)", () => {
+  const auth = fs.readFileSync(path.join(__dirname, "..", "src", "services", "services", "authService.ts"), "utf8");
+  const sw = auth.slice(auth.indexOf("case 'greymarchGround'"), auth.indexOf("this.gm.greymarchPacket(msgContent)"));
+  assert.ok(auth.includes("case 'greymarchGround'") && sw.length > 0 && !sw.includes("break;"), "listed among the packets handed to the bridge");
+});

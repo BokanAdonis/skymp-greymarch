@@ -229,6 +229,7 @@ export class AuthService extends ClientListener {
       case 'greymarchHunger': // the hunger bowl on the HUD
       case 'greymarchEnergy': // the energy bar on the HUD while working or resting (gamemode exhaustion.js)
       case 'greymarchMagicBlock': // NPC raise-the-dead and summon effects to end (gamemode magicblock.js)
+      case 'greymarchGround': // the server saw an NPC off the ground: where the ground is (bridge.ts; 2026-10-28: not on this list, it never reached the bridge)
       case 'greymarchBeast':
       case 'greymarchFaceOf': // another player's face from the emote wheel (gamemode faces.js)
       case 'greymarchWolfFeed':
