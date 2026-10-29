@@ -26,8 +26,9 @@ export class DropItemService extends ClientListener {
         if (!this.sp.Ui.isMenuOpen("InventoryMenu"))
             return;
         if (
+            // GREYMARCH: the drop event comes with no reference in this SkyrimPlatform (the owner's breadcrumbs, 2026-10-28: "reference none" on every drop), so a
+            // drop was never told to the server and the item came back while the game's copy stayed on the ground. The dropped copy is found below anyway.
             isPlayer &&
-            isReference &&
             noContainer &&
             sweetCantDropService.canDropOrPutItem(e.baseObj.getFormID())
         ) {
