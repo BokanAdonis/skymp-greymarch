@@ -193,3 +193,9 @@ test("a stuck runner: an NPC in a fight that runs but barely moves is moved onto
   assert.ok(block.includes("npc.moveTo(npc, 0, 0, 0, false)") && block.includes("this.gmGroundRefight(npc)"), "moved onto itself and back at its target");
   assert.ok(block.includes('gmCrumb("stuck run '), "a breadcrumb");
 });
+
+test("an NPC this game runs keeps its gear while it fights: no applyEquipment mid-charge (2026-10-28, the owner: skeletons slid, then ran)", () => {
+  const view = fs.readFileSync(path.join(__dirname, "..", "src", "view", "formView.ts"), "utf8");
+  const step = view.slice(view.indexOf("if (this.eqState.lastNumChanges !== model.equipment.numChanges)"), view.indexOf("applyEquipment(ac, model.equipment)"));
+  assert.ok(step.includes("!(this.gmWasHost && gmInFight(ac))"), "skipped while its host runs it in a fight; numChanges stays behind so it is put on later");
+});

@@ -31,6 +31,8 @@ const GM_RUN_CHECK_MS = 1500;
 const GM_RUN_SPEED = 150;
 const GM_RUN_NEAR = 250;
 const GM_RUN_NUDGE_MS = 8000;
+// in a fight (its gear is not changed then: see the equipment step)
+function gmInFight(ac: Actor): boolean { try { return ac.isInCombat(); } catch (e) { return false; } }
 import { FormModel } from "./model";
 import { applyMovement } from "../sync/movementApply";
 import { Movement } from "../sync/movement";
@@ -860,6 +862,10 @@ export class FormView {
           Date.now() - this.eqState.lastEqMoment > 500 &&
           Date.now() - this.spawnMoment > -1 &&
           this.spawnMoment > 0 &&
+          // GREYMARCH: NOT IN THE MIDDLE OF ITS FIGHT (2026-10-28, the owner: encounter skeletons and draugr "slide for a bit then run"). applyEquipment empties the
+          // NPC and dresses it again; an NPC this game runs got that a moment after it spawned (the server's echo of what this game reported) while it charged,
+          // and slid until its run came back. Its host leaves it dressed as it is while it fights; the change is put on after the fight (numChanges stays behind)
+          !(this.gmWasHost && gmInFight(ac)) &&
           (!gmBeastLook || (!!this.gmBeast && !beastHeld(this.gmBeast, Date.now())))
         ) {
           //if (this.spawnMoment > 0 && Date.now() - this.spawnMoment > 5000) {
