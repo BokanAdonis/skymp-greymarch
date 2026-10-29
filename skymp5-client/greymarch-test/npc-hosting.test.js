@@ -223,3 +223,13 @@ test("an NPC its host runs with empty hands still takes the server's gear, out o
   assert.ok(view.includes("function gmHoldsWeapon(ac: Actor): boolean") && view.includes("ac.getEquippedWeapon(false) || !!ac.getEquippedWeapon(true)"), "a weapon in either hand");
   assert.ok(view.includes("function gmInCombat(ac: Actor): boolean"));
 });
+
+test("a quiver: the game that runs an NPC with a bow or crossbow and none of its ammunition gives it some, equipped (2026-10-28, the owner: the Skeleton archer never used its bow)", () => {
+  const view = fs.readFileSync(path.join(__dirname, "..", "src", "view", "formView.ts"), "utf8");
+  const fn = view.slice(view.indexOf("function gmQuiver("), view.indexOf("function gmHoldsWeapon("));
+  assert.ok(fn.includes("type !== 7 && type !== 9"), "a bow or a crossbow only");
+  assert.ok(fn.includes("ac.getItemCount(ammo) > 0) return"), "never when it has arrows already");
+  assert.ok(fn.includes("ac.addItem(ammo, GM_QUIVER_COUNT, true)") && fn.includes("ac.equipItem(ammo, false, true)"), "given and equipped");
+  assert.ok(fn.includes("ac.getFormID() === 0x14"), "never the player");
+  assert.ok(view.includes("gmQuiver(npc); } // A QUIVER"), "checked by its host every few seconds");
+});

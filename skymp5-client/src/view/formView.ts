@@ -35,6 +35,26 @@ const GM_RUN_NUDGE_MS = 8000;
 const GM_GRAPH_RESET = "IdleForceDefaultState";
 // in a fight (DRESSED ONCE BY ITS HOST: an empty-handed NPC takes the server's gear, but not mid-fight)
 function gmInCombat(ac: Actor): boolean { try { return ac.isInCombat(); } catch (e) { return true; } }
+// A QUIVER (2026-10-28, the owner: the Skeleton archer had its bow on its back and never used it). The server sends an NPC's games only what it wears, and
+// it puts the bow on but never the arrows (MpActor::EquipBestWeapon: the weapon only), so the archer came with no arrows and its AI would not shoot. The game
+// that runs an NPC holding a bow or a crossbow with none of its ammunition gives it GM_QUIVER_COUNT, equipped: draugr arrows for a draugr bow, iron arrows
+// for any other bow, steel bolts for a crossbow (Dawnguard)
+const GM_QUIVER_COUNT = 40;
+const GM_DRAUGR_BOWS = [0x302ca, 0x5d179];
+function gmQuiver(ac: Actor): void {
+  try {
+    if (ac.getFormID() === 0x14) return;
+    const w = ac.getEquippedWeapon(false) || ac.getEquippedWeapon(true);
+    if (!w) return;
+    const type = w.getWeaponType();
+    if (type !== 7 && type !== 9) return; // a bow, a crossbow
+    const ammo = type === 9 ? Game.getFormFromFile(0xbb3, "Dawnguard.esm") : GM_DRAUGR_BOWS.indexOf(w.getFormID()) >= 0 ? Game.getFormFromFile(0x34182, "Skyrim.esm") : Game.getFormFromFile(0x1397d, "Skyrim.esm");
+    if (!ammo || ac.getItemCount(ammo) > 0) return;
+    ac.addItem(ammo, GM_QUIVER_COUNT, true);
+    ac.equipItem(ammo, false, true);
+    gmCrumb("quiver " + gmHex(ac.getFormID()) + ": " + GM_QUIVER_COUNT + " of " + gmHex(ammo.getFormID()) + " for its " + (type === 9 ? "crossbow" : "bow") + " " + gmHex(w.getFormID()));
+  } catch (e) { /* it fights without arrows */ }
+}
 // a weapon in either hand (DRESSED ONCE BY ITS HOST: an NPC with empty hands still takes the server's gear)
 function gmHoldsWeapon(ac: Actor): boolean {
   try { return !!ac.getEquippedWeapon(false) || !!ac.getEquippedWeapon(true); } catch (e) { return true; }
@@ -892,6 +912,7 @@ export class FormView {
           if (applyEquipment(ac, model.equipment)) {
             this.eqState.lastNumChanges = model.equipment.numChanges;
             this.gmGearDone = true;
+            if (this.gmWasHost) gmQuiver(ac); // the game that runs it: a bow comes with arrows
           }
           this.eqState.lastEqMoment = Date.now();
           //}
@@ -1221,6 +1242,7 @@ export class FormView {
       // GM_RUN_CHECK_MS: an NPC in a fight, "running" (Speed over GM_RUN_SPEED), not near its target, that covered less than a quarter of what that speed covers,
       // twice in a row, is written down ("stuck run"); when its graph is not moving at all its animation state is reset. It is never moved: moved onto itself it stayed stuck, and rebuilt it
       // vanished and came back with other weapons (the owner, 2026-10-28). At most once each GM_RUN_NUDGE_MS
+      if (Date.now() - this.gmQuiverAt >= 5000) { this.gmQuiverAt = Date.now(); gmQuiver(npc); } // A QUIVER: its bow may come after it was dressed
       {
         const gmRNow = Date.now();
         if (gmRNow - this.gmRunAt >= GM_RUN_CHECK_MS) {
@@ -1322,6 +1344,7 @@ export class FormView {
   private gmRunPos: number[] | null = null;
   private gmRunStuck = 0;
   private gmRunNudgedAt = 0;
+  private gmQuiverAt = 0; // GREYMARCH: when its host last checked it has arrows for its bow (A QUIVER)
   private gmClashSaid = false; // GREYMARCH: "host clash" written down for it (NEVER BOTH)
   private gmGearDone = false; // GREYMARCH: the gear step has dressed it once (its host then leaves its gear alone: DRESSED ONCE BY ITS HOST)
   private gmLastEquipment: any = null; // GREYMARCH: the server's record of what this NPC wears (put back after a rebuild)
