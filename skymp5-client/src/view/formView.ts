@@ -55,6 +55,10 @@ function gmQuiver(ac: Actor): void {
     gmCrumb("quiver " + gmHex(ac.getFormID()) + ": " + GM_QUIVER_COUNT + " of " + gmHex(ammo.getFormID()) + " for its " + (type === 9 ? "crossbow" : "bow") + " " + gmHex(w.getFormID()));
   } catch (e) { /* it fights without arrows */ }
 }
+// the gear puts a weapon in its hand (a weapon worn in it)
+function gmGearArms(eq: any): boolean {
+  try { return !!eq && !!eq.inv && Array.isArray(eq.inv.entries) && eq.inv.entries.some((e: any) => !!e && (e.worn || e.wornLeft) && (() => { const f = Game.getFormEx(e.baseId); return !!f && f.getType() === 41; })()); } catch (err) { return false; }
+}
 // a weapon in either hand (DRESSED ONCE BY ITS HOST: an NPC with empty hands still takes the server's gear)
 function gmHoldsWeapon(ac: Actor): boolean {
   try { return !!ac.getEquippedWeapon(false) || !!ac.getEquippedWeapon(true); } catch (e) { return true; }
@@ -891,6 +895,11 @@ export class FormView {
         // 1. Place ~90 bots and force them to reequip iron swords to the left hand (rate should be ~50ms)
         // 2. Open your inventory and reequip different items fast
         // 3. After 1-2 minutes close your inventory and see that HUD disappeared
+        // GREYMARCH breadcrumb: a gear change its host holds back (DRESSED ONCE BY ITS HOST), once per change
+        if (ac && this.gmWasHost && this.gmGearDone && this.gmHeldGear !== model.equipment.numChanges && (gmHoldsWeapon(ac) || (gmInCombat(ac) && !gmGearArms(model.equipment)))) {
+          this.gmHeldGear = model.equipment.numChanges as number;
+          gmCrumb("gear held " + gmHex(ac.getFormID()) + ": " + (gmHoldsWeapon(ac) ? "it holds a weapon" : "in a fight, the change brings no weapon"));
+        }
         if (
           ac &&
           !isBadMenuShown() &&
@@ -904,7 +913,7 @@ export class FormView {
           // copy is not put back on it (a rebuild still dresses it: "reground"). UNLESS ITS HANDS ARE EMPTY (2026-10-28, the owner: the Skeleton archer had no
           // bow): the server equips the weapon the gamemode gave it (npcresolve armFor) only when a game takes it over, after the first dressing; with nothing in
           // its hands there is no weapon to pull, so that dressing is taken
-          !(this.gmWasHost && this.gmGearDone && (gmHoldsWeapon(ac) || gmInCombat(ac))) && // (empty hands mid-fight: after the fight, so it does not slide)
+          !(this.gmWasHost && this.gmGearDone && (gmHoldsWeapon(ac) || (gmInCombat(ac) && !gmGearArms(model.equipment)))) && // (empty hands mid-fight: after the fight, so it does not slide; at once when it brings a weapon: the archer fought its whole life with its fists, 2026-10-28)
           (!gmBeastLook || (!!this.gmBeast && !beastHeld(this.gmBeast, Date.now())))
         ) {
           //if (this.spawnMoment > 0 && Date.now() - this.spawnMoment > 5000) {
@@ -1344,6 +1353,7 @@ export class FormView {
   private gmRunPos: number[] | null = null;
   private gmRunStuck = 0;
   private gmRunNudgedAt = 0;
+  private gmHeldGear: number | null = null; // GREYMARCH: the gear change last held back (its breadcrumb)
   private gmQuiverAt = 0; // GREYMARCH: when its host last checked it has arrows for its bow (A QUIVER)
   private gmClashSaid = false; // GREYMARCH: "host clash" written down for it (NEVER BOTH)
   private gmGearDone = false; // GREYMARCH: the gear step has dressed it once (its host then leaves its gear alone: DRESSED ONCE BY ITS HOST)

@@ -188,7 +188,7 @@ test("a bandit put down keeps its fight: back at its target, weapon drawn, after
 test("an NPC this game runs keeps its gear while it fights: no applyEquipment mid-charge (2026-10-28, the owner: skeletons slid, then ran)", () => {
   const view = fs.readFileSync(path.join(__dirname, "..", "src", "view", "formView.ts"), "utf8");
   const step = view.slice(view.indexOf("if (this.eqState.lastNumChanges !== model.equipment.numChanges)"), view.indexOf("applyEquipment(ac, model.equipment)"));
-  assert.ok(step.includes("!(this.gmWasHost && this.gmGearDone && (gmHoldsWeapon(ac) || gmInCombat(ac)))"), "once its host has dressed it, the server's copy is not put back on it (the armed skeletons lost the weapon in hand and ran on the spot)");
+  assert.ok(step.includes("!(this.gmWasHost && this.gmGearDone && (gmHoldsWeapon(ac) || (gmInCombat(ac) && !gmGearArms(model.equipment))))"), "once its host has dressed it, the server's copy is not put back on it (the armed skeletons lost the weapon in hand and ran on the spot)");
   assert.ok(view.includes("this.gmGearDone = true;"), "dressed once");
 });
 
@@ -232,4 +232,10 @@ test("a quiver: the game that runs an NPC with a bow or crossbow and none of its
   assert.ok(fn.includes("ac.addItem(ammo, GM_QUIVER_COUNT, true)") && fn.includes("ac.equipItem(ammo, false, true)"), "given and equipped");
   assert.ok(fn.includes("ac.getFormID() === 0x14"), "never the player");
   assert.ok(view.includes("gmQuiver(npc); } // A QUIVER"), "checked by its host every few seconds");
+});
+
+test("an empty-handed NPC mid-fight is dressed at once when the gear brings it a weapon (2026-10-28, the owner: the archer's bow came only when it died)", () => {
+  const view = fs.readFileSync(path.join(__dirname, "..", "src", "view", "formView.ts"), "utf8");
+  const fn = view.slice(view.indexOf("function gmGearArms("), view.indexOf("function gmHoldsWeapon("));
+  assert.ok(fn.includes("(e.worn || e.wornLeft)") && fn.includes("f.getType() === 41"), "a weapon worn in the new gear");
 });
