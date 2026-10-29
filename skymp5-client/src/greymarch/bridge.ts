@@ -179,7 +179,7 @@ export class GreymarchBridge {
         if (type === "greymarchKill") { this.greymarchKillMe(); return; }
         if (type === "greymarchKnown") { this.greymarchKnown = msg.names && typeof msg.names === "object" ? msg.names : {}; this.greymarchNamesNext = 0; try { (Function("return this")() as any).__gmKnown = this.greymarchKnown; } catch (e) { /* the floating names keep showing IDs */ } return; }
         if (type === "greymarchChatLine") { this.greymarchChatToPage("line", msg); return; }
-        if (type === "greymarchChatInfo") { this.greymarchChatToPage("info", msg); return; }
+        if (type === "greymarchChatInfo") { this.greymarchConsoleAllowed = msg.console === true; this.greymarchChatToPage("info", msg); return; } // console: true = Lead GM and up keep the console (~) open (greymarchConsoleTick)
         if (type === "greymarchProps") { this.greymarchDoorNames = msg.doors && typeof msg.doors === "object" ? msg.doors : {}; this.greymarchDoorNamesNext = 0; return; }
         if (type === "greymarchGmAlert") { this.greymarchChatToPage("alert", msg); return; } // a player typed /gm (the server only sends it to Trial GM and up)
         if (type === "greymarchMenuReply") { this.greymarchMenuToPage("reply", msg); return; }
@@ -3692,7 +3692,9 @@ export class GreymarchBridge {
     }
     // Every frame: an open console is closed through GreymarchCamera.dll 1.3 (CloseMenu, as the forge window closes the Crafting Menu). on("menuOpen") sees it
     // too, but Skyrim functions cannot be called from it, so the update loop does it. Without CloseMenu the console key is pressed again (once a second at most).
+    // Lead GM and up (the server's greymarchChatInfo says console: true) keep it open, to read what the game prints there. The commands that cheat stay locked.
     greymarchConsoleTick(now: number): any {
+        if (this.greymarchConsoleAllowed) { this.greymarchConsoleOpen = false; return; }
         var sp = this.sp, open = "";
         for (var i = 0; i < CONSOLE_MENUS.length && !open; i++) { try { if (sp.Ui.isMenuOpen(CONSOLE_MENUS[i])) open = CONSOLE_MENUS[i]; } catch (e) { /* a menu this game does not know */ } }
         if (!open) { this.greymarchConsoleOpen = false; return; }
