@@ -1169,6 +1169,7 @@ export class FormView {
         const gmGl: any = Function("return this")();
         const gmFixes: any = gmGl.__gmGroundFix;
         const gmFix = gmFixes ? gmFixes[String(this.remoteRefrId)] : null;
+        if (gmFix && !gmFix.seen) { gmFix.seen = true; gmCrumb("ground seen " + gmHex(this.remoteRefrId as number) + ": " + Math.round(npc.getPositionZ() - gmFix.z) + " over the ground here, " + Math.round((Date.now() - gmFix.at) / 100) / 10 + " s after the word"); }
         if (gmFix && Date.now() - gmFix.at < GM_GROUND_FIX_MS) {
           const gmZ = npc.getPositionZ();
           if (Math.abs(gmZ - gmFix.z) <= GM_GROUND_NEAR) { delete gmFixes[String(this.remoteRefrId)]; }

@@ -139,3 +139,10 @@ test("an NPC the server saw off the ground is put down by its host, its fight ke
   assert.ok(tick.includes("(this.gmFlatSteps >= FLAT_STEPS || this.gmGroundForce)"), "the rebuild takes the server's word");
   assert.ok(!fix.includes("setPosition(") && !fix.includes("moveTo("), "never set at a height (that fell back) or moved away");
 });
+
+test("breadcrumbs follow a ground word from the server to the host check (2026-10-28: the server told the games and nothing happened)", () => {
+  const bridge = fs.readFileSync(path.join(__dirname, "..", "src", "greymarch", "bridge.ts"), "utf8");
+  assert.ok(bridge.includes('"ground word "'), "each word as it arrives (the first 40)");
+  const view = fs.readFileSync(path.join(__dirname, "..", "src", "view", "formView.ts"), "utf8");
+  assert.ok(view.includes('gmCrumb("ground seen "'), "and the host check that finds it");
+});
