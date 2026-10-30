@@ -213,6 +213,7 @@ export class GreymarchBridge {
         if (type === "greymarchEmote") { if (typeof msg.emote === "string" && msg.emote.length < 40) this.greymarchServerEmote = { id: msg.emote, ms: Math.max(500, Math.min(30000, Number(msg.ms) || 4000)), at: Date.now() }; return; } // the server asks for an emote (a Harvester or Chef kneeling at a salt deposit): played in greymarchEmoteTick
         if (type === "greymarchMinigame") { this.greymarchMiniShow(msg); return; } // a profession mini game before the work (gamemode minigames.js)
         if (type === "greymarchMinigameDone") { this.greymarchMiniDone(msg); return; }
+        if (type === "greymarchChestGlow") { this.greymarchChestGlowWant = msg.on && typeof msg.ref === "string" ? msg.ref.slice(0, 80) : ""; this.greymarchChestGlowAt = 0; return; } // a dungeon's boss chest with its loot waiting (gamemode dungeons.js): it shines (greymarchChestGlowTick)
         if (type === "greymarchForgeOpen") { this.greymarchForgeShow(msg); return; } // a forge was used (gamemode forgemenu.js): the Greymarch forge window instead of the game's menu
         if (type === "greymarchForgeReply") { this.greymarchForgeToPage("reply", msg); return; }
         if (type === "greymarchCraftOpen") { this.greymarchCraftShow(msg); return; } // a crafting station was used (gamemode craftsys.js): the crafting panel
@@ -453,6 +454,7 @@ export class GreymarchBridge {
         this.greymarchBuildCamTick(Date.now()); // the build system's free camera: the preview where the camera looks
         this.greymarchChopTick(Date.now()); // sitting at a chopping block: the server counts the chops (XP, firewood)
         this.greymarchForgeTick(Date.now()); // after the forge window closed: the smith is surely out of the forge's animation
+        this.greymarchChestGlowTick(Date.now()); // a dungeon's boss chest shines while its loot waits
         this.greymarchForgePreviewTick(Date.now()); // the forge's display of the picked piece: made, turned and always removed (never left behind)
         this.greymarchPointerGuard(Date.now()); // a window that holds the mouse always has its pointer (the game's Cursor Menu)
         this.greymarchHotkeyTick(Date.now()); // a window hotkey whose key-up the game never sent
@@ -2991,6 +2993,31 @@ export class GreymarchBridge {
     //  - ONLY BY ITS FORM ID, fetched again on every frame: a game object SkyrimPlatform hands over is good for the frame it was fetched in only ("Invalid
     //    _skyrimPlatform_indexInPool" on the next, 2026-10-26: the display was removed at once, and the old version's deletes through such a handle failed,
     //    which is how its copies were left on the floor). A copy whose id cannot be read is deleted in the frame it was made.
+    // THE BOSS CHEST SHINES (2026-10-29, the owner: "so it's easy for players to find"): the server names the chest ("<id>:<plugin>", "" none) while its loot
+    // waits; the game's AzuraGoodCrystal shader (Azura's Star's glow, Skyrim.esm 0B6BFA) plays on it once its 3D is there, again if the 3D came back, and stops
+    // when the server says so. Checked once a second.
+    greymarchChestGlowRef(key: any): any {
+        var m = /^([0-9a-f]{1,8}):([^:]{1,64})$/i.exec(String(key || ""));
+        if (!m) return null;
+        try { var f = this.sp.Game.getFormFromFile(parseInt(m[1], 16), m[2]); return f ? this.sp.ObjectReference.from(f) : null; } catch (e) { return null; }
+    }
+    greymarchChestGlowTick(now: number): any {
+        if (now - (this.greymarchChestGlowAt || 0) < 1000) return;
+        this.greymarchChestGlowAt = now;
+        var sp = this.sp, want = this.greymarchChestGlowWant || "", on = this.greymarchChestGlowOn || "";
+        var shader: any = null; try { shader = sp.EffectShader.from(sp.Game.getFormEx(0x0b6bfa)); } catch (e) { shader = null; }
+        if (!shader) return;
+        var ref = want ? this.greymarchChestGlowRef(want) : null;
+        var loaded = false; try { loaded = !!(ref && ref.is3DLoaded()); } catch (e) { loaded = false; }
+        if (on && (on !== want || !loaded)) { // not wanted any more, or its 3D went (it plays again once it is back)
+            var old = this.greymarchChestGlowRef(on);
+            try { if (old) shader.stop(old); } catch (e) { /* gone with its 3D */ }
+            this.greymarchChestGlowOn = ""; on = "";
+        }
+        if (want && loaded && !on) {
+            try { shader.play(ref, -1); this.greymarchChestGlowOn = want; this.greymarchLog("dungeon: the boss chest shines (" + want + ")"); } catch (e) { this.greymarchLog("dungeon: the boss chest could not shine (" + e + ")"); this.greymarchChestGlowWant = ""; }
+        }
+    }
     greymarchForgePreviewTick(now: number): any {
         var sp = this.sp, want = this.greymarchForgePreviewWant;
         if (!this.greymarchForgeOn) want = this.greymarchForgeGhostId ? "" : null; // no window, no display
