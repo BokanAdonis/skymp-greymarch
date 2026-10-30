@@ -489,7 +489,7 @@ export class FormView {
             this.gmBeast = gmWere ? beastSpawned(Date.now()) : null; // GREYMARCH: a werewolf or werebear: a hidden stand-in, switched to its race in update() (beastSwitch.ts)
             if (gmWere) { try { const gmSi = Actor.from(ObjectReference.from(Game.getFormEx(this.refrId))); if (gmSi) gmSi.setAlpha(0, false); } catch (e) { /* shown as it is */ } }
             gmCrumb("spawned " + gmHex(this.refrId));
-            if (!model.appearance) gmMakePeaceful(this.refrId); // GREYMARCH: a fox, deer, rabbit, goat, chicken or cow never fights (see gmMakePeaceful)
+            if (!model.appearance) this.gmPeaceful = gmMakePeaceful(this.refrId); // GREYMARCH: a fox, deer, rabbit, goat, chicken or cow never fights (see gmMakePeaceful)
           });
         } else {
           printConsole("Unable to triggerSpawnProcess for null refr");
@@ -686,6 +686,17 @@ export class FormView {
       gmCrumb("host start " + gmHex(this.refrId) + ": move stopped" + (gmReset ? ", animation state reset" : ""));
     }
     this.gmWasHost = alreadyHosted;
+    // GREYMARCH: a peaceful animal this game runs never fights (2026-10-30, the owner: the fox still fought): cowardly is not enough for a fox that is hit, so a
+    // fight it starts is ended at once, and its settings are put back whenever this game takes it over
+    if (this.gmPeaceful && alreadyHosted) {
+      try {
+        const gmPa = Actor.from(refr);
+        if (gmPa && !gmPa.isDead()) {
+          if (!this.gmPeacefulHost) { this.gmPeacefulHost = true; gmMakePeaceful(this.refrId); }
+          if (gmPa.isInCombat()) { gmPa.stopCombat(); gmPa.stopCombatAlarm(); if (Date.now() - this.gmCalmedAt > 5000) { this.gmCalmedAt = Date.now(); gmCrumb("calmed " + gmHex(this.refrId)); } }
+        }
+      } catch (e) { /* the next frame */ }
+    } else if (!alreadyHosted) this.gmPeacefulHost = false;
 
     // GREYMARCH: A SERVER-DRIVEN ANIMAL (gamemode wildlifebrain.js; the server sets the custom property greymarchPuppet). The server decides where it goes and
     // when it attacks, so this game never hosts it and never lets it fight on its own: it plays the server's frames (gmPuppetMove) the way SkyMP plays another
@@ -1382,6 +1393,9 @@ export class FormView {
     } catch (e) { /* the NPC stays as it is */ }
     return "";
   }
+  private gmPeaceful = false; // GREYMARCH: a peaceful animal (gmMakePeaceful)
+  private gmPeacefulHost = false;
+  private gmCalmedAt = 0;
   public gmIsPlayerLook = false; // GREYMARCH: this view draws a player (another player's character), not an NPC
   private gmHostCheckAt = 0;
   private gmWasHost = false;
@@ -1487,17 +1501,18 @@ export class FormView {
 // hit, they run. The server's own animals (wildlifebrain.js) never fight anyway; wolves, mudcrabs and the rest are left as they are.
 const GM_PEACEFUL_RACES = [0x109c7c /* Fox */, 0xcf89b /* Deer */, 0x131ed /* Elk */, 0x6dc99 /* Hare */, 0x131fa /* Goat */, 0x6fc4a /* domestic Goat */, 0xa919d /* Chicken */, 0x4e785 /* Cow */];
 let gmGlowDeerRace = -1; // Dawnguard's glowing deer
-function gmMakePeaceful(refrId: number): void {
+function gmMakePeaceful(refrId: number): boolean {
   try {
     const ac = Actor.from(Game.getFormEx(refrId));
-    if (!ac) return;
-    const race = ac.getRace(); if (!race) return;
+    if (!ac) return false;
+    const race = ac.getRace(); if (!race) return false;
     if (gmGlowDeerRace < 0) { try { const g = Game.getFormFromFile(0xd0b2, "Dawnguard.esm"); gmGlowDeerRace = g ? g.getFormID() : 0; } catch (e) { gmGlowDeerRace = 0; } }
     const id = race.getFormID();
-    if (!GM_PEACEFUL_RACES.includes(id) && !(gmGlowDeerRace && id === gmGlowDeerRace)) return;
+    if (!GM_PEACEFUL_RACES.includes(id) && !(gmGlowDeerRace && id === gmGlowDeerRace)) return false;
     ac.setActorValue("Aggression", 0); // unaggressive: never starts a fight
     ac.setActorValue("Confidence", 0); // cowardly: runs when hit
     ac.stopCombat();
     gmCrumb("peaceful " + gmHex(refrId));
-  } catch (e) { /* left as it is */ }
+    return true;
+  } catch (e) { return false; }
 }
