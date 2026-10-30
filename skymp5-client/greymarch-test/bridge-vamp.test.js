@@ -456,3 +456,22 @@ test("the held feeding: the vampire's movement key asks the server to end it (on
   victim.tick(); victim.down = true; victim.tick();
   assert.strictEqual(victim.log.sent.filter((m) => m.op === "feed_end").length, 0);
 });
+test("the held feeding: a refused replay is tried again within a second, and after 4 refusals the pose is reset first (test 2026-10-30: it stopped at 7 s)", () => {
+  const realNow = Date.now; let t = 7_000_000; Date.now = () => t;
+  try {
+    const v = make({ others: { 0xff000002: 0x5000 } });
+    let refuse = false; const player = v.gm.sp.Game.getPlayer(); const play = player.playIdleWithTarget;
+    player.playIdleWithTarget = (idle, target) => (refuse ? false : play(idle, target));
+    v.say({ customPacketType: "greymarchVampFeed", on: true, role: "vampire", partner: 0xff000002 });
+    v.tick();
+    assert.strictEqual(v.log.idles.length, 1);
+    refuse = true; t += 6000; v.tick();
+    t += 300; v.tick(); t += 300; v.tick(); t += 300; v.tick();
+    assert.deepStrictEqual(v.log.events.filter((e) => e[1] === "IdleForceDefaultState"), [], "no reset for the first refusals");
+    t += 300; v.tick();
+    assert.deepStrictEqual(v.log.events.filter((e) => e[1] === "IdleForceDefaultState"), [["me", "IdleForceDefaultState"]], "4 refusals: the pose is reset before the 5th try");
+    refuse = false; t += 300; v.tick();
+    assert.strictEqual(v.log.idles.length, 2, "played again 1.5 s after the bite ended, not 6 s");
+    assert.ok(v.log.lines.some((l) => /plays again after 5 refusal/.test(l)));
+  } finally { Date.now = realNow; }
+});

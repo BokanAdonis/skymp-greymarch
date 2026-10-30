@@ -57,6 +57,8 @@ const WOLF_HOWL_SHOUT = 0x0ce218;
 const WOLF_ROAR_SOUND = 0x101008, BEAR_ROAR_SOUND = 0x0f95bb; // NPCWerewolfShout (the werewolf's howl) and NPCBearAggroWarning01 (a bear's warning roar), Skyrim.esm
 // vampires (gamemode vampire.js): the game's own records, inside Dawnguard.esm (read from the game files); the real IDs are looked up with Game.getFormFromFile
 const FEED_REPLAY_MS = 6000; // the held feeding: the standing feed is played again at most this often (greymarchVampFeedHeld)
+const FEED_RETRY_MS = 300; // ... and when the game refused it (still finishing the last one), tried again this soon
+const FEED_RESET_AFTER = 4; // refused this many times in a row: the biter is put back to the default pose first (the game will not start a paired idle over a stuck one)
 const FEED_STOP_KEYS = [0x11, 0x1e, 0x1f, 0x20]; // W A S D (DirectInput scan codes): the vampire's movement keys end a feeding
 const VAMP_FORMS = { mist: 0x38ba, lord: 0x283b, potionFx: 0x18ef4, potion: 0x18ef3, feedIdle: 0xe6a8 }; // DLC1VampireMistform, DLC1VampireChange, DLC1BloodPotionEffect, DLC1BloodPotion, IdleVampireStandingFeedFront_Loose
 // a vampire's eyes, one colour per bloodline (GreymarchCore.esp, made by tools/vampire-eyes.js in the launcher repo): GM_VampEyes{Male,Female}{Colour}0..6, glow 0 (none) to 6 (a Lord)
@@ -1361,10 +1363,19 @@ export class GreymarchBridge {
     greymarchVampFeedPlay(player: any, other: any, now: number, first: boolean): any {
         var sp = this.sp, h = this.greymarchVampFeedHold; if (!h) return;
         var biter = h.role === "vampire" ? player : other, bitten = h.role === "vampire" ? other : player;
+        // TEST 2026-10-30 (the owner: it stopped at the usual time): the replay 6 s in was refused (the bite was still finishing) and the next try was 6 s later, so
+        // the vampire stood up. A refusal is now tried again after FEED_RETRY_MS, and after FEED_RESET_AFTER refusals the biter is reset to the default pose first.
+        if ((h.refused || 0) >= FEED_RESET_AFTER) { try { sp.Debug.sendAnimationEvent(biter, "IdleForceDefaultState"); } catch (rErr) { /* tried anyway */ } }
         var played = false;
         try { var idle = sp.Idle.from(sp.Game.getFormEx(this.greymarchVampForm("feedIdle"))); played = !!idle && !!biter.playIdleWithTarget(idle, bitten); } catch (pErr) { played = false; }
-        h.playedAt = now;
-        if (first || !played) this.greymarchLog("vampire: feeding (" + h.role + "), the animation " + (first ? "" : "again ") + (played ? "plays" : "was refused by the game"));
+        if (played) {
+            if (first || h.refused) this.greymarchLog("vampire: feeding (" + h.role + "), the animation " + (first ? "plays" : "plays again after " + h.refused + " refusal(s)"));
+            h.playedAt = now; h.refused = 0;
+        } else {
+            h.refused = (h.refused || 0) + 1;
+            if (h.refused === 1 || h.refused === FEED_RESET_AFTER) this.greymarchLog("vampire: feeding (" + h.role + "), the animation " + (first ? "" : "again ") + "was refused by the game" + (h.refused === FEED_RESET_AFTER ? " " + FEED_RESET_AFTER + " times: resetting the pose" : ""));
+            h.playedAt = now - FEED_REPLAY_MS + FEED_RETRY_MS; // soon again
+        }
     }
     greymarchVampFeedHeld(player: any, now: number): any {
         var sp = this.sp, h = this.greymarchVampFeedHold; if (!h) return;
@@ -1375,7 +1386,7 @@ export class GreymarchBridge {
         } else if (now - h.playedAt >= FEED_REPLAY_MS) {
             var biter = h.role === "vampire" ? player : other, synced = false;
             try { synced = !!biter.getAnimationVariableBool("bIsSynced"); } catch (sErr) { synced = false; }
-            if (!synced) this.greymarchVampFeedPlay(player, other, now, false);
+            if (!synced || h.refused) this.greymarchVampFeedPlay(player, other, now, false); // after a refusal the flag is no reason to wait
         }
         if (h.role !== "vampire" || h.asked) return;
         var input = sp.Input; if (!input || typeof input.isKeyPressed !== "function") return;
