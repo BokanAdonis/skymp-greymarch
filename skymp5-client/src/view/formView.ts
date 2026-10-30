@@ -59,6 +59,10 @@ function gmQuiver(ac: Actor): void {
 function gmGearArms(eq: any): boolean {
   try { return !!eq && !!eq.inv && Array.isArray(eq.inv.entries) && eq.inv.entries.some((e: any) => !!e && (e.worn || e.wornLeft) && (() => { const f = Game.getFormEx(e.baseId); return !!f && f.getType() === 41; })()); } catch (err) { return false; }
 }
+// dead here (a failed check counts as dead: the gear step is then skipped, never risked)
+function gmIsDead(ac: Actor): boolean {
+  try { return ac.isDead(); } catch (e) { return true; }
+}
 // a weapon in either hand (DRESSED ONCE BY ITS HOST: an NPC with empty hands still takes the server's gear)
 function gmHoldsWeapon(ac: Actor): boolean {
   try { return !!ac.getEquippedWeapon(false) || !!ac.getEquippedWeapon(true); } catch (e) { return true; }
@@ -914,7 +918,12 @@ export class FormView {
           // bow): the server equips the weapon the gamemode gave it (npcresolve armFor) only when a game takes it over, after the first dressing; with nothing in
           // its hands there is no weapon to pull, so that dressing is taken
           !(this.gmWasHost && this.gmGearDone && (gmHoldsWeapon(ac) || (gmInCombat(ac) && !gmGearArms(model.equipment)))) && // (empty hands mid-fight: after the fight, so it does not slide; at once when it brings a weapon: the archer fought its whole life with its fists, 2026-10-28)
-          (!gmBeastLook || (!!this.gmBeast && !beastHeld(this.gmBeast, Date.now())))
+          (!gmBeastLook || (!!this.gmBeast && !beastHeld(this.gmBeast, Date.now()))) &&
+          // GREYMARCH: NEVER RE-DRESS A DEAD NPC (2026-10-29, crash: a Soul Cairn skeleton "Shade" in Halldir's Cairn, the game crashed in its character physics
+          // (bhkCharRigidBodyController) with this game's gear step half done: "gear ff000ca1", then TESModPlatform.Add waiting). Its loot goes on the body when it
+          // dies (npcloot.js), that counts as a gear change, and its hands are empty once it falls, so the step emptied and dressed a body going into its ragdoll.
+          // A body keeps what it wore; its loot is the server's (the container), not this step's. (A body built for a dead NPC is dressed before it is made dead.)
+          !gmIsDead(ac)
         ) {
           //if (this.spawnMoment > 0 && Date.now() - this.spawnMoment > 5000) {
           gmCrumb("gear " + gmHex(ac.getFormID()) + (gmBeastLook ? " beast" : ""));
