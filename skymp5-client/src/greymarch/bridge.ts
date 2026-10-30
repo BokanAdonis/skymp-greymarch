@@ -56,6 +56,8 @@ const WOLF_ROAR_MS = 0; // R: no wait between roars (2026-10-21, the owner's cal
 const WOLF_HOWL_SHOUT = 0x0ce218;
 const WOLF_ROAR_SOUND = 0x101008, BEAR_ROAR_SOUND = 0x0f95bb; // NPCWerewolfShout (the werewolf's howl) and NPCBearAggroWarning01 (a bear's warning roar), Skyrim.esm
 // vampires (gamemode vampire.js): the game's own records, inside Dawnguard.esm (read from the game files); the real IDs are looked up with Game.getFormFromFile
+const FEED_REPLAY_MS = 6000; // the held feeding: the standing feed is played again at most this often (greymarchVampFeedHeld)
+const FEED_STOP_KEYS = [0x11, 0x1e, 0x1f, 0x20]; // W A S D (DirectInput scan codes): the vampire's movement keys end a feeding
 const VAMP_FORMS = { mist: 0x38ba, lord: 0x283b, potionFx: 0x18ef4, potion: 0x18ef3, feedIdle: 0xe6a8 }; // DLC1VampireMistform, DLC1VampireChange, DLC1BloodPotionEffect, DLC1BloodPotion, IdleVampireStandingFeedFront_Loose
 // a vampire's eyes, one colour per bloodline (GreymarchCore.esp, made by tools/vampire-eyes.js in the launcher repo): GM_VampEyes{Male,Female}{Colour}0..6, glow 0 (none) to 6 (a Lord)
 const VAMP_EYES: any = { blue: { male: 0x80e, female: 0x815 }, red: { male: 0x81f, female: 0x826 }, yellow: { male: 0x82e, female: 0x835 }, green: { male: 0x83d, female: 0x844 }, purple: { male: 0x84c, female: 0x853 } };
@@ -202,7 +204,7 @@ export class GreymarchBridge {
         if (type === "greymarchRaceMenuLook") { var rm0 = this.greymarchRmState(); rm0.want = msg.look && typeof msg.look === "object" ? msg.look : {}; rm0.tries = 0; return; } // RaceMenu's extra sliders of this character, kept by the server (greymarchRaceMenuTick)
         if (type === "greymarchVampire") { this.greymarchVampWant = msg.on ? msg : null; this.greymarchVampCostTold = {}; this.greymarchHudToPage("blood", { on: !!msg.on, blood: msg.blood, empty: !!msg.empty }); return; } // a vampire's state: the blood drop and what the game applies (greymarchVampTick)
         if (type === "greymarchVampLooks") { this.greymarchVampLookList = Array.isArray(msg.vampires) ? msg.vampires : []; if (Number(msg.me) > 0) this.greymarchMeActor = Number(msg.me) >>> 0; return; } // (me: which of them is this player: the ghosts and effects packets that also say so may not have come yet, and without it the player's own eyes and fangs were never put on) // how every vampire in the world looks (eyes and fangs)
-        if (type === "greymarchVampFeed") { this.greymarchVampFeedWant = msg.on ? { role: msg.role, partner: msg.partner, at: Date.now(), done: false } : { off: true }; return; } // the feeding scene
+        if (type === "greymarchVampFeed") { this.greymarchVampFeedWant = msg.on ? { role: msg.role, partner: msg.partner, at: Date.now(), done: false } : { off: true }; return; } // the feeding scene (held until the vampire stops: greymarchVampFeedHeld)
         if (type === "greymarchVampMist") { if (!msg.on) this.greymarchVampMistEnd = true; return; } // Mist Form refused or over: the game's own mist is ended
         if (type === "greymarchVampLord") { if (this.greymarchVampLordWas !== !!msg.on) { this.greymarchVampLordWas = !!msg.on; this.greymarchLog("vampire: the server says the Lord's shape is " + (msg.on ? "on" : "off")); } return; } // the body itself is the creature form (greymarchShape)
         if (type === "greymarchCuffs") { this.greymarchCuffsWant = msg.on ? msg : null; return; } // in cuffs (guards.js): the cuffs worn and the bound pose (greymarchCuffsTick)
@@ -1337,21 +1339,53 @@ export class GreymarchBridge {
             var other: any = null;
             try { var lid = misc.remoteIdToLocalId(fd.partner); other = lid ? sp.Actor.from(sp.Game.getFormEx(lid)) : null; } catch (oErr) { other = null; }
             if (fd.off) {
-                this.greymarchVampFeedWant = null;
+                this.greymarchVampFeedWant = null; this.greymarchVampFeedHold = null;
                 try { sp.Debug.sendAnimationEvent(player, "IdleForceDefaultState"); } catch (e1) { /* it ends by itself */ }
                 var was = this.greymarchVampFeedOther; this.greymarchVampFeedOther = null;
                 if (was) { try { sp.Debug.sendAnimationEvent(was, "IdleForceDefaultState"); } catch (e2) { /* gone */ } }
-            } else if (!other) this.greymarchLog("vampire: the feeding partner is not loaded here");
-            else {
-                this.greymarchVampFeedOther = other;
-                var biter = fd.role === "vampire" ? player : other, bitten = fd.role === "vampire" ? other : player;
-                var played = false;
-                try { var idle = sp.Idle.from(sp.Game.getFormEx(this.greymarchVampForm("feedIdle"))); played = !!idle && !!biter.playIdleWithTarget(idle, bitten); } catch (pErr) { played = false; }
-                this.greymarchLog("vampire: feeding (" + fd.role + "), the animation " + (played ? "plays" : "was refused by the game"));
+            } else {
+                // held until the server says off: the animation is played again whenever it ran out, and the vampire's own movement key asks the server to end it
+                this.greymarchVampFeedHold = { role: fd.role, partner: fd.partner, playedAt: 0, keysUp: {}, asked: false };
+                if (!other) this.greymarchLog("vampire: the feeding partner is not loaded here");
+                else { this.greymarchVampFeedOther = other; this.greymarchVampFeedPlay(player, other, now, true); }
             }
         }
+        this.greymarchVampFeedHeld(player, now);
         this.greymarchVampFangsWear(now); // the worn fangs the server gave: put on (SkyMP then shows them to everyone)
         this.greymarchVampEyes(now); // every vampire's blue eyes, on this screen
+    }
+    // THE HELD FEEDING (2026-10-30, the owner): the server keeps the scene on until the vampire stops it and drains the victim meanwhile; the game's standing feed
+    // is one paired animation of a few seconds, so it is played again each time it has run out (bIsSynced is the game's flag for a paired animation still
+    // playing; at least FEED_REPLAY_MS apart, so a game that never sets it is not restarted mid-bite). On the vampire's game a movement key pressed during the
+    // scene (it has to be seen up first: the one they walked up with does not count) sends { op: "feed_end" }; the server ends it for both.
+    greymarchVampFeedPlay(player: any, other: any, now: number, first: boolean): any {
+        var sp = this.sp, h = this.greymarchVampFeedHold; if (!h) return;
+        var biter = h.role === "vampire" ? player : other, bitten = h.role === "vampire" ? other : player;
+        var played = false;
+        try { var idle = sp.Idle.from(sp.Game.getFormEx(this.greymarchVampForm("feedIdle"))); played = !!idle && !!biter.playIdleWithTarget(idle, bitten); } catch (pErr) { played = false; }
+        h.playedAt = now;
+        if (first || !played) this.greymarchLog("vampire: feeding (" + h.role + "), the animation " + (first ? "" : "again ") + (played ? "plays" : "was refused by the game"));
+    }
+    greymarchVampFeedHeld(player: any, now: number): any {
+        var sp = this.sp, h = this.greymarchVampFeedHold; if (!h) return;
+        var other: any = this.greymarchVampFeedOther;
+        if (!other) { // not loaded when it began: try again
+            try { var lid = misc.remoteIdToLocalId(h.partner); other = lid ? sp.Actor.from(sp.Game.getFormEx(lid)) : null; } catch (oErr) { other = null; }
+            if (other) { this.greymarchVampFeedOther = other; this.greymarchVampFeedPlay(player, other, now, true); }
+        } else if (now - h.playedAt >= FEED_REPLAY_MS) {
+            var biter = h.role === "vampire" ? player : other, synced = false;
+            try { synced = !!biter.getAnimationVariableBool("bIsSynced"); } catch (sErr) { synced = false; }
+            if (!synced) this.greymarchVampFeedPlay(player, other, now, false);
+        }
+        if (h.role !== "vampire" || h.asked) return;
+        var input = sp.Input; if (!input || typeof input.isKeyPressed !== "function") return;
+        try { if (sp.browser && sp.browser.isFocused && sp.browser.isFocused()) return; } catch (fErr) { /* no browser: keys count */ } // typing in a window is not walking away
+        for (var i = 0; i < FEED_STOP_KEYS.length; i++) {
+            var k = FEED_STOP_KEYS[i], down = false;
+            try { down = !!input.isKeyPressed(k); } catch (kErr) { down = false; }
+            if (!down) { h.keysUp[k] = true; continue; }
+            if (h.keysUp[k]) { h.asked = true; this.greymarchLog("vampire: a movement key ends the feeding"); this.greymarchVampSend({ op: "feed_end" }); return; }
+        }
     }
     // Every vampire in the world (the player included) gets their bloodline's eye part for their glow and, while their fangs show, the fanged teeth, by the server's
     // list (greymarchVampLooks). Only those parts change: the character is not redrawn. Their OWN eyes and teeth are kept and put back while /eyes or /fangs hides

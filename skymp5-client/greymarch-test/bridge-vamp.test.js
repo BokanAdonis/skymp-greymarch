@@ -419,3 +419,40 @@ test("/disguise (2026-10-30, the owner): the server's disguised list names whose
   s.say({ customPacketType: "greymarchGhosts", ghosts: [], me: 0xff000001 });
   assert.deepStrictEqual(g.__gmDisguised, {}, "an older server sends none: nobody is hidden");
 });
+test("the held feeding: the standing feed is played again once it has run out, until the server says off", () => {
+  const realNow = Date.now; let t = 5_000_000; Date.now = () => t;
+  try {
+    const v = make({ others: { 0xff000002: 0x5000 } });
+    let synced = false; v.gm.sp.Game.getPlayer().getAnimationVariableBool = (n) => n === "bIsSynced" && synced;
+    v.say({ customPacketType: "greymarchVampFeed", on: true, role: "vampire", partner: 0xff000002 });
+    v.tick();
+    assert.strictEqual(v.log.idles.length, 1);
+    t += 3000; v.tick();
+    assert.strictEqual(v.log.idles.length, 1, "not restarted mid-bite");
+    t += 3500; synced = true; v.tick();
+    assert.strictEqual(v.log.idles.length, 1, "the game says it is still playing");
+    synced = false; v.tick();
+    assert.strictEqual(v.log.idles.length, 2, "ran out: played again");
+    v.say({ customPacketType: "greymarchVampFeed", on: false });
+    v.tick(); t += 10000; v.tick();
+    assert.strictEqual(v.log.idles.length, 2, "off: no more");
+  } finally { Date.now = realNow; }
+});
+
+test("the held feeding: the vampire's movement key asks the server to end it (once; the key they walked up with must be let go first); the victim's keys never do", () => {
+  const keys = new Set([0x11]); // W held while walking up
+  const v = make({ others: { 0xff000002: 0x5000 } });
+  v.gm.sp.Input = { isKeyPressed: (k) => keys.has(k) };
+  v.say({ customPacketType: "greymarchVampFeed", on: true, role: "vampire", partner: 0xff000002 });
+  const ends = () => v.log.sent.filter((m) => m.customPacketType === "greymarchVamp" && m.op === "feed_end").length;
+  v.tick(); v.tick();
+  assert.strictEqual(ends(), 0, "still held from walking up");
+  keys.delete(0x11); v.tick();
+  keys.add(0x1f); v.tick(); v.tick();
+  assert.strictEqual(ends(), 1, "S pressed: asked once");
+  const victim = make({ others: { 0xff000001: 0x5000 } });
+  victim.gm.sp.Input = { isKeyPressed: (k) => k === 0x20 && victim.down };
+  victim.say({ customPacketType: "greymarchVampFeed", on: true, role: "victim", partner: 0xff000001 });
+  victim.tick(); victim.down = true; victim.tick();
+  assert.strictEqual(victim.log.sent.filter((m) => m.op === "feed_end").length, 0);
+});
