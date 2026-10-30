@@ -1,4 +1,4 @@
-import { Actor, ActorBase, Cell, Race, createText, Debug, destroyText, Form, FormType, Game, Keyword, NetImmerse, ObjectReference, once, printConsole, setTextColor, setTextPos, setTextSize, setTextString, storage, TESModPlatform, Utility, WorldSpace, worldPointToScreenPoint, writeLogs } from "skyrimPlatform";
+import { Actor, ActorBase, HeadPart, Cell, Race, createText, Debug, destroyText, Form, FormType, Game, Keyword, NetImmerse, ObjectReference, once, printConsole, setTextColor, setTextPos, setTextSize, setTextString, storage, TESModPlatform, Utility, WorldSpace, worldPointToScreenPoint, writeLogs } from "skyrimPlatform";
 import { setDefaultAnimsDisabled, applyAnimation, allowAttackAnim } from "../sync/animation";
 const GM_PUPPET_MINE_FRESH_MS = 2500; // the server's word that an animal hunts this player holds this long (it repeats it at least once a second)
 const GM_PUPPET_LOCAL_EVERY_MS = 100; // a hunting animal is moved here this often
@@ -98,6 +98,17 @@ import { GamemodeUpdateService } from "../services/services/gamemodeUpdateServic
 // new werewolf form (__gmWolfRace) must stay the same before the NPC is built again with it
 // (GM_BEAST_SETTLE_MS and the stand-in rules: beastSwitch.ts, A BEAST IS NEVER BUILT AS A BEAST)
 const GM_WOLF_RACE_SETTLE_MS = 4000;
+
+// GREYMARCH: A VAMPIRE'S EYES (2026-10-30). The bridge (greymarchVampEyes) names the eye part each other vampire is drawn with in __gmVampEyes (server actor id ->
+// the head part's form id; none: their own eyes). Their character is BUILT with it in place of the eyes in their look, so it is shaped to the face like any part:
+// an eye part swapped on the live character (ChangeHeadPart) was never shaped and sat out of the face, worst with /eyes (the owner, 2026-10-29 and 2026-10-30).
+// A change (a glow, a colour, /eyes) builds the character again, as a changed look does.
+const gmVampEyeFor = (remoteId: number): number => { try { const m: any = (Function("return this")() as any).__gmVampEyes; return (m && Number(m[remoteId])) || 0; } catch (e) { return 0; } };
+const gmWithEyes = (ap: any, eyeId: number): any => {
+  if (!eyeId || !ap || !Array.isArray(ap.headpartIds) || !ap.headpartIds.length) return ap; // no eyes named, or a beast look (no head parts)
+  const parts = ap.headpartIds.filter((id: number) => { const hp = HeadPart.from(Game.getFormEx(id)); return !hp || hp.getType() !== 2; }); // 2: eyes
+  return { ...ap, headpartIds: [...parts, eyeId] };
+};
 
 // GREYMARCH: CRASH BREADCRUMBS (2026-10-20). One line in Data\Platform\Logs\greymarch-crumbs-logs.txt just BEFORE each step that touches another player's or a creature's
 // NPC in a way that has crashed games (spawning, removing, a model refresh, gear, an idle or a beast's animation). Every line is flushed (SkyrimPlatform's writeLogs ends
@@ -252,6 +263,15 @@ export class FormView {
       }
     } else this.gmWolfRacePending = gmWolfRace;
     this.gmLookJustChanged = false;
+    // GREYMARCH: a vampire's eyes changed (gmVampEyeFor above): this character is built again with them
+    {
+      const gmEyeNow = gmVampEyeFor(this.getRemoteRefrId() || 0);
+      const gmAp: any = this.appearanceState.appearance;
+      if (gmEyeNow !== this.gmVampEye && this.appearanceBasedBaseId !== 0 && gmAp && Array.isArray(gmAp.headpartIds) && gmAp.headpartIds.length > 0) {
+        gmCrumb("vampire eyes " + gmHex(this.getRemoteRefrId() || 0) + " -> " + gmHex(gmEyeNow) + " (built again)");
+        this.appearanceBasedBaseId = 0;
+      }
+    }
 
     const refId =
       model.refrId && model.refrId < 0xff000000 ? model.refrId : undefined;
@@ -1044,7 +1064,8 @@ export class FormView {
     if (!base && this.appearanceState.appearance) {
       const gmAp = this.appearanceState.appearance;
       const gmLook = gmWereLook(gmAp, this.gmWolfRace) ? { ...gmAp, raceId: GM_STANDIN_RACE } : gmAp; // GREYMARCH: a beast look is built as a person stand-in, switched to its race later (A BEAST IS NEVER BUILT AS A BEAST)
-      this.appearanceBasedBaseId = applyAppearance(gmLook).getFormID();
+      this.gmVampEye = gmVampEyeFor(this.getRemoteRefrId() || 0); // GREYMARCH: a vampire is built with their vampire eyes
+      this.appearanceBasedBaseId = applyAppearance(gmWithEyes(gmLook, this.gmVampEye)).getFormID();
     }
     return this.appearanceBasedBaseId;
   }
@@ -1425,6 +1446,7 @@ export class FormView {
   private appearanceState = this.getDefaultAppearanceState();
   private eqState = this.getDefaultEquipState();
   private appearanceBasedBaseId = 0;
+  private gmVampEye = 0; // GREYMARCH: the vampire eye part this character was built with (0: their own eyes)
   private gmKeptLook: any = null; // GREYMARCH: the person look of a body kept through its change (THE SAME BODY)
   private gmLookJustChanged = false;
   private gmBeast: BeastSwitchState | null = null; // GREYMARCH: a beast look's NPC: its stand-in and switch state (beastSwitch.ts)
