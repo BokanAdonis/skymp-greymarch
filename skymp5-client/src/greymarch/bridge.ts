@@ -213,7 +213,7 @@ export class GreymarchBridge {
         if (type === "greymarchEmote") { if (typeof msg.emote === "string" && msg.emote.length < 40) this.greymarchServerEmote = { id: msg.emote, ms: Math.max(500, Math.min(30000, Number(msg.ms) || 4000)), at: Date.now() }; return; } // the server asks for an emote (a Harvester or Chef kneeling at a salt deposit): played in greymarchEmoteTick
         if (type === "greymarchMinigame") { this.greymarchMiniShow(msg); return; } // a profession mini game before the work (gamemode minigames.js)
         if (type === "greymarchMinigameDone") { this.greymarchMiniDone(msg); return; }
-        if (type === "greymarchOwnLook") { if (msg.look && typeof msg.look === "object" && Array.isArray(msg.look.headpartIds) && msg.look.headpartIds.length) this.greymarchOwnLookWant = msg.look; return; } // the barber refused a race or sex change (gamemode barber.js): the old look back on this body (greymarchOwnLookTick)
+        if (type === "greymarchOwnLook") { if (msg.look && typeof msg.look === "object" && Array.isArray(msg.look.headpartIds) && msg.look.headpartIds.length) { this.greymarchOwnLookWant = msg.look; this.greymarchOwnLookRebuild = msg.rebuild === true; } return; } // the barber refused a race or sex change (gamemode barber.js): the old look back on this body (greymarchOwnLookTick)
         if (type === "greymarchChestGlow") { this.greymarchChestGlowWant = msg.on && typeof msg.ref === "string" ? msg.ref.slice(0, 80) : ""; this.greymarchChestGlowAt = 0; return; } // a dungeon's boss chest with its loot waiting (gamemode dungeons.js): it shines (greymarchChestGlowTick)
         if (type === "greymarchForgeOpen") { this.greymarchForgeShow(msg); return; } // a forge was used (gamemode forgemenu.js): the Greymarch forge window instead of the game's menu
         if (type === "greymarchForgeReply") { this.greymarchForgeToPage("reply", msg); return; }
@@ -3024,7 +3024,16 @@ export class GreymarchBridge {
         try {
             var race = sp.Race.from(sp.Game.getFormEx(look.raceId));
             var now = player.getRace();
+            var rebuild = this.greymarchOwnLookRebuild === true; this.greymarchOwnLookRebuild = false;
             if (race && (!now || now.getFormID() !== race.getFormID())) { player.setRace(race); this.greymarchLog("barber: the body's race set back to " + (look.raceId >>> 0).toString(16)); }
+            else if (race && rebuild) {
+                // THE WALK (2026-10-30, the owner: "now I am walking like a female character" after the load back): the body's animations were set up for the sex the race
+                // menu gave it. A SetRace to the same race changes nothing, so the body goes to another race and straight back: two real race changes, the second
+                // building the body and its animations for the look's sex (set on the character first, below, so it is already right when the body is rebuilt)
+                step = "sex"; appearanceMod.applyAppearanceToPlayer(look);
+                var other = sp.Race.from(sp.Game.getFormEx((look.raceId >>> 0) === 0x13744 ? 0x13746 : 0x13744)); // Imperial, or Nord for an Imperial
+                step = "rebuild"; if (other) { player.setRace(other); player.setRace(race); this.greymarchLog("barber: the body rebuilt for its sex (race " + (look.raceId >>> 0).toString(16) + " again)"); }
+            }
             step = "look"; appearanceMod.applyAppearanceToPlayer(look);
             this.greymarchLog("barber: the old look put back on this body");
         } catch (e) { this.greymarchLog("barber: the old look could not be put back (" + step + "): " + e); }
