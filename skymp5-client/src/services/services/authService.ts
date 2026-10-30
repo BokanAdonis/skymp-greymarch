@@ -211,6 +211,7 @@ export class AuthService extends ClientListener {
       case 'greymarchCraftReply':
       case 'greymarchCraftDone':
       case 'greymarchChestGlow':
+      case 'greymarchOwnLook':
       case 'greymarchCombatMod':
       case 'greymarchMenuEvent':
       case 'greymarchChatLine':
