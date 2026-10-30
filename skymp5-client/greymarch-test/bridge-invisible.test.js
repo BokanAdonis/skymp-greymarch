@@ -51,7 +51,7 @@ test("the prompt is hidden through the game's own BlockActivation with both argu
   const mk = (callNative) => { const gm = new bridge.GreymarchBridge({ printConsole() {}, writeLogs: (n, l) => lines.push(l), Game: { getFormEx: () => actor }, Actor: { from: (f) => f }, callNative, on() {}, storage: {} }, { on() {}, emitter: { on() {}, emit: () => {} } }); gm.greymarchLog = (l) => lines.push(l); return gm; };
   mk((cls, fn, self, a, b) => calls.push(["native", cls, fn, a, b])).greymarchNoPrompt(actor, true);
   assert.deepStrictEqual(calls, [["native", "ObjectReference", "BlockActivation", true, true]]);
-  assert.ok(lines.some((l) => /talk prompt: hidden (BlockActivation, 2 arguments)/.test(l)));
+  assert.ok(lines.some((l) => l.includes("talk prompt: hidden (BlockActivation, 2 arguments)")));
   calls.length = 0;
   mk(() => { throw new Error("no such function"); }).greymarchNoPrompt(actor, true);
   assert.deepStrictEqual(calls, [["sp", true]], "the old call as a fallback");
