@@ -63,7 +63,7 @@ test("formView.ts: a beast look gets no full model refresh when it comes on scre
   assert.ok(fv.includes("this.gmSpawnedBeast = gmBeastSpawn;"), "the spawn remembers a beast");
   assert.ok(fv.includes("const gmHoldStill = this.gmSpawnedBeast && beastHeld(this.gmBeast, Date.now());"), "a fresh beast is held still while it settles");
   assert.ok(/!gmHoldStill && \(\s*\+\(model\.numMovementChanges as number\)/.test(fv), "SkyMP's movement waits for it (the movement controller crashed the half-built graph)");
-  const removal = fv.slice(fv.indexOf("if (refrId >= 0xff000000 && gmBeast) {"), fv.indexOf("if (refrId >= 0xff000000 && gmBeast) {") + 1400);
+  const removal = fv.slice(fv.indexOf("if (refrId >= 0xff000000 && gmBeast) {"), fv.indexOf("if (refrId >= 0xff000000 && gmBeast) {") + 2400);
   assert.ok(/gone\.delete\(\);[\s\S]{0,120}unprotect\(\);\s*\}\);/.test(removal), "the world cleaner's protection is dropped only after the delete (a second delete by the cleaner crashed the watching game)");
   assert.ok(!/modWcProtection\(refrId, -1\);\s*return;/.test(removal), "not at once any more");
   assert.ok(fv.includes("if (gmBeastMove) { try { const gmAc = Actor.from(refr); if (gmAc) forcedWeapDrawn = gmAc.isWeaponDrawn(); }"), "a beast's NPC is never ordered to draw (ActionDraw played WerewolfDraw and crashed the watching game)");

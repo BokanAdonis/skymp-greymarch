@@ -559,6 +559,9 @@ export class FormView {
         const unprotect = () => SpApiInteractor.getControllerInstance().lookupListener(WorldCleanerService).modWcProtection(refrId, -1);
         const refr = ObjectReference.from(Game.getFormEx(refrId));
         if (!refr) { unprotect(); return; }
+        // ITS MOVES STOPPED FIRST (2026-10-30, crash: a wildlife Deer deleted while a movement order SkyMP gave it was still queued, MovementControllerNPC
+        // reading the deleted actor, IMovementMessageInterface): the translateTo and keepOffsetFromActor orders are cancelled before it is disabled and deleted
+        try { const gmMover = Actor.from(refr); if (gmMover) { gmMover.stopTranslation(); gmMover.clearKeepOffsetFromActor(); } } catch (e) { /* it was not moving */ }
         refr.disable(false).then(() => {
           const gone = ObjectReference.from(Game.getFormEx(refrId));
           if (gone) gone.delete();
@@ -570,6 +573,7 @@ export class FormView {
       if (refrId >= 0xff000000) {
         const refr = ObjectReference.from(Game.getFormEx(refrId));
         if (refr) {
+          try { const gmMover = Actor.from(refr); if (gmMover) { gmMover.stopTranslation(); gmMover.clearKeepOffsetFromActor(); } } catch (e) { /* it was not moving */ } // (its moves stopped first, as above)
           refr.delete();
         }
         SpApiInteractor.getControllerInstance().lookupListener(WorldCleanerService).modWcProtection(refrId, -1);
