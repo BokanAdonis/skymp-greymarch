@@ -350,14 +350,14 @@ test("the Spells balance tab's costs go on the spell records too (GreymarchCamer
   assert.deepStrictEqual(old.log.sent.filter((m) => m.customPacketType === "greymarchSpellCost"), [], "an older DLL: nothing told, the server keeps correcting");
 });
 
-test("another player's head is drawn again after their eyes change, so /eyes leaves no vampire eyes floating on the forehead (2026-10-29); this player's own head is not", () => {
+test("another player's eyes are not swapped on their character but built into it (__gmVampEyes for formView.ts), so /eyes leaves nothing out of the face (2026-10-30); this player's own head is swapped as before", () => {
   const s = make({ others: { 0xff000002: 0x5000 } });
   const sp = s.gm.sp;
   const GM = 0x0a000000;
   const part = (id) => ({ getFormID: () => id, getType: () => 2 });
   const worn = { me: { 2: 0x111 }, them: { 2: 0x222 } };
-  const redrawn = { me: 0, them: 0 };
-  const body = (name) => ({ name, getRace: () => ({ getFormID: () => 0x13746 }), getBaseObject: () => ({ name, sex: 0 }), changeHeadPart: (hp) => { worn[name][2] = hp.getFormID(); }, regenerateHead: () => {}, is3DLoaded: () => true, queueNiNodeUpdate: () => { redrawn[name]++; } });
+  const swapped = { me: 0, them: 0 };
+  const body = (name) => ({ name, getRace: () => ({ getFormID: () => 0x13746 }), getBaseObject: () => ({ name, sex: 0 }), changeHeadPart: (hp) => { worn[name][2] = hp.getFormID(); swapped[name]++; }, regenerateHead: () => {}, is3DLoaded: () => true, queueNiNodeUpdate: () => {} });
   Object.assign(sp.Game.getPlayer(), body("me"));
   const them = body("them");
   sp.Game.getFormEx = (id) => (id === 0x5000 ? them : { id });
@@ -367,18 +367,21 @@ test("another player's head is drawn again after their eyes change, so /eyes lea
   sp.ActorBase = { from: (b) => (b ? { getSex: () => b.sex, getNumHeadParts: () => 1, getNthHeadPart: () => part(worn[b.name][2]), setNthHeadPart: () => {} } : null) };
   let t = 7_000_000; const realNow = Date.now; Date.now = () => t;
   const look = (list) => { s.say({ customPacketType: "greymarchVampLooks", vampires: list }); s.tick(); t += 2500; };
+  const built = () => Object.assign({}, globalThis.__gmVampEyes);
   try {
     s.say({ customPacketType: "greymarchGhosts", ghosts: [], me: 0xff000001 });
     look([{ actor: 0xff000001, glow: 2, fangs: false }, { actor: 0xff000002, glow: 2, fangs: false, eyes: "yellow" }]);
-    assert.strictEqual(worn.them[2], GM + 0x82e + 2, "their yellow eyes");
-    assert.strictEqual(redrawn.them, 1);
-    look([{ actor: 0xff000001, glow: 2, fangs: false }, { actor: 0xff000002, glow: 2, fangs: false, eyes: "yellow" }]);
-    assert.strictEqual(redrawn.them, 1, "nothing changed: not drawn again");
+    assert.deepStrictEqual(built(), { [0xff000002]: GM + 0x82e + 2 }, "their character is built with yellow eyes, glow 2");
+    assert.strictEqual(swapped.them, 0, "no head part swapped on another player");
+    assert.strictEqual(worn.them[2], 0x222);
+    assert.strictEqual(worn.me[2], GM + 0x80e + 2, "this player's own eyes: swapped (blue, glow 2)");
     look([{ actor: 0xff000001, glow: 2, fangs: false }, { actor: 0xff000002, glow: 0, fangs: false, eyes: "yellow" }]);
-    assert.strictEqual(worn.them[2], 0x222, "/eyes: their own eyes");
-    assert.strictEqual(redrawn.them, 2, "and the head drawn again, so the vampire eyes are gone");
+    assert.deepStrictEqual(built(), {}, "/eyes: built with their own look again");
+    assert.ok(s.log.lines.some((l) => /5000 is built with their own eyes \(\/eyes\)/.test(l)));
+    look([{ actor: 0xff000001, glow: 2, fangs: false }, { actor: 0xff000002, glow: 3, fangs: false, eyes: "red" }]);
+    assert.deepStrictEqual(built(), { [0xff000002]: GM + 0x81f + 3 });
     look([{ actor: 0xff000001, glow: 2, fangs: false }]);
-    assert.strictEqual(redrawn.them, 3, "no longer a vampire: their own eyes put back and the head drawn again");
-    assert.strictEqual(redrawn.me, 0, "this player's own head is left to the game");
-  } finally { Date.now = realNow; }
+    assert.deepStrictEqual(built(), {}, "no longer a vampire: their own look");
+    assert.strictEqual(swapped.them, 0);
+  } finally { Date.now = realNow; delete globalThis.__gmVampEyes; }
 });

@@ -1306,6 +1306,10 @@ export class GreymarchBridge {
     // list (greymarchVampLooks). Only those parts change: the character is not redrawn. Their OWN eyes and teeth are kept and put back while /eyes or /fangs hides
     // them (glow 0) and when they are no longer a vampire. Greymarch's own eye parts never count as "their own" (a reload or a colour change finds one already on).
     // Checked again every 2 seconds, because SkyMP puts a character's saved look back now and then (a load, a redraw): that look is their own eyes, kept again.
+    // ANOTHER PLAYER'S EYES (2026-10-30, the owner: the eyes still popped out of the head with /eyes after the redraw of 2026-10-29): a part swapped on their
+    // character with ChangeHeadPart is never shaped to their face (SkyMP shapes the head when it builds the character), so it sat at the plain spot, out of the
+    // face. Their eyes are no longer swapped here: __gmVampEyes (server actor id -> the eye part's form id, none = their own eyes) tells formView.ts, which
+    // builds their character with those eyes in their look, shaped like any part, and builds it again when that changes. Only the player's own head is swapped.
     greymarchVampEyes(now: number): any {
         if (now < (this.greymarchVampEyesNext || 0)) return;
         this.greymarchVampEyesNext = now + 2000;
@@ -1317,6 +1321,7 @@ export class GreymarchBridge {
         try { var gmBlue = sp.HeadPart.from(sp.Game.getFormFromFile(VAMP_EYES.blue.male, "GreymarchCore.esp")); if (gmBlue) gmOff = gmBlue.getFormID() - VAMP_EYES.blue.male; } catch (gErr) { gmOff = -1; }
         var ours = function (id: number) { return gmOff >= 0 && id - gmOff >= 0x80d && id - gmOff <= 0x859; }; // one of Greymarch's vampire eye parts
         var skipped = this.greymarchVampEyesSkipped || (this.greymarchVampEyesSkipped = {});
+        var others: any = {}; // server actor id -> the eye part their character is built with (formView.ts, __gmVampEyes)
         for (var i = 0; i < list.length; i++) {
             var v = list[i];
             var localId = this.greymarchMeActor && v.actor === this.greymarchMeActor ? 0x14 : misc.remoteIdToLocalId(v.actor);
@@ -1346,9 +1351,11 @@ export class GreymarchBridge {
                 if (cur && !ours(cur.getFormID())) rec.orig = cur.getFormID(); // what they wear that is not ours is their own eyes (SkyMP may have put their look back)
                 var own = glow === 0 && rec.orig ? sp.HeadPart.from(sp.Game.getFormEx(rec.orig)) : null; // /eyes hides them: their own eyes
                 var wantEyes = own || hp, key = own ? "own" : colour + glow;
-                if (!(rec.key === key && cur && cur.getFormID() === wantEyes.getFormID())) {
-                    actor.changeHeadPart(wantEyes);
-                    this.greymarchVampHeadRedraw(actor, localId); // another player's head keeps the eyes it had, floating unshaped above the new ones, until it is drawn again
+                if (localId !== 0x14) { // another player: built with the eyes (formView.ts); glow 0 is their own look as it is
+                    if (glow > 0) others[v.actor] = hp.getFormID();
+                    if (rec.key !== key) { this.greymarchLog("vampire: " + localId.toString(16) + (glow === 0 ? " is built with their own eyes (/eyes)" : " is built with " + colour + " eyes, glow " + glow)); rec.key = key; }
+                } else if (!(rec.key === key && cur && cur.getFormID() === wantEyes.getFormID())) {
+                    actor.changeHeadPart(wantEyes); // the player's own head: the game shapes it
                     if (rec.key !== key) this.greymarchLog("vampire: " + localId.toString(16) + (own ? " shows their own eyes (/eyes)" : " has " + colour + " eyes, glow " + glow));
                     rec.key = key;
                 }
@@ -1365,13 +1372,14 @@ export class GreymarchBridge {
                 }
             } catch (eErr) { this.greymarchVampFangReport(v.actor, localId, "error: " + String(eErr).slice(0, 200)); /* not loaded here: the next look */ }
         }
+        try { (Function("return this")() as any).__gmVampEyes = others; } catch (gErr) { /* their own eyes */ }
         for (var k in done) {
             if (seen[k]) continue;
             var back = done[k]; delete done[k];
             try {
                 var a2 = Number(k) === 0x14 ? sp.Game.getPlayer() : sp.Actor.from(sp.Game.getFormEx(Number(k)));
                 var orig = back.orig ? sp.HeadPart.from(sp.Game.getFormEx(back.orig)) : null;
-                if (a2 && orig) { a2.changeHeadPart(orig); this.greymarchVampHeadRedraw(a2, Number(k)); this.greymarchLog("vampire: " + Number(k).toString(16) + " has their own eyes back"); }
+                if (a2 && orig && Number(k) === 0x14) { a2.changeHeadPart(orig); this.greymarchLog("vampire: " + Number(k).toString(16) + " has their own eyes back"); } // another player: built from their own look again (no __gmVampEyes)
                 if (a2) { // a fang head part from an earlier build swapped back for their own teeth (or the race's)
                     var base2 = sp.ActorBase.from(a2.getBaseObject()), female2 = !!base2 && base2.getSex() === 1;
                     var fang2 = sp.HeadPart.from(sp.Game.getFormFromFile(female2 ? VAMP_FANGS.female : VAMP_FANGS.male, "GreymarchCore.esp"));
@@ -1399,13 +1407,6 @@ export class GreymarchBridge {
             if (show && !on) { player.equipItem(f, true, true); if (!this.greymarchVampFangsSaid) { this.greymarchVampFangsSaid = true; this.greymarchLog("vampire: the worn fangs put on"); } } // preventRemoval, silent
             else if (!show && on) player.unequipItem(f, false, true); // /fangs hides them (or no look of this player yet): off
         } catch (err) { /* tried again in a second */ }
-    }
-    // ChangeHeadPart on another player's character swaps the part in its list but leaves the old eyes' 3D on the head, without the face's shaping: with /eyes the
-    // vampire eyes stayed, floating on the forehead above the own ones (2026-10-29). Drawing the model again (what SkyMP does when a character comes on screen,
-    // formView.ts) builds the head from the parts it has now. The player's own head is drawn again by the game itself.
-    greymarchVampHeadRedraw(actor: any, localId: number): any {
-        if (localId === 0x14) return;
-        try { if (actor.is3DLoaded()) actor.queueNiNodeUpdate(); } catch (e) { /* drawn again when it next comes on screen */ }
     }
     greymarchVampPartSlot(base: any, part: any): number { // where that head part is in the character's list of parts (-1: not there)
         if (!part) return -1;
