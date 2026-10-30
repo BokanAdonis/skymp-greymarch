@@ -214,6 +214,14 @@ export class MagicSyncService extends ClientListener {
         }
     }
 
+    // GREYMARCH (2026-10-30, a crash): did THIS game cast this spell from this caster (an NPC it runs) in the last ms? The server sends the cast back to
+    // the game that runs the NPC too, and replaying it there launched a second projectile from the same hands (two Fireballs at once, point blank: the
+    // game crashed in the projectile's animation)
+    public castHere(casterLocalId: number, spell: number, ms: number): boolean {
+        const now = Date.now();
+        return this.recentCasts.some((c) => c.casterLocalId === casterLocalId && c.spell === spell && now - c.at <= ms);
+    }
+
     // the spell a recent cast of this caster (within 5 s) that explodes into this explosion
     public findSpellForExplosion(casterLocalId: number, explosionId: number): number {
         const now = Date.now();

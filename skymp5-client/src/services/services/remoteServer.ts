@@ -58,6 +58,7 @@ import {
   remoteIdToLocalId,
 } from '../../view/worldViewMisc';
 import { TimeService } from './timeService';
+import { MagicSyncService } from './magicSyncService';
 import { logTrace, logError } from '../../logging';
 
 import { SpellCastMessage } from '../messages/spellCastMessage';
@@ -1035,6 +1036,15 @@ export class RemoteServer extends ClientListener {
       const showing = this.greymarchHeldSpells.get(castKey);
       if (isHeld && showing && showing.spell === spell!.getFormID()) {
         showing.lastSeen = Date.now();
+        return;
+      }
+
+      // GREYMARCH: this game's own cast, sent back (an NPC this game runs cast it here already): not cast a second time
+      let castHere = false;
+      try { castHere = !!spell && this.controller.lookupListener(MagicSyncService).castHere(ac.getFormID(), spell.getFormID(), 1500); } catch (e) { castHere = false; }
+      if (castHere) {
+        if (isHeld) this.greymarchHeldSpells.set(castKey, { spell: spell!.getFormID(), casterId: ac.getFormID(), lastSeen: Date.now() }); // its reminders only keep it going
+        this.greymarchMagicDiag(`magic: saw ${msg.data.caster.toString(16)} cast ${msg.data.spell.toString(16)} hand ${msg.data.castingSource}: cast in this game already (an NPC it runs), not again`);
         return;
       }
 
