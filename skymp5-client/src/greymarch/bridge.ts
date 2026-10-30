@@ -3022,18 +3022,15 @@ export class GreymarchBridge {
         this.greymarchOwnLookWant = null;
         var step = "race";
         try {
+            // ORDER (2026-10-30, the owner: "I still walk like a woman"): the race was set back BEFORE the character's sex, so the body was rebuilt as the other sex and
+            // got its walk. Now: the look first (the character's sex, race, head parts), then the body is rebuilt by two real race changes (another race and back,
+            // since a SetRace to the race it has changes nothing), then the look again for the face on the new body
             var race = sp.Race.from(sp.Game.getFormEx(look.raceId));
-            var now = player.getRace();
-            var rebuild = this.greymarchOwnLookRebuild === true; this.greymarchOwnLookRebuild = false;
-            if (race && (!now || now.getFormID() !== race.getFormID())) { player.setRace(race); this.greymarchLog("barber: the body's race set back to " + (look.raceId >>> 0).toString(16)); }
-            else if (race && rebuild) {
-                // THE WALK (2026-10-30, the owner: "now I am walking like a female character" after the load back): the body's animations were set up for the sex the race
-                // menu gave it. A SetRace to the same race changes nothing, so the body goes to another race and straight back: two real race changes, the second
-                // building the body and its animations for the look's sex (set on the character first, below, so it is already right when the body is rebuilt)
-                step = "sex"; appearanceMod.applyAppearanceToPlayer(look);
-                var other = sp.Race.from(sp.Game.getFormEx((look.raceId >>> 0) === 0x13744 ? 0x13746 : 0x13744)); // Imperial, or Nord for an Imperial
-                step = "rebuild"; if (other) { player.setRace(other); player.setRace(race); this.greymarchLog("barber: the body rebuilt for its sex (race " + (look.raceId >>> 0).toString(16) + " again)"); }
-            }
+            this.greymarchOwnLookRebuild = false;
+            step = "sex"; appearanceMod.applyAppearanceToPlayer(look);
+            var other = sp.Race.from(sp.Game.getFormEx((look.raceId >>> 0) === 0x13744 ? 0x13746 : 0x13744)); // Imperial, or Nord for an Imperial
+            step = "rebuild";
+            if (race) { if (other) player.setRace(other); player.setRace(race); this.greymarchLog("barber: the body rebuilt as race " + (look.raceId >>> 0).toString(16) + ", " + (look.isFemale ? "female" : "male")); }
             step = "look"; appearanceMod.applyAppearanceToPlayer(look);
             this.greymarchLog("barber: the old look put back on this body");
         } catch (e) { this.greymarchLog("barber: the old look could not be put back (" + step + "): " + e); }
