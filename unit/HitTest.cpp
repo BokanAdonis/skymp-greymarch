@@ -211,6 +211,9 @@ TEST_CASE("checking weapon cooldown", "[Hit]")
   eq.inv.entries.push_back(Inventory::Entry(80254, 1, kExtraWornTrue));
   ac.SetEquipment(eq);
 
+  // GREYMARCH: two hits per swing time. The last two hits 500 and 300 ms
+  // ago (a dagger's swing time is about 590 ms): a third is dropped
+  ac.SetLastHitTime(0xff000000, std::chrono::steady_clock::now() - 500ms);
   auto past = std::chrono::steady_clock::now() - 300ms;
 
   ac.SetLastHitTime(0xff000000, past);
@@ -224,6 +227,16 @@ TEST_CASE("checking weapon cooldown", "[Hit]")
 
   REQUIRE(passedTime <= 1.1 * (1 / daggerSpeed));
   REQUIRE(p.Messages().size() == 0);
+
+  // GREYMARCH: one hit 300 ms ago, the one before it 3 s ago: this hit counts
+  // (a quick second swing, the other hand, or two hits bunched up by the
+  // network: every other one was dropped)
+  ac.SetLastHitTime(0xff000000, std::chrono::steady_clock::now() - 3s);
+  ac.SetLastHitTime(0xff000000, std::chrono::steady_clock::now() - 300ms);
+  p.Messages().clear();
+  p.GetActionListener().OnHit(msgData, hitMsg);
+  REQUIRE(p.Messages().size() == 1);
+  ac.SetPercentages(actorValues); // full health again for the case below
 
   past = std::chrono::steady_clock::now() - 3s;
   ac.SetLastHitTime(0xff000000, past);

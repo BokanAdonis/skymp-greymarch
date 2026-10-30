@@ -1514,13 +1514,23 @@ void ActionListener::OnWeaponHit(MpActor* aggressor,
                    aggressor->GetFormId(), targetActor.GetFormId());
       return;
     }
-  } else if (!CanHit(*aggressor, hitData, timePassedAnyTarget)) {
+  } else if (!CanHit(*aggressor, hitData, timePassedAnyTarget) &&
+             !CanHit(*aggressor, hitData,
+                     std::chrono::duration<float>(
+                       currentHitTime - aggressor->GetHitBeforeLastTime()))) {
+    // GREYMARCH (2026-10-30, the owner: "only every other hit does damage"):
+    // two hits per swing time, not one. A real player's hits come closer
+    // than one swing time (quick chains, both hands, hits the network
+    // bunched up), and a dropped hit left the timer as it was, so every
+    // other one was dropped. Now a hit is dropped only when the hit before
+    // the last one is within a swing time too: still no faster than twice
+    // the game's own pace.
     WorldState* espmProvider = targetActor.GetParent();
     auto weapDNAM =
       espm::GetData<espm::WEAP>(hitData.source, espmProvider).weapDNAM;
     float expectedAttackTime = (1.1 * (1 / weapDNAM->speed)) -
       (1.1 * (1 / weapDNAM->speed) * (weapDNAM->speed <= 0.75 ? 0.45 : 0.3));
-    spdlog::debug(
+    spdlog::info(
       "OnWeaponHit - Target {0:x} is not available for attack due to fast "
       "attack speed. Weapon: {1:x}. Elapsed time: {2}. Expected attack time: "
       "{3}",

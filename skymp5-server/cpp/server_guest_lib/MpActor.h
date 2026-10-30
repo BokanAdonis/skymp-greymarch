@@ -135,6 +135,8 @@ public:
   std::chrono::steady_clock::time_point GetLastHitTime(
     std::optional<uint32_t> targetId) const;
   size_t CountRecentHits(std::chrono::duration<float> timeWindow) const;
+  // GREYMARCH: when the hit before the last one landed (any target)
+  std::chrono::steady_clock::time_point GetHitBeforeLastTime() const;
 
   void SetLastAttributesPercentagesUpdate(
     std::chrono::steady_clock::time_point timePoint =

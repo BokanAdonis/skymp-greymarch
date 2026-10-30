@@ -58,6 +58,9 @@ struct MpActor::Impl
   std::chrono::steady_clock::time_point lastAttributesUpdateTimePoint;
   std::vector<std::pair<uint32_t, std::chrono::steady_clock::time_point>>
     lastHitTimesLRU;
+  // GREYMARCH: the hit before the last one, any target (ActionListener's
+  // swing pace)
+  std::chrono::steady_clock::time_point hitBeforeLast;
   using RestorationTimePoints =
     std::unordered_map<espm::ActorValue,
                        std::chrono::steady_clock::time_point>;
@@ -788,6 +791,9 @@ void MpActor::SetLastHitTime(uint32_t targetId,
   constexpr size_t kMaxHitMemory = 16;
 
   auto& hits = pImpl->lastHitTimesLRU;
+  // GREYMARCH: the last hit becomes the one before it
+  pImpl->hitBeforeLast = hits.empty() ? std::chrono::steady_clock::time_point()
+                                      : hits.back().second;
 
   auto it =
     std::find_if(hits.begin(), hits.end(), [targetId](const auto& entry) {
@@ -806,6 +812,11 @@ void MpActor::SetLastHitTime(uint32_t targetId,
     }
     pImpl->lastHitTimesLRU.push_back({ targetId, timePoint });
   }
+}
+
+std::chrono::steady_clock::time_point MpActor::GetHitBeforeLastTime() const
+{
+  return pImpl->hitBeforeLast;
 }
 
 size_t MpActor::CountRecentHits(std::chrono::duration<float> timeWindow) const
