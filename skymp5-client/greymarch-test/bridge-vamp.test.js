@@ -410,3 +410,12 @@ test("another player's eyes are not swapped on their character but built into it
     assert.strictEqual(swapped.them, 0);
   } finally { Date.now = realNow; delete globalThis.__gmVampEyes; }
 });
+
+test("/disguise (2026-10-30, the owner): the server's disguised list names whose floating name every game hides; not your own", () => {
+  const s = make();
+  const g = Function("return this")();
+  s.say({ customPacketType: "greymarchGhosts", ghosts: [], invisible: [], disguised: [0xff000002, 0xff000001], me: 0xff000001 });
+  assert.deepStrictEqual(g.__gmDisguised, { [0xff000002]: true });
+  s.say({ customPacketType: "greymarchGhosts", ghosts: [], me: 0xff000001 });
+  assert.deepStrictEqual(g.__gmDisguised, {}, "an older server sends none: nobody is hidden");
+});
