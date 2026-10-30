@@ -2500,6 +2500,12 @@ export class GreymarchBridge {
     greymarchIsInvisible(actorId: any, isMe: any): any {
         return !isMe && !!this.greymarchInvisList && this.greymarchInvisList.indexOf(actorId) >= 0;
     }
+    // NO "E TALK" ON SOMEONE INVISIBLE (2026-10-30, the owner): looking at an invisible GM still showed the prompt to talk to them. Their body here is
+    // blocked from activation with the prompt hidden (Papyrus BlockActivation(abBlocked, abHideActivateText), the second argument since Skyrim 1.6.1130;
+    // SkyrimPlatform passes it on though its typings list one), and unblocked when they show again.
+    greymarchNoPrompt(actor: any, hide: boolean): any {
+        try { (actor as any).blockActivation(hide, hide); } catch (bErr) { if (!this.greymarchNoPromptErr) { this.greymarchNoPromptErr = true; this.greymarchLog("staff: invisible: the talk prompt could not be hidden (" + bErr + ")"); } }
+    }
     greymarchInvisApply(now: any): any {
         var sp = this.sp;
         var list = this.greymarchInvisList || [];
@@ -2515,6 +2521,7 @@ export class GreymarchBridge {
             var actor = sp.Actor.from(sp.Game.getFormEx(localId));
             if (!actor) continue;
             try { actor.setAlpha(0, false); } catch (aErr) { if (!this.greymarchInvErr) { this.greymarchInvErr = true; this.greymarchLog("staff: invisible: setAlpha failed (" + aErr + ")"); } continue; }
+            this.greymarchNoPrompt(actor, true); // nothing to talk to: no prompt, no activation
             if (!cur || cur.removing) this.greymarchLog("staff: invisible on " + localId.toString(16));
             applied[localId] = { at: now };
         }
@@ -2522,9 +2529,9 @@ export class GreymarchBridge {
             if (seen[key]) continue;
             var old = applied[key];
             var gone = null; try { gone = sp.Actor.from(sp.Game.getFormEx(Number(key))); } catch (e2) { gone = null; }
-            if (!old.removing) { if (gone) { try { gone.setAlpha(1, false); } catch (e3) { /* nothing to restore */ } } applied[key] = { removing: true, at: now, passes: 0 }; this.greymarchLog("staff: invisible removed from " + Number(key).toString(16)); continue; }
+            if (!old.removing) { if (gone) { try { gone.setAlpha(1, false); } catch (e3) { /* nothing to restore */ } this.greymarchNoPrompt(gone, false); } applied[key] = { removing: true, at: now, passes: 0 }; this.greymarchLog("staff: invisible removed from " + Number(key).toString(16)); continue; }
             if (old.passes === 0 && now - old.at >= 600) { if (gone) { try { gone.setAlpha(1, false); } catch (e4) { /* fine */ } } old.passes = 1; }
-            else if (old.passes === 1 && now - old.at >= 2500) { if (gone) { try { gone.setAlpha(1, false); } catch (e5) { /* fine */ } } delete applied[key]; }
+            else if (old.passes === 1 && now - old.at >= 2500) { if (gone) { try { gone.setAlpha(1, false); } catch (e5) { /* fine */ } this.greymarchNoPrompt(gone, false); } delete applied[key]; }
         }
     }
     // SERVER-DRIVEN ANIMALS (gamemode wildlifebrain.js, switch wildlife-brain.on): their frames { f: [[id, x, y, z, heading, speed, anim], ...] } are kept by the
