@@ -464,6 +464,7 @@ export class FormView {
             this.ready = true;
             this.spawnMoment = Date.now();
             this.gmSpawnedBeast = gmBeastSpawn;
+            this.gmSpawnedNoLook = !model.appearance; // a server NPC built from its own record (encounters, dungeons): disabled before it is deleted too (see destroy())
             const gmWere = gmBeastSpawn && gmWereLook(this.appearanceState.appearance, this.gmWolfRace);
             this.gmBeast = gmWere ? beastSpawned(Date.now()) : null; // GREYMARCH: a werewolf or werebear: a hidden stand-in, switched to its race in update() (beastSwitch.ts)
             if (gmWere) { try { const gmSi = Actor.from(ObjectReference.from(Game.getFormEx(this.refrId))); if (gmSi) gmSi.setAlpha(0, false); } catch (e) { /* shown as it is */ } }
@@ -513,8 +514,11 @@ export class FormView {
     // GREYMARCH: an NPC spawned with a beast look (a werewolf, a werebear, a creature form) is disabled first and deleted once that is done, and is not given
     // setWeaponDrawnMode afterwards. Deleted while still enabled, with its ragdoll and keyframed bodies in the physics world, the watching games crashed in that physics
     // (hkpKeyframedRigidMotion, SkyrimSE.exe+0A883CE) the moment the player changed back (2026-10-19 #GNQS). A person's NPC is removed as before.
-    const gmBeast = this.gmSpawnedBeast;
-    this.gmSpawnedBeast = false;
+    // GREYMARCH: AND EVERY SERVER NPC BUILT FROM ITS OWN RECORD (2026-10-29: a player's game crashed in a Falmer's animation-graph physics step,
+    // GraphPhysicsStepListener -> FalmerBehavior.hkb reading nothing, Duskglow Crevice 2026-10-22; and a Soul Cairn skeleton in its character physics,
+    // Halldir's Cairn 2026-10-29): the same delete while still enabled, its graph and bodies still being stepped. Disabled first, deleted once that is done.
+    const gmBeast = this.gmSpawnedBeast || this.gmSpawnedNoLook;
+    this.gmSpawnedBeast = false; this.gmSpawnedNoLook = false;
     this.gmBeast = null; this.gmKeptLook = null;
     // GREYMARCH: still being spawned: the spawn itself disables and deletes it (see gmAbandonedSpawns in spawnProcess.ts); deleting it here left a copy it then enabled
     const gmMidSpawn = refrId >= 0xff000000 && this.gmSpawningId === refrId;
@@ -526,7 +530,7 @@ export class FormView {
       this.removeNickname();
       return;
     }
-    if (refrId >= 0xff000000) gmCrumb("remove " + gmHex(refrId) + (gmBeast ? " beast (disable first)" : ""));
+    if (refrId >= 0xff000000) gmCrumb("remove " + gmHex(refrId) + (gmBeast ? " (disable first)" : ""));
     once("update", () => {
       if (refrId >= 0xff000000 && gmBeast) {
         // The world cleaner's protection is dropped only AFTER the delete (2026-10-20). Dropped at once, the NPC was unprotected and not yet disabled for the frames
@@ -538,7 +542,7 @@ export class FormView {
         refr.disable(false).then(() => {
           const gone = ObjectReference.from(Game.getFormEx(refrId));
           if (gone) gone.delete();
-          gmCrumb("removed " + gmHex(refrId) + " beast");
+          gmCrumb("removed " + gmHex(refrId) + " (disabled first)");
           unprotect();
         });
         return;
@@ -1431,6 +1435,7 @@ export class FormView {
   private lastWorldOrCell = 0;
   private spawnMoment = 0;
   private gmSpawnedBeast = false;
+  private gmSpawnedNoLook = false; // GREYMARCH: an NPC built from its own record (no look sent): see destroy()
   private gmHeldSaid = false;
   private gmHoldSince = 0; // GREYMARCH: since when nobody hosts this NPC (0: someone does)
   private gmHoldGaveUp = false;
