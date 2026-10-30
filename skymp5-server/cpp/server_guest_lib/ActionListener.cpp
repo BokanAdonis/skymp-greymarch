@@ -822,6 +822,17 @@ void ActionListener::OnChangeValues(const RawMessageData& rawMsgData,
 
     if (av == espm::ActorValue::Health) {
       newVal = CropHealthRegeneration(newVal, timeAfterRegeneration, actor);
+      // GREYMARCH: a report from before a spell heal reached their game
+      constexpr float kHealGraceSeconds = 1.f;
+      if (auto it = lastSpellHeal.find(actor->GetFormId());
+          it != lastSpellHeal.end()) {
+        const std::chrono::duration<float> age = now - it->second;
+        if (age.count() > kHealGraceSeconds) {
+          lastSpellHeal.erase(it);
+        } else if (newVal < currentVal) {
+          newVal = currentVal;
+        }
+      }
     } else if (av == espm::ActorValue::Magicka) {
       newVal = CropMagickaRegeneration(newVal, timeAfterRegeneration, actor);
     } else if (av == espm::ActorValue::Stamina) {
@@ -884,6 +895,44 @@ float CalculateCurrentHealthPercentage(const MpActor& actor, float damage,
 
   /// TODO add check for nan and inf!
   return currentHealthPercentage <= 0.f ? 0.f : currentHealthPercentage;
+}
+
+// GREYMARCH: the health a spell gives back (Healing Hands, Heal Other, Grand
+// Healing...): its helpful Restore Health effects (value modifiers of Health
+// that are neither hostile nor detrimental). An effect with a duration gives
+// its magnitude every second. The server never counted these: the healed
+// player's game raised their health, the regeneration check took it back down
+// as too fast, and the heal was lost.
+float SpellHealPoints(WorldState* worldState, uint32_t spellId)
+{
+  auto& browser = worldState->GetEspm().GetBrowser();
+  const auto spellLookup = browser.LookupById(spellId);
+  if (!spellLookup.rec || spellLookup.rec->GetType() != espm::SPEL::kType) {
+    return 0.f;
+  }
+  const auto spellData = espm::GetData<espm::SPEL>(spellId, worldState);
+  float heal = 0.f;
+  for (const auto& effect : spellData.effects) {
+    if (!effect.effectItem || effect.effectFormId == 0) {
+      continue;
+    }
+    const uint32_t mgefId = spellLookup.ToGlobalId(effect.effectFormId);
+    const auto mgefLookup = browser.LookupById(mgefId);
+    if (!mgefLookup.rec || mgefLookup.rec->GetType() != espm::MGEF::kType) {
+      continue;
+    }
+    const auto mgef = espm::GetData<espm::MGEF>(mgefId, worldState).data;
+    if (mgef.effectType != espm::MGEF::EffectType::ValueMod ||
+        mgef.primaryAV != espm::ActorValue::Health ||
+        mgef.IsFlagSet(espm::MGEF::Flags::Hostile) ||
+        mgef.IsFlagSet(espm::MGEF::Flags::Detrimental)) {
+      continue;
+    }
+    const float seconds = static_cast<float>(
+      std::max<uint32_t>(effect.effectItem->duration, 1u));
+    heal += std::max(effect.effectItem->magnitude, 0.f) * seconds;
+  }
+  return heal;
 }
 
 float GetReach(const MpActor& actor, const uint32_t source,
@@ -1293,6 +1342,7 @@ void ActionListener::OnSpellHit(MpActor* aggressor,
   float damage =
     partOne.CalculateDamage(*aggressor, *targetActorPtr, spellCastData);
   damage = damage <= 0.f ? 0.f : damage;
+  float heal = SpellHealPoints(&partOne.worldState, hitData.source);
 
   // GREYMARCH: a spell dual cast in the last 10 seconds hits 2.2 times as
   // hard (the game's dual-casting magnitude)
@@ -1303,6 +1353,7 @@ void ActionListener::OnSpellHit(MpActor* aggressor,
       std::chrono::steady_clock::now() - it->second.at;
     if (age.count() <= 10.f) {
       damage *= kDualCastMult;
+      heal *= kDualCastMult;
     }
   }
 
@@ -1311,13 +1362,31 @@ void ActionListener::OnSpellHit(MpActor* aggressor,
     espm::GetData<espm::SPEL>(hitData.source, &partOne.worldState);
   if (spellData.spellItem &&
       spellData.spellItem->castType == espm::SPEL::CastType::Concentration) {
-    damage *= ConcentrationHitSeconds(aggressor->GetFormId(),
-                                      targetActorPtr->GetFormId(),
-                                      hitData.source);
+    const float seconds = ConcentrationHitSeconds(
+      aggressor->GetFormId(), targetActorPtr->GetFormId(), hitData.source);
+    damage *= seconds;
+    heal *= seconds;
   }
 
-  targetActorValues.healthPercentage = CalculateCurrentHealthPercentage(
-    *targetActorPtr, damage, targetActorValues.healthPercentage, nullptr);
+  // GREYMARCH: a heal raises the target's health here, and the new value is
+  // sent to them, so their own regeneration check no longer takes it back
+  if (heal > 0.f && targetActorPtr->IsDead()) {
+    heal = 0.f;
+  }
+
+  if (heal > 0.f) {
+    if (lastSpellHeal.size() > 1024) {
+      lastSpellHeal.clear();
+    }
+    lastSpellHeal[targetActorPtr->GetFormId()] =
+      std::chrono::steady_clock::now();
+  }
+
+  targetActorValues.healthPercentage = std::min(
+    CalculateCurrentHealthPercentage(*targetActorPtr, damage - heal,
+                                     targetActorValues.healthPercentage,
+                                     nullptr),
+    1.f);
 
   static const auto kHealthAvFilter =
     std::vector<espm::ActorValue>{ espm::ActorValue::Health };
@@ -1326,9 +1395,9 @@ void ActionListener::OnSpellHit(MpActor* aggressor,
                                     kHealthAvFilter);
 
   spdlog::info("OnSpellHit - Target {0:x} is hit by {1:x} spell on {2} "
-               "damage. By caster: {3:x})",
+               "damage, {4} healing. By caster: {3:x})",
                spellCastData.target, spellCastData.spell, damage,
-               spellCastData.caster);
+               spellCastData.caster, heal);
 }
 
 bool ActionListener::IsDamageOfRecentCloak(uint32_t casterId,
