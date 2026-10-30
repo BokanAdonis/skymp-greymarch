@@ -2300,7 +2300,7 @@ export class GreymarchBridge {
                 }
             }
             this.greymarchNoHostApply(now, player, !!have.god);
-            this.greymarchGhostApply(now, ghosts || []); this.greymarchNamesApply(now); this.greymarchInvisApply(now); this.greymarchSeenLog(now); this.greymarchStatsApply(player); this.greymarchCombatApply(player);
+            this.greymarchGhostApply(now, ghosts || []); this.greymarchNamesApply(now); this.greymarchInvisApply(now); this.greymarchNoTalkApply(now); this.greymarchSeenLog(now); this.greymarchStatsApply(player); this.greymarchCombatApply(player);
         } catch (err) {
             if (!this.greymarchFxErr) { this.greymarchFxErr = true; this.greymarchLog("staff effects error (shown once): " + err); }
         }
@@ -2505,6 +2505,22 @@ export class GreymarchBridge {
     // SkyrimPlatform passes it on though its typings list one), and unblocked when they show again.
     greymarchNoPrompt(actor: any, hide: boolean): any {
         try { (actor as any).blockActivation(hide, hide); } catch (bErr) { if (!this.greymarchNoPromptErr) { this.greymarchNoPromptErr = true; this.greymarchLog("staff: invisible: the talk prompt could not be hidden (" + bErr + ")"); } }
+    }
+    // NO "E TALK STRANGER" ON PLAYERS (2026-10-30, the owner: remove the prompt from people completely). Every other living player's body here is blocked from
+    // activation with the prompt hidden (greymarchNoPrompt), checked every 2 s (a body built again would show it again). A dead body is left open: a werewolf
+    // feeds on it with E (gamemode werewolf.js). Robbing, frisking, trading and the rest go through the X menu, not E. Invisible players: greymarchInvisApply.
+    greymarchNoTalkApply(now: any): any {
+        if (now < (this.greymarchNoTalkNext || 0)) return;
+        this.greymarchNoTalkNext = now + 2000;
+        var sp = this.sp, others = this.greymarchOthers || [];
+        for (var i = 0; i < others.length; i++) {
+            if (this.greymarchIsInvisible(others[i], false)) continue; // hidden with the body there
+            var lid = misc.remoteIdToLocalId(others[i]); if (!lid) continue;
+            var actor: any = null; try { actor = sp.Actor.from(sp.Game.getFormEx(lid)); } catch (e1) { actor = null; }
+            if (!actor) continue;
+            var dead = false; try { dead = !!actor.isDead(); } catch (e2) { dead = false; }
+            this.greymarchNoPrompt(actor, !dead);
+        }
     }
     greymarchInvisApply(now: any): any {
         var sp = this.sp;

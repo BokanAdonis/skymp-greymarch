@@ -25,3 +25,20 @@ test("an invisible player's body: alpha 0, activation blocked with the prompt hi
   gm.greymarchInvisApply(5000);
   assert.deepStrictEqual(calls, [["alpha", 1], ["block", false, false]], "visible again: the prompt comes back");
 });
+
+test("no E Talk on any other living player (2026-10-30, the owner); a dead body stays open (a werewolf feeds with E); not your own body", () => {
+  const calls = [];
+  const mk = (name, dead) => ({ isDead: () => dead, setAlpha() {}, blockActivation: (...a) => calls.push([name, ...a]) });
+  const bodies = { 0xff000aa1: mk("alive", false), 0xff000aa2: mk("dead", true) };
+  const mods = { "../messages": { MsgType: { CustomPacket: 77 } }, "./emotes": emotes, "../view/worldViewMisc": { remoteIdToLocalId: (id) => ({ 0xff000002: 0xff000aa1, 0xff000003: 0xff000aa2 })[id] || 0, localIdToRemoteId: () => 0 }, "../services/services/remoteServer": { RemoteServer: {} }, "../services/services/singlePlayerService": { SinglePlayerService: {} } };
+  const bridge = load(tr("bridge.ts"), mods);
+  const sp = { printConsole() {}, writeLogs() {}, Game: { getFormEx: (id) => bodies[id] || null }, Actor: { from: (f) => f }, on() {}, storage: {} };
+  const gm = new bridge.GreymarchBridge(sp, { on() {}, emitter: { on() {}, emit() {} } });
+  gm.greymarchOthers = [0xff000002, 0xff000003]; gm.greymarchInvisList = [];
+  gm.greymarchNoTalkApply(1000);
+  assert.deepStrictEqual(calls, [["alive", true, true], ["dead", false, false]]);
+  gm.greymarchNoTalkApply(1500);
+  assert.strictEqual(calls.length, 2, "every 2 seconds, not every frame");
+  gm.greymarchNoTalkApply(3100);
+  assert.strictEqual(calls.length, 4, "put on again (a body built again would show the prompt)");
+});
