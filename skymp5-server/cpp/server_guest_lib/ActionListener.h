@@ -137,6 +137,12 @@ private:
            std::chrono::steady_clock::time_point>
     lastConcentrationHit;
 
+  // GREYMARCH: when the server last healed an actor with a spell (OnSpellHit).
+  // A health report from their game sent before the heal reached it is lower
+  // than the healed value; for a moment after a heal such a report is not
+  // taken (OnChangeValues), or the heal would be lost again.
+  std::map<uint32_t, std::chrono::steady_clock::time_point> lastSpellHeal;
+
   // TODO: inverse dependency
   std::shared_ptr<CraftService> craftService;
   std::shared_ptr<SweetHidePlayerNamesService> sweetHidePlayerNamesService;
