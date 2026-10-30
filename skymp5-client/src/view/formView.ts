@@ -489,6 +489,7 @@ export class FormView {
             this.gmBeast = gmWere ? beastSpawned(Date.now()) : null; // GREYMARCH: a werewolf or werebear: a hidden stand-in, switched to its race in update() (beastSwitch.ts)
             if (gmWere) { try { const gmSi = Actor.from(ObjectReference.from(Game.getFormEx(this.refrId))); if (gmSi) gmSi.setAlpha(0, false); } catch (e) { /* shown as it is */ } }
             gmCrumb("spawned " + gmHex(this.refrId));
+            if (!model.appearance) gmMakePeaceful(this.refrId); // GREYMARCH: a fox, deer, rabbit, goat, chicken or cow never fights (see gmMakePeaceful)
           });
         } else {
           printConsole("Unable to triggerSpawnProcess for null refr");
@@ -1478,4 +1479,25 @@ export class FormView {
 
 
   public static isDisplayingNicknames: boolean = true;
+}
+
+// GREYMARCH: PEACEFUL ANIMALS (2026-10-30, the owner: "any animals that aren't supposed to be hostile stay non-hostile"; a fox from the F7 spawn menu fought
+// them). An animal the games run with Skyrim's own AI (the F7 spawn menu's, an encounter animal handed back) fights back as in the game: a fox stands its
+// ground when hit. Foxes (snow foxes too), deer, elk, hares, goats, chickens and cows are made cowardly and unaggressive in every game that loads them:
+// hit, they run. The server's own animals (wildlifebrain.js) never fight anyway; wolves, mudcrabs and the rest are left as they are.
+const GM_PEACEFUL_RACES = [0x109c7c /* Fox */, 0xcf89b /* Deer */, 0x131ed /* Elk */, 0x6dc99 /* Hare */, 0x131fa /* Goat */, 0x6fc4a /* domestic Goat */, 0xa919d /* Chicken */, 0x4e785 /* Cow */];
+let gmGlowDeerRace = -1; // Dawnguard's glowing deer
+function gmMakePeaceful(refrId: number): void {
+  try {
+    const ac = Actor.from(Game.getFormEx(refrId));
+    if (!ac) return;
+    const race = ac.getRace(); if (!race) return;
+    if (gmGlowDeerRace < 0) { try { const g = Game.getFormFromFile(0xd0b2, "Dawnguard.esm"); gmGlowDeerRace = g ? g.getFormID() : 0; } catch (e) { gmGlowDeerRace = 0; } }
+    const id = race.getFormID();
+    if (!GM_PEACEFUL_RACES.includes(id) && !(gmGlowDeerRace && id === gmGlowDeerRace)) return;
+    ac.setActorValue("Aggression", 0); // unaggressive: never starts a fight
+    ac.setActorValue("Confidence", 0); // cowardly: runs when hit
+    ac.stopCombat();
+    gmCrumb("peaceful " + gmHex(refrId));
+  } catch (e) { /* left as it is */ }
 }
