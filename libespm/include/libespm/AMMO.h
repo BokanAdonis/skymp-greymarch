@@ -12,7 +12,9 @@ public:
 
   struct Data
   {
-    float weight;
+    float weight = 0.f;
+    float damage = 0.f; // GREYMARCH: what the arrow or bolt adds to the bow's damage (DATA + 0x8)
+    bool hasDamage = false;
   };
 
   Data GetData(CompressedFieldsCache& compressedFieldsCache) const;

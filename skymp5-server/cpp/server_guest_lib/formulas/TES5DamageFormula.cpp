@@ -7,6 +7,7 @@
 #include "WorldState.h"
 #include "libespm/espm.h"
 #include <algorithm>
+#include <cmath>
 
 namespace internal {
 
@@ -33,6 +34,7 @@ private:
 
 private:
   [[nodiscard]] float GetBaseWeaponDamage() const;
+  [[nodiscard]] float GetAmmoDamage() const;
   [[nodiscard]] float CalcWeaponRating() const;
   [[nodiscard]] float CalcArmorRatingComponent(
     const Inventory::Entry& opponentEquipmentEntry) const;
@@ -70,10 +72,44 @@ float TES5DamageFormulaImpl::GetBaseWeaponDamage() const
   return weapData.weapData->damage;
 }
 
+// GREYMARCH: ARROWS COUNT (2026-10-29, the owner: balance arrow damage). A shot from a bow or crossbow
+// adds the damage of the arrow or bolt the shooter has equipped, as the game does: the balance table's
+// number for it (the F7 Balance tab's Arrows), else the plugin's. A bash with the bow adds nothing.
+float TES5DamageFormulaImpl::GetAmmoDamage() const
+{
+  if (hitData.isBashAttack) {
+    return 0.f;
+  }
+  const auto weapData =
+    espm::GetData<espm::WEAP>(hitData.source, espmProvider);
+  if (!weapData.weapDNAM ||
+      (weapData.weapDNAM->animType != espm::WEAP::AnimType::Bow &&
+       weapData.weapDNAM->animType != espm::WEAP::AnimType::Crossbow)) {
+    return 0.f;
+  }
+  const auto& balance = GreymarchBalance::Get().ammoDamage;
+  for (const auto& entry : aggressor.GetEquipment().inv.entries) {
+    if (entry.GetWorn() == Inventory::Worn::None ||
+        espm::GetRecordType(entry.baseId, espmProvider) !=
+          espm::AMMO::kType) {
+      continue;
+    }
+    if (auto it = balance.find(entry.baseId); it != balance.end()) {
+      return it->second;
+    }
+    const auto ammoData = espm::GetData<espm::AMMO>(entry.baseId, espmProvider);
+    return ammoData.hasDamage && std::isfinite(ammoData.damage) &&
+        ammoData.damage > 0.f
+      ? ammoData.damage
+      : 0.f;
+  }
+  return 0.f;
+}
+
 float TES5DamageFormulaImpl::CalcWeaponRating() const
 {
   // TODO(#457): take other components into account
-  return GetBaseWeaponDamage();
+  return GetBaseWeaponDamage() + GetAmmoDamage();
 }
 
 float TES5DamageFormulaImpl::CalcMagicEffects(const Effects& effects) const

@@ -55,6 +55,7 @@ GreymarchBalanceTable GreymarchBalanceTable::FromJson(const nlohmann::json& j)
   GreymarchBalanceTable t;
   ReadMap(j, "weapons", 10000.f, t.weaponDamage);
   ReadMap(j, "armor", 10000.f, t.armorRating);
+  ReadMap(j, "ammo", 10000.f, t.ammoDamage);
   t.armorScaling = Number(j, "armorScaling", 0.f, 10.f);
   t.maxArmor = Number(j, "maxArmor", 0.f, 100.f);
   t.shieldBlock = Number(j, "shieldBlock", 0.f, 1.f);
