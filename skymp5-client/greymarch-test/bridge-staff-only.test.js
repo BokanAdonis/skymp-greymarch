@@ -77,7 +77,9 @@ test("a staffOnly refusal while the panel is open (rank taken away, off duty) cl
 
 test("wiring: F7, H, B, F6 and F8 (testers) all go through the server check; replies reach it first", () => {
   assert.match(src, /if \(code === 65 && !this\.greymarchAdminOn && !this\.greymarchMenuOn\) \{ if \(this\.greymarchEmoteOn\) this\.greymarchEmoteHide\(\); this\.greymarchStaffOpen\(\); \}/);
-  for (const mode of ["encounters", "build", "dungeons", "tester"]) assert.ok(src.includes(`this.greymarchStaffOpen("${mode}"); }`), mode);
+  for (const mode of ["dungeons", "tester"]) assert.ok(src.includes(`this.greymarchStaffOpen("${mode}"); }`), mode);
+  for (const mode of ["encounters", "build"]) assert.ok(src.includes(`this.greymarchStaffKeyWanted = { at: Date.now(), mode: "${mode}"`), mode + ": H and B go through the game-menu check first (greymarchStaffKeyPending)");
+  assert.ok(src.includes("this.greymarchStaffOpen(want.mode);"), "and then through the server check");
   assert.doesNotMatch(src, /if \(code === 66 [^\n]*this\.greymarchAdminShow\("tester"\)/, "F8 asks too; the server lets testers in on the test server only");
   assert.match(src, /if \(type === "greymarchAdminReply" && this\.greymarchStaffReply\(msg\)\) return;[^\n]*\n\s*if \(type === "greymarchAdminReply"\) \{ var brids/);
   assert.doesNotMatch(src, /greymarchHotkeyOpen[\s\S]{0,200}code === 65[^\n]*greymarchAdminShow\(\)/, "F7 never opens the panel without asking");

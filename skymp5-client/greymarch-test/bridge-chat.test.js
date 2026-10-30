@@ -422,15 +422,15 @@ test("window hotkeys open on release: F7, H, B, F6, F8 and K hold nothing while 
   gm.greymarchStaffOk = true; // the server already said this is staff (bridge-staff-only.test.js: otherwise F7, H, B and F6 ask first)
   gm.greymarchKey({ code: 48, isDown: true });
   assert.deepStrictEqual(shows, [], "B down: nothing yet (the page would never see it go up and the browser would repeat the letter)");
-  gm.greymarchKey({ code: 48, isDown: false });
+  gm.greymarchKey({ code: 48, isDown: false }); gm.greymarchStaffKeyPending();
   assert.deepStrictEqual(shows, ["build"], "B let go: the Build tab");
-  for (const [code, mode] of [[65, "staff"], [35, "encounters"], [64, "dungeons"], [66, "tester"]]) { gm.greymarchKey({ code, isDown: true }); gm.greymarchKey({ code, isDown: false }); assert.strictEqual(shows.pop(), mode); }
+  for (const [code, mode] of [[65, "staff"], [35, "encounters"], [64, "dungeons"], [66, "tester"]]) { gm.greymarchKey({ code, isDown: true }); gm.greymarchKey({ code, isDown: false }); gm.greymarchStaffKeyPending(); assert.strictEqual(shows.pop(), mode); }
   shows.length = 0;
   let held = true; gm.sp.Input = { isKeyPressed: (c) => c === 35 && held };
   gm.greymarchKey({ code: 35, isDown: true });
   gm.greymarchHotkeyTick(Date.now() + 500); assert.deepStrictEqual(shows, [], "H still held: waits");
-  held = false; gm.greymarchHotkeyTick(Date.now() + 600); assert.deepStrictEqual(shows, ["encounters"], "the key-up never came, but H reads as up: opened");
-  gm.greymarchKey({ code: 35, isDown: true }); gm.greymarchKey({ code: 35, isDown: false }); assert.strictEqual(shows.length, 2, "and the next press works as before");
+  held = false; gm.greymarchHotkeyTick(Date.now() + 600); gm.greymarchStaffKeyPending(); assert.deepStrictEqual(shows, ["encounters"], "the key-up never came, but H reads as up: opened");
+  gm.greymarchKey({ code: 35, isDown: true }); gm.greymarchKey({ code: 35, isDown: false }); gm.greymarchStaffKeyPending(); assert.strictEqual(shows.length, 2, "and the next press works as before");
 });
 
 test("the chat's keyboard releases (its answer every 2 s, the release after a close, the voice display switching) leave the K window, the chancery and the vampire menu their cursor", () => {
@@ -496,4 +496,20 @@ test("stuck keys: no Input functions (an old SkyrimPlatform) or no browser state
   gm.sp.Input = undefined;
   focus.on = true; assert.doesNotThrow(() => gm.greymarchKeyReleaseTick());
   focus.on = false; assert.doesNotThrow(() => gm.greymarchKeyReleaseTick());
+});
+
+test("H and B typed into a game menu (the console, the race menu's name box) are letters, as K is (2026-10-29, the owner): the staff panel does not open, the log says why; with the menu gone they open it", () => {
+  const { gm, log, menus } = make();
+  const shows = []; gm.greymarchAdminShow = (mode) => { shows.push(mode || "staff"); };
+  gm.greymarchStaffOk = true;
+  for (const m of ["Console", "RaceSex Menu"]) {
+    menus.add(m);
+    for (const code of [35, 48]) { gm.greymarchKey({ code, isDown: true }); gm.greymarchKey({ code, isDown: false }); gm.greymarchStaffKeyPending(); }
+    assert.deepStrictEqual(shows, [], m);
+    menus.delete(m); gm.greymarchChatWhyNext = 0;
+  }
+  assert.ok(log.lines.some((l) => /H ignored: the game says 'Console' is open/.test(l)), "the log says why");
+  gm.greymarchStaffKeyPending(); assert.deepStrictEqual(shows, [], "an H pressed in the menu does not open the panel later");
+  gm.greymarchKey({ code: 35, isDown: true }); gm.greymarchKey({ code: 35, isDown: false }); gm.greymarchStaffKeyPending();
+  assert.deepStrictEqual(shows, ["encounters"]);
 });

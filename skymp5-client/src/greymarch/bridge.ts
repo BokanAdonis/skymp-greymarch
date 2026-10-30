@@ -436,6 +436,7 @@ export class GreymarchBridge {
         this.greymarchDoorPrompt(Date.now());
         this.greymarchChatPending();
         this.greymarchProfPending();
+        this.greymarchStaffKeyPending(); // H and B, the same way as K
         this.greymarchKeyReleaseTick(); // keys let go while a page had the keyboard are released in the game too (greymarchKeyReleaseTick)
         this.greymarchTemplateFixTick(Date.now()); // objects the start save pins to their unmodded spot go back where the plugins put them (templateFix.ts)
         this.greymarchEmoteTick(Date.now()); // the emote wheel (G): opening it, playing and stopping an emote (Skyrim functions: the update phase)
@@ -796,8 +797,8 @@ export class GreymarchBridge {
     // a window hotkey let go (greymarchKey): what it opens, checked now (the state may have changed while it was held)
     greymarchHotkeyOpen(code: number): any {
         if (code === 65 && !this.greymarchAdminOn && !this.greymarchMenuOn) { if (this.greymarchEmoteOn) this.greymarchEmoteHide(); this.greymarchStaffOpen(); } // F7: staff only (greymarchStaffOpen asks the server first)
-        else if (code === 35 && !this.greymarchAdminOn && !this.greymarchMenuOn && !this.greymarchChatTyping && !this.greymarchPanelHasKeys()) { if (this.greymarchEmoteOn) this.greymarchEmoteHide(); this.greymarchStaffOpen("encounters"); } // H: the staff panel straight on its Encounters tab (GM and up; staff below GM see the page close again at once; the page closes it with H)
-        else if (code === 48 && !this.greymarchAdminOn && !this.greymarchMenuOn && !this.greymarchChatTyping && !this.greymarchPanelHasKeys()) { if (this.greymarchEmoteOn) this.greymarchEmoteHide(); this.greymarchStaffOpen("build"); } // B: the staff panel straight on its Build tab (GM and up; staff below GM see the page close again at once)
+        else if (code === 35 && !this.greymarchAdminOn && !this.greymarchMenuOn && !this.greymarchChatTyping && !this.greymarchPanelHasKeys()) this.greymarchStaffKeyWanted = { at: Date.now(), mode: "encounters", key: "H" }; // H: the staff panel straight on its Encounters tab (GM and up; staff below GM see the page close again at once; the page closes it with H)
+        else if (code === 48 && !this.greymarchAdminOn && !this.greymarchMenuOn && !this.greymarchChatTyping && !this.greymarchPanelHasKeys()) this.greymarchStaffKeyWanted = { at: Date.now(), mode: "build", key: "B" }; // B: the staff panel straight on its Build tab (GM and up; staff below GM see the page close again at once)
         else if (code === 64 && !this.greymarchAdminOn && !this.greymarchMenuOn && !this.greymarchChatTyping) { if (this.greymarchEmoteOn) this.greymarchEmoteHide(); this.greymarchStaffOpen("dungeons"); } // F6: the staff panel straight on its Dungeons tab (GM and up; the server checks the "dungeons" command, the page closes it with F6)
         else if (code === 66 && !this.greymarchAdminOn && !this.greymarchMenuOn && !this.greymarchChatTyping) { if (this.greymarchEmoteOn) this.greymarchEmoteHide(); this.greymarchStaffOpen("tester"); } // F8: the same panel as the tester menu (teleports, items, NPCs; the server gives testers those commands on the test server only); asks the server first like F7, so a player sees nothing
         else if (code === 37 && !this.greymarchChatTyping && !this.greymarchEmoteOn && !(this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchScribeOn || this.greymarchCraftOn || this.greymarchForgeOn)) this.greymarchProfWanted = Date.now(); // K opens the professions window from the update phase (greymarchProfPending), where the game's menus can be asked about (the page itself closes it with K or Esc, like the staff panel with F7)
@@ -2604,6 +2605,18 @@ export class GreymarchBridge {
         if (Date.now() - at > 1000) return; // a press from long ago
         if (this.greymarchInMenu()) { this.greymarchChatWhy("K ignored: the game says '" + this.greymarchMenuName + "' is open"); return; }
         this.greymarchProfShow();
+    }
+    // H AND B, handled every frame the way K is (2026-10-29, the owner: "the H key follows the fix we did for the chat box and K"): an H or a B typed into a game
+    // menu (the console, the race menu's name box) is a letter, not the staff panel; the log says why. A press older than a second is dropped.
+    greymarchStaffKeyPending(): any {
+        var want = this.greymarchStaffKeyWanted;
+        if (!want) return;
+        this.greymarchStaffKeyWanted = null;
+        if (Date.now() - want.at > 1000) return;
+        if (this.greymarchInMenu()) { this.greymarchChatWhy(want.key + " ignored: the game says '" + this.greymarchMenuName + "' is open"); return; }
+        if (this.greymarchAdminOn || this.greymarchMenuOn || this.greymarchChatTyping || this.greymarchPanelHasKeys()) return; // something took the keyboard meanwhile
+        if (this.greymarchEmoteOn) this.greymarchEmoteHide();
+        this.greymarchStaffOpen(want.mode);
     }
     greymarchProfShow(): any {
         if (this.greymarchScreenUp || this.greymarchAdminOn || this.greymarchMenuOn || (this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchScribeOn || this.greymarchCraftOn || this.greymarchForgeOn) || this.greymarchChatTyping) return; // not over the select screen, the other panels, or while typing

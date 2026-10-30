@@ -14,11 +14,11 @@ test("F6 (scan code 64) reaches the key handler and opens the panel in dungeons 
 });
 
 test("H (scan code 35) opens the panel in encounters mode, not while typing in the chat or another window has the keys", () => {
-  assert.match(src, /if \(code === 35 && !this\.greymarchAdminOn && !this\.greymarchMenuOn && !this\.greymarchChatTyping && !this\.greymarchPanelHasKeys\(\)\) \{[^}]*this\.greymarchStaffOpen\("encounters"\); \}/);
+  assert.match(src, /if \(code === 35 && !this\.greymarchAdminOn && !this\.greymarchMenuOn && !this\.greymarchChatTyping && !this\.greymarchPanelHasKeys\(\)\) this\.greymarchStaffKeyWanted = \{ at: Date\.now\(\), mode: "encounters", key: "H" \};/, "through the game-menu check first (greymarchStaffKeyPending), as K");
 });
 
 test("B (scan code 48) opens the panel on its Build tab, not while typing or another window has the keys; a turned piece is turned in this game too", () => {
-  assert.match(src, /if \(code === 48 && !this\.greymarchAdminOn && !this\.greymarchMenuOn && !this\.greymarchChatTyping && !this\.greymarchPanelHasKeys\(\)\) \{[^}]*this\.greymarchStaffOpen\("build"\); \}/);
+  assert.match(src, /if \(code === 48 && !this\.greymarchAdminOn && !this\.greymarchMenuOn && !this\.greymarchChatTyping && !this\.greymarchPanelHasKeys\(\)\) this\.greymarchStaffKeyWanted = \{ at: Date\.now\(\), mode: "build", key: "B" \};/, "through the game-menu check first, as K");
   assert.match(src, /if \(type === "greymarchBuildAngle"\)/);
   assert.match(src, /if \(ref\) ref\.setAngle\(0, 0, q\[i\]\.z\);/);
   assert.match(src, /this\.greymarchBuildAngleTick\(\);/);
