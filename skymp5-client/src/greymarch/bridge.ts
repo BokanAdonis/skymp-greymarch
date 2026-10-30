@@ -1969,7 +1969,7 @@ export class GreymarchBridge {
         var ref = 0;
         try { var player = this.sp.Game.getPlayer(); var furn = player ? player.getFurnitureReference() : null; ref = furn ? misc.localIdToRemoteId(furn.getFormID()) || 0 : 0; } catch (e) { ref = 0; }
         // sitting or lying on the ground from the emote wheel is resting too (gamemode exhaustion.js); so is any furniture that is not a work station (the server tells them apart)
-        var em = this.greymarchEmoteNow, rest = !!(em && em.kind === "loop" && (em.id === "wounded2" || em.id === "lie"));
+        var em = this.greymarchEmoteNow, rest = !!(em && em.kind === "loop" && (em.id === "wounded2" || em.id === "lie" || em.id === "sit" || em.id === "sitledge"));
         if (!ref && !rest && !this.greymarchChopRef && !this.greymarchChopRest) return;
         this.greymarchChopRef = ref; this.greymarchChopRest = rest;
         this.controller.emitter.emit("sendMessage", { message: { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify(rest ? { customPacketType: "greymarchChop", ref: ref >>> 0, rest: true } : { customPacketType: "greymarchChop", ref: ref >>> 0 }) }, reliability: "unreliable" });
@@ -3532,11 +3532,12 @@ export class GreymarchBridge {
             var idle = sp.Idle.from(sp.Game.getFormEx(em.idle));
             this.greymarchCrumb("emote " + em.id + " idle " + (Number(em.idle) >>> 0).toString(16));
             ok = !!idle && !!player.playIdle(idle);
+            if (!ok && em.event) { sp.Debug.sendAnimationEvent(player, em.event); ok = true; } // a sitting idle asks for a seat: its own event sits anywhere (emotes.ts, SITTING DOWN)
         } catch (err) { ok = false; }
         var n = this.greymarchEmoteLogged = (this.greymarchEmoteLogged || 0) + 1;
         if (n <= 20) this.greymarchLog("emote: " + em.id + " (idle " + em.idle.toString(16) + ", " + em.kind + ") " + (ok ? "played" : "refused by the game"));
         if (!ok) { this.greymarchEmoteSay("You cannot do that right now"); return; }
-        this.greymarchEmoteNow = em.kind === "once" ? null : { id: em.id, kind: em.kind, stop: em.stop || emoteMod.IDLE_STOP, at: Date.now() };
+        this.greymarchEmoteNow = em.kind === "once" ? null : { id: em.id, kind: em.kind, stop: em.stop || emoteMod.IDLE_STOP, stopEvent: em.stopEvent, at: Date.now() };
     }
     // ---- FACES (the wheel's Face group). The face is put on the player's own body here and reported to the server, which passes it to everyone else (gamemode faces.js);
     // the faces of other players come back as { customPacketType: "greymarchFaceOf", actor, face } and are put on the characters this game draws. The game can drop a face
@@ -3728,7 +3729,7 @@ export class GreymarchBridge {
             var player = sp.Game.getPlayer();
             var idle = sp.Idle.from(sp.Game.getFormEx(cur.stop));
             var ok = !!idle && !!player.playIdle(idle);
-            if (!ok) sp.Debug.sendAnimationEvent(player, cur.stop === emoteMod.OFFSET_STOP ? "OffsetStop" : cur.stop === emoteMod.DRUNK_STOP ? "DrunkStop" : "IdleStop"); // the stop event itself
+            if (!ok) sp.Debug.sendAnimationEvent(player, cur.stopEvent ? cur.stopEvent : cur.stop === emoteMod.OFFSET_STOP ? "OffsetStop" : cur.stop === emoteMod.DRUNK_STOP ? "DrunkStop" : "IdleStop"); // the stop event itself
         } catch (err) { /* the next movement ends it anyway */ }
         if ((this.greymarchEmoteLogged || 0) <= 20) this.greymarchLog("emote: " + cur.id + " ended (" + why + ")");
     }

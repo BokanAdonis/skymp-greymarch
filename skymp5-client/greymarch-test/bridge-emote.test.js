@@ -737,3 +737,25 @@ test("the forge display is never shown at the smelter or the charcoal kiln (2026
   s.page({ type: "forge-preview", key: "20:skyrim.esm" }); tick();
   assert.strictEqual(s.log.ghosts.length, 1, "the tanning rack shows its pieces");
 });
+
+test("sitting down (2026-10-30): the game refuses the sitting idle away from a seat, so its own event sits the player anywhere; moving stands them up with IdleChairExitStart; it counts as rest", () => {
+  const s = make();
+  s.state.refuse = true; // GetSitting == 2: playIdle says no on open ground
+  s.page({ type: "emote", id: "sit" }); s.tick();
+  assert.deepStrictEqual(s.log.idles, [0xc4ef9], "IdleSitCrossLeggedEnter tried first");
+  assert.deepStrictEqual(s.log.events, ["IdleSitCrossLeggedEnter"]);
+  assert.ok(!s.log.notes.includes("You cannot do that right now"));
+  assert.strictEqual(s.gm.greymarchEmoteNow.id, "sit");
+  s.chopTick();
+  assert.deepStrictEqual(s.log.sent.filter((m) => m.customPacketType === "greymarchChop").at(-1), { customPacketType: "greymarchChop", ref: 0, rest: true }, "resting (exhaustion.js)");
+  s.key(17, true); s.tick();
+  assert.deepStrictEqual(s.log.idles, [0xc4ef9, 0xc4efa], "IdleSitCrossLeggedExit tried");
+  assert.deepStrictEqual(s.log.events, ["IdleSitCrossLeggedEnter", "IdleChairExitStart"], "then its own event");
+  assert.ok(!s.gm.greymarchEmoteNow);
+  const l = make();
+  l.state.refuse = true;
+  l.page({ type: "emote", id: "sitledge" }); l.tick();
+  assert.deepStrictEqual(l.log.events, ["IdleSitLedgeEnter"]);
+  const g = emotes.EMOTE_GROUPS.find((x) => x.id === "sit");
+  assert.deepStrictEqual(g.items.map((x) => x.id), ["sit", "sitledge", "lie", "wounded2", "wounded3"]);
+});

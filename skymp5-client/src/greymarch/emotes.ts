@@ -10,7 +10,7 @@
 
 export type EmoteKind = "once" | "loop" | "walk" | "face";
 export interface Face { mood?: number; strength?: number; phonemes?: number[][] } // phonemes: [index, 0-1] (0 Aah, 1 BigAah, 5 Eee ...)
-export interface Emote { id: string; name: string; idle: number; kind: EmoteKind; stop?: number; face?: Face }
+export interface Emote { id: string; name: string; idle: number; kind: EmoteKind; stop?: number; face?: Face; event?: string; stopEvent?: string } // event / stopEvent: sent when the game refuses the idle (see SITTING)
 export interface EmoteGroup { id: string; name: string; items: Emote[] }
 
 export const IDLE_STOP = 0x10d9ee;       // IdleStop_Loose (event IdleStop): ends a loop
@@ -19,6 +19,10 @@ export const DRUNK_STOP = 0xcefd1;       // IdleDrunkStop (event DrunkStop)
 
 const e = (id: string, name: string, idle: number, kind: EmoteKind, stop?: number): Emote => (stop ? { id, name, idle, kind, stop } : { id, name, idle, kind });
 const f = (id: string, name: string, face: Face): Emote => ({ id, name, idle: 0, kind: "face", face });
+// SITTING DOWN (2026-10-30, the owner). The game's own sitting idles, IdleSitCrossLeggedEnter (0C4EF9) and IdleSitLedgeEnter (0C482B), ask for a seat (GetSitting == 2),
+// so playIdle refuses them on open ground: the bridge then sends their animation event itself, which the behaviour graph takes anywhere. They stand up with their exit
+// idles (0C4EFA, 0C482D), whose event is IdleChairExitStart. SkyMP passes both events to the other games like any animation.
+const sit = (id: string, name: string, idle: number, event: string, stop: number): Emote => ({ id, name, idle, kind: "loop", stop, event, stopEvent: "IdleChairExitStart" });
 // the moods setExpressionOverride knows: 0 anger, 1 fear, 2 happy, 3 sad, 4 surprise, 6 disgust (the dialogue faces), 15 combat anger (teeth bared), 16 combat shout
 
 export const EMOTE_GROUPS: EmoteGroup[] = [
@@ -52,7 +56,11 @@ export const EMOTE_GROUPS: EmoteGroup[] = [
     { id: "stand", name: "Stand & rest", items: [
         e("crossarms", "Cross arms", 0xff7f4, "walk", OFFSET_STOP), e("handsbehind", "Hands behind", 0xb240a, "loop"), e("loiter", "Lean right", 0xf64da, "loop"), e("loiterleft", "Lean left", 0xf64d8, "loop"),
         e("gravefront", "Mourn", 0x977ef, "loop"), e("gravebehind", "Mourn, hands behind", 0x977f0, "loop"), e("warmhands", "Warm hands", 0x2e52a, "loop"), e("warmarms", "Warm arms", 0x19793, "once"),
-        e("lie", "Lie down", 0xec25a, "loop"), e("wounded1", "Wounded", 0xd873a, "loop"), e("wounded2", "Wounded, sitting", 0xb8f1a, "loop"), e("wounded3", "Wounded, lying", 0xb8f1b, "loop"),
+        e("wounded1", "Wounded", 0xd873a, "loop"),
+    ] },
+    { id: "sit", name: "Sit & lie", items: [
+        sit("sit", "Sit on the ground", 0xc4ef9, "IdleSitCrossLeggedEnter", 0xc4efa), sit("sitledge", "Sit on an edge", 0xc482b, "IdleSitLedgeEnter", 0xc482d),
+        e("lie", "Lie down", 0xec25a, "loop"), e("wounded2", "Wounded, sitting", 0xb8f1a, "loop"), e("wounded3", "Wounded, lying", 0xb8f1b, "loop"),
     ] },
     { id: "work", name: "Work", items: [
         e("sweep", "Sweep", 0x640fe, "loop"), e("hoe", "Hoe the ground", 0x75cb4, "loop"), e("searchbody", "Search a body", 0xefc64, "loop"), e("searchchest", "Search a chest", 0x6ff14, "loop"),
