@@ -1043,8 +1043,6 @@ export class FormView {
   private isSweetHidePerson(refr: ObjectReference): boolean {
     // GREYMARCH: anyone the server listed as invisible has no floating name
     try { const gmGlobal: any = Function("return this")(); if (gmGlobal.__gmInvisible && gmGlobal.__gmInvisible[this.getRemoteRefrId()]) return true; } catch (gmErr) { /* names stay as they are */ }
-    // GREYMARCH: a disguised player (/disguise with a mask on, gamemode disguise.js) has no floating name either; their body shows as usual
-    try { const gmGlobal2: any = Function("return this")(); if (gmGlobal2.__gmDisguised && gmGlobal2.__gmDisguised[this.getRemoteRefrId()]) return true; } catch (gmErr2) { /* names stay as they are */ }
     const actor = Actor.from(refr)
     if (!actor) {
       return false;
