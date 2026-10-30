@@ -237,6 +237,7 @@ export class AuthService extends ClientListener {
       case 'greymarchWolfFeed':
       case 'greymarchVampire':
       case 'greymarchSpellCosts':
+      case 'greymarchSpellEdits': // the Magic balance tab's durations and strengths (bridge.ts greymarchSpellEditTick)
       case 'greymarchVampLooks':
       case 'greymarchRaceMenuLook':
       case 'greymarchVampFeed':

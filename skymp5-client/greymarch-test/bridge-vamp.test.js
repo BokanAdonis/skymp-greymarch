@@ -350,6 +350,31 @@ test("the Spells balance tab's costs go on the spell records too (GreymarchCamer
   assert.deepStrictEqual(old.log.sent.filter((m) => m.customPacketType === "greymarchSpellCost"), [], "an older DLL: nothing told, the server keeps correcting");
 });
 
+test("the Magic balance tab's durations and strengths go on the spell records (durations scaled by the longest, strengths by a percent); a part no longer set gets the record's own back", () => {
+  const s = make();
+  // Invisibility: one effect, 30 s; Oakflesh: armor 40 for 60 s and a hidden effect with no duration; Candlelight is never touched
+  const recs = { 0x27eb6: [{ dur: 30, mag: 0 }], 0x5ad5d: [{ dur: 60, mag: 40 }, { dur: 0, mag: 10 }], 0x43324: [{ dur: 60, mag: 0 }] };
+  const writes = [];
+  s.gm.sp.Game.getFormFromFile = (id, file) => (file === "Skyrim.esm" && recs[id] ? { id, getNumEffects: () => recs[id].length, getNthEffectDuration: (i) => recs[id][i].dur, getNthEffectMagnitude: (i) => recs[id][i].mag,
+    setNthEffectDuration: (i, v) => { writes.push([id, i, "dur", v]); recs[id][i].dur = v; }, setNthEffectMagnitude: (i, v) => { writes.push([id, i, "mag", v]); recs[id][i].mag = v; } } : null);
+  const tick = () => { s.gm.greymarchSpellEditNext = 0; s.gm.greymarchSpellEditTick(); };
+  tick(); assert.deepStrictEqual(writes, [], "nothing set: nothing touched");
+  s.say({ customPacketType: "greymarchSpellEdits", edits: { "27eb6:Skyrim.esm": { dur: 90 }, "5ad5d:Skyrim.esm": { dur: 30, pct: 200 }, "99999:Nowhere.esp": { dur: 5 } } });
+  tick();
+  assert.deepStrictEqual(recs[0x27eb6], [{ dur: 90, mag: 0 }], "Invisibility lasts 90 s");
+  assert.deepStrictEqual(recs[0x5ad5d], [{ dur: 30, mag: 80 }, { dur: 0, mag: 20 }], "Oakflesh: 30 s and every strength doubled; an effect with no duration keeps none");
+  assert.deepStrictEqual(recs[0x43324], [{ dur: 60, mag: 0 }]);
+  const n = writes.length; tick(); assert.strictEqual(writes.length, n, "set once, not every tick");
+  s.say({ customPacketType: "greymarchSpellEdits", edits: { "5ad5d:Skyrim.esm": { pct: 125 } } }); tick();
+  assert.deepStrictEqual(recs[0x27eb6], [{ dur: 30, mag: 0 }], "no longer set: the record's own 30 s again");
+  assert.deepStrictEqual(recs[0x5ad5d], [{ dur: 60, mag: 50 }, { dur: 0, mag: 12.5 }], "the duration back to its own, the strength from the record's own numbers");
+  s.say({ customPacketType: "greymarchSpellEdits", edits: {} }); tick();
+  assert.deepStrictEqual(recs[0x5ad5d], [{ dur: 60, mag: 40 }, { dur: 0, mag: 10 }], "an empty packet puts every one back");
+  const m = writes.length; s.say({ customPacketType: "greymarchSpellEdits", edits: {} }); tick();
+  assert.strictEqual(writes.length, m, "nothing left to put back");
+  assert.ok(/case 'greymarchSpellEdits':/.test(fs.readFileSync(path.join(__dirname, "..", "src", "services", "services", "authService.ts"), "utf8")), "the packet reaches the bridge");
+});
+
 test("another player's eyes are not swapped on their character but built into it (__gmVampEyes for formView.ts), so /eyes leaves nothing out of the face (2026-10-30); this player's own head is swapped as before", () => {
   const s = make({ others: { 0xff000002: 0x5000 } });
   const sp = s.gm.sp;

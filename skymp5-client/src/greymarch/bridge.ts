@@ -198,6 +198,7 @@ export class GreymarchBridge {
         if (type === "greymarchWolfRoar") { if (Number(msg.actor) > 0) (this.greymarchWolfRoarQueue || (this.greymarchWolfRoarQueue = [])).push({ actor: Number(msg.actor), bear: !!msg.bear }); return; } // another player roared nearby: the sound on their NPC (greymarchWolfTick)
         if (type === "greymarchWolfAlphas") { var lists: any = {}; for (var lk in GM_WOLF_LISTS) lists[lk] = Array.isArray(msg[GM_WOLF_LISTS[lk]]) ? msg[GM_WOLF_LISTS[lk]] : []; this.greymarchWolfLists = lists; return; } // the other players in the Alpha form: drawn white (greymarchWolfAlphaOthers)
         if (type === "greymarchSpellCosts") { this.greymarchSpellCostWant = msg.costs && typeof msg.costs === "object" ? msg.costs : {}; this.greymarchSpellCostTold = {}; return; } // the Spells balance tab's costs (greymarchSpellCostTick)
+        if (type === "greymarchSpellEdits") { this.greymarchSpellEditWant = msg.edits && typeof msg.edits === "object" ? msg.edits : {}; this.greymarchSpellEditTold = {}; return; } // the Magic balance tab's durations and strengths (greymarchSpellEditTick)
         if (type === "greymarchRaceMenuLook") { var rm0 = this.greymarchRmState(); rm0.want = msg.look && typeof msg.look === "object" ? msg.look : {}; rm0.tries = 0; return; } // RaceMenu's extra sliders of this character, kept by the server (greymarchRaceMenuTick)
         if (type === "greymarchVampire") { this.greymarchVampWant = msg.on ? msg : null; this.greymarchVampCostTold = {}; this.greymarchHudToPage("blood", { on: !!msg.on, blood: msg.blood, empty: !!msg.empty }); return; } // a vampire's state: the blood drop and what the game applies (greymarchVampTick)
         if (type === "greymarchVampLooks") { this.greymarchVampLookList = Array.isArray(msg.vampires) ? msg.vampires : []; if (Number(msg.me) > 0) this.greymarchMeActor = Number(msg.me) >>> 0; return; } // (me: which of them is this player: the ghosts and effects packets that also say so may not have come yet, and without it the player's own eyes and fangs were never put on) // how every vampire in the world looks (eyes and fangs)
@@ -470,6 +471,7 @@ export class GreymarchBridge {
         this.greymarchRaceMenuTick(Date.now()); // RaceMenu's extra sliders: sent when the race menu closes, put back after a relog (racemenuLook.ts)
         this.greymarchWolfTick(); // the werewolf form: the game's Beast Form power is the trigger, the server decides, the change is done here
         this.greymarchSpellCostTick(); // the Spells balance tab's costs on the spell records (GreymarchCamera.dll 1.5)
+        this.greymarchSpellEditTick(); // the Magic balance tab's durations and strengths on the spell records
         this.greymarchVampTick(); // a vampire: powers and potions reported, the abilities the server names, no Restoration, the feeding scene
         this.greymarchCuffsTick(Date.now()); // in cuffs: the cuffs worn, the bound pose (others' too), the chain drawn to whoever holds it
         this.greymarchEarsTick(Date.now()); // where each voice comes from, for the launcher (only while it is in voice)
@@ -1170,6 +1172,53 @@ export class GreymarchBridge {
             var back = this.greymarchVampSpellOf(k);
             try { if (back) sp.callNative("GreymarchCam", "SetSpellCost", undefined, back, -1); } catch (e2) { /* no plugin */ }
             send(k, null);
+        }
+    }
+    // The durations and strengths the F7 Magic balance tab set (greymarchSpellEdits { edits: { "<hex id>:<plugin>": { dur: seconds, pct: percent } } }, either may be
+    // missing) go on the spell records in this game (SKSE's Spell.setNthEffectDuration / setNthEffectMagnitude): every effect that lasts is scaled so the longest
+    // lasts the seconds set (the others keep their share), and every effect's magnitude is the percent set of the record's own. The record's own numbers are kept
+    // the first time it is changed and put back when the server no longer sets that part (an empty packet puts every one back). Told again after every edits
+    // packet (sent when the player joins and when one changes). Looked at every half second. Only for this game: everyone's game gets the same packet.
+    greymarchSpellEditTick(): any {
+        var now = Date.now();
+        if (now < (this.greymarchSpellEditNext || 0)) return;
+        this.greymarchSpellEditNext = now + 500;
+        var want: any = this.greymarchSpellEditWant || {};
+        var orig = this.greymarchSpellEditOrig || (this.greymarchSpellEditOrig = {});
+        var told = this.greymarchSpellEditTold || (this.greymarchSpellEditTold = {});
+        var keys: any = {};
+        for (var k1 in want) keys[k1] = true;
+        for (var k2 in orig) keys[k2] = true;
+        for (var d in keys) {
+            var w = want[d] && typeof want[d] === "object" ? want[d] : {};
+            var wd = Number(w.dur), wp = Number(w.pct);
+            var hasDur = w.dur !== null && w.dur !== undefined && wd >= 0, hasMag = w.pct !== null && w.pct !== undefined && wp >= 0;
+            var sig = (hasDur ? wd : "-") + "|" + (hasMag ? wp : "-");
+            if (told[d] === sig) continue;
+            told[d] = sig;
+            var spell = this.greymarchVampSpellOf(d);
+            if (!spell) continue;
+            try {
+                var o = orig[d];
+                if (!o) {
+                    if (!hasDur && !hasMag) continue; // never changed here: nothing to put back
+                    o = { dur: [], mag: [] };
+                    var n = Number(spell.getNumEffects()) || 0;
+                    for (var i = 0; i < n; i++) { o.dur.push(Number(spell.getNthEffectDuration(i)) || 0); o.mag.push(Number(spell.getNthEffectMagnitude(i)) || 0); }
+                    orig[d] = o;
+                }
+                var maxDur = 0;
+                for (var j = 0; j < o.dur.length; j++) maxDur = Math.max(maxDur, o.dur[j]);
+                for (var e = 0; e < o.dur.length; e++) {
+                    var dd = hasDur && maxDur > 0 && o.dur[e] > 0 ? Math.max(1, Math.round(o.dur[e] * wd / maxDur)) : o.dur[e];
+                    var mm = hasMag ? Math.round(o.mag[e] * wp) / 100 : o.mag[e];
+                    spell.setNthEffectDuration(e, dd);
+                    spell.setNthEffectMagnitude(e, mm);
+                }
+                if (!hasDur && !hasMag) { delete orig[d]; delete told[d]; } // its own numbers are back
+            } catch (err) {
+                if (!this.greymarchSpellEditFailed) { this.greymarchSpellEditFailed = true; this.greymarchLog("spell edits: could not change " + d + ": " + err); }
+            }
         }
     }
     greymarchVampSend(msg: any): any {
