@@ -2503,8 +2503,17 @@ export class GreymarchBridge {
     // NO "E TALK" ON SOMEONE INVISIBLE (2026-10-30, the owner): looking at an invisible GM still showed the prompt to talk to them. Their body here is
     // blocked from activation with the prompt hidden (Papyrus BlockActivation(abBlocked, abHideActivateText), the second argument since Skyrim 1.6.1130;
     // SkyrimPlatform passes it on though its typings list one), and unblocked when they show again.
+    // 2026-10-30, the owner: "the fix for invisibility did not work". SkyrimPlatform's own blockActivation passes only the one argument it knows from older
+    // Skyrim, so the hide-the-text flag never arrived. The game's Papyrus function is called by name instead (callNative passes every argument), and the old
+    // call is the fallback. The first outcome is logged once: "talk prompt: hidden (BlockActivation, 2 arguments)" or why not.
     greymarchNoPrompt(actor: any, hide: boolean): any {
-        try { (actor as any).blockActivation(hide, hide); } catch (bErr) { if (!this.greymarchNoPromptErr) { this.greymarchNoPromptErr = true; this.greymarchLog("staff: invisible: the talk prompt could not be hidden (" + bErr + ")"); } }
+        var sp: any = this.sp, how = "";
+        try { sp.callNative("ObjectReference", "BlockActivation", actor, hide, hide); how = "BlockActivation, 2 arguments"; }
+        catch (nErr) {
+            try { (actor as any).blockActivation(hide); how = "blockActivation, 1 argument (the prompt still shows): " + nErr; }
+            catch (bErr) { how = "failed: " + bErr; }
+        }
+        if (!this.greymarchNoPromptLogged) { this.greymarchNoPromptLogged = true; this.greymarchLog("talk prompt: " + (hide ? "hidden" : "shown") + " (" + how + ")"); }
     }
     // NO "E TALK STRANGER" ON PLAYERS (2026-10-30, the owner: remove the prompt from people completely). Every other living player's body here is blocked from
     // activation with the prompt hidden (greymarchNoPrompt), checked every 2 s (a body built again would show it again). A dead body is left open: a werewolf
