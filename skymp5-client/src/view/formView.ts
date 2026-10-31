@@ -681,6 +681,14 @@ export class FormView {
     }
     // the horse this player rides: the server's movement is never played on it here, and this game asks to host it (once a second)
     const gmMyMount = !!this.refrId && (Function("return this")() as any).__gmMyHorse === this.refrId;
+    // the moves SkyMP gave it while it played the server's movement (keepOffsetFromActor on itself: it keeps walking towards a spot ahead and above it; a
+    // translateTo) stay on an actor until cleared: under its rider the horse chased that spot up rocks, into the air and onto roofs (2026-10-31, the owner's
+    // clip). Cleared when this player gets on, and every second while they ride
+    if (gmMyMount && Date.now() - this.gmMountClearAt >= 1000) {
+      this.gmMountClearAt = Date.now();
+      try { const gmMa = Actor.from(refr); if (gmMa) { gmMa.clearKeepOffsetFromActor(); gmMa.stopTranslation(); } } catch (e) { /* the next second */ }
+    }
+    if (!gmMyMount) this.gmMountClearAt = 0;
     if (gmMyMount && !alreadyHosted && this.remoteRefrId) {
       const gmMr = this.remoteRefrId as number;
       if (Date.now() - (lastTryHost[gmMr] || 0) >= 1000) { lastTryHost[gmMr] = Date.now(); tryHost(gmMr); }
@@ -1172,6 +1180,7 @@ export class FormView {
     return seated && !!riding;
   }
   private gmRiding = 0; // GREYMARCH: the horse this character rides, as last seen (gmRideStep)
+  private gmMountClearAt = 0; // GREYMARCH: when the horse this player rides last had SkyMP's moves cleared (see update)
   private gmSeatTryAt = 0; // GREYMARCH: when it was last put on its horse (gmRideStep)
 
   private gmPuppetMove(refr: ObjectReference, model: FormModel): string {

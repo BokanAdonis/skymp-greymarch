@@ -82,7 +82,7 @@ test("getting on (2026-10-31): SkyMP blocks E on NPCs, so the server's greymarch
   const auth = fs.readFileSync(path.join(__dirname, "..", "src", "services", "services", "authService.ts"), "utf8");
   assert.ok(auth.includes("case 'greymarchMount':"));
   assert.ok(bridge.includes('if (type === "greymarchMount") { if (Number(msg.horse) > 0) this.greymarchMountWanted = {'));
-  assert.ok(bridge.includes("mh.blockActivation(false);\r\n                        mh.activate(mpl, true);") || bridge.includes("mh.blockActivation(false);\n                        mh.activate(mpl, true);"));
+  assert.ok(bridge.indexOf("mh.blockActivation(false);") > 0 && bridge.indexOf("mh.blockActivation(false);") < bridge.indexOf("mh.activate(mpl, true);"));
   assert.ok(bridge.indexOf("var mw = this.greymarchMountWanted;") < bridge.indexOf("if (now < (this.greymarchRideNext || 0)) return;"), "not held back by the 250 ms gate");
   assert.ok(formView.includes("horse.blockActivation(false); horse.activate(ac, true);"));
 });
@@ -98,4 +98,10 @@ test("another player near the rider (2026-10-31: the horse flew off when someone
   assert.ok(formView.includes("setDefaultAnimsDisabled(this.refrId, alreadyHosted || gmMyMount ? false : true);"));
   const host = formView.slice(formView.indexOf("private tryHostIfNeed(ac: Actor, remoteId: number) {"));
   assert.ok(host.indexOf("if (riddenByOther(ridersMap(), remoteId)) return false;") > 0 && host.indexOf("if (riddenByOther(ridersMap(), remoteId)) return false;") < host.indexOf("tryHost(remoteId);"));
+});
+
+test("no SkyMP move left on the horse under its rider (2026-10-31, the owner's clip: the horse climbed rocks, flew and landed on a tower): keepOffsetFromActor and translateTo are cleared on getting on and every second while riding", () => {
+  assert.ok(formView.includes("if (gmMyMount && Date.now() - this.gmMountClearAt >= 1000) {"));
+  assert.ok(formView.includes("if (gmMa) { gmMa.clearKeepOffsetFromActor(); gmMa.stopTranslation(); }"));
+  assert.ok(bridge.indexOf("mh.clearKeepOffsetFromActor(); mh.stopTranslation();") < bridge.indexOf("mh.activate(mpl, true);"));
 });

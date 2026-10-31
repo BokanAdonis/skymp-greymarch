@@ -1688,6 +1688,7 @@ export class GreymarchBridge {
                     var mloc = misc.remoteIdToLocalId(mw.id), mh = mloc ? this.sp.Actor.from(this.sp.Game.getFormEx(mloc)) : null;
                     if (mh && mh.is3DLoaded() && !mh.isDead()) {
                         mh.blockActivation(false);
+                        try { mh.clearKeepOffsetFromActor(); mh.stopTranslation(); } catch (e0) { /* formView clears it again */ } // no SkyMP move left on it under the rider
                         mh.activate(mpl, true);
                         mdone = true;
                         this.greymarchCrumb("mount " + mw.id.toString(16) + " (here " + mloc.toString(16) + ")");
