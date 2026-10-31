@@ -210,7 +210,7 @@ export class GreymarchBridge {
         if (type === "greymarchHungerFx") { this.greymarchHungerRegen = msg.regen !== false; return; } // starving: no health or stamina regeneration (greymarchHungerDrive)
         if (type === "greymarchFaceOf") { this.greymarchFaceOf(msg); return; } // another player's face from the emote wheel (gamemode faces.js; put on in greymarchFaceTick)
         if (type === "greymarchGround") { if (Number(msg.id) > 0 && typeof msg.z === "number" && isFinite(msg.z)) { const gl: any = Function("return this")(); const fx: any = gl.__gmGroundFix || (gl.__gmGroundFix = {}); const gr: any = msg.grid && Array.isArray(msg.grid.h) && msg.grid.h.length === 25 && [msg.grid.x, msg.grid.y, msg.grid.step].every((n: any) => typeof n === "number" && isFinite(n)) && msg.grid.step > 0 ? { x: msg.grid.x, y: msg.grid.y, step: msg.grid.step, h: msg.grid.h.map((v: any) => (typeof v === "number" && isFinite(v) ? v : null)) } : null; fx[String(Number(msg.id) >>> 0)] = { z: msg.z, off: Number(msg.off) || 0, at: Date.now(), grid: gr }; if ((this.greymarchGroundCrumbs = (this.greymarchGroundCrumbs || 0) + 1) <= 40 && typeof this.greymarchCrumb === "function") this.greymarchCrumb("ground word " + (Number(msg.id) >>> 0).toString(16) + ": " + Math.round(Number(msg.off) || 0) + " off, the ground at " + Math.round(msg.z)); } return; } // the server saw an NPC off the ground: where the ground is (formView gmHostedTick puts it down if this game hosts it; gamemode groundclamp.js)
-        if (type === "greymarchMount") { if (Number(msg.horse) > 0) this.greymarchMountWanted = { id: Number(msg.horse) >>> 0, at: Date.now(), tries: 0 }; return; } // E on this player's own horse (gamemode stables.js): mounted in the update phase (greymarchRideTick)
+        if (type === "greymarchMount") { if (Number(msg.base) > 0) this.greymarchMountWanted = { id: 0, base: Number(msg.base) >>> 0, name: typeof msg.name === "string" ? msg.name.slice(0, 40) : "", at: Date.now(), tries: 0, tryAt: 0 }; else if (Number(msg.horse) > 0) this.greymarchMountWanted = { id: Number(msg.horse) >>> 0, base: 0, name: "", at: Date.now(), tries: 0, tryAt: 0 }; return; } // E on this player's own horse (gamemode stables.js): mounted in the update phase (greymarchRideTick)
         if (type === "greymarchRideRefused") { this.greymarchRideOff = { at: Date.now(), text: typeof msg.text === "string" ? msg.text.slice(0, 200) : "" }; return; } // not your horse (gamemode riding.js): off it in the update phase (greymarchRideTick)
         if (type === "greymarchBeast") { this.greymarchBeastFrames(msg); return; } // a server-driven animal moved (gamemode wildlifebrain.js): played by formView (gmPuppetMove)
         if (type === "greymarchShapeAnim") { if (typeof msg.ev === "string" && msg.ev.length < 64 && Number(msg.actor) > 0) (this.greymarchShapeAnimQueue || (this.greymarchShapeAnimQueue = [])).push({ actor: Number(msg.actor), ev: msg.ev }); return; } // another player's creature attacked (played in greymarchShapeDrive) // a creature form (staff): greymarchShapeTick changes the body
@@ -1669,6 +1669,28 @@ export class GreymarchBridge {
         this.greymarchLog("map: " + add.length + " new place(s) on the map");
     }
     greymarchRideNext = 0;
+    greymarchOwnHorse: { id: number, base: number, mountedAt: number } | null = null;
+    // RIDDEN AS THEIR OWN: true while this game has a horse of its own out. Off it (1.5 s after getting on, so the mounting itself is not taken for getting off):
+    // the server is told where it stands (greymarchDismount; it places the horse NPC there) and this game's horse is removed
+    greymarchOwnHorseTick(now: number): boolean {
+        var oh = this.greymarchOwnHorse; if (!oh) return false;
+        var sp = this.sp, pl = sp.Game.getPlayer();
+        (Function("return this")() as any).__gmMyHorse = oh.id;
+        var on = false; try { on = !!pl && pl.isOnMount(); } catch (e) { on = true; }
+        if (on) { if (!oh.mountedAt) oh.mountedAt = now; return true; }
+        if (!oh.mountedAt ? !this.greymarchMountWanted : now - oh.mountedAt > 1500) {
+            var href = sp.ObjectReference.from(sp.Game.getFormEx(oh.id)), pos: any = null, rot = 0;
+            try { if (href) { pos = [href.getPositionX(), href.getPositionY(), href.getPositionZ()]; rot = href.getAngleZ(); } } catch (e) { pos = null; }
+            var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchDismount", pos: pos, rot: rot }) };
+            this.controller.emitter.emit("sendMessage", { message: message, reliability: "reliable" });
+            this.greymarchOwnHorse = null;
+            (Function("return this")() as any).__gmMyHorse = 0;
+            try { if (href) { href.disable(false); href.delete(); } } catch (e) { /* gone already */ }
+            try { this.controller.lookupListener(WorldCleanerService).modWcProtection(oh.id, -1); } catch (e) { /* nothing was protected */ }
+            this.greymarchCrumb("own horse: off at " + (pos ? pos.map(function (n: number) { return Math.round(n); }).join(" ") : "?"));
+        }
+        return true;
+    }
     greymarchRideOff: { at: number, text: string } | null = null;
     greymarchMountWanted: { id: number, at: number, tries: number } | null = null;
     greymarchRideState: rideMod.RideReportState | null = null;
@@ -1680,7 +1702,34 @@ export class GreymarchBridge {
         // server, so the game never mounted. The server answers the owner with greymarchMount: the horse is unblocked and activated by the player, which is how
         // the game mounts. Tried for up to 3 s while the horse comes in
         var mw = this.greymarchMountWanted;
-        if (mw) {
+        if (mw && mw.base) {
+            // RIDDEN AS THEIR OWN (2026-10-31, the owner: "taking me back into the sky ... when another player is near, I need a permanent solution"): the server took
+            // the horse NPC out of the world (gamemode stables.js); this game rides a horse of the breed of its own, which no other game runs, moves or rebuilds. It is
+            // placed at the player, kept from the world cleaner, and activated by the player (that mounts them). Getting off: see greymarchOwnHorseTick
+            var opl2 = this.sp.Game.getPlayer(), odone = false;
+            try {
+                if (!opl2 || Date.now() - mw.at > 6000) { odone = true; if (opl2 && !opl2.isOnMount()) this.greymarchCrumb("own horse: could not get on in time"); }
+                else {
+                    if (!this.greymarchOwnHorse) {
+                        var obase = this.sp.Game.getFormEx(mw.base);
+                        var oref = obase ? opl2.placeAtMe(obase, 1, false, false) : null;
+                        if (!oref) { odone = true; this.greymarchCrumb("own horse: no base " + mw.base.toString(16)); }
+                        else {
+                            var oid = oref.getFormID() >>> 0;
+                            this.greymarchOwnHorse = { id: oid, base: mw.base, mountedAt: 0 };
+                            try { this.controller.lookupListener(WorldCleanerService).modWcProtection(oid, 1); } catch (wcErr) { this.greymarchCrumb("own horse: no world cleaner protection: " + wcErr); }
+                            try { var oac = this.sp.Actor.from(oref); if (oac && mw.name) oac.setDisplayName(mw.name, true); } catch (nErr) { /* the breed's name */ }
+                            this.greymarchCrumb("own horse " + oid.toString(16) + " (" + mw.base.toString(16) + ")");
+                        }
+                    }
+                    var oh = this.greymarchOwnHorse, oha = oh ? this.sp.Actor.from(this.sp.Game.getFormEx(oh.id)) : null;
+                    if (opl2.isOnMount()) { odone = true; if (oh) oh.mountedAt = Date.now(); this.greymarchCrumb("own horse: on"); }
+                    else if (oha && oha.is3DLoaded() && Date.now() - mw.tryAt > 700) { mw.tryAt = Date.now(); oha.activate(opl2, true); }
+                }
+            } catch (e) { odone = ++mw.tries > 20; this.greymarchCrumb("own horse failed: " + e); }
+            if (odone) this.greymarchMountWanted = null;
+        }
+        else if (mw) {
             var mpl = this.sp.Game.getPlayer(), mdone = false;
             try {
                 if (!mpl || mpl.isOnMount() || Date.now() - mw.at > 3000) mdone = true;
@@ -1707,6 +1756,7 @@ export class GreymarchBridge {
         }
         if (now < (this.greymarchRideNext || 0)) return;
         this.greymarchRideNext = now + rideMod.RIDE_CHECK_EVERY_MS;
+        if (this.greymarchOwnHorseTick(now)) return; // on a horse of this game's own: the server knows (stables.js), no ride report
         var sp = this.sp, gl: any = Function("return this")(), local = 0, remote = 0;
         try {
             var pl = sp.Game.getPlayer();

@@ -88,7 +88,8 @@ import { getMovement } from "../sync/movementGet";
 import { lastTryHost, tryHost } from "./hostAttempts";
 import { ModelApplyUtils } from "./modelApplyUtils";
 import { localIdToRemoteId, remoteIdToLocalId, getViewFromStorage } from "./worldViewMisc";
-import { ridingOf, ridersMap, noteRider, riddenByOther, seatStep, HORSE_RACE } from "../greymarch/riding";
+import { ridingOf, ridersMap, noteRider, riddenByOther, seatStep, HORSE_RACE, SEAT_TRY_EVERY_MS } from "../greymarch/riding";
+const GM_NPC_BASE_TYPE = 43; // FormType NPC_: greymarchRiding names a breed (RIDDEN AS THEIR OWN), not a placed horse
 import { flatStep, FLAT_STEPS, REGROUND_EVERY_MS, regroundExempt } from "../greymarch/npcHosting";
 import { CHECK_EVERY_MS as GM_HOST_CHECK_MS, shouldRelease, pickTarget, markReleased, isReleased, withoutHosted, shouldReleaseUnloaded, movementDead, buildWhileDead, BODY_KILL_EVERY_MS } from "../greymarch/npcHosting";
 import { SpApiInteractor } from "../services/spApiInteractor";
@@ -530,6 +531,7 @@ export class FormView {
   }
 
   destroy(): void {
+    this.gmRemoveLocalMount("the rider is gone"); // GREYMARCH: RIDDEN AS THEIR OWN: this game's horse under them goes with them
     this.isOnScreen = false;
     this.spawnMoment = 0;
     const refrId = this.refrId;
@@ -1158,6 +1160,12 @@ export class FormView {
     if (!ac || !ac.is3DLoaded() || ac.isDead()) return false;
     let seated = false;
     try { seated = ac.isOnMount(); } catch (e) { seated = false; }
+    // RIDDEN AS THEIR OWN (2026-10-31, gamemode stables.js / riding.js mountLocal): greymarchRiding names the breed (an NPC base record), not a server horse. This game
+    // puts a horse of that breed of its own under the rider, moved with the rider's own movement (which SkyMP sends for every player); no game shares it
+    let ownBase = 0;
+    if (riding) { try { const f = Game.getFormEx(riding); if (f && f.getType() === GM_NPC_BASE_TYPE) ownBase = riding; } catch (e) { ownBase = 0; } }
+    if (this.gmLocalMount && this.gmLocalMount.base !== ownBase) { if (seated) { try { ac.dismount(); } catch (e) { /* removed anyway */ } } this.gmRemoveLocalMount("off"); }
+    if (ownBase) return this.gmLocalMountStep(ac, model, ownBase, seated);
     let horse: Actor | null = null;
     if (riding) {
       try {
@@ -1179,6 +1187,47 @@ export class FormView {
     }
     return seated && !!riding;
   }
+  // RIDDEN AS THEIR OWN: the horse of this game's own under another player (made at them, kept from the world cleaner, the rider put on it every 3 s until they
+  // sit; then the rider's movement is played on the horse, the way SkyMP plays it on any NPC). True while they sit on it
+  private gmLocalMountStep(ac: Actor, model: FormModel, base: number, seated: boolean): boolean {
+    const me = this.remoteRefrId as number;
+    if (!this.gmLocalMount) {
+      try {
+        const bf = Game.getFormEx(base);
+        const ref = bf ? ac.placeAtMe(bf, 1, false, false) : null;
+        if (!ref) return false;
+        const id = ref.getFormID() >>> 0;
+        this.gmLocalMount = { id, base };
+        try { SpApiInteractor.getControllerInstance().lookupListener(WorldCleanerService).modWcProtection(id, 1); } catch (e) { /* the cleaner may take it: made again */ }
+        gmCrumb("their own horse " + gmHex(me) + ": " + gmHex(id) + " (" + gmHex(base) + ")");
+      } catch (e) { gmCrumb("their own horse failed " + gmHex(me) + ": " + e); return false; }
+    }
+    const lm = this.gmLocalMount;
+    const horse = Actor.from(Game.getFormEx(lm.id));
+    if (!horse) { this.gmLocalMount = null; return false; } // gone (the cleaner, a cell change): made again next time
+    if (!seated) {
+      if (horse.is3DLoaded() && Date.now() - this.gmSeatTryAt >= SEAT_TRY_EVERY_MS) {
+        this.gmSeatTryAt = Date.now();
+        gmCrumb("seat " + gmHex(me) + " on their own horse " + gmHex(lm.id));
+        try { ac.stopTranslation(); ac.clearKeepOffsetFromActor(); } catch (e) { /* not moving */ }
+        try { horse.blockActivation(false); horse.activate(ac, true); } catch (e) { gmCrumb("seat failed " + gmHex(me) + ": " + e); }
+      }
+      return false;
+    }
+    if (model.movement) {
+      try { applyMovement(horse, model.movement, false); } catch (e) { /* a door or a long way: the rider's own respawn makes it again */ }
+    }
+    return true;
+  }
+  private gmRemoveLocalMount(why: string): void {
+    const lm = this.gmLocalMount;
+    this.gmLocalMount = null;
+    if (!lm) return;
+    try { const r = ObjectReference.from(Game.getFormEx(lm.id)); if (r) { r.disable(false); r.delete(); } } catch (e) { /* gone already */ }
+    try { SpApiInteractor.getControllerInstance().lookupListener(WorldCleanerService).modWcProtection(lm.id, -1); } catch (e) { /* nothing was protected */ }
+    gmCrumb("their own horse removed " + gmHex(lm.id) + " (" + why + ")");
+  }
+  private gmLocalMount: { id: number, base: number } | null = null; // GREYMARCH: RIDDEN AS THEIR OWN: this game's horse under this other player
   private gmRiding = 0; // GREYMARCH: the horse this character rides, as last seen (gmRideStep)
   private gmMountClearAt = 0; // GREYMARCH: when the horse this player rides last had SkyMP's moves cleared (see update)
   private gmSeatTryAt = 0; // GREYMARCH: when it was last put on its horse (gmRideStep)

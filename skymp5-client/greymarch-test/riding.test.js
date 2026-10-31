@@ -81,7 +81,7 @@ test("someone else's horse: the server's greymarchRideRefused gets this player o
 test("getting on (2026-10-31): SkyMP blocks E on NPCs, so the server's greymarchMount has the game unblock the horse and mount; other games unblock before seating", () => {
   const auth = fs.readFileSync(path.join(__dirname, "..", "src", "services", "services", "authService.ts"), "utf8");
   assert.ok(auth.includes("case 'greymarchMount':"));
-  assert.ok(bridge.includes('if (type === "greymarchMount") { if (Number(msg.horse) > 0) this.greymarchMountWanted = {'));
+  assert.ok(bridge.includes('else if (Number(msg.horse) > 0) this.greymarchMountWanted = { id: Number(msg.horse) >>> 0,'), "a server horse (an event's): mounted as before");
   assert.ok(bridge.indexOf("mh.blockActivation(false);") > 0 && bridge.indexOf("mh.blockActivation(false);") < bridge.indexOf("mh.activate(mpl, true);"));
   assert.ok(bridge.indexOf("var mw = this.greymarchMountWanted;") < bridge.indexOf("if (now < (this.greymarchRideNext || 0)) return;"), "not held back by the 250 ms gate");
   assert.ok(formView.includes("horse.blockActivation(false); horse.activate(ac, true);"));
@@ -104,4 +104,16 @@ test("no SkyMP move left on the horse under its rider (2026-10-31, the owner's c
   assert.ok(formView.includes("if (gmMyMount && Date.now() - this.gmMountClearAt >= 1000) {"));
   assert.ok(formView.includes("if (gmMa) { gmMa.clearKeepOffsetFromActor(); gmMa.stopTranslation(); }"));
   assert.ok(bridge.indexOf("mh.clearKeepOffsetFromActor(); mh.stopTranslation();") < bridge.indexOf("mh.activate(mpl, true);"));
+});
+
+test("RIDDEN AS THEIR OWN (2026-10-31: no game shares the horse any more): the rider's game spawns a horse of the breed, protected, and mounts; off it, it tells the server where it stands and removes it; other games put a horse of the breed of their own under the rider and move it with the rider's movement", () => {
+  assert.ok(bridge.includes('if (Number(msg.base) > 0) this.greymarchMountWanted = { id: 0, base: Number(msg.base) >>> 0,'));
+  assert.ok(bridge.includes("opl2.placeAtMe(obase, 1, false, false)"));
+  assert.ok(bridge.includes("modWcProtection(oid, 1)") && bridge.includes("modWcProtection(oh.id, -1)"));
+  assert.ok(bridge.includes('customPacketType: "greymarchDismount", pos: pos, rot: rot'));
+  assert.ok(bridge.includes("if (this.greymarchOwnHorseTick(now)) return;"), "no ride report while on a horse of its own");
+  assert.ok(formView.includes("if (ownBase) return this.gmLocalMountStep(ac, model, ownBase, seated);"));
+  assert.ok(formView.includes("applyMovement(horse, model.movement, false)"));
+  assert.ok(formView.includes('this.gmRemoveLocalMount("the rider is gone");'));
+  assert.ok(formView.includes("const GM_NPC_BASE_TYPE = 43;"));
 });
