@@ -47,7 +47,7 @@ test("the packet reaches the bridge (authService.ts) and the bridge hands it to 
 });
 
 test("a puppet is never hosted and never fights on its own: formView plays the frame (walk, run, stand, attack) and leaves SkyMP's hosting path alone", () => {
-  const branch = formView.slice(formView.indexOf("const gmPuppet = "), formView.indexOf("} else if (model.movement) {"));
+  const branch = formView.slice(formView.indexOf("const gmPuppet = "), formView.indexOf("} else if (model.movement && !gmMyMount && !gmSeated) {"));
   assert.ok(branch.includes("this.gmPuppetMove(refr, model)"), "the puppet branch");
   assert.ok(!/tryHost/.test(branch), "no host attempt for a puppet");
   const fn = formView.slice(formView.indexOf("private gmPuppetMove("), formView.indexOf("private tryHostIfNeed("));

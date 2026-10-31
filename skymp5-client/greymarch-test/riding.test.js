@@ -1,0 +1,70 @@
+"use strict";
+// Riding (src/greymarch/riding.ts, the riding test of 2026-10-31): the rider's game reports its horse, other games seat the rider on it, and the game that
+// hosts a ridden horse lets it go to the rider's game.
+const test = require("node:test");
+const assert = require("node:assert");
+const fs = require("node:fs");
+const path = require("node:path");
+const ts = require("typescript");
+
+const src = fs.readFileSync(path.join(__dirname, "..", "src", "greymarch", "riding.ts"), "utf8");
+const js = ts.transpileModule(src, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2019 } }).outputText;
+const mod = { exports: {} };
+new Function("require", "exports", "module", js)(() => ({}), mod.exports, mod);
+const R = mod.exports;
+const formView = fs.readFileSync(path.join(__dirname, "..", "src", "view", "formView.ts"), "utf8");
+const bridge = fs.readFileSync(path.join(__dirname, "..", "src", "greymarch", "bridge.ts"), "utf8");
+
+test("the rider's game reports a new horse at once, the same horse again every 5 s, and 0 once when it gets off", () => {
+  const st = { sent: 0, at: 0 };
+  assert.strictEqual(R.rideReport(st, 1000, 0), null); // on foot from the start: nothing
+  assert.strictEqual(R.rideReport(st, 1000, 0xff000123), 0xff000123);
+  assert.strictEqual(R.rideReport(st, 1250, 0xff000123), null);
+  assert.strictEqual(R.rideReport(st, 1000 + R.RIDE_REPORT_EVERY_MS, 0xff000123), 0xff000123);
+  assert.strictEqual(R.rideReport(st, 7000, 0), 0);
+  assert.strictEqual(R.rideReport(st, 20000, 0), null);
+  assert.strictEqual(R.rideReport(st, 20250, 0xff000200), 0xff000200); // another horse
+});
+
+test("the riding property: a server id, anything else is on foot", () => {
+  assert.strictEqual(R.ridingOf({ greymarchRiding: 0xff000123 }), 0xff000123);
+  for (const v of [undefined, null, 0, -5, "x", NaN]) assert.strictEqual(R.ridingOf({ greymarchRiding: v }), 0);
+  assert.strictEqual(R.ridingOf(null), 0);
+});
+
+test("the riders map: one horse per rider, cleared when they get off; a ridden horse is let go by its host", () => {
+  const m = {};
+  R.noteRider(m, 0xff000001, 0xff000100);
+  assert.ok(R.riddenByOther(m, 0xff000100));
+  R.noteRider(m, 0xff000001, 0xff000200); // changed horses
+  assert.ok(!R.riddenByOther(m, 0xff000100));
+  assert.ok(R.riddenByOther(m, 0xff000200));
+  R.noteRider(m, 0xff000002, 0xff000300);
+  R.noteRider(m, 0xff000001, 0); // got off
+  assert.deepStrictEqual(Object.keys(m).map(Number), [0xff000300]);
+  assert.ok(!R.riddenByOther(m, 0));
+});
+
+test("seating: put on once the horse is here, tried again every 3 s until it sits, got down with no horse", () => {
+  assert.strictEqual(R.seatStep(0, false, false, 0, 1000), "none");
+  assert.strictEqual(R.seatStep(0, true, false, 0, 1000), "unseat");
+  assert.strictEqual(R.seatStep(7, false, false, 0, 10000), "wait"); // the horse is not loaded here (yet)
+  assert.strictEqual(R.seatStep(7, false, true, 0, 10000), "seat");
+  assert.strictEqual(R.seatStep(7, false, true, 10000, 11000), "wait");
+  assert.strictEqual(R.seatStep(7, false, true, 10000, 10000 + R.SEAT_TRY_EVERY_MS), "seat");
+  assert.strictEqual(R.seatStep(7, true, true, 0, 99999), "none");
+});
+
+test("only a horse is mounted on another player's word (HorseRace), and the hooks are in place", () => {
+  assert.strictEqual(R.HORSE_RACE, 0x131fd);
+  assert.ok(formView.includes("r.getFormID() === HORSE_RACE"));
+  assert.ok(formView.includes("horse.activate(ac, true)"));
+  assert.ok(formView.includes("ac.dismount()"));
+  // a seated rider and the horse this game rides: no server movement played on them
+  assert.ok(formView.includes("} else if (model.movement && !gmMyMount && !gmSeated) {"));
+  assert.ok(formView.includes("if (alreadyHosted && riddenByOther(ridersMap(), this.remoteRefrId as number)) {"));
+  assert.ok(formView.includes("if (Date.now() - (lastTryHost[gmMr] || 0) >= 1000) { lastTryHost[gmMr] = Date.now(); tryHost(gmMr); }"));
+  assert.ok(bridge.includes('customPacketType: "greymarchRide", horse: send'));
+  assert.ok(bridge.includes("this.greymarchRideTick(Date.now());"));
+  assert.ok(bridge.includes("sp.Game.getPlayersLastRiddenHorse()"));
+});

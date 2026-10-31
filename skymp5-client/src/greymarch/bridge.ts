@@ -16,6 +16,7 @@ import * as holdMod from "./bodyHold";
 import * as emoteMod from "./emotes";
 import * as templateFixMod from "./templateFix";
 import * as rmMod from "./racemenuLook";
+import * as rideMod from "./riding";
 
 // Runs inside SkyMP's browser page (once). Each shows a page from Platform/UI in an iframe and relays its messages.
 const PAGE_SCRIPT = "(function(){if(window.__gmSend)return;var f=document.createElement('iframe');f.id='greymarch-frame';f.src='greymarch-select.html';f.style.cssText='position:fixed;left:0;top:0;width:100%;height:100%;border:0;z-index:2147483647;background:#05080d;display:none';var ready=false,queue=[];window.addEventListener('message',function(e){if(e.source!==f.contentWindow)return;var d=e.data;if(!d)return;if(d.greymarchReady){ready=true;queue.forEach(function(q){f.contentWindow.postMessage({greymarchIn:q},'*')});queue=[]}else if(d.greymarchOut&&window.skyrimPlatform){window.skyrimPlatform.sendMessage('greymarch',JSON.stringify(d.greymarchOut))}});window.__gmSend=function(m){f.style.display=m.fn==='hide'?'none':'block';if(ready)f.contentWindow.postMessage({greymarchIn:m},'*');else queue.push(m)};document.body.appendChild(f)})();";
@@ -453,6 +454,7 @@ export class GreymarchBridge {
     greymarchTick(): any {
         this.greymarchRebaseAfterLoad(Date.now()); // "update" runs only once the world is loaded
         this.greymarchMapTick(Date.now());
+        this.greymarchRideTick(Date.now()); // riding: which horse this player sits on, to the server (riding.ts)
         this.greymarchNoFastTravel(Date.now());
         this.greymarchFavTick(Date.now());
         this.greymarchSelectFocusGuard(Date.now());
@@ -1662,6 +1664,28 @@ export class GreymarchBridge {
         var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchMapFound", found: add.slice(0, 200) }) };
         this.controller.emitter.emit("sendMessage", { message: message, reliability: "reliable" });
         this.greymarchLog("map: " + add.length + " new place(s) on the map");
+    }
+    greymarchRideNext = 0;
+    greymarchRideState: rideMod.RideReportState | null = null;
+    greymarchRideTick(now: number): any {
+        // RIDING (riding.ts): every RIDE_CHECK_EVERY_MS, the horse this player sits on (its server id; 0 on foot) goes to the server when it changes and every
+        // RIDE_REPORT_EVERY_MS while riding. Its local id is kept on the global (__gmMyHorse) for formView: no server movement on it, and this game hosts it
+        if (!rideMod || !rideMod.rideReport) return; // a test that loads the bridge without riding.ts
+        if (now < (this.greymarchRideNext || 0)) return;
+        this.greymarchRideNext = now + rideMod.RIDE_CHECK_EVERY_MS;
+        var sp = this.sp, gl: any = Function("return this")(), local = 0, remote = 0;
+        try {
+            var pl = sp.Game.getPlayer();
+            if (pl && pl.isOnMount()) { var h = sp.Game.getPlayersLastRiddenHorse(); if (h) { local = h.getFormID() >>> 0; remote = misc.localIdToRemoteId(local) >>> 0; } }
+        } catch (e) { local = 0; remote = 0; }
+        gl.__gmMyHorse = local;
+        var st = this.greymarchRideState || (this.greymarchRideState = { sent: 0, at: 0 });
+        var was = st.sent;
+        var send = rideMod.rideReport(st, now, remote);
+        if (send === null) return;
+        var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchRide", horse: send }) };
+        this.controller.emitter.emit("sendMessage", { message: message, reliability: "reliable" });
+        if (send !== was) this.greymarchCrumb(send ? "ride " + send.toString(16) + " (here " + local.toString(16) + ")" : "ride off");
     }
     greymarchRmState(): any {
         return this.greymarchRm || (this.greymarchRm = { menuWas: false, sendAt: 0, want: null, done: null, loadedSince: 0, next: 0, tries: 0, beast: false, said: {} });

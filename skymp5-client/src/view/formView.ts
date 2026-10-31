@@ -87,7 +87,8 @@ import { PlayerCharacterDataHolder } from "./playerCharacterDataHolder";
 import { getMovement } from "../sync/movementGet";
 import { lastTryHost, tryHost } from "./hostAttempts";
 import { ModelApplyUtils } from "./modelApplyUtils";
-import { localIdToRemoteId, getViewFromStorage } from "./worldViewMisc";
+import { localIdToRemoteId, remoteIdToLocalId, getViewFromStorage } from "./worldViewMisc";
+import { ridingOf, ridersMap, noteRider, riddenByOther, seatStep, HORSE_RACE } from "../greymarch/riding";
 import { flatStep, FLAT_STEPS, REGROUND_EVERY_MS, regroundExempt } from "../greymarch/npcHosting";
 import { CHECK_EVERY_MS as GM_HOST_CHECK_MS, shouldRelease, pickTarget, markReleased, isReleased, withoutHosted, shouldReleaseUnloaded, movementDead, buildWhileDead, BODY_KILL_EVERY_MS } from "../greymarch/npcHosting";
 import { SpApiInteractor } from "../services/spApiInteractor";
@@ -670,6 +671,20 @@ export class FormView {
         alreadyHosted = false;
       }
     } else this.gmUnloadedSince = 0;
+    // GREYMARCH: RIDING (greymarch/riding.ts): a horse another player rides is run by the rider's game, so this game lets it go
+    if (alreadyHosted && riddenByOther(ridersMap(), this.remoteRefrId as number)) {
+      const gmRid = this.remoteRefrId as number;
+      storage["hosted"] = withoutHosted(storage["hosted"], gmRid);
+      markReleased(gmRid, Date.now());
+      gmCrumb("horse let go " + gmHex(gmRid) + ": another player rides it");
+      alreadyHosted = false;
+    }
+    // the horse this player rides: the server's movement is never played on it here, and this game asks to host it (once a second)
+    const gmMyMount = !!this.refrId && (Function("return this")() as any).__gmMyHorse === this.refrId;
+    if (gmMyMount && !alreadyHosted && this.remoteRefrId) {
+      const gmMr = this.remoteRefrId as number;
+      if (Date.now() - (lastTryHost[gmMr] || 0) >= 1000) { lastTryHost[gmMr] = Date.now(); tryHost(gmMr); }
+    }
     setDefaultAnimsDisabled(this.refrId, alreadyHosted ? false : true);
 
     if (alreadyHosted) {
@@ -702,9 +717,11 @@ export class FormView {
     // when it attacks, so this game never hosts it and never lets it fight on its own: it plays the server's frames (gmPuppetMove) the way SkyMP plays another
     // player's movement (applyMovement: translateTo for the place, keepOffsetFromActor for the walk or run).
     const gmPuppet = (model as any).greymarchPuppet === true;
+    // GREYMARCH: RIDING: another player on a horse here sits on it, and its own movement is not played while it does (the horse carries it)
+    const gmSeated = this.gmRideStep(refr, model);
     if (gmPuppet) {
       if (this.gmPuppetMove(refr, model) === "respawn") return;
-    } else if (model.movement) {
+    } else if (model.movement && !gmMyMount && !gmSeated) {
       let ac = Actor.from(refr);
       if (
         this.movState.lastApply &&
@@ -1118,6 +1135,43 @@ export class FormView {
   };
 
   // a server-driven animal: its newest frame from the server, or where the server placed it until the first one comes. "respawn" when it must be made again.
+  // GREYMARCH: RIDING (greymarch/riding.ts): another player's character is put on the horse the server says it rides (greymarchRiding), the way an NPC mounts
+  // (the horse activated by it), at most every SEAT_TRY_EVERY_MS until it sits; with no horse it gets down. The riders map (which horse each player rides) follows
+  // the models, so a game that hosts a ridden horse lets it go. True while it sits on a horse here
+  private gmRideStep(refr: ObjectReference, model: FormModel): boolean {
+    if (model.isMyClone) return false;
+    const riding = ridingOf(model);
+    const me = this.remoteRefrId as number;
+    if (me && (riding || this.gmRiding)) noteRider(ridersMap(), me, riding);
+    this.gmRiding = riding;
+    const ac = Actor.from(refr);
+    if (!ac || !ac.is3DLoaded() || ac.isDead()) return false;
+    let seated = false;
+    try { seated = ac.isOnMount(); } catch (e) { seated = false; }
+    let horse: Actor | null = null;
+    if (riding) {
+      try {
+        const l = remoteIdToLocalId(riding);
+        const h = l ? Actor.from(Game.getFormEx(l)) : null;
+        const r = h ? h.getRace() : null;
+        if (h && h.is3DLoaded() && !h.isDead() && r && r.getFormID() === HORSE_RACE) horse = h;
+      } catch (e) { horse = null; }
+    }
+    const step = seatStep(riding, seated, !!horse, this.gmSeatTryAt, Date.now());
+    if (step === "seat" && horse) {
+      this.gmSeatTryAt = Date.now();
+      gmCrumb("seat " + gmHex(me) + " on " + gmHex(riding) + " (here " + gmHex(horse.getFormID()) + ")");
+      try { ac.stopTranslation(); ac.clearKeepOffsetFromActor(); } catch (e) { /* not moving */ }
+      try { horse.activate(ac, true); } catch (e) { gmCrumb("seat failed " + gmHex(me) + ": " + e); }
+    } else if (step === "unseat") {
+      gmCrumb("unseat " + gmHex(me));
+      try { ac.dismount(); } catch (e) { gmCrumb("unseat failed " + gmHex(me) + ": " + e); }
+    }
+    return seated && !!riding;
+  }
+  private gmRiding = 0; // GREYMARCH: the horse this character rides, as last seen (gmRideStep)
+  private gmSeatTryAt = 0; // GREYMARCH: when it was last put on its horse (gmRideStep)
+
   private gmPuppetMove(refr: ObjectReference, model: FormModel): string {
     const ac = Actor.from(refr);
     if (!ac || !model.movement) return "";
