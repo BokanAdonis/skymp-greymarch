@@ -4,15 +4,17 @@
 #include <chrono>
 
 #include "GreymarchBalance.h"
-#include "HitMessage.h"
+#include "HitData.h"
+#include "formulas/TES5DamageFormula.h"
 
 PartOne& GetPartOne();
-using namespace std::chrono_literals;
 
 namespace {
 constexpr uint32_t kIronDagger = 0x0001397E;
 
-// one hit of the player on themselves with an iron dagger: how much of their health it took (0..1)
+// the damage of one hit of the player on themselves with an iron dagger, by
+// the real formula (the shared test PartOne has a fake formula that always
+// deals 25, so a hit through OnHit never sees the table or the multiplier)
 float OneHit(float damageMult = 1.f)
 {
   PartOne& p = GetPartOne();
@@ -20,25 +22,26 @@ float OneHit(float damageMult = 1.f)
   p.CreateActor(0xff000000, { 0, 0, 0 }, 0, 0x3c);
   p.SetUserActor(0, 0xff000000);
   auto& ac = p.worldState.GetFormAt<MpActor>(0xff000000);
+  ac.SetEquipment(Equipment());
   ac.SetGreymarchDamageMult(damageMult);
 
-  RawMessageData rawMsgData;
-  rawMsgData.userId = 0;
-  HitMessage hitMsg;
-  hitMsg.data.target = 0x14;
-  hitMsg.data.aggressor = 0x14;
-  hitMsg.data.source = kIronDagger;
-  ac.AddItem(hitMsg.data.source, 1);
+  HitData hitData;
+  hitData.target = 0x14;
+  hitData.aggressor = 0x14;
+  hitData.source = kIronDagger;
+  const float damage = TES5DamageFormula{}.CalculateDamage(ac, ac, hitData);
 
-  ac.SetLastHitTime(0xff000000, std::chrono::steady_clock::now() - 10s);
-  p.Messages().clear();
-  p.GetActionListener().OnHit(rawMsgData, hitMsg);
-
-  const float lost = 1.f - ac.GetChangeForm().actorValues.healthPercentage;
   p.DestroyActor(0xff000000);
   DoDisconnect(p, 0);
-  return lost;
+  return damage;
 }
+
+// the table is global: put it back even when a check fails, or the tests
+// after this one see the changed damage
+struct ResetBalanceAtEnd
+{
+  ~ResetBalanceAtEnd() { GreymarchBalance::Set({}); }
+};
 }
 
 TEST_CASE("Greymarch: the balance table reads numbers and leaves out what is broken or out of range",
@@ -59,9 +62,10 @@ TEST_CASE("Greymarch: the balance table reads numbers and leaves out what is bro
 TEST_CASE("Greymarch: a weapon's damage comes from the live table, and the attacker's multiplier scales it",
           "[Greymarch]")
 {
+  ResetBalanceAtEnd reset;
   GreymarchBalance::Set({});
   const float plain = OneHit();
-  REQUIRE(plain > 0.f);
+  REQUIRE(plain == 4.f); // the iron dagger in the game files
 
   GreymarchBalanceTable t;
   t.weaponDamage[kIronDagger] = 8.f; // the iron dagger does 4 in the game files
