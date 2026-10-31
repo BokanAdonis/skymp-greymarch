@@ -987,6 +987,14 @@ export class RemoteServer extends ClientListener {
         return;
       }
 
+      // GREYMARCH (2026-10-31, a crash in the player's own casting animation, DefaultMagicCastingBehavior / magicMoveStartTransition, in Duskglow Crevice):
+      // a cast or its end is never replayed onto THIS game's player. Their own game already casts it; forcing the server's copy of their animation
+      // variables into their live casting animation (interruptCast) broke it
+      if (ac.getFormID() === 0x14) {
+        this.greymarchMagicDiag(`magic: ${msg.data.caster.toString(16)} ${msg.data.interruptCast ? "end" : "cast"} ${msg.data.spell.toString(16)}: this game's own player, not replayed`);
+        return;
+      }
+
       const actorAnimationVariables: ActorAnimationVariables = {
         booleans: new Uint8Array(msg.data.actorAnimationVariables.booleans),
         floats: new Uint8Array(msg.data.actorAnimationVariables.floats),
