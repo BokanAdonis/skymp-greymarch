@@ -161,9 +161,10 @@ void ActionListener::OnUpdateMovement(const RawMessageData& rawMsgData,
       SetAngleMode::CalledByUpdateMovement);
     actor->SetAnimationVariableBool(
       AnimationVariableBool::kVariable_bInJumpState, msg.data.isInJumpState);
-    // GREYMARCH: a jumping power attack (combat perks) counts for a moment
-    // after the jump: the hit arrives after the movement update
-    if (msg.data.isInJumpState) {
+    // GREYMARCH: a jumping or sprinting power attack (combat perks, the
+    // sprint lunge: 2026-10-31, the owner) counts for a moment after: the
+    // hit arrives after the movement update
+    if (msg.data.isInJumpState || msg.data.runMode == "Sprinting") {
       actor->SetLastInJumpTime(std::chrono::steady_clock::now());
     }
     actor->SetAnimationVariableBool(
