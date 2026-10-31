@@ -205,7 +205,7 @@ export class GreymarchBridge {
         if (type === "greymarchWolfAlphas") { var lists: any = {}; for (var lk in GM_WOLF_LISTS) lists[lk] = Array.isArray(msg[GM_WOLF_LISTS[lk]]) ? msg[GM_WOLF_LISTS[lk]] : []; this.greymarchWolfLists = lists; return; } // the other players in the Alpha form: drawn white (greymarchWolfAlphaOthers)
         if (type === "greymarchSpellCosts") { this.greymarchSpellCostWant = msg.costs && typeof msg.costs === "object" ? msg.costs : {}; this.greymarchSpellCostTold = {}; return; } // the Spells balance tab's costs (greymarchSpellCostTick)
         if (type === "greymarchSpellEdits") { this.greymarchSpellEditWant = msg.edits && typeof msg.edits === "object" ? msg.edits : {}; this.greymarchSpellEditTold = {}; return; } // the Magic balance tab's durations and strengths (greymarchSpellEditTick)
-        if (type === "greymarchFavorites") { var favList = Array.isArray(msg.fav) ? msg.fav.filter((x: any) => x && Number(x.f) > 0).slice(0, 300) : []; var favWant: any = {}; favList.forEach((x: any) => { favWant[Number(x.f) >>> 0] = Number(x.k) >= 0 && Number(x.k) <= 7 ? Number(x.k) : -1; }); this.greymarchFavState = { pending: favList.map((x: any) => ({ f: Number(x.f) >>> 0, k: favWant[Number(x.f) >>> 0] })), want: favWant, restoreUntil: Date.now() + 60000, nextAt: Date.now() + 3000, lastSent: JSON.stringify(Object.keys(favWant).map((k) => ({ f: Number(k), k: favWant[k] })).sort((p: any, q: any) => p.f - q.f)), put: 0, menuSeen: false }; return; } // favorites remembered (greymarchFavTick)
+        if (type === "greymarchFavorites") { var favList = Array.isArray(msg.fav) ? msg.fav.filter((x: any) => x && Number(x.f) > 0).slice(0, 300) : []; var favWant: any = {}; favList.forEach((x: any) => { favWant[Number(x.f) >>> 0] = Number(x.k) >= 0 && Number(x.k) <= 7 ? Number(x.k) : -1; }); this.greymarchFavState = { pending: favList.map((x: any) => ({ f: Number(x.f) >>> 0, k: favWant[Number(x.f) >>> 0] })), want: favWant, restoreUntil: Date.now() + 60000, restoreAt: 0, loginAt: Date.now(), nextAt: Date.now() + 2000, lastSent: JSON.stringify(Object.keys(favWant).map((k) => ({ f: Number(k), k: favWant[k] })).sort((p: any, q: any) => p.f - q.f)), put: 0, menuSeen: false }; return; } // favorites remembered (greymarchFavTick)
         if (type === "greymarchMapMarkers") { this.greymarchMapState = { all: Array.isArray(msg.all) ? msg.all.filter((x: any) => typeof x === "string").slice(0, 5000) : [], found: new Set(Array.isArray(msg.found) ? msg.found.filter((x: any) => typeof x === "string") : []), restore: true, checkAt: 0, refs: {} }; return; } // the map remembered (greymarchMapTick)
         if (type === "greymarchRaceMenuLook") { var rm0 = this.greymarchRmState(); rm0.want = msg.look && typeof msg.look === "object" ? msg.look : {}; rm0.tries = 0; return; } // RaceMenu's extra sliders of this character, kept by the server (greymarchRaceMenuTick)
         if (type === "greymarchVampire") { this.greymarchVampWant = msg.on ? msg : null; this.greymarchVampCostTold = {}; this.greymarchHudToPage("blood", { on: !!msg.on, blood: msg.blood, empty: !!msg.empty }); return; } // a vampire's state: the blood drop and what the game applies (greymarchVampTick)
@@ -1558,12 +1558,14 @@ export class GreymarchBridge {
         var sp = this.sp;
         // a menu where the player changes favorites: open since the last look? (a favorite lost with none open was taken by the game: SkyMP rebuilding the inventory)
         try { if (sp.Ui.isMenuOpen("InventoryMenu") || sp.Ui.isMenuOpen("MagicMenu") || sp.Ui.isMenuOpen("FavoritesMenu")) st.menuSeen = true; } catch (e) { /* as not open */ }
-        if (now < st.nextAt) return;
-        var player = sp.Game.getPlayer(); if (!player) { st.nextAt = now + 2000; return; }
+        // FASTER (2026-10-31, the owner: "could we make it reload faster"): the first try as soon as they arrive, then every second; the look for ones the game
+        // took off runs beside it, every 2 s for the first 2 minutes (when SkyMP rebuilds the inventory), then every 10 s
+        if (now < st.nextAt && !(st.pending.length && now >= st.restoreAt)) return;
+        var player = sp.Game.getPlayer(); if (!player) return;
         var carried = (form: any): boolean => { var t = form.getType(); return t === 119 ? true : t === 22 ? player.hasSpell(form) : player.getItemCount(form) > 0; };
         var putBack = (form: any, k: number): boolean => { if (this.greymarchFavCall("SetFavorite", form, true) !== 1) return false; if (k >= 0 && k <= 7) this.greymarchFavCall("SetHotkey", form, k); return true; };
-        if (st.pending.length && now < st.restoreUntil) { // putting them back after login
-            st.nextAt = now + 3000;
+        if (st.pending.length && now < st.restoreUntil && now >= st.restoreAt) { // putting them back after login
+            st.restoreAt = now + 1000;
             var left: any[] = [];
             for (var i = 0; i < st.pending.length; i++) {
                 var x = st.pending[i]; var form = sp.Game.getFormEx(x.f);
@@ -1572,11 +1574,11 @@ export class GreymarchBridge {
                 if (putBack(form, x.k)) st.put++;
             }
             st.pending = left;
-            if (!left.length) this.greymarchLog("favorites: " + st.put + " put back");
-            return;
+            if (!left.length) this.greymarchLog("favorites: " + st.put + " put back, " + Math.round((now - st.loginAt) / 100) / 10 + " s after they arrived");
         }
-        if (st.pending.length) { this.greymarchLog("favorites: " + st.put + " put back, " + st.pending.length + " not carried or known after a minute (kept for when they are)"); st.pending = []; }
-        st.nextAt = now + 10000;
+        if (now < st.nextAt) return;
+        if (st.pending.length && now >= st.restoreUntil) { this.greymarchLog("favorites: " + st.put + " put back, " + st.pending.length + " not carried or known after a minute (kept for when they are)"); st.pending = []; }
+        st.nextAt = now + (now - st.loginAt < 120000 ? 2000 : 10000);
         // what is a favorite now
         var now2: any = {};
         var look = (form: any) => {
