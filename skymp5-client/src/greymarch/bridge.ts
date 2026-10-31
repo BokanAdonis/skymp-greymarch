@@ -117,6 +117,7 @@ const GREYMARCH_PERK_QUICK_SHOT = 0x00105F19;
 // the sprinting power attack (the lunge) at rank 5 (2026-10-31, the owner: "whenever you are sprinting it should trigger a lunge attack when you do a heavy"):
 // the game plays it only with these perks; the server makes it hit x2 (combatPerks jumpPower, a power attack while sprinting or jumping)
 const GREYMARCH_PERK_CRITICAL_CHARGE = 0x000CB406;
+const GREYMARCH_FAST_DRAW_SPEED = 1.15; // fast draw: the bow drawn 15% faster on top of Quick Shot (greymarchFastDrawApply)
 const GREYMARCH_PERK_GREAT_CRITICAL_CHARGE = 0x000CB407;
 
 export class GreymarchBridge {
@@ -2488,7 +2489,7 @@ export class GreymarchBridge {
                 }
             }
             this.greymarchNoHostApply(now, player, !!have.god);
-            this.greymarchGhostApply(now, ghosts || []); this.greymarchNamesApply(now); this.greymarchInvisApply(now); this.greymarchNoTalkApply(now); this.greymarchSeenLog(now); this.greymarchStatsApply(player); this.greymarchCombatApply(player); this.greymarchPerksApply(now, player);
+            this.greymarchGhostApply(now, ghosts || []); this.greymarchNamesApply(now); this.greymarchInvisApply(now); this.greymarchNoTalkApply(now); this.greymarchSeenLog(now); this.greymarchStatsApply(player); this.greymarchCombatApply(player); this.greymarchPerksApply(now, player); this.greymarchFastDrawApply(now, player);
         } catch (err) {
             if (!this.greymarchFxErr) { this.greymarchFxErr = true; this.greymarchLog("staff effects error (shown once): " + err); }
         }
@@ -2592,6 +2593,22 @@ export class GreymarchBridge {
                 if (w[e.key] && !has) { player.addPerk(perk); added[e.id] = true; this.greymarchLog("combat perks: " + e.name + " on"); }
                 else if (!w[e.key] && has && added[e.id]) { player.removePerk(perk); added[e.id] = false; this.greymarchLog("combat perks: " + e.name + " off"); }
             } catch (err) { this.greymarchLog("combat perks: " + e.name + " failed (" + err + ")"); }
+        }
+    }
+    // FAST DRAW, A LITTLE FASTER (2026-10-31, the owner: "speed up the bow slightly for fast draw"): on top of Quick Shot, a Bowman with fast draw (rank 5)
+    // draws 15% faster while a bow or crossbow is in hand (WeaponSpeedMult); put back to what it was when the bow is put away or the perk goes. Looked at twice a second.
+    greymarchFastDrawApply(now: number, player: any): any {
+        if (now < (this.greymarchFastDrawNext || 0)) return;
+        this.greymarchFastDrawNext = now + 500;
+        var w = this.greymarchPerksWant || {};
+        var bow = false;
+        try { var wpn = player.getEquippedWeapon(false); var t = wpn ? wpn.getWeaponType() : 0; bow = t === 7 || t === 9; } catch (e1) { bow = false; } // 7 bow, 9 crossbow
+        var want = !!w.fastDraw && bow;
+        if (want && this.greymarchFastDrawWas === undefined) {
+            try { this.greymarchFastDrawWas = player.getActorValue("WeaponSpeedMult"); player.setActorValue("WeaponSpeedMult", GREYMARCH_FAST_DRAW_SPEED); } catch (e2) { this.greymarchFastDrawWas = undefined; }
+        } else if (!want && this.greymarchFastDrawWas !== undefined) {
+            try { player.setActorValue("WeaponSpeedMult", this.greymarchFastDrawWas); } catch (e3) { /* tried again next time */ return; }
+            this.greymarchFastDrawWas = undefined;
         }
     }
     // STAT MAXIMUMS set by staff (1 to 1000): the base value is set and the stat filled. Done once per value, so the game is never fought with.

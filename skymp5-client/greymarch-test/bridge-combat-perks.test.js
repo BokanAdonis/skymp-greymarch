@@ -61,3 +61,18 @@ test("apply: on, off, and a perk the player had before is left alone", () => {
   b.greymarchPerksApply(14000, player);
   assert.deepStrictEqual([...perks].sort(), [3, 4, 5]);
 });
+
+test("fast draw is a little faster (2026-10-31, the owner): WeaponSpeedMult 1.15 while a bow or crossbow is in hand, put back after", () => {
+  const start = src.indexOf("    greymarchFastDrawApply(now: number, player: any): any {");
+  const end = src.indexOf("    // STAT MAXIMUMS set by staff");
+  const body = src.slice(start, end).replace(/\(now: number, player: any\): any/g, "(now, player)");
+  const Cls = new Function("GREYMARCH_FAST_DRAW_SPEED", "return class {\n" + body + "\n};")(1.15);
+  const b = new Cls();
+  let av = 0, type = 7;
+  const player = { getEquippedWeapon: () => ({ getWeaponType: () => type }), getActorValue: () => av, setActorValue: (k, v) => { assert.strictEqual(k, "WeaponSpeedMult"); av = v; } };
+  b.greymarchPerksWant = { fastDraw: true };
+  b.greymarchFastDrawApply(0, player); assert.strictEqual(av, 1.15, "a bow in hand");
+  type = 1; b.greymarchFastDrawApply(1000, player); assert.strictEqual(av, 0, "a sword: put back");
+  type = 9; b.greymarchFastDrawApply(2000, player); assert.strictEqual(av, 1.15, "a crossbow too");
+  b.greymarchPerksWant = { fastDraw: false }; b.greymarchFastDrawApply(3000, player); assert.strictEqual(av, 0, "the perk gone: put back");
+});
