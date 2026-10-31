@@ -120,6 +120,7 @@ export class GreymarchBridge {
         this.controller.on("buttonEvent", (e: any) => this.greymarchKey(e)); // F7 opens the staff panel
         try { this.sp.on("hit", (e: any) => this.greymarchHit(e)); } catch (hitErr) { /* no hit events: the combat history stays empty */ }
         this.controller.on("update", () => this.greymarchTick()); // Skyrim functions only work in the update phase, never in tick
+        try { this.controller.on("loadGame", () => { if (this.greymarchMapState) { this.greymarchMapState.restore = true; this.greymarchMapState.refs = {}; } }); } catch (e) { /* shown once per login */ } // a world load forgets the map: shown again
         this.controller.on("tick", () => this.greymarchConnectCover(Date.now()));
         this.controller.on("tick", () => this.greymarchChoiceTick(Date.now()));
         this.controller.on("tick", () => this.greymarchBodyTick(Date.now())); // select before the world: the held body is let go once a character is chosen ("tick": "update" does not run at the main menu) // a held Play / Create goes out once the world has loaded (greymarchChoiceTick) // the connecting screen: "tick", because "update" does not run at the main menu (it only uses the browser)
@@ -204,6 +205,7 @@ export class GreymarchBridge {
         if (type === "greymarchWolfAlphas") { var lists: any = {}; for (var lk in GM_WOLF_LISTS) lists[lk] = Array.isArray(msg[GM_WOLF_LISTS[lk]]) ? msg[GM_WOLF_LISTS[lk]] : []; this.greymarchWolfLists = lists; return; } // the other players in the Alpha form: drawn white (greymarchWolfAlphaOthers)
         if (type === "greymarchSpellCosts") { this.greymarchSpellCostWant = msg.costs && typeof msg.costs === "object" ? msg.costs : {}; this.greymarchSpellCostTold = {}; return; } // the Spells balance tab's costs (greymarchSpellCostTick)
         if (type === "greymarchSpellEdits") { this.greymarchSpellEditWant = msg.edits && typeof msg.edits === "object" ? msg.edits : {}; this.greymarchSpellEditTold = {}; return; } // the Magic balance tab's durations and strengths (greymarchSpellEditTick)
+        if (type === "greymarchMapMarkers") { this.greymarchMapState = { all: Array.isArray(msg.all) ? msg.all.filter((x: any) => typeof x === "string").slice(0, 5000) : [], found: new Set(Array.isArray(msg.found) ? msg.found.filter((x: any) => typeof x === "string") : []), restore: true, checkAt: 0, refs: {} }; return; } // the map remembered (greymarchMapTick)
         if (type === "greymarchRaceMenuLook") { var rm0 = this.greymarchRmState(); rm0.want = msg.look && typeof msg.look === "object" ? msg.look : {}; rm0.tries = 0; return; } // RaceMenu's extra sliders of this character, kept by the server (greymarchRaceMenuTick)
         if (type === "greymarchVampire") { this.greymarchVampWant = msg.on ? msg : null; this.greymarchVampCostTold = {}; this.greymarchHudToPage("blood", { on: !!msg.on, blood: msg.blood, empty: !!msg.empty }); return; } // a vampire's state: the blood drop and what the game applies (greymarchVampTick)
         if (type === "greymarchVampLooks") { this.greymarchVampLookList = Array.isArray(msg.vampires) ? msg.vampires : []; if (Number(msg.me) > 0) this.greymarchMeActor = Number(msg.me) >>> 0; return; } // (me: which of them is this player: the ghosts and effects packets that also say so may not have come yet, and without it the player's own eyes and fangs were never put on) // how every vampire in the world looks (eyes and fangs)
@@ -438,6 +440,7 @@ export class GreymarchBridge {
     }
     greymarchTick(): any {
         this.greymarchRebaseAfterLoad(Date.now()); // "update" runs only once the world is loaded
+        this.greymarchMapTick(Date.now());
         this.greymarchSelectFocusGuard(Date.now());
         this.greymarchDoorNamesApply(Date.now());
         this.greymarchDoorPrompt(Date.now());
@@ -1521,6 +1524,43 @@ export class GreymarchBridge {
     // The server sends this character's kept parts when it enters the world; 4 seconds after the player's 3D is there (SkyMP has applied the vanilla look
     // by then) the look the player has now is exported, the kept parts put in and the result loaded. Nothing is loaded when the parts already match,
     // and nothing while the race menu is open or the body is the werewolf or a creature (done again after changing back).
+    // THE MAP REMEMBERED (gamemode mapmarkers.js, 2026-10-30, the owner: discoveries were lost at every login; restored ones "only show them"): the character's
+    // found markers are shown on the map again (AddToMap(false): no fast travel to them), then every 10 s the markers the player has come to see on the map since
+    // are told to the server, which keeps them
+    greymarchMapState: any = null;
+    greymarchMapRef(desc: string): any {
+        var st = this.greymarchMapState; if (!st) return null;
+        if (st.refs[desc] === undefined) {
+            var at = desc.indexOf(":"); var local = parseInt(desc.slice(0, at), 16); var plugin = desc.slice(at + 1); var id = 0;
+            try { var f = this.sp.Game.getFormFromFile(local, plugin); id = f ? f.getFormID() : 0; } catch (e) { id = 0; }
+            st.refs[desc] = id;
+        }
+        if (!st.refs[desc]) return null;
+        try { return this.sp.ObjectReference.from(this.sp.Game.getFormEx(st.refs[desc])); } catch (e) { return null; }
+    }
+    greymarchMapTick(now: number): any {
+        var st = this.greymarchMapState; if (!st) return;
+        if (st.restore) {
+            st.restore = false;
+            var shown = 0, missing = 0;
+            st.found.forEach((d: string) => { var r = this.greymarchMapRef(d); if (!r) { missing++; return; } try { if (!r.isMapMarkerVisible()) r.addToMap(false); shown++; } catch (e) { missing++; } });
+            this.greymarchLog("map: " + shown + " place(s) found before shown on the map again" + (missing ? ", " + missing + " not in this game" : ""));
+            st.checkAt = now + 15000; // the game's own markers settle first
+            return;
+        }
+        if (now < st.checkAt) return;
+        st.checkAt = now + 10000;
+        var add: string[] = [];
+        for (var i = 0; i < st.all.length; i++) {
+            var d = st.all[i]; if (st.found.has(d)) continue;
+            var r = this.greymarchMapRef(d); if (!r) continue;
+            try { if (r.isMapMarkerVisible()) { st.found.add(d); add.push(d); } } catch (e) { /* the next look */ }
+        }
+        if (!add.length) return;
+        var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchMapFound", found: add.slice(0, 200) }) };
+        this.controller.emitter.emit("sendMessage", { message: message, reliability: "reliable" });
+        this.greymarchLog("map: " + add.length + " new place(s) on the map");
+    }
     greymarchRmState(): any {
         return this.greymarchRm || (this.greymarchRm = { menuWas: false, sendAt: 0, want: null, done: null, loadedSince: 0, next: 0, tries: 0, beast: false, said: {} });
     }

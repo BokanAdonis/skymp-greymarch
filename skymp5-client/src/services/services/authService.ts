@@ -240,6 +240,7 @@ export class AuthService extends ClientListener {
       case 'greymarchSpellEdits': // the Magic balance tab's durations and strengths (bridge.ts greymarchSpellEditTick)
       case 'greymarchVampLooks':
       case 'greymarchRaceMenuLook':
+      case 'greymarchMapMarkers': // every map marker and the ones this character has found (gamemode mapmarkers.js)
       case 'greymarchVampFeed':
       case 'greymarchVampMist':
       case 'greymarchVampLord':
