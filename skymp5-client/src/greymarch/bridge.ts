@@ -205,7 +205,7 @@ export class GreymarchBridge {
         if (type === "greymarchWolfAlphas") { var lists: any = {}; for (var lk in GM_WOLF_LISTS) lists[lk] = Array.isArray(msg[GM_WOLF_LISTS[lk]]) ? msg[GM_WOLF_LISTS[lk]] : []; this.greymarchWolfLists = lists; return; } // the other players in the Alpha form: drawn white (greymarchWolfAlphaOthers)
         if (type === "greymarchSpellCosts") { this.greymarchSpellCostWant = msg.costs && typeof msg.costs === "object" ? msg.costs : {}; this.greymarchSpellCostTold = {}; return; } // the Spells balance tab's costs (greymarchSpellCostTick)
         if (type === "greymarchSpellEdits") { this.greymarchSpellEditWant = msg.edits && typeof msg.edits === "object" ? msg.edits : {}; this.greymarchSpellEditTold = {}; return; } // the Magic balance tab's durations and strengths (greymarchSpellEditTick)
-        if (type === "greymarchFavorites") { var favList = Array.isArray(msg.fav) ? msg.fav.filter((x: any) => x && Number(x.f) > 0).slice(0, 300) : []; this.greymarchFavState = { pending: favList.map((x: any) => ({ f: Number(x.f) >>> 0, k: Number(x.k) })), known: favList.map((x: any) => Number(x.f) >>> 0), restoreUntil: Date.now() + 60000, nextAt: Date.now() + 3000, lastSent: JSON.stringify(favList.map((x: any) => ({ f: Number(x.f) >>> 0, k: Number(x.k) }))), put: 0 }; return; } // favorites remembered (greymarchFavTick)
+        if (type === "greymarchFavorites") { var favList = Array.isArray(msg.fav) ? msg.fav.filter((x: any) => x && Number(x.f) > 0).slice(0, 300) : []; var favWant: any = {}; favList.forEach((x: any) => { favWant[Number(x.f) >>> 0] = Number(x.k) >= 0 && Number(x.k) <= 7 ? Number(x.k) : -1; }); this.greymarchFavState = { pending: favList.map((x: any) => ({ f: Number(x.f) >>> 0, k: favWant[Number(x.f) >>> 0] })), want: favWant, restoreUntil: Date.now() + 60000, nextAt: Date.now() + 3000, lastSent: JSON.stringify(Object.keys(favWant).map((k) => ({ f: Number(k), k: favWant[k] })).sort((p: any, q: any) => p.f - q.f)), put: 0, menuSeen: false }; return; } // favorites remembered (greymarchFavTick)
         if (type === "greymarchMapMarkers") { this.greymarchMapState = { all: Array.isArray(msg.all) ? msg.all.filter((x: any) => typeof x === "string").slice(0, 5000) : [], found: new Set(Array.isArray(msg.found) ? msg.found.filter((x: any) => typeof x === "string") : []), restore: true, checkAt: 0, refs: {} }; return; } // the map remembered (greymarchMapTick)
         if (type === "greymarchRaceMenuLook") { var rm0 = this.greymarchRmState(); rm0.want = msg.look && typeof msg.look === "object" ? msg.look : {}; rm0.tries = 0; return; } // RaceMenu's extra sliders of this character, kept by the server (greymarchRaceMenuTick)
         if (type === "greymarchVampire") { this.greymarchVampWant = msg.on ? msg : null; this.greymarchVampCostTold = {}; this.greymarchHudToPage("blood", { on: !!msg.on, blood: msg.blood, empty: !!msg.empty }); return; } // a vampire's state: the blood drop and what the game applies (greymarchVampTick)
@@ -1554,39 +1554,63 @@ export class GreymarchBridge {
         catch (e) { if (!this.greymarchFavNoDll) { this.greymarchFavNoDll = true; this.greymarchLog("favorites: GreymarchCam." + fn + " is not there (GreymarchCamera.dll older than 1.6?): favorites are kept but not put back"); } return -2; }
     }
     greymarchFavTick(now: number): any {
-        var st = this.greymarchFavState; if (!st || now < st.nextAt) return;
-        var sp = this.sp; var player = sp.Game.getPlayer(); if (!player) { st.nextAt = now + 2000; return; }
-        if (st.pending.length && now < st.restoreUntil) { // putting them back
+        var st = this.greymarchFavState; if (!st) return;
+        var sp = this.sp;
+        // a menu where the player changes favorites: open since the last look? (a favorite lost with none open was taken by the game: SkyMP rebuilding the inventory)
+        try { if (sp.Ui.isMenuOpen("InventoryMenu") || sp.Ui.isMenuOpen("MagicMenu") || sp.Ui.isMenuOpen("FavoritesMenu")) st.menuSeen = true; } catch (e) { /* as not open */ }
+        if (now < st.nextAt) return;
+        var player = sp.Game.getPlayer(); if (!player) { st.nextAt = now + 2000; return; }
+        var carried = (form: any): boolean => { var t = form.getType(); return t === 119 ? true : t === 22 ? player.hasSpell(form) : player.getItemCount(form) > 0; };
+        var putBack = (form: any, k: number): boolean => { if (this.greymarchFavCall("SetFavorite", form, true) !== 1) return false; if (k >= 0 && k <= 7) this.greymarchFavCall("SetHotkey", form, k); return true; };
+        if (st.pending.length && now < st.restoreUntil) { // putting them back after login
             st.nextAt = now + 3000;
             var left: any[] = [];
             for (var i = 0; i < st.pending.length; i++) {
                 var x = st.pending[i]; var form = sp.Game.getFormEx(x.f);
                 if (!form) continue; // not in this game
-                var t = form.getType(); var magic = t === 22 || t === 119; // a spell, a shout
-                var have = magic ? (t === 119 || player.hasSpell(form)) : player.getItemCount(form) > 0;
-                if (!have) { left.push(x); continue; }
-                if (this.greymarchFavCall("SetFavorite", form, true) === 1) { st.put++; if (x.k >= 0 && x.k <= 7) this.greymarchFavCall("SetHotkey", form, x.k); }
+                if (!carried(form)) { left.push(x); continue; }
+                if (putBack(form, x.k)) st.put++;
             }
             st.pending = left;
             if (!left.length) this.greymarchLog("favorites: " + st.put + " put back");
             return;
         }
-        if (st.pending.length) { this.greymarchLog("favorites: " + st.put + " put back, " + st.pending.length + " not carried or known after a minute"); st.pending = []; }
-        st.nextAt = now + 10000; // what is a favorite now
-        var list: any[] = []; var seen: any = {};
-        var add = (form: any) => {
-            if (!form) return; var id = form.getFormID() >>> 0; if (seen[id]) return;
+        if (st.pending.length) { this.greymarchLog("favorites: " + st.put + " put back, " + st.pending.length + " not carried or known after a minute (kept for when they are)"); st.pending = []; }
+        st.nextAt = now + 10000;
+        // what is a favorite now
+        var now2: any = {};
+        var look = (form: any) => {
+            if (!form) return; var id = form.getFormID() >>> 0; if (now2[id] !== undefined) return;
             var fav = false; try { fav = sp.Game.isObjectFavorited(form); } catch (e) { fav = false; }
             if (!fav) return;
-            seen[id] = true; var k = this.greymarchFavNoDll ? -1 : this.greymarchFavCall("GetHotkey", form);
-            list.push({ f: id, k: k >= 0 && k <= 7 ? k : -1 });
+            var k = this.greymarchFavNoDll ? -1 : this.greymarchFavCall("GetHotkey", form);
+            now2[id] = k >= 0 && k <= 7 ? k : -1;
         };
-        try { var n = player.getNumItems(); for (var a = 0; a < n && list.length < 300; a++) add(player.getNthForm(a)); } catch (e) { /* next time */ }
-        try { var ns = player.getSpellCount(); for (var b = 0; b < ns; b++) add(player.getNthSpell(b)); } catch (e) { /* next time */ }
-        try { var base = sp.ActorBase.from(player.getBaseObject()); var nb = base ? base.getSpellCount() : 0; for (var c = 0; c < nb; c++) add(base!.getNthSpell(c)); } catch (e) { /* next time */ }
-        // shouts: the game lists no shouts a character knows, so the kept ones still a favorite stay, and the one equipped is looked at
-        try { for (var q = 0; q < st.known.length; q++) add(sp.Game.getFormEx(st.known[q])); add(player.getEquippedShout()); } catch (e) { /* next time */ }
-        var text = JSON.stringify(list);
+        try { var n = player.getNumItems(); for (var a = 0; a < n; a++) look(player.getNthForm(a)); } catch (e) { /* next time */ }
+        try { var ns = player.getSpellCount(); for (var b = 0; b < ns; b++) look(player.getNthSpell(b)); } catch (e) { /* next time */ }
+        try { var base = sp.ActorBase.from(player.getBaseObject()); var nb = base ? base.getSpellCount() : 0; for (var c = 0; c < nb; c++) look(base!.getNthSpell(c)); } catch (e) { /* next time */ }
+        try { for (var key in st.want) look(sp.Game.getFormEx(Number(key))); look(player.getEquippedShout()); } catch (e) { /* next time */ }
+        // THE PLAYER'S CHOICE (2026-10-31, the owner: they came back once, not the second time): what the player chose is kept (st.want), not what the game shows
+        // this moment. A kept favorite the game lost with no favorites menu open (SkyMP rebuilds the inventory) is put back with its hotkey; lost with a menu
+        // open, the player took it off. A new favorite, or a hotkey changed in a menu, is the player's choice
+        var mine = !!st.menuSeen; st.menuSeen = false;
+        var putAgain = 0;
+        for (var key2 in st.want) {
+            var f = Number(key2); var k2 = st.want[key2];
+            if (now2[f] === undefined) {
+                var form2 = sp.Game.getFormEx(f);
+                if (!form2 || !carried(form2)) continue; // not carried now: kept for when it is
+                if (mine) { delete st.want[key2]; continue; } // taken off by the player
+                if (putBack(form2, k2)) putAgain++;
+            } else if (now2[f] !== k2) {
+                if (mine) st.want[key2] = now2[f]; else if (k2 >= 0) this.greymarchFavCall("SetHotkey", sp.Game.getFormEx(f), k2);
+            }
+        }
+        for (var key3 in now2) if (st.want[key3] === undefined) st.want[key3] = now2[key3];
+        if (putAgain) this.greymarchLog("favorites: " + putAgain + " lost with no menu open (the inventory rebuilt?) and put back");
+        var list: any[] = []; for (var key4 in st.want) list.push({ f: Number(key4), k: st.want[key4] });
+        if (list.length > 300) list = list.slice(0, 300);
+        var text = JSON.stringify(list.slice().sort((p: any, q: any) => p.f - q.f));
         if (text === st.lastSent) return;
         st.lastSent = text;
         var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchFavorites", fav: list }) };
