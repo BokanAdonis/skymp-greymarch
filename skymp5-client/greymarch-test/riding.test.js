@@ -77,3 +77,12 @@ test("someone else's horse: the server's greymarchRideRefused gets this player o
   // before the 250 ms gate, so it is not held back
   assert.ok(bridge.indexOf("var off = this.greymarchRideOff;") < bridge.indexOf("if (now < (this.greymarchRideNext || 0)) return;"));
 });
+
+test("getting on (2026-10-31): SkyMP blocks E on NPCs, so the server's greymarchMount has the game unblock the horse and mount; other games unblock before seating", () => {
+  const auth = fs.readFileSync(path.join(__dirname, "..", "src", "services", "services", "authService.ts"), "utf8");
+  assert.ok(auth.includes("case 'greymarchMount':"));
+  assert.ok(bridge.includes('if (type === "greymarchMount") { if (Number(msg.horse) > 0) this.greymarchMountWanted = {'));
+  assert.ok(bridge.includes("mh.blockActivation(false);\r\n                        mh.activate(mpl, true);") || bridge.includes("mh.blockActivation(false);\n                        mh.activate(mpl, true);"));
+  assert.ok(bridge.indexOf("var mw = this.greymarchMountWanted;") < bridge.indexOf("if (now < (this.greymarchRideNext || 0)) return;"), "not held back by the 250 ms gate");
+  assert.ok(formView.includes("horse.blockActivation(false); horse.activate(ac, true);"));
+});

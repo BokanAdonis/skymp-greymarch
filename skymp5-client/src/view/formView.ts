@@ -1162,7 +1162,7 @@ export class FormView {
       this.gmSeatTryAt = Date.now();
       gmCrumb("seat " + gmHex(me) + " on " + gmHex(riding) + " (here " + gmHex(horse.getFormID()) + ")");
       try { ac.stopTranslation(); ac.clearKeepOffsetFromActor(); } catch (e) { /* not moving */ }
-      try { horse.activate(ac, true); } catch (e) { gmCrumb("seat failed " + gmHex(me) + ": " + e); }
+      try { horse.blockActivation(false); horse.activate(ac, true); } catch (e) { gmCrumb("seat failed " + gmHex(me) + ": " + e); } // unblocked first: SkyMP blocks activation on every NPC whose movement it plays
     } else if (step === "unseat") {
       gmCrumb("unseat " + gmHex(me));
       try { ac.dismount(); } catch (e) { gmCrumb("unseat failed " + gmHex(me) + ": " + e); }
