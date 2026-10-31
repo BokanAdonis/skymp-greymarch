@@ -1698,6 +1698,44 @@ void ActionListener::OnWeaponHit(MpActor* aggressor,
     ? 0.f
     : currentActorValues.healthPercentage;
 
+  // GREYMARCH (2026-10-31, the owner: players in iron killed by a bear in 3
+  // hits): every weapon or claw hit on a player goes to the log with what
+  // decided it, so a fight can be read back: the attacker (form, base, race),
+  // the weapon (1f4 = claws or fists), power/sneak/blocked, the armor counted
+  // on the player, the attacker's damage multiplier, the damage and the health
+  // before and after (in points of the player's maximum)
+  if (partOne.serverState.UserByActor(&targetActor) !=
+      Networking::InvalidUserId) {
+    float armor = 0.f;
+    WorldState* worldState = targetActor.GetParent();
+    const auto& armorTable = GreymarchBalance::Get().armorRating;
+    for (const auto& entry : targetActor.GetEquipment().inv.entries) {
+      if (entry.GetWorn() == Inventory::Worn::None ||
+          espm::GetRecordType(entry.baseId, worldState) != espm::ARMO::kType) {
+        continue;
+      }
+      auto it = armorTable.find(entry.baseId);
+      armor += it != armorTable.end()
+        ? it->second
+        : static_cast<float>(
+            espm::GetData<espm::ARMO>(entry.baseId, worldState)
+              .baseRatingX100) /
+          100.f;
+    }
+    spdlog::info(
+      "hit on player: {:x} (base {:x}, race {:x}) -> player {:x} with "
+      "{:x}{}{}{}: armor {:.0f}, attacker x{:.2f}, damage {:.1f}, health "
+      "{:.1f} -> {:.1f} of {:.0f}",
+      aggressor->GetFormId(), aggressor->GetBaseId(), aggressor->GetRaceId(),
+      targetActor.GetFormId(), hitData.source,
+      hitData.isPowerAttack ? " power" : "",
+      hitData.isSneakAttack ? " sneak" : "",
+      hitData.isHitBlocked ? " blocked" : "", armor,
+      aggressor->GetGreymarchDamageMult(), damage,
+      healthPercentage * outBaseHealth,
+      currentActorValues.healthPercentage * outBaseHealth, outBaseHealth);
+  }
+
   targetActor.NetSetPercentages(
     currentActorValues, aggressor,
     std::vector<espm::ActorValue>{ espm::ActorValue::Health });
