@@ -66,6 +66,8 @@ GreymarchBalanceTable GreymarchBalanceTable::FromJson(const nlohmann::json& j)
   t.dualCast = Number(j, "dualCast", 1.f, 5.f);
   t.playerSpells = Number(j, "playerSpells", 0.f, 10.f);
   t.npcSpells = Number(j, "npcSpells", 0.f, 10.f);
+  ReadMap(j, "shieldStops", 100.f, t.shieldStops);
+  t.enchantArmorCap = Number(j, "enchantArmorCap", 0.f, 10000.f);
   return t;
 }
 

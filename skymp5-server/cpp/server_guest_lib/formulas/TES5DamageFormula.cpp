@@ -7,7 +7,9 @@
 #include "WorldState.h"
 #include "libespm/espm.h"
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <optional>
 
 namespace internal {
 
@@ -43,7 +45,8 @@ private:
   [[nodiscard]] float DetermineDamageFromSource(uint32_t source) const;
   [[nodiscard]] float CalcUnarmedDamage() const;
   [[nodiscard]] float CalcArmorDamagePenalty() const;
-  [[nodiscard]] bool TargetHasShield() const;
+  [[nodiscard]] std::optional<uint32_t> TargetShieldId() const;
+  [[nodiscard]] bool AggressorJumpedRecently() const;
 };
 
 TES5DamageFormulaImpl::TES5DamageFormulaImpl(const MpActor& aggressor_,
@@ -144,7 +147,14 @@ float TES5DamageFormulaImpl::CalcArmorRatingComponent(
       // TODO(#632) refactor this effect with actor effect system
       const auto enchantmentData =
         espm::GetData<espm::ENCH>(armorData.enchantmentFormId, espmProvider);
-      ac += CalcMagicEffects(enchantmentData.effects);
+      float enchantBonus = CalcMagicEffects(enchantmentData.effects);
+      // GREYMARCH: the balance table's cap on what one piece's enchantment
+      // adds (about one tier's worth); none = all of it, as the game
+      if (const auto& cap = GreymarchBalance::Get().enchantArmorCap;
+          cap.has_value()) {
+        enchantBonus = std::min(enchantBonus, *cap);
+      }
+      ac += enchantBonus;
     }
 
     return ac;
@@ -194,9 +204,9 @@ float TES5DamageFormulaImpl::CalcArmorDamagePenalty() const
                      maxArmorRating));
 }
 
-// GREYMARCH: whether the target wears a shield (a block with one can stop
-// more than a block with a weapon)
-bool TES5DamageFormulaImpl::TargetHasShield() const
+// GREYMARCH: the shield the target wears, if any (a block with one can stop
+// more than a block with a weapon, and a better shield more)
+std::optional<uint32_t> TES5DamageFormulaImpl::TargetShieldId() const
 {
   for (const auto& entry : target.GetEquipment().inv.entries) {
     if (entry.GetWorn() == Inventory::Worn::None ||
@@ -205,10 +215,23 @@ bool TES5DamageFormulaImpl::TargetHasShield() const
     }
     if (espm::GetData<espm::ARMO>(entry.baseId, espmProvider).equipSlotId >
         0) {
-      return true;
+      return entry.baseId;
     }
   }
-  return false;
+  return std::nullopt;
+}
+
+// GREYMARCH: whether the attacker was in a jump just now. The hit arrives
+// after the movement update that said so, maybe after landing.
+bool TES5DamageFormulaImpl::AggressorJumpedRecently() const
+{
+  constexpr auto kJumpWindow = std::chrono::milliseconds(1000);
+  if (aggressor.GetAnimationVariableBool("bInJumpState")) {
+    return true;
+  }
+  const auto last = aggressor.GetLastInJumpTime();
+  return last != std::chrono::steady_clock::time_point{} &&
+    std::chrono::steady_clock::now() - last < kJumpWindow;
 }
 
 float TES5DamageFormulaImpl::CalculateDamage() const
@@ -219,19 +242,48 @@ float TES5DamageFormulaImpl::CalculateDamage() const
   // TODO(#461): add difficulty multiplier
   float damage = incomingDamage * CalcArmorDamagePenalty();
 
+  // GREYMARCH: the combat skill perks the gamemode set on each side
+  // (mp.set(actorId, "combatPerks", ...)); unset = as before
+  const auto& aggressorPerks = aggressor.GetCombatPerks();
+  const auto& targetPerks = target.GetCombatPerks();
+
   if (hitData.isPowerAttack) {
-    damage *= balance.powerAttack.value_or(2.f);
+    // a jumping power attack does x2 with the perk (rank 5), else the
+    // table's power attack (x1.5 when the table has none)
+    if (aggressorPerks.isSet && aggressorPerks.jumpPower &&
+        AggressorJumpedRecently()) {
+      damage *= 2.f;
+    } else {
+      damage *= balance.powerAttack.value_or(1.5f);
+    }
   }
 
   if (hitData.isHitBlocked) {
     // GREYMARCH: what gets through a block comes from the balance table,
-    // apart for a shield and a weapon (0.1 = the old placeholder)
-    const auto& through =
-      TargetHasShield() ? balance.shieldBlock : balance.weaponBlock;
-    damage *= through.value_or(0.1f);
+    // apart for a shield and a weapon (0.1 = the old placeholder). A shield
+    // in the table's shieldStops stops its own percent (its tier); a weapon
+    // block stops the defender's blockStops percent when the gamemode set it.
+    const auto shieldId = TargetShieldId();
+    float through = 0.1f;
+    if (shieldId.has_value()) {
+      if (auto it = balance.shieldStops.find(*shieldId);
+          it != balance.shieldStops.end()) {
+        through = 1.f - it->second / 100.f;
+      } else {
+        through = balance.shieldBlock.value_or(0.1f);
+      }
+    } else if (targetPerks.isSet && targetPerks.blockStops.has_value()) {
+      through = 1.f - *targetPerks.blockStops / 100.f;
+    } else {
+      through = balance.weaponBlock.value_or(0.1f);
+    }
+    damage *= std::clamp(through, 0.f, 1.f);
   }
 
-  if (hitData.isSneakAttack) {
+  // the sneak bonus only for an attacker with the perk (rank 3); an actor
+  // the gamemode never set (an NPC) keeps it
+  if (hitData.isSneakAttack &&
+      (!aggressorPerks.isSet || aggressorPerks.sneak)) {
     damage *= balance.sneak.value_or(1.3f);
   }
 

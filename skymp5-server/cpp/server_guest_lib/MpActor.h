@@ -201,6 +201,26 @@ public:
   };
   void SetRegenBonus(const RegenBonus& bonus) noexcept;
   const RegenBonus& GetRegenBonus() const noexcept;
+  // GREYMARCH: the combat skill perks the gamemode grants this actor
+  // (COMBAT-OVERHAUL.md, Combat skills): mp.set(actorId, "combatPerks",
+  // { sneak, jumpPower, blockStops }). Unset (NPCs, or set to null) plays as
+  // before: sneak attacks count, no jump bonus, the table's weapon block.
+  // Not saved: the gamemode sets it again.
+  struct CombatPerks
+  {
+    bool isSet = false;
+    // the sneak attack multiplier counts
+    bool sneak = true;
+    // a power attack in a jump does x2
+    bool jumpPower = false;
+    // percent a weapon block stops, 0..100
+    std::optional<float> blockStops;
+  };
+  void SetCombatPerks(const CombatPerks& perks) noexcept;
+  const CombatPerks& GetCombatPerks() const noexcept;
+  // GREYMARCH: when a movement update last said the actor was in a jump
+  void SetLastInJumpTime(std::chrono::steady_clock::time_point t) noexcept;
+  std::chrono::steady_clock::time_point GetLastInJumpTime() const noexcept;
   NiPoint3 GetViewDirection() const;
   void IncreaseBlockCount() noexcept;
   void ResetBlockCount() noexcept;

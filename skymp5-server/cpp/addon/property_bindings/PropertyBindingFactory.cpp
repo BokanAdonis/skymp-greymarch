@@ -4,6 +4,7 @@
 #include "AngleBinding.h"
 #include "AppearanceBinding.h"
 #include "BaseDescBinding.h"
+#include "CombatPerksBinding.h"
 #include "ConsoleCommandsAllowedBinding.h"
 #include "CustomPropertyBinding.h"
 #include "EquipmentBinding.h"
@@ -48,6 +49,7 @@ PropertyBindingFactory::CreateStandardPropertyBindings()
   result["maxVitals"] = std::make_shared<MaxVitalsBinding>(); // GREYMARCH
   result["damageMult"] = std::make_shared<DamageMultBinding>(); // GREYMARCH
   result["regenBonus"] = std::make_shared<RegenBonusBinding>(); // GREYMARCH
+  result["combatPerks"] = std::make_shared<CombatPerksBinding>(); // GREYMARCH
   result["greymarchBalance"] =
     std::make_shared<GreymarchBalanceBinding>(); // GREYMARCH
   result["neighbors"] = std::make_shared<NeighborsBinding>();

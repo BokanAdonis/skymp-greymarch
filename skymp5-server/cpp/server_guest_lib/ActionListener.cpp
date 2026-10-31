@@ -161,6 +161,11 @@ void ActionListener::OnUpdateMovement(const RawMessageData& rawMsgData,
       SetAngleMode::CalledByUpdateMovement);
     actor->SetAnimationVariableBool(
       AnimationVariableBool::kVariable_bInJumpState, msg.data.isInJumpState);
+    // GREYMARCH: a jumping power attack (combat perks) counts for a moment
+    // after the jump: the hit arrives after the movement update
+    if (msg.data.isInJumpState) {
+      actor->SetLastInJumpTime(std::chrono::steady_clock::now());
+    }
     actor->SetAnimationVariableBool(
       AnimationVariableBool::kVariable__skymp_isWeapDrawn,
       msg.data.isWeapDrawn);

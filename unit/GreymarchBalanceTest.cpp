@@ -5,6 +5,7 @@
 
 #include "ActionListener.h"
 #include "GreymarchBalance.h"
+#include "HitData.h"
 #include "HitMessage.h"
 #include "formulas/TES5DamageFormula.h"
 
@@ -104,4 +105,162 @@ TEST_CASE("Greymarch: a weapon's damage comes from the live table, and the attac
   GreymarchBalance::Set({});
   REQUIRE_THAT(OneHit(0.5f), Catch::Matchers::WithinAbs(plain * 0.5f, 0.002f));
   REQUIRE_THAT(OneHit(), Catch::Matchers::WithinAbs(plain, 0.002f)); // an empty table plays like the game files
+}
+
+namespace {
+constexpr uint32_t kIronShield = 0x00012EB6;
+
+// the real formula's damage for one iron dagger hit of the actor on themselves (no armor unless a shield is worn)
+float FormulaHit(MpActor& ac, bool power, bool sneak, bool blocked)
+{
+  HitData hitData;
+  hitData.target = 0x14;
+  hitData.aggressor = 0x14;
+  hitData.source = kIronDagger;
+  hitData.isPowerAttack = power;
+  hitData.isSneakAttack = sneak;
+  hitData.isHitBlocked = blocked;
+  return TES5DamageFormula{}.CalculateDamage(ac, ac, hitData);
+}
+
+MpActor& MakeActor(PartOne& p)
+{
+  DoConnect(p, 0);
+  p.CreateActor(0xff000000, { 0, 0, 0 }, 0, 0x3c);
+  p.SetUserActor(0, 0xff000000);
+  auto& ac = p.worldState.GetFormAt<MpActor>(0xff000000);
+  ac.SetEquipment(Equipment());
+  return ac;
+}
+
+void DropActor(PartOne& p)
+{
+  p.DestroyActor(0xff000000);
+  DoDisconnect(p, 0);
+}
+}
+
+TEST_CASE("Greymarch: the balance table reads shield stops and the enchantment cap",
+          "[Greymarch]")
+{
+  auto t = GreymarchBalanceTable::FromJson(nlohmann::json::parse(
+    R"({"shieldStops":{"77494":60,"77495":120,"z":5},"enchantArmorCap":15})"));
+  REQUIRE(t.shieldStops.size() == 1); // more than 100% stopped: refused
+  REQUIRE(t.shieldStops.at(77494) == 60.f);
+  REQUIRE(t.enchantArmorCap.value() == 15.f);
+  auto none = GreymarchBalanceTable::FromJson(nlohmann::json::parse("{}"));
+  REQUIRE_FALSE(none.enchantArmorCap.has_value());
+  REQUIRE(none.shieldStops.empty());
+}
+
+TEST_CASE("Greymarch: power attack x1.5 by default, x2 in a jump with the jumpPower perk",
+          "[Greymarch]")
+{
+  BalanceReset reset;
+  GreymarchBalance::Set({});
+  PartOne& p = GetPartOne();
+  auto& ac = MakeActor(p);
+
+  REQUIRE(FormulaHit(ac, false, false, false) == 4.f); // iron dagger
+  REQUIRE(FormulaHit(ac, true, false, false) == Catch::Approx(6.f));
+
+  ac.SetLastInJumpTime(std::chrono::steady_clock::now());
+  REQUIRE(FormulaHit(ac, true, false, false) == Catch::Approx(6.f)); // no perk
+
+  MpActor::CombatPerks perks;
+  perks.isSet = true;
+  perks.jumpPower = true;
+  ac.SetCombatPerks(perks);
+  REQUIRE(FormulaHit(ac, true, false, false) == Catch::Approx(8.f));
+
+  ac.SetLastInJumpTime(std::chrono::steady_clock::now() - 5s); // landed long ago
+  REQUIRE(FormulaHit(ac, true, false, false) == Catch::Approx(6.f));
+
+  GreymarchBalanceTable t;
+  t.powerAttack = 1.25f;
+  GreymarchBalance::Set(t);
+  REQUIRE(FormulaHit(ac, true, false, false) == Catch::Approx(5.f));
+
+  DropActor(p);
+}
+
+TEST_CASE("Greymarch: the sneak bonus only with the sneak perk; an actor never set keeps it",
+          "[Greymarch]")
+{
+  BalanceReset reset;
+  GreymarchBalance::Set({});
+  PartOne& p = GetPartOne();
+  auto& ac = MakeActor(p);
+
+  REQUIRE(FormulaHit(ac, false, true, false) == Catch::Approx(5.2f)); // unset (an NPC)
+
+  MpActor::CombatPerks perks;
+  perks.isSet = true;
+  perks.sneak = false;
+  ac.SetCombatPerks(perks);
+  REQUIRE(FormulaHit(ac, false, true, false) == Catch::Approx(4.f));
+
+  perks.sneak = true;
+  ac.SetCombatPerks(perks);
+  REQUIRE(FormulaHit(ac, false, true, false) == Catch::Approx(5.2f));
+
+  DropActor(p);
+}
+
+TEST_CASE("Greymarch: a weapon block stops the defender's blockStops, else the table's weaponBlock",
+          "[Greymarch]")
+{
+  BalanceReset reset;
+  GreymarchBalanceTable t;
+  t.weaponBlock = 0.6f; // 40% stopped
+  GreymarchBalance::Set(t);
+  PartOne& p = GetPartOne();
+  auto& ac = MakeActor(p);
+
+  REQUIRE(FormulaHit(ac, false, false, true) == Catch::Approx(2.4f));
+
+  MpActor::CombatPerks perks;
+  perks.isSet = true;
+  perks.blockStops = 50.f;
+  ac.SetCombatPerks(perks);
+  REQUIRE(FormulaHit(ac, false, false, true) == Catch::Approx(2.f));
+
+  ac.SetCombatPerks(MpActor::CombatPerks{}); // cleared: the table again
+  REQUIRE(FormulaHit(ac, false, false, true) == Catch::Approx(2.4f));
+
+  DropActor(p);
+}
+
+TEST_CASE("Greymarch: a shield block stops the shield's own percent from shieldStops, else shieldBlock",
+          "[Greymarch]")
+{
+  BalanceReset reset;
+  PartOne& p = GetPartOne();
+  auto& ac = MakeActor(p);
+
+  Inventory::ExtraData worn;
+  worn.worn_ = true;
+  Equipment eq;
+  eq.inv.entries.push_back(Inventory::Entry(kIronShield, 1, worn));
+  ac.SetEquipment(eq);
+
+  GreymarchBalanceTable t;
+  t.armorRating[kIronShield] = 0.f; // no armor from the shield: only the block counts
+  t.shieldBlock = 0.35f;
+  GreymarchBalance::Set(t);
+  REQUIRE(FormulaHit(ac, false, false, false) == Catch::Approx(4.f));
+  REQUIRE(FormulaHit(ac, false, false, true) == Catch::Approx(1.4f));
+
+  // the defender's weapon block perk does not count with a shield
+  MpActor::CombatPerks perks;
+  perks.isSet = true;
+  perks.blockStops = 50.f;
+  ac.SetCombatPerks(perks);
+  REQUIRE(FormulaHit(ac, false, false, true) == Catch::Approx(1.4f));
+
+  t.shieldStops[kIronShield] = 70.f;
+  GreymarchBalance::Set(t);
+  REQUIRE(FormulaHit(ac, false, false, true) == Catch::Approx(1.2f));
+
+  DropActor(p);
 }

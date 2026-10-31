@@ -17,6 +17,8 @@
 //   spells    { "<global spell id>": multiplier }   a spell hit's damage times this (the F7 Spells balance tab: the number set / the game's, times the school's percent)
 //   dualCast                    how much harder a dual cast spell hits (the game's 2.2)
 //   playerSpells / npcSpells    a spell hit's damage times this when a player / an NPC cast it
+//   shieldStops { "<global form id>": percent }   percent of a hit a block with that shield stops (0..100; the tier's number), else shieldBlock
+//   enchantArmorCap             the most armor rating one worn piece's enchantment adds (none = all of it, as the game)
 struct GreymarchBalanceTable
 {
   std::unordered_map<uint32_t, float> weaponDamage;
@@ -32,6 +34,8 @@ struct GreymarchBalanceTable
   std::optional<float> dualCast;
   std::optional<float> playerSpells;
   std::optional<float> npcSpells;
+  std::unordered_map<uint32_t, float> shieldStops; // GREYMARCH: percent stopped
+  std::optional<float> enchantArmorCap;
 
   // Throws on text that is not a JSON object. Values out of range are left out (the plugin's value is used).
   static GreymarchBalanceTable FromJson(const nlohmann::json& j);

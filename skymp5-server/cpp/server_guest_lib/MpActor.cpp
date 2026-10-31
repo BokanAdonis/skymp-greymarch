@@ -55,6 +55,9 @@ struct MpActor::Impl
   MpActor::MaxVitalsOverride maxVitalsOverride; // GREYMARCH
   float greymarchDamageMult = 1.f;              // GREYMARCH
   MpActor::RegenBonus regenBonus;               // GREYMARCH
+  MpActor::CombatPerks combatPerks;             // GREYMARCH
+  // GREYMARCH: the last movement update in a jump (combat perks)
+  std::chrono::steady_clock::time_point lastInJump;
   std::chrono::steady_clock::time_point lastAttributesUpdateTimePoint;
   std::vector<std::pair<uint32_t, std::chrono::steady_clock::time_point>>
     lastHitTimesLRU;
@@ -1815,6 +1818,28 @@ void MpActor::SetRegenBonus(const RegenBonus& bonus) noexcept
 const MpActor::RegenBonus& MpActor::GetRegenBonus() const noexcept
 {
   return pImpl->regenBonus;
+}
+
+void MpActor::SetCombatPerks(const CombatPerks& perks) noexcept
+{
+  pImpl->combatPerks = perks;
+}
+
+const MpActor::CombatPerks& MpActor::GetCombatPerks() const noexcept
+{
+  return pImpl->combatPerks;
+}
+
+void MpActor::SetLastInJumpTime(
+  std::chrono::steady_clock::time_point t) noexcept
+{
+  pImpl->lastInJump = t;
+}
+
+std::chrono::steady_clock::time_point MpActor::GetLastInJumpTime()
+  const noexcept
+{
+  return pImpl->lastInJump;
 }
 
 const float kAngleToRadians = std::acos(-1.f) / 180.f;
