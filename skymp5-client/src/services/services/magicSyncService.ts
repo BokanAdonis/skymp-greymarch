@@ -119,8 +119,11 @@ export class MagicSyncService extends ClientListener {
             return;
         }
 
+        // GREYMARCH (2026-10-30, a crash: Howling Blast ended, and with it the Frostbite of every NPC this game runs): these are the PLAYER's animation
+        // events (the hook is the player's only), so they end the player's own casts only. An NPC's cast ends by its own checks (checkActiveCasts)
         this.controller.once('update', () => {
-            for (const key of Array.from(this.activeCasts.keys())) {
+            for (const [key, cast] of Array.from(this.activeCasts.entries())) {
+                if (cast.casterLocalId !== this.playerId) continue;
                 this.sendInterrupt(key, ctx.animEventName);
             }
         });

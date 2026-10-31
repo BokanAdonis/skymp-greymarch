@@ -995,6 +995,16 @@ export class RemoteServer extends ClientListener {
 
       const castKey = `${msg.data.caster}:${msg.data.castingSource}`;
 
+      // GREYMARCH (2026-10-30, a crash at the end of a held Frostbite): an NPC THIS game runs cast it here already, with its own AI; the server's copy of its
+      // cast or its end, sent back, is never replayed onto it (an end forced its animation variables in and interrupted it mid-cast). Its own cast is enough
+      try {
+        const hosted = storage['hosted'];
+        if (Array.isArray(hosted) && (hosted.includes(msg.data.caster) || hosted.includes(msg.data.caster + 0x100000000))) {
+          this.greymarchMagicDiag(`magic: ${msg.data.caster.toString(16)} ${msg.data.interruptCast ? "end" : "cast"} ${msg.data.spell.toString(16)}: an NPC this game runs, not replayed`);
+          return;
+        }
+      } catch (e) { /* replayed as before */ }
+
       // GREYMARCH: never on a werewolf, werebear or creature form (see greymarchIsBeastCopy)
       if (this.greymarchIsBeastCopy(msg.data.caster, ac)) {
         this.greymarchMagicDiag(`magic: ${msg.data.caster.toString(16)} ${msg.data.interruptCast ? "end" : "cast"} ${msg.data.spell.toString(16)} hand ${msg.data.castingSource}: not replayed (a beast or creature copy)`);
