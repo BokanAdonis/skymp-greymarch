@@ -10,7 +10,7 @@ const auth = fs.readFileSync(path.join(__dirname, "..", "src", "services", "serv
 
 test("greymarchCombatPerks is let through and read as three booleans", () => {
   assert.match(auth, /case 'greymarchCombatPerks':/);
-  assert.match(src, /if \(type === "greymarchCombatPerks"\) \{ this\.greymarchPerksWant = \{ blockSpeed: msg\.blockSpeed === true, bowSpeed: msg\.bowSpeed === true, fastDraw: msg\.fastDraw === true \}; this\.greymarchPerksDirty = true; return; \}/);
+  assert.match(src, /if \(type === "greymarchCombatPerks"\) \{ this\.greymarchPerksWant = \{ blockSpeed: msg\.blockSpeed === true, bowSpeed: msg\.bowSpeed === true, fastDraw: msg\.fastDraw === true, sprintPower: msg\.sprintPower === true \}; this\.greymarchPerksDirty = true; return; \}/);
 });
 
 test("the vanilla perk ids are Block Runner, Ranger and Quick Shot", () => {
@@ -34,7 +34,7 @@ test("apply: on, off, and a perk the player had before is left alone", () => {
   const start = src.indexOf("    greymarchPerksDue(now: number): any {");
   const end = src.indexOf("    // STAT MAXIMUMS set by staff");
   const body = src.slice(start, end).replace(/\(now: number\): any/g, "(now)").replace(/\(now: number, player: any\): any/g, "(now, player)");
-  const Cls = new Function("GREYMARCH_PERK_BLOCK_RUNNER", "GREYMARCH_PERK_RANGER", "GREYMARCH_PERK_QUICK_SHOT", "return class {\n" + body + "\n};")(1, 2, 3);
+  const Cls = new Function("GREYMARCH_PERK_BLOCK_RUNNER", "GREYMARCH_PERK_RANGER", "GREYMARCH_PERK_QUICK_SHOT", "GREYMARCH_PERK_CRITICAL_CHARGE", "GREYMARCH_PERK_GREAT_CRITICAL_CHARGE", "return class {\n" + body + "\n};")(1, 2, 3, 4, 5);
   const b = new Cls();
   const logs = [];
   b.greymarchLog = (m) => logs.push(m);
@@ -54,4 +54,10 @@ test("apply: on, off, and a perk the player had before is left alone", () => {
   b.greymarchPerksDirty = true;
   b.greymarchPerksApply(7000, player);
   assert.deepStrictEqual([...perks].sort(), [2, 3]);
+
+  // rank 5 melee: the sprinting power attack (the lunge) needs Critical Charge and Great Critical Charge (2026-10-31, the owner)
+  b.greymarchPerksWant = { blockSpeed: false, bowSpeed: false, fastDraw: false, sprintPower: true };
+  b.greymarchPerksDirty = true;
+  b.greymarchPerksApply(14000, player);
+  assert.deepStrictEqual([...perks].sort(), [3, 4, 5]);
 });

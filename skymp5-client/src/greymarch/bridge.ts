@@ -114,6 +114,10 @@ export function greymarchCameraYaw(project: (pts: number[][]) => number[][], hea
 const GREYMARCH_PERK_BLOCK_RUNNER = 0x00106253;
 const GREYMARCH_PERK_RANGER = 0x00058F63;
 const GREYMARCH_PERK_QUICK_SHOT = 0x00105F19;
+// the sprinting power attack (the lunge) at rank 5 (2026-10-31, the owner: "whenever you are sprinting it should trigger a lunge attack when you do a heavy"):
+// the game plays it only with these perks; the server makes it hit x2 (combatPerks jumpPower, a power attack while sprinting or jumping)
+const GREYMARCH_PERK_CRITICAL_CHARGE = 0x000CB406;
+const GREYMARCH_PERK_GREAT_CRITICAL_CHARGE = 0x000CB407;
 
 export class GreymarchBridge {
     [key: string]: any;
@@ -242,7 +246,7 @@ export class GreymarchBridge {
         if (type === "greymarchScribeOpen") { this.greymarchScribeShow(); return; }
         if (type === "greymarchProfReply") { this.greymarchLog("prof: the server's answer arrived (rid " + msg.rid + ", ok " + msg.ok + ")"); this.greymarchProfToPage("reply", msg); return; } // the professions window (K)
         if (type === "greymarchCombatMod") { var cm = Number(msg.mult); this.greymarchCombatWant = cm >= 0.1 && cm <= 3 ? cm : 1; return; } // the damage multiplier for what is in hand (professions: a weapon above your rank hits weaker, a Brawler's fists hit harder)
-        if (type === "greymarchCombatPerks") { this.greymarchPerksWant = { blockSpeed: msg.blockSpeed === true, bowSpeed: msg.bowSpeed === true, fastDraw: msg.fastDraw === true }; this.greymarchPerksDirty = true; return; } // combat skill perks (gamemode, COMBAT-OVERHAUL.md): rank 4 full speed while blocking / with a bow drawn, rank 5 Bowman fast draw
+        if (type === "greymarchCombatPerks") { this.greymarchPerksWant = { blockSpeed: msg.blockSpeed === true, bowSpeed: msg.bowSpeed === true, fastDraw: msg.fastDraw === true, sprintPower: msg.sprintPower === true }; this.greymarchPerksDirty = true; return; } // combat skill perks (gamemode, COMBAT-OVERHAUL.md): rank 4 full speed while blocking / with a bow drawn, rank 5 Bowman fast draw
         if (type === "greymarchMenuEvent" && msg.type === "body" && Number(msg.looking) > 0 && !this.greymarchMenuOn) { this.greymarchMenuShow({ mode: "open", looking: Number(msg.looking) }); return; } // E on the body of a dead wild animal (gamemode wildlifesystem.js): the menu opens on it to take what is on it
         if (type === "greymarchMenuEvent") { if ((msg.type === "trade_invite" || msg.type === "trade" || msg.type === "feed_invite" || msg.type === "frisk_invite" || msg.type === "guard_view") && !this.greymarchMenuOn) this.greymarchMenuShow({ mode: "invite", looking: 0 }); /* a trade, a vampire's request to feed, a guard's request to frisk or what the frisk found opens the menu by itself */ this.greymarchMenuToPage("event", msg); return; }
         if (type === "greymarchFx") { this.greymarchFxWant = { noclip: !!msg.noclip, speed: Number(msg.speed) || 100, frozen: !!msg.frozen, god: !!msg.god, tgm: !!msg.tgm }; if (msg.me) this.greymarchMeActor = msg.me; return; }
@@ -2570,7 +2574,7 @@ export class GreymarchBridge {
         var w = this.greymarchPerksWant;
         if (!w) return false;
         if (this.greymarchPerksDirty) return true;
-        return (w.blockSpeed || w.bowSpeed || w.fastDraw) && now >= (this.greymarchPerksNext || 0);
+        return (w.blockSpeed || w.bowSpeed || w.fastDraw || w.sprintPower) && now >= (this.greymarchPerksNext || 0);
     }
     greymarchPerksApply(now: number, player: any): any {
         if (!this.greymarchPerksDue(now)) return;
@@ -2578,7 +2582,7 @@ export class GreymarchBridge {
         this.greymarchPerksDirty = false;
         this.greymarchPerksNext = now + 5000;
         var added = this.greymarchPerksAdded || (this.greymarchPerksAdded = {});
-        var list = [{ key: "blockSpeed", id: GREYMARCH_PERK_BLOCK_RUNNER, name: "Block Runner" }, { key: "bowSpeed", id: GREYMARCH_PERK_RANGER, name: "Ranger" }, { key: "fastDraw", id: GREYMARCH_PERK_QUICK_SHOT, name: "Quick Shot" }];
+        var list = [{ key: "blockSpeed", id: GREYMARCH_PERK_BLOCK_RUNNER, name: "Block Runner" }, { key: "bowSpeed", id: GREYMARCH_PERK_RANGER, name: "Ranger" }, { key: "fastDraw", id: GREYMARCH_PERK_QUICK_SHOT, name: "Quick Shot" }, { key: "sprintPower", id: GREYMARCH_PERK_CRITICAL_CHARGE, name: "Critical Charge" }, { key: "sprintPower", id: GREYMARCH_PERK_GREAT_CRITICAL_CHARGE, name: "Great Critical Charge" }];
         for (var i = 0; i < list.length; i++) {
             var e = list[i];
             try {
