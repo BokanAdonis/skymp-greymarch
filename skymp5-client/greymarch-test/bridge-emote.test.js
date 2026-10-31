@@ -381,10 +381,10 @@ test("the build system's free camera: Place in the Build tab turns it on, a prev
   const g = s.log.ghosts[0]; assert.deepStrictEqual({ id: g.base.id, file: g.base.file }, { id: 0xd932f, file: "Skyrim.esm" });
   assert.deepStrictEqual(g.at, [1000, 2400, 300], "400 units ahead"); assert.deepStrictEqual(g.rot, [0, 0, 180], "facing the camera");
   s.key(200, true); s.key(200, false); s.key(205, true); s.key(205, false); s.key(201, true); s.key(201, false); s.camTick(50);
-  assert.deepStrictEqual(g.at, [1000, 2440, 310]); assert.deepStrictEqual(g.rot, [0, 0, 195]);
+  assert.deepStrictEqual(g.at, [1000, 2425, 325], "the step: 25 units, 15 degrees"); assert.deepStrictEqual(g.rot, [0, 0, 195]);
   s.key(28, true); s.key(28, false);
   const sent = s.log.sent.filter((m) => m.customPacketType === "greymarchAdmin").pop();
-  assert.deepStrictEqual([sent.op, sent.args.sub, sent.args.key, sent.args.pos, sent.args.rot], ["build", "place_at", "d932f:Skyrim.esm", [1000, 2440, 310], 195]);
+  assert.deepStrictEqual([sent.op, sent.args.sub, sent.args.key, sent.args.pos, sent.args.rot], ["build", "place_at", "d932f:Skyrim.esm", [1000, 2425, 325], 195]);
   assert.ok(s.gm.greymarchBuildCam, "placing keeps the camera on for the next one");
   s.say({ customPacketType: "greymarchAdminReply", rid: sent.rid, ok: true, data: { message: "Blacksmith Forge placed." } });
   s.key(1, true); s.key(1, false);
@@ -398,6 +398,30 @@ test("the build system's free camera: Place in the Build tab turns it on, a prev
   const t = make(); t.state.noDll = true;
   t.page({ type: "build-cam", mode: "place", key: "d932f:Skyrim.esm", name: "Forge" }); t.camTick();
   assert.ok(!t.gm.greymarchBuildCam, "no plugin: no free camera, nothing changes");
+});
+
+test("precision in the free camera (2026-10-31): [ and ] pick the step (1, 5, 25, 100 units / 1, 5, 15, 90 degrees), L locks the preview where it is while the camera flies, the arrows then move it the way the camera looks, comma and period turn it, L again follows from where it is", () => {
+  const s = make();
+  s.state.cam = [1000, 2000, 300, 0, 1, 0]; // looking north
+  s.page({ type: "build-cam", mode: "place", key: "d932f:Skyrim.esm", name: "Sign" }); s.camTick();
+  const g = s.log.ghosts[0];
+  s.key(26, true); s.key(26, false); s.key(26, true); s.key(26, false); // [ twice: 1 unit, 1 degree
+  s.key(200, true); s.key(200, false); s.camTick(50);
+  assert.deepStrictEqual(g.at, [1000, 2401, 300]);
+  s.key(38, true); s.key(38, false); // L: locked at 1000,2401,300
+  s.state.cam = [5000, 5000, 900, 1, 0, 0]; s.camTick(100); // the camera flies off, looking east
+  assert.deepStrictEqual(g.at, [1000, 2401, 300], "locked: it stays where it was");
+  s.key(200, true); s.key(200, false); s.camTick(150); // forward the way the camera looks: east, 1 unit
+  assert.deepStrictEqual(g.at, [1001, 2401, 300]);
+  s.key(27, true); s.key(27, false); // ] : 5 units, 5 degrees
+  s.key(205, true); s.key(205, false); s.key(201, true); s.key(201, false); s.key(52, true); s.key(52, false); s.camTick(200); // right of east is south, up, turn
+  assert.deepStrictEqual(g.at, [1001, 2396, 305]); assert.deepStrictEqual(g.rot, [0, 0, 185]);
+  s.key(28, true); s.key(28, false);
+  const sent = s.log.sent.filter((m) => m.customPacketType === "greymarchAdmin").pop();
+  assert.deepStrictEqual([sent.args.pos, sent.args.rot], [[1001, 2396, 305], 185], "Enter sends the locked spot");
+  s.state.cam = [1001, 2000, 280, 0, 1, 0]; // the camera looks towards it again (north, from below)
+  s.key(38, true); s.key(38, false); s.camTick(250); // unlocked: it follows the camera from where it is, no jump
+  assert.deepStrictEqual(g.at.map(Math.round), [1001, 2396, 305]);
 });
 
 test("the chopping block: while the player sits in furniture its id goes to the server once a second, 0 once on getting up, nothing while standing", () => {

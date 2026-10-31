@@ -94,6 +94,7 @@ const CLICK_GUARD_MS = 400; // after a window closes, attacks and drawing a weap
 const MINI_KEEP_MS = 3500; // a mini game window kept up between logs (the chopping block) closes if the next does not come within this
 const MINIGAME_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmMiniRun").split("greymarch-prof").join("greymarch-minigame").split("2147483220").join("2147483226"); // the profession mini games (gamemode minigames.js): the same loader, another page, over the others
 const LEDGER_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmLedgerRun").split("greymarch-prof").join("greymarch-ledger").split("2147483220").join("2147483223"); // the guard ledger (/reports)
+const BUILD_CAM_STEPS = [[1, 1], [5, 5], [25, 15], [100, 90]]; // the free camera's steps: units and degrees ([ and ]; gamemode buildsys.js TUNE.steps)
 const SCRIBE_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmScribeRun").split("greymarch-prof").join("greymarch-scribe").split("2147483220").join("2147483227"); // the scribe's desk (/scribe): letters and books: the same loader, another page
 
 // Which way the camera faces, in degrees the Skyrim way (0 = north, 90 = east). Skyrim Platform has no camera call, so 24 points on a wide ring round the head are
@@ -2161,9 +2162,9 @@ export class GreymarchBridge {
         var on = false;
         try { on = !!sp.callNative("GreymarchCam", "SetFreeCamera", undefined, true); } catch (e) { on = false; this.greymarchLog("build: no free camera (" + e + ")"); }
         if (!on) { this.greymarchBuildCamSay("The free camera needs the latest game files (GreymarchCamera.dll). The Build tab's own buttons still place and move things."); return; }
-        this.greymarchBuildCam = { mode: w.mode === "move" ? "move" : "place", key: key, name: String(w.name || "It").slice(0, 60), id: Number(w.id) >>> 0, base: base, ghost: null, dist: 400, turn: 0, up: 0, last: "", next: 0, shift: false };
+        this.greymarchBuildCam = { mode: w.mode === "move" ? "move" : "place", key: key, name: String(w.name || "It").slice(0, 60), id: Number(w.id) >>> 0, base: base, ghost: null, dist: 400, turn: 0, up: 0, last: "", next: 0, shift: false, step: 2, lock: null };
         this.greymarchLog("build: free camera on, " + this.greymarchBuildCam.mode + " " + key);
-        this.greymarchBuildCamSay(this.greymarchBuildCam.name + ": fly with WASD and the mouse. Up / Down arrows closer / farther, Left / Right turn, Page Up / Down raise / lower, Shift bigger steps, Enter puts it there, B or Esc leaves.");
+        this.greymarchBuildCamSay(this.greymarchBuildCam.name + ": fly with WASD and the mouse. Up / Down arrows closer / farther, Left / Right turn, Page Up / Down raise / lower, [ and ] the step, L locks it in place, Enter puts it there, B or Esc leaves.");
     }
     greymarchBuildCamEnd(why: string): any {
         var b = this.greymarchBuildCam;
@@ -2173,9 +2174,11 @@ export class GreymarchBridge {
         try { if (this.sp.callNative("GreymarchCam", "IsFreeCamera", undefined)) this.sp.callNative("GreymarchCam", "SetFreeCamera", undefined, false); } catch (e) { /* the camera is the player's again on the next view change */ }
         this.greymarchLog("build: free camera off (" + why + ")");
     }
-    // where the preview goes: the camera's spot plus its forward direction times the distance, raised by up; turned to face the camera, plus the GM's turn
+    // where the preview goes: the camera's spot plus its forward direction times the distance, raised by up; turned to face the camera, plus the GM's turn.
+    // LOCKED (L, 2026-10-31, the owner: "precision movement"): it stays where it was locked, whatever the camera does, and only the keys move and turn it
     greymarchBuildCamSpot(): any {
         var sp = this.sp, b = this.greymarchBuildCam, c: number[] = [];
+        if (b.lock) return { pos: b.lock.pos.slice(), rot: b.lock.rot };
         for (var i = 0; i < 6; i++) c.push(Number(sp.callNative("GreymarchCam", "GetCamera", undefined, i)));
         if (!c.every(function (n) { return isFinite(n); })) return null;
         var len = Math.hypot(c[3], c[4], c[5]); if (!(len > 0.01)) return null;
@@ -2203,26 +2206,64 @@ export class GreymarchBridge {
             b.ghost.setAngle(0, 0, spot.rot);
         } catch (err) { if (b.ghost) { try { b.ghost.delete(); } catch (dErr) { /* gone */ } b.ghost = null; } } // a cell change took the preview: made again next time
     }
-    // the free camera's keys; true when the key was the build system's (the game still flies the camera with its own)
+    // the free camera's keys; true when the key was the build system's (the game still flies the camera with its own).
+    // THE STEP ([ and ], 2026-10-31): 1, 5, 25 or 100 units and 1, 5, 15 or 90 degrees (BUILD_CAM_STEPS); Shift is the biggest. Not the number keys: they are
+    // the game's favorites. LOCK (L): the preview stays put while the camera flies round it; the arrows then move it the way the camera faces (level), the
+    // Page keys raise and lower it, comma and period turn it; L again lets it follow the camera from where it is
     greymarchBuildCamKey(e: any): boolean {
         var b = this.greymarchBuildCam; if (!b) return false;
         var down = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true);
         if (e.isUp === true) down = false;
-        if (e.code === 42 || e.code === 54) { b.shift = down; return false; } // Shift: bigger steps (it still runs the camera faster)
-        var mine = [28, 1, 200, 208, 203, 205, 201, 209, 48];
+        if (e.code === 42 || e.code === 54) { b.shift = down; return false; } // Shift: the biggest step (it still runs the camera faster)
+        var mine = [28, 1, 200, 208, 203, 205, 201, 209, 48, 38, 26, 27, 51, 52];
         if (mine.indexOf(e.code) < 0) return false;
         if (!down) return true;
-        var big = !!b.shift;
-        if (e.code === 200) b.dist = Math.min(2000, b.dist + (big ? 200 : 40));
-        else if (e.code === 208) b.dist = Math.max(80, b.dist - (big ? 200 : 40));
-        else if (e.code === 203) b.turn -= big ? 90 : 15;
-        else if (e.code === 205) b.turn += big ? 90 : 15;
-        else if (e.code === 201) b.up += big ? 100 : 10;
-        else if (e.code === 209) b.up -= big ? 100 : 10;
-        else if (e.code === 28 && e.isRepeating !== true) this.greymarchBuildCamSend();
-        else if (e.code === 48 || e.code === 1) { this.greymarchBuildCamEnd(e.code === 48 ? "B" : "Esc"); if (e.code === 48) this.greymarchAdminShow("build"); }
+        var steps = BUILD_CAM_STEPS, st = steps[b.shift ? steps.length - 1 : b.step], u = st[0], deg = st[1];
+        if (e.code === 26 || e.code === 27) { b.step = Math.max(0, Math.min(steps.length - 1, b.step + (e.code === 27 ? 1 : -1))); this.greymarchBuildCamSay("Step: " + steps[b.step][0] + " units, " + steps[b.step][1] + "\u00b0"); return true; }
+        if (e.code === 38) {
+            if (b.lock) { this.greymarchBuildCamUnlock(); this.greymarchBuildCamSay("Unlocked: it follows the camera again."); }
+            else { var at: any = null; try { at = this.greymarchBuildCamSpot(); } catch (err) { at = null; } if (at) { b.lock = { pos: at.pos, rot: at.rot }; this.greymarchBuildCamSay("Locked: fly round it freely. Arrows move it the way you look, Page Up / Down raise and lower, comma / period turn, [ and ] the step, L unlocks."); } }
+            b.next = 0; return true;
+        }
+        if (e.code === 28) { if (e.isRepeating !== true) this.greymarchBuildCamSend(); b.next = 0; return true; } // Enter: put it there (locked or not)
+        if (e.code === 48 || e.code === 1) { this.greymarchBuildCamEnd(e.code === 48 ? "B" : "Esc"); if (e.code === 48) this.greymarchAdminShow("build"); return true; }
+        if (b.lock) {
+            var lk = b.lock, f = this.greymarchBuildCamFlat();
+            if (e.code === 200 || e.code === 208) { var sg = e.code === 200 ? 1 : -1; lk.pos[0] += f[0] * u * sg; lk.pos[1] += f[1] * u * sg; }
+            else if (e.code === 203 || e.code === 205) { var sr = e.code === 205 ? 1 : -1; lk.pos[0] += f[1] * u * sr; lk.pos[1] -= f[0] * u * sr; } // right of the way the camera looks
+            else if (e.code === 201) lk.pos[2] += u;
+            else if (e.code === 209) lk.pos[2] -= u;
+            else if (e.code === 51 || e.code === 52) lk.rot = (((lk.rot + (e.code === 52 ? deg : -deg)) % 360) + 360) % 360;
+        }
+        else if (e.code === 200) b.dist = Math.min(2000, b.dist + u);
+        else if (e.code === 208) b.dist = Math.max(40, b.dist - u);
+        else if (e.code === 203 || e.code === 51) b.turn -= deg;
+        else if (e.code === 205 || e.code === 52) b.turn += deg;
+        else if (e.code === 201) b.up += u;
+        else if (e.code === 209) b.up -= u;
         b.next = 0; // the preview follows at once
         return true;
+    }
+    // the camera's way, level (x, y of length 1); north when it looks straight up or down
+    greymarchBuildCamFlat(): number[] {
+        var x = 0, y = 1;
+        try { x = Number(this.sp.callNative("GreymarchCam", "GetCamera", undefined, 3)); y = Number(this.sp.callNative("GreymarchCam", "GetCamera", undefined, 4)); } catch (e) { x = 0; y = 1; }
+        var l = Math.hypot(x, y);
+        return isFinite(l) && l > 0.01 ? [x / l, y / l] : [0, 1];
+    }
+    // unlocked again: the preview follows the camera from where it was put, so it does not jump (its distance, height and turn from where the camera is now)
+    greymarchBuildCamUnlock(): any {
+        var b = this.greymarchBuildCam; if (!b || !b.lock) return;
+        var lk = b.lock; b.lock = null;
+        var c: number[] = [];
+        try { for (var i = 0; i < 6; i++) c.push(Number(this.sp.callNative("GreymarchCam", "GetCamera", undefined, i))); } catch (e) { return; }
+        if (!c.every(function (n) { return isFinite(n); })) return;
+        var len = Math.hypot(c[3], c[4], c[5]); if (!(len > 0.01)) return;
+        var fx = c[3] / len, fy = c[4] / len, fz = c[5] / len;
+        b.dist = Math.max(40, Math.min(2000, (lk.pos[0] - c[0]) * fx + (lk.pos[1] - c[1]) * fy + (lk.pos[2] - c[2]) * fz));
+        b.up = lk.pos[2] - (c[2] + fz * b.dist);
+        var face = Math.atan2(-fx, -fy) * 180 / Math.PI;
+        b.turn = lk.rot - face;
     }
     greymarchBuildCamSend(): any {
         var b = this.greymarchBuildCam; if (!b) return;
