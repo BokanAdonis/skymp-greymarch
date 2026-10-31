@@ -213,6 +213,7 @@ export class AuthService extends ClientListener {
       case 'greymarchChestGlow':
       case 'greymarchOwnLook':
       case 'greymarchCombatMod':
+      case 'greymarchCombatPerks': // rank 4/5 combat skill perks (bridge.ts greymarchPerksApply)
       case 'greymarchMenuEvent':
       case 'greymarchChatLine':
       case 'greymarchChatInfo':

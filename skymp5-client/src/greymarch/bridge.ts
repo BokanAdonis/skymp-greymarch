@@ -110,6 +110,11 @@ export function greymarchCameraYaw(project: (pts: number[][]) => number[][], hea
     return null;
 }
 
+// the game's own perks the combat skill ranks grant (greymarchCombatPerks): Block Runner, Ranger, Quick Shot (Skyrim.esm)
+const GREYMARCH_PERK_BLOCK_RUNNER = 0x00106253;
+const GREYMARCH_PERK_RANGER = 0x00058F63;
+const GREYMARCH_PERK_QUICK_SHOT = 0x00105F19;
+
 export class GreymarchBridge {
     [key: string]: any;
 
@@ -237,6 +242,7 @@ export class GreymarchBridge {
         if (type === "greymarchScribeOpen") { this.greymarchScribeShow(); return; }
         if (type === "greymarchProfReply") { this.greymarchLog("prof: the server's answer arrived (rid " + msg.rid + ", ok " + msg.ok + ")"); this.greymarchProfToPage("reply", msg); return; } // the professions window (K)
         if (type === "greymarchCombatMod") { var cm = Number(msg.mult); this.greymarchCombatWant = cm >= 0.1 && cm <= 3 ? cm : 1; return; } // the damage multiplier for what is in hand (professions: a weapon above your rank hits weaker, a Brawler's fists hit harder)
+        if (type === "greymarchCombatPerks") { this.greymarchPerksWant = { blockSpeed: msg.blockSpeed === true, bowSpeed: msg.bowSpeed === true, fastDraw: msg.fastDraw === true }; this.greymarchPerksDirty = true; return; } // combat skill perks (gamemode, COMBAT-OVERHAUL.md): rank 4 full speed while blocking / with a bow drawn, rank 5 Bowman fast draw
         if (type === "greymarchMenuEvent" && msg.type === "body" && Number(msg.looking) > 0 && !this.greymarchMenuOn) { this.greymarchMenuShow({ mode: "open", looking: Number(msg.looking) }); return; } // E on the body of a dead wild animal (gamemode wildlifesystem.js): the menu opens on it to take what is on it
         if (type === "greymarchMenuEvent") { if ((msg.type === "trade_invite" || msg.type === "trade" || msg.type === "feed_invite" || msg.type === "frisk_invite" || msg.type === "guard_view") && !this.greymarchMenuOn) this.greymarchMenuShow({ mode: "invite", looking: 0 }); /* a trade, a vampire's request to feed, a guard's request to frisk or what the frisk found opens the menu by itself */ this.greymarchMenuToPage("event", msg); return; }
         if (type === "greymarchFx") { this.greymarchFxWant = { noclip: !!msg.noclip, speed: Number(msg.speed) || 100, frozen: !!msg.frozen, god: !!msg.god, tgm: !!msg.tgm }; if (msg.me) this.greymarchMeActor = msg.me; return; }
@@ -2458,7 +2464,7 @@ export class GreymarchBridge {
         this.greymarchFxNext = now + 400;
         var want = this.greymarchFxWant;
         var ghosts = this.greymarchGhostList;
-        if (!want && !(ghosts && ghosts.length) && !this.greymarchGhostApplied && !(this.greymarchInvisList && this.greymarchInvisList.length) && !this.greymarchInvApplied && !(this.greymarchOthers && this.greymarchOthers.length) && !this.greymarchStatsWant && !(this.greymarchCombatWant !== undefined && this.greymarchCombatWant !== this.greymarchCombatHave) && (this.greymarchSelfCleared || !this.greymarchMeActor)) return;
+        if (!want && !(ghosts && ghosts.length) && !this.greymarchGhostApplied && !(this.greymarchInvisList && this.greymarchInvisList.length) && !this.greymarchInvApplied && !(this.greymarchOthers && this.greymarchOthers.length) && !this.greymarchStatsWant && !(this.greymarchCombatWant !== undefined && this.greymarchCombatWant !== this.greymarchCombatHave) && !this.greymarchPerksDue(now) && (this.greymarchSelfCleared || !this.greymarchMeActor)) return;
         try {
             var sp = this.sp;
             var player = sp.Game.getPlayer();
@@ -2478,7 +2484,7 @@ export class GreymarchBridge {
                 }
             }
             this.greymarchNoHostApply(now, player, !!have.god);
-            this.greymarchGhostApply(now, ghosts || []); this.greymarchNamesApply(now); this.greymarchInvisApply(now); this.greymarchNoTalkApply(now); this.greymarchSeenLog(now); this.greymarchStatsApply(player); this.greymarchCombatApply(player);
+            this.greymarchGhostApply(now, ghosts || []); this.greymarchNamesApply(now); this.greymarchInvisApply(now); this.greymarchNoTalkApply(now); this.greymarchSeenLog(now); this.greymarchStatsApply(player); this.greymarchCombatApply(player); this.greymarchPerksApply(now, player);
         } catch (err) {
             if (!this.greymarchFxErr) { this.greymarchFxErr = true; this.greymarchLog("staff effects error (shown once): " + err); }
         }
@@ -2555,6 +2561,34 @@ export class GreymarchBridge {
         var want = this.greymarchCombatWant;
         if (want === undefined || want === this.greymarchCombatHave) return;
         try { player.setActorValue("AttackDamageMult", want); this.greymarchCombatHave = want; this.greymarchLog("combat: my damage multiplier is now " + want); } catch (e) { this.greymarchCombatHave = want; this.greymarchLog("combat: the damage multiplier could not be set (" + e + ")"); }
+    }
+    // COMBAT SKILL PERKS (greymarchCombatPerks). The game's own perks do it, so the game's movement types and draw speed are used, nothing is fought
+    // with: Block Runner (bPerkShieldCharge: NPC_Blocking_ShieldCharge_MT, full run speed while blocking), Ranger (bPerkQuickShot:
+    // NPC_BowDrawn_QuickShot_MT, full run speed with a bow drawn), Quick Shot (draws a bow 30% faster). Only a perk this bridge added is taken away.
+    // Checked again every 5 s while one is wanted (a perk the game dropped comes back).
+    greymarchPerksDue(now: number): any {
+        var w = this.greymarchPerksWant;
+        if (!w) return false;
+        if (this.greymarchPerksDirty) return true;
+        return (w.blockSpeed || w.bowSpeed || w.fastDraw) && now >= (this.greymarchPerksNext || 0);
+    }
+    greymarchPerksApply(now: number, player: any): any {
+        if (!this.greymarchPerksDue(now)) return;
+        var w = this.greymarchPerksWant;
+        this.greymarchPerksDirty = false;
+        this.greymarchPerksNext = now + 5000;
+        var added = this.greymarchPerksAdded || (this.greymarchPerksAdded = {});
+        var list = [{ key: "blockSpeed", id: GREYMARCH_PERK_BLOCK_RUNNER, name: "Block Runner" }, { key: "bowSpeed", id: GREYMARCH_PERK_RANGER, name: "Ranger" }, { key: "fastDraw", id: GREYMARCH_PERK_QUICK_SHOT, name: "Quick Shot" }];
+        for (var i = 0; i < list.length; i++) {
+            var e = list[i];
+            try {
+                var perk = this.sp.Perk.from(this.sp.Game.getFormEx(e.id));
+                if (!perk) { this.greymarchLog("combat perks: " + e.name + " is not in the game files"); continue; }
+                var has = !!player.hasPerk(perk);
+                if (w[e.key] && !has) { player.addPerk(perk); added[e.id] = true; this.greymarchLog("combat perks: " + e.name + " on"); }
+                else if (!w[e.key] && has && added[e.id]) { player.removePerk(perk); added[e.id] = false; this.greymarchLog("combat perks: " + e.name + " off"); }
+            } catch (err) { this.greymarchLog("combat perks: " + e.name + " failed (" + err + ")"); }
+        }
     }
     // STAT MAXIMUMS set by staff (1 to 1000): the base value is set and the stat filled. Done once per value, so the game is never fought with.
     greymarchStatsApply(player: any): any {
