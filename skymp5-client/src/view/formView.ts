@@ -1500,10 +1500,14 @@ export class FormView {
 // GREYMARCH: PEACEFUL ANIMALS (2026-10-30, the owner: "any animals that aren't supposed to be hostile stay non-hostile"; a fox from the F7 spawn menu fought
 // them). An animal the games run with Skyrim's own AI (the F7 spawn menu's, an encounter animal handed back) fights back as in the game: a fox stands its
 // ground when hit. Foxes (snow foxes too), deer, elk, hares, goats, chickens and cows are made cowardly and unaggressive in every game that loads them:
-// hit, they run, and slower than the game's own (GM_PEACEFUL_SPEED). The server's own animals (wildlifebrain.js) never fight anyway; wolves, mudcrabs and the rest are left as they are.
+// hit, they run, and no faster than a little over a running player (GM_PEACEFUL_SPEED_BY_RACE). The server's own animals (wildlifebrain.js) never fight anyway; wolves, mudcrabs and the rest are left as they are.
 const GM_PEACEFUL_RACES = [0x109c7c /* Fox */, 0xcf89b /* Deer */, 0x131ed /* Elk */, 0x6dc99 /* Hare */, 0x131fa /* Goat */, 0x6fc4a /* domestic Goat */, 0xa919d /* Chicken */, 0x4e785 /* Cow */];
 let gmGlowDeerRace = -1; // Dawnguard's glowing deer
-const GM_PEACEFUL_SPEED = 65; // percent of the game's own speed (100)
+// percent of the game's own speed, per race (2026-10-30, the owner: "only slightly faster than a running player"): a run of about 400, a person's being 370
+// (NPC_Default_MT). Deer and elk run 833 in the game (Deer_Default_MT), cows 525; goats (360), hares (244) and chickens (252) are slower than a person
+// already and keep their own; the fox has no speed of its own in the game files and keeps 65
+const GM_PEACEFUL_SPEED_BY_RACE: Record<number, number> = { 0xcf89b: 48 /* Deer */, 0x131ed: 48 /* Elk */, 0x4e785: 76 /* Cow */, 0x109c7c: 65 /* Fox */ };
+const GM_PEACEFUL_SPEED_GLOW_DEER = 48;
 function gmMakePeaceful(refrId: number, puppet = false): boolean {
   try {
     const ac = Actor.from(Game.getFormEx(refrId));
@@ -1519,8 +1523,9 @@ function gmMakePeaceful(refrId: number, puppet = false): boolean {
     // weight changes, so it is nudged
     // not a server-driven animal (2026-10-30, the owner: encounter cows stuttered): the server sets its pace (wildlifedata.js BRAIN); slowed here too, its walk
     // fell behind the server's frames and it was pulled forward again and again
-    if (!puppet && ac.getActorValue("SpeedMult") !== GM_PEACEFUL_SPEED) {
-      ac.setActorValue("SpeedMult", GM_PEACEFUL_SPEED);
+    const gmSpeed = gmGlowDeerRace && id === gmGlowDeerRace ? GM_PEACEFUL_SPEED_GLOW_DEER : (GM_PEACEFUL_SPEED_BY_RACE[id] || 100);
+    if (!puppet && ac.getActorValue("SpeedMult") !== gmSpeed) {
+      ac.setActorValue("SpeedMult", gmSpeed);
       ac.modActorValue("CarryWeight", 0.1); ac.modActorValue("CarryWeight", -0.1);
     }
     ac.stopCombat();
