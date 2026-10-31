@@ -1019,8 +1019,24 @@ export class RemoteServer extends ClientListener {
         return;
       }
 
+      // GREYMARCH (2026-11-01, Falmer crashes in Duskglow Crevice: a Falmer Gloomlurker's animation graph broke while a spell effect was being put on it,
+      // a minute after the watching player logged back in): nothing is replayed onto a copy whose model has not finished loading (its graph is not ready)
+      let loaded3d = false;
+      try { loaded3d = !!ac.is3DLoaded(); } catch (e) { loaded3d = false; }
+      if (!loaded3d) {
+        this.greymarchMagicDiag(`magic: ${msg.data.caster.toString(16)} ${msg.data.interruptCast ? "end" : "cast"} ${msg.data.spell.toString(16)}: its model is not loaded here yet, not replayed`);
+        return;
+      }
+
       if (msg.data.interruptCast) {
         this.greymarchHeldSpells.delete(castKey);
+        // GREYMARCH (2026-11-01): an NPC another game runs ends its cast with the game's own plain InterruptCast; the other game's animation variables are
+        // never forced into this copy's graph (they are for a player's copy, whose graph is the same human one)
+        if (!this.greymarchIsPlayerCopy(msg.data.caster)) {
+          try { ac.interruptCast(); } catch (e) { /* not loaded */ }
+          this.greymarchMagicDiag(`magic: saw NPC ${msg.data.caster.toString(16)} end ${msg.data.spell.toString(16)} hand ${msg.data.castingSource} (plain interrupt)`);
+          return;
+        }
         interruptCast(ac.getFormID(), msg.data.castingSource, actorAnimationVariables);
         this.greymarchMagicDiag(`magic: saw ${msg.data.caster.toString(16)} end ${msg.data.spell.toString(16)} hand ${msg.data.castingSource}`);
         // GREYMARCH: the call above does nothing when the caster's animation variables cannot be applied, and a concentration spell
@@ -1107,6 +1123,18 @@ export class RemoteServer extends ClientListener {
     return false;
   }
   private greymarchWerebearRace = -1;
+
+  // GREYMARCH: is this copy a player's (the server sends a look for every player's actor, none for an NPC)
+  private greymarchIsPlayerCopy(remoteId: number): boolean {
+    try {
+      const forms = this.getWorldModel().forms;
+      for (let i = 0; i < forms.length; i++) {
+        const f = forms[i];
+        if (f && f.refrId === remoteId) return !!f.appearance;
+      }
+    } catch (e) { /* not known */ }
+    return false;
+  }
 
   private greymarchIsHeld(spell: Spell): boolean {
     try { const effect = spell.getNthEffectMagicEffect(0); return !!effect && effect.getCastingType() === 2; } catch (e) { return false; }
