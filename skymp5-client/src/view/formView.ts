@@ -489,7 +489,7 @@ export class FormView {
             this.gmBeast = gmWere ? beastSpawned(Date.now()) : null; // GREYMARCH: a werewolf or werebear: a hidden stand-in, switched to its race in update() (beastSwitch.ts)
             if (gmWere) { try { const gmSi = Actor.from(ObjectReference.from(Game.getFormEx(this.refrId))); if (gmSi) gmSi.setAlpha(0, false); } catch (e) { /* shown as it is */ } }
             gmCrumb("spawned " + gmHex(this.refrId));
-            if (!model.appearance) this.gmPeaceful = gmMakePeaceful(this.refrId); // GREYMARCH: a fox, deer, rabbit, goat, chicken or cow never fights (see gmMakePeaceful)
+            if (!model.appearance) this.gmPeaceful = gmMakePeaceful(this.refrId, (model as any).greymarchPuppet === true); // GREYMARCH: a fox, deer, rabbit, goat, chicken or cow never fights (see gmMakePeaceful)
           });
         } else {
           printConsole("Unable to triggerSpawnProcess for null refr");
@@ -1127,7 +1127,9 @@ export class FormView {
       this.gmPuppetReady = true;
       // its own AI never moves it (2026-10-28, the owner's cow clip: hit, it jumped back and forth, its own flight against the server's frames): never a fight
       // (Aggression 0), never a flight (Confidence 4, foolhardy), never helping another (Assistance 0); only the server's frames move it
-      try { ac.setActorValue("Aggression", 0); ac.setActorValue("Confidence", 4); ac.setActorValue("Assistance", 0); ac.setActorValue("AttackDamageMult", 0); } catch (e) { /* the server still decides every hit */ } // never a fight of its own, never local damage
+      try { ac.setActorValue("Aggression", 0); ac.setActorValue("Confidence", 4); ac.setActorValue("Assistance", 0); ac.setActorValue("AttackDamageMult", 0); } catch (e) { /* the server still decides every hit */ }
+      // its own pace, never the peaceful animals' slower one (gmMakePeaceful, before it was known to be the server's): the server's frames set how fast it goes
+      try { if (ac.getActorValue("SpeedMult") !== 100) { ac.setActorValue("SpeedMult", 100); ac.modActorValue("CarryWeight", 0.1); ac.modActorValue("CarryWeight", -0.1); } } catch (e) { /* as it is */ } // never a fight of its own, never local damage
     }
     try { if (ac.isInCombat()) ac.stopCombat(); } catch (e) { /* next frame */ }
     // the bridge's frames: through the global first (see bridge.ts greymarchBeastFrames, 2026-10-28), storage as before
@@ -1502,7 +1504,7 @@ export class FormView {
 const GM_PEACEFUL_RACES = [0x109c7c /* Fox */, 0xcf89b /* Deer */, 0x131ed /* Elk */, 0x6dc99 /* Hare */, 0x131fa /* Goat */, 0x6fc4a /* domestic Goat */, 0xa919d /* Chicken */, 0x4e785 /* Cow */];
 let gmGlowDeerRace = -1; // Dawnguard's glowing deer
 const GM_PEACEFUL_SPEED = 65; // percent of the game's own speed (100)
-function gmMakePeaceful(refrId: number): boolean {
+function gmMakePeaceful(refrId: number, puppet = false): boolean {
   try {
     const ac = Actor.from(Game.getFormEx(refrId));
     if (!ac) return false;
@@ -1515,7 +1517,9 @@ function gmMakePeaceful(refrId: number): boolean {
     // SLOWER (2026-10-30, the owner: "make sure all animals are slowed down", cows were fast): Skyrim's own speed, cut to GM_PEACEFUL_SPEED %, so a running
     // player catches them (the server's own animals run slower than a player already, wildlifedata.js BRAIN). The game takes a new speed when the carried
     // weight changes, so it is nudged
-    if (ac.getActorValue("SpeedMult") !== GM_PEACEFUL_SPEED) {
+    // not a server-driven animal (2026-10-30, the owner: encounter cows stuttered): the server sets its pace (wildlifedata.js BRAIN); slowed here too, its walk
+    // fell behind the server's frames and it was pulled forward again and again
+    if (!puppet && ac.getActorValue("SpeedMult") !== GM_PEACEFUL_SPEED) {
       ac.setActorValue("SpeedMult", GM_PEACEFUL_SPEED);
       ac.modActorValue("CarryWeight", 0.1); ac.modActorValue("CarryWeight", -0.1);
     }
