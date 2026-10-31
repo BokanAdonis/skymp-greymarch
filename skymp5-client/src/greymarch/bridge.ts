@@ -209,6 +209,7 @@ export class GreymarchBridge {
         if (type === "greymarchHungerFx") { this.greymarchHungerRegen = msg.regen !== false; return; } // starving: no health or stamina regeneration (greymarchHungerDrive)
         if (type === "greymarchFaceOf") { this.greymarchFaceOf(msg); return; } // another player's face from the emote wheel (gamemode faces.js; put on in greymarchFaceTick)
         if (type === "greymarchGround") { if (Number(msg.id) > 0 && typeof msg.z === "number" && isFinite(msg.z)) { const gl: any = Function("return this")(); const fx: any = gl.__gmGroundFix || (gl.__gmGroundFix = {}); const gr: any = msg.grid && Array.isArray(msg.grid.h) && msg.grid.h.length === 25 && [msg.grid.x, msg.grid.y, msg.grid.step].every((n: any) => typeof n === "number" && isFinite(n)) && msg.grid.step > 0 ? { x: msg.grid.x, y: msg.grid.y, step: msg.grid.step, h: msg.grid.h.map((v: any) => (typeof v === "number" && isFinite(v) ? v : null)) } : null; fx[String(Number(msg.id) >>> 0)] = { z: msg.z, off: Number(msg.off) || 0, at: Date.now(), grid: gr }; if ((this.greymarchGroundCrumbs = (this.greymarchGroundCrumbs || 0) + 1) <= 40 && typeof this.greymarchCrumb === "function") this.greymarchCrumb("ground word " + (Number(msg.id) >>> 0).toString(16) + ": " + Math.round(Number(msg.off) || 0) + " off, the ground at " + Math.round(msg.z)); } return; } // the server saw an NPC off the ground: where the ground is (formView gmHostedTick puts it down if this game hosts it; gamemode groundclamp.js)
+        if (type === "greymarchRideRefused") { this.greymarchRideOff = { at: Date.now(), text: typeof msg.text === "string" ? msg.text.slice(0, 200) : "" }; return; } // not your horse (gamemode riding.js): off it in the update phase (greymarchRideTick)
         if (type === "greymarchBeast") { this.greymarchBeastFrames(msg); return; } // a server-driven animal moved (gamemode wildlifebrain.js): played by formView (gmPuppetMove)
         if (type === "greymarchShapeAnim") { if (typeof msg.ev === "string" && msg.ev.length < 64 && Number(msg.actor) > 0) (this.greymarchShapeAnimQueue || (this.greymarchShapeAnimQueue = [])).push({ actor: Number(msg.actor), ev: msg.ev }); return; } // another player's creature attacked (played in greymarchShapeDrive) // a creature form (staff): greymarchShapeTick changes the body
         if (type === "greymarchWolfForm") { if (this.greymarchWolfWant !== !!msg.on) this.greymarchLog("wolf: the server says " + (msg.on ? "changed" : "no (change back)")); this.greymarchWolfWant = !!msg.on; if (msg.on) { this.greymarchWolfWordAt = Date.now(); this.greymarchWolfAlpha = !!msg.alpha; this.greymarchWolfPup = !msg.alpha && !!msg.pup; this.greymarchWolfKind = msg.kind && GM_WOLF_FORMS[msg.kind] && msg.kind !== "black" && msg.kind !== "polar" ? String(msg.kind) : this.greymarchWolfAlpha ? "alpha" : this.greymarchWolfPup ? "pup" : ""; this.greymarchWolfBearRace = msg.bear && Number(msg.race) > 0 ? Number(msg.race) >>> 0 : 0; if (this.greymarchWolfBearRace) this.greymarchWolfBearSeen = this.greymarchWolfBearRace; this.greymarchWolfBlack = !!this.greymarchWolfBearRace && !!msg.black; this.greymarchWolfPolar = !!this.greymarchWolfBearRace && !!msg.polar; } return; } // (logged only when it changes: the server repeats it every 5 seconds) // the werewolf form (greymarchWolfTick)
@@ -1666,11 +1667,20 @@ export class GreymarchBridge {
         this.greymarchLog("map: " + add.length + " new place(s) on the map");
     }
     greymarchRideNext = 0;
+    greymarchRideOff: { at: number, text: string } | null = null;
     greymarchRideState: rideMod.RideReportState | null = null;
     greymarchRideTick(now: number): any {
         // RIDING (riding.ts): every RIDE_CHECK_EVERY_MS, the horse this player sits on (its server id; 0 on foot) goes to the server when it changes and every
         // RIDE_REPORT_EVERY_MS while riding. Its local id is kept on the global (__gmMyHorse) for formView: no server movement on it, and this game hosts it
         if (!rideMod || !rideMod.rideReport) return; // a test that loads the bridge without riding.ts
+        // the server refused this ride (someone else's horse, riding.js mayRide): this player gets off, once, and is told why
+        var off = this.greymarchRideOff;
+        if (off) {
+            this.greymarchRideOff = null;
+            try { var opl = this.sp.Game.getPlayer(); if (opl && opl.isOnMount()) opl.dismount(); } catch (e) { /* the next refusal tries again */ }
+            if (off.text) { try { this.sp.Debug.notification(off.text); } catch (e) { /* the server log has it */ } }
+            this.greymarchCrumb("ride refused: " + off.text);
+        }
         if (now < (this.greymarchRideNext || 0)) return;
         this.greymarchRideNext = now + rideMod.RIDE_CHECK_EVERY_MS;
         var sp = this.sp, gl: any = Function("return this")(), local = 0, remote = 0;

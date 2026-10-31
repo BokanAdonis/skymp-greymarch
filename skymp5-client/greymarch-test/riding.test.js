@@ -68,3 +68,12 @@ test("only a horse is mounted on another player's word (HorseRace), and the hook
   assert.ok(bridge.includes("this.greymarchRideTick(Date.now());"));
   assert.ok(bridge.includes("sp.Game.getPlayersLastRiddenHorse()"));
 });
+
+test("someone else's horse: the server's greymarchRideRefused gets this player off (in the update phase) and says why; authService lets it through", () => {
+  const auth = fs.readFileSync(path.join(__dirname, "..", "src", "services", "services", "authService.ts"), "utf8");
+  assert.ok(auth.includes("case 'greymarchRideRefused':"));
+  assert.ok(bridge.includes('if (type === "greymarchRideRefused") { this.greymarchRideOff = {'));
+  assert.ok(bridge.includes("if (opl && opl.isOnMount()) opl.dismount();"));
+  // before the 250 ms gate, so it is not held back
+  assert.ok(bridge.indexOf("var off = this.greymarchRideOff;") < bridge.indexOf("if (now < (this.greymarchRideNext || 0)) return;"));
+});

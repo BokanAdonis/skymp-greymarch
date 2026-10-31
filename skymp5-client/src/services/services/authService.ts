@@ -234,6 +234,7 @@ export class AuthService extends ClientListener {
       case 'greymarchMagicBlock': // NPC raise-the-dead and summon effects to end (gamemode magicblock.js)
       case 'greymarchGround': // the server saw an NPC off the ground: where the ground is (bridge.ts; 2026-10-28: not on this list, it never reached the bridge)
       case 'greymarchBeast':
+      case 'greymarchRideRefused': // the server refused the horse this player sits on (someone else's): off it (bridge.ts; gamemode riding.js)
       case 'greymarchFaceOf': // another player's face from the emote wheel (gamemode faces.js)
       case 'greymarchWolfFeed':
       case 'greymarchVampire':
