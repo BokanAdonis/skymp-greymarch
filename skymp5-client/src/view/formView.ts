@@ -1498,9 +1498,10 @@ export class FormView {
 // GREYMARCH: PEACEFUL ANIMALS (2026-10-30, the owner: "any animals that aren't supposed to be hostile stay non-hostile"; a fox from the F7 spawn menu fought
 // them). An animal the games run with Skyrim's own AI (the F7 spawn menu's, an encounter animal handed back) fights back as in the game: a fox stands its
 // ground when hit. Foxes (snow foxes too), deer, elk, hares, goats, chickens and cows are made cowardly and unaggressive in every game that loads them:
-// hit, they run. The server's own animals (wildlifebrain.js) never fight anyway; wolves, mudcrabs and the rest are left as they are.
+// hit, they run, and slower than the game's own (GM_PEACEFUL_SPEED). The server's own animals (wildlifebrain.js) never fight anyway; wolves, mudcrabs and the rest are left as they are.
 const GM_PEACEFUL_RACES = [0x109c7c /* Fox */, 0xcf89b /* Deer */, 0x131ed /* Elk */, 0x6dc99 /* Hare */, 0x131fa /* Goat */, 0x6fc4a /* domestic Goat */, 0xa919d /* Chicken */, 0x4e785 /* Cow */];
 let gmGlowDeerRace = -1; // Dawnguard's glowing deer
+const GM_PEACEFUL_SPEED = 65; // percent of the game's own speed (100)
 function gmMakePeaceful(refrId: number): boolean {
   try {
     const ac = Actor.from(Game.getFormEx(refrId));
@@ -1511,6 +1512,13 @@ function gmMakePeaceful(refrId: number): boolean {
     if (!GM_PEACEFUL_RACES.includes(id) && !(gmGlowDeerRace && id === gmGlowDeerRace)) return false;
     ac.setActorValue("Aggression", 0); // unaggressive: never starts a fight
     ac.setActorValue("Confidence", 0); // cowardly: runs when hit
+    // SLOWER (2026-10-30, the owner: "make sure all animals are slowed down", cows were fast): Skyrim's own speed, cut to GM_PEACEFUL_SPEED %, so a running
+    // player catches them (the server's own animals run slower than a player already, wildlifedata.js BRAIN). The game takes a new speed when the carried
+    // weight changes, so it is nudged
+    if (ac.getActorValue("SpeedMult") !== GM_PEACEFUL_SPEED) {
+      ac.setActorValue("SpeedMult", GM_PEACEFUL_SPEED);
+      ac.modActorValue("CarryWeight", 0.1); ac.modActorValue("CarryWeight", -0.1);
+    }
     ac.stopCombat();
     gmCrumb("peaceful " + gmHex(refrId));
     return true;
