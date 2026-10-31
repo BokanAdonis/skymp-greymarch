@@ -68,6 +68,9 @@ GreymarchBalanceTable GreymarchBalanceTable::FromJson(const nlohmann::json& j)
   t.npcSpells = Number(j, "npcSpells", 0.f, 10.f);
   ReadMap(j, "shieldStops", 100.f, t.shieldStops);
   t.enchantArmorCap = Number(j, "enchantArmorCap", 0.f, 10000.f);
+  t.pvpDamage = Number(j, "pvpDamage", 0.f, 10.f);
+  t.pvpArmor = Number(j, "pvpArmor", 0.f, 1.f);
+  t.pvpRankKeep = Number(j, "pvpRankKeep", 0.f, 1.f);
   return t;
 }
 

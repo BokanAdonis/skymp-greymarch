@@ -19,6 +19,9 @@
 //   playerSpells / npcSpells    a spell hit's damage times this when a player / an NPC cast it
 //   shieldStops { "<global form id>": percent }   percent of a hit a block with that shield stops (0..100; the tier's number), else shieldBlock
 //   enchantArmorCap             the most armor rating one worn piece's enchantment adds (none = all of it, as the game)
+//   pvpDamage / pvpArmor / pvpRankKeep   PLAYER AGAINST PLAYER only (2026-10-31, the owner: PvP fights too long and too far apart): the hit times
+//                               pvpDamage; the defender's armor counts pvpArmor of what it would; a rank penalty (damageMult below 1) keeps pvpRankKeep of
+//                               its size. A player is an actor the gamemode gave combat perks to (combatPerks). None = as for everyone.
 struct GreymarchBalanceTable
 {
   std::unordered_map<uint32_t, float> weaponDamage;
@@ -36,6 +39,9 @@ struct GreymarchBalanceTable
   std::optional<float> npcSpells;
   std::unordered_map<uint32_t, float> shieldStops; // GREYMARCH: percent stopped
   std::optional<float> enchantArmorCap;
+  std::optional<float> pvpDamage;
+  std::optional<float> pvpArmor;
+  std::optional<float> pvpRankKeep;
 
   // Throws on text that is not a JSON object. Values out of range are left out (the plugin's value is used).
   static GreymarchBalanceTable FromJson(const nlohmann::json& j);

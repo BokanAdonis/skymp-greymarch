@@ -198,9 +198,16 @@ float TES5DamageFormulaImpl::CalcArmorDamagePenalty() const
     : espm::GetData<espm::GMST>(espm::GMST::kFArmorScalingFactor,
                                 espmProvider)
         .value;
+  // GREYMARCH: player against player, the armor counts pvpArmor of itself
+  float armorFactor = 1.f;
+  if (balance.pvpArmor.has_value() && aggressor.GetCombatPerks().isSet &&
+      target.GetCombatPerks().isSet) {
+    armorFactor = *balance.pvpArmor;
+  }
   return 0.01f *
     (100.f -
-     std::min<float>(CalcOpponentArmorRating() * armorScalingFactor,
+     std::min<float>(CalcOpponentArmorRating() * armorScalingFactor *
+                       armorFactor,
                      maxArmorRating));
 }
 
@@ -290,7 +297,19 @@ float TES5DamageFormulaImpl::CalculateDamage() const
   // GREYMARCH: the attacker's own multiplier, set by the gamemode (a weapon
   // above their rank or not of their skill, the werewolf form, a Brawler's
   // fists): mp.set(actorId, "damageMult", x). 1 when nothing was set.
-  damage *= aggressor.GetGreymarchDamageMult();
+  float attackerMult = aggressor.GetGreymarchDamageMult();
+
+  // GREYMARCH: player against player (both have combat perks from the
+  // gamemode): a rank penalty keeps pvpRankKeep of its size, and the hit is
+  // times pvpDamage (2026-10-31, the owner: PvP fights shorter and closer)
+  const bool pvp = aggressorPerks.isSet && targetPerks.isSet;
+  if (pvp && attackerMult < 1.f && balance.pvpRankKeep.has_value()) {
+    attackerMult = 1.f - (1.f - attackerMult) * *balance.pvpRankKeep;
+  }
+  damage *= attackerMult;
+  if (pvp && balance.pvpDamage.has_value()) {
+    damage *= *balance.pvpDamage;
+  }
 
   return damage;
 }
