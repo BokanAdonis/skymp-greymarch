@@ -42,7 +42,7 @@ test("a hostile NPC fighting nobody goes for the nearest other player it DETECTS
 });
 
 test("formView: the check runs once a second for NPCs this game hosts; a released NPC is no longer treated as hosted; tryHostIfNeed respects the release", () => {
-  const upd = formView.slice(formView.indexOf("this.gmIsPlayerLook = !!model.appearance"), formView.indexOf("setDefaultAnimsDisabled(this.refrId, alreadyHosted ? false : true);"));
+  const upd = formView.slice(formView.indexOf("this.gmIsPlayerLook = !!model.appearance"), formView.indexOf("setDefaultAnimsDisabled(this.refrId, alreadyHosted || gmMyMount ? false : true);"));
   assert.ok(upd.includes("alreadyHosted && refr.is3DLoaded()") && upd.includes("GM_HOST_CHECK_MS"), "only for what this game hosts, once a second");
   assert.ok(upd.includes('=== "released") alreadyHosted = false'), "let go at once (default animations back off, no movement sent)");
   const tryHost = formView.slice(formView.indexOf("private tryHostIfNeed("), formView.indexOf("private tryHostIfNeed(") + 400);
@@ -59,7 +59,7 @@ test("floating NPCs: a hosted NPC this game has not had loaded for 2 s is let go
   assert.strictEqual(H.shouldReleaseUnloaded(1000, 2999), false, "a moment unloaded (a cell loading): kept");
   assert.strictEqual(H.shouldReleaseUnloaded(1000, 3000), true);
   const at = formView.indexOf("if (alreadyHosted && !refr.is3DLoaded()) {");
-  assert.ok(at > 0 && at < formView.indexOf("setDefaultAnimsDisabled(this.refrId, alreadyHosted ? false : true);"), "decided before this game sends its movement");
+  assert.ok(at > 0 && at < formView.indexOf("setDefaultAnimsDisabled(this.refrId, alreadyHosted || gmMyMount ? false : true);"), "decided before this game sends its movement");
   const block = formView.slice(at, formView.indexOf("} else this.gmUnloadedSince = 0;", at));
   assert.ok(block.includes('storage["hosted"] = withoutHosted(') && block.includes("markReleased(") && block.includes("alreadyHosted = false"), "dropped from the hosted list, not asked for again at once");
 });

@@ -685,7 +685,9 @@ export class FormView {
       const gmMr = this.remoteRefrId as number;
       if (Date.now() - (lastTryHost[gmMr] || 0) >= 1000) { lastTryHost[gmMr] = Date.now(); tryHost(gmMr); }
     }
-    setDefaultAnimsDisabled(this.refrId, alreadyHosted ? false : true);
+    // GREYMARCH: RIDING (2026-10-31, the owner: the horse flew off when another player logged on): the horse this player sits on keeps its own animations even
+    // when another game runs it; without them it moved untied from the ground
+    setDefaultAnimsDisabled(this.refrId, alreadyHosted || gmMyMount ? false : true);
 
     if (alreadyHosted) {
       Actor.from(refr)?.clearKeepOffsetFromActor();
@@ -1489,6 +1491,7 @@ export class FormView {
   private gmPuppetDriveCrumbed = false; // breadcrumbs: first moved here
 
   private tryHostIfNeed(ac: Actor, remoteId: number) {
+    if (riddenByOther(ridersMap(), remoteId)) return false; // GREYMARCH: another player rides it
     if (isReleased(remoteId, Date.now())) return false; // GREYMARCH: this game handed it to a closer player a moment ago (greymarch/npcHosting.ts)
     const last = lastTryHost[remoteId];
     if (!last || Date.now() - last >= 1000) {

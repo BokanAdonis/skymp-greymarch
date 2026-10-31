@@ -93,3 +93,9 @@ test("a ridden horse is left alone by the host's NPC care (2026-10-31: a gallopi
   assert.ok(formView.includes("if (alreadyHosted && !this.gmWasHost && !gmMyMount) {"), "no stop and animation reset on the horse this player sits on");
   assert.ok(formView.indexOf("const gmMyMount =") < formView.indexOf("if (alreadyHosted && !this.gmWasHost && !gmMyMount) {"));
 });
+
+test("another player near the rider (2026-10-31: the horse flew off when someone logged on): the rider's horse keeps its animations whoever runs it, and no other game asks to run a horse someone rides", () => {
+  assert.ok(formView.includes("setDefaultAnimsDisabled(this.refrId, alreadyHosted || gmMyMount ? false : true);"));
+  const host = formView.slice(formView.indexOf("private tryHostIfNeed(ac: Actor, remoteId: number) {"));
+  assert.ok(host.indexOf("if (riddenByOther(ridersMap(), remoteId)) return false;") > 0 && host.indexOf("if (riddenByOther(ridersMap(), remoteId)) return false;") < host.indexOf("tryHost(remoteId);"));
+});
