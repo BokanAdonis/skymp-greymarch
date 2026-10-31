@@ -1,5 +1,5 @@
 import { Actor, ActorBase, HeadPart, Cell, Race, createText, Debug, destroyText, Form, FormType, Game, Keyword, NetImmerse, ObjectReference, once, printConsole, setTextColor, setTextPos, setTextSize, setTextString, storage, TESModPlatform, Utility, WorldSpace, worldPointToScreenPoint, writeLogs } from "skyrimPlatform";
-import { setDefaultAnimsDisabled, applyAnimation, allowAttackAnim } from "../sync/animation";
+import { setDefaultAnimsDisabled, applyAnimation, allowAttackAnim, gmSetCollision } from "../sync/animation";
 const GM_PUPPET_MINE_FRESH_MS = 2500; // the server's word that an animal hunts this player holds this long (it repeats it at least once a second)
 const GM_PUPPET_LOCAL_EVERY_MS = 100; // a hunting animal is moved here this often
 const GM_PUPPET_REPORT_EVERY_MS = 200; // and its place reported this often
@@ -657,6 +657,18 @@ export class FormView {
     // GREYMARCH: hosting follows the players (greymarch/npcHosting.ts): once a second, an NPC this game runs is handed on to a clearly closer player, or made to
     // fight another player it detects while it fights nobody
     this.gmIsPlayerLook = !!model.appearance && (model as any).greymarchPuppet !== true;
+    // GREYMARCH: NO SHOVE WHILE RIDING (2026-10-31, the owner: "player gets near me and me and the horse go flying", even on a horse no other game shares). Other
+    // players' characters here are moved by SkyMP straight to where their game says (translateTo), through anything; one that slid into this player's horse
+    // was pushed apart from it by the physics, and the horse flew. While this player rides, no other player's character collides here; again when they get off.
+    // Set again every 2 s (a rebuilt character comes with its collision on)
+    if (this.gmIsPlayerLook && this.refrId) {
+      const gmRidingNow = !!(Function("return this")() as any).__gmMyHorse;
+      if (gmRidingNow !== this.gmNoCollide || (gmRidingNow && Date.now() - this.gmNoCollideAt >= 2000)) {
+        this.gmNoCollideAt = Date.now();
+        try { gmSetCollision(this.refrId, !gmRidingNow); if (gmRidingNow !== this.gmNoCollide) gmCrumb((gmRidingNow ? "no collision " : "collision back ") + gmHex(this.remoteRefrId as number)); } catch (e) { /* the next update */ }
+        this.gmNoCollide = gmRidingNow;
+      }
+    }
     if (alreadyHosted && refr.is3DLoaded() && Date.now() - this.gmHostCheckAt >= GM_HOST_CHECK_MS) {
       this.gmHostCheckAt = Date.now();
       if (this.gmHostedTick(refr) === "released") alreadyHosted = false;
@@ -1205,6 +1217,7 @@ export class FormView {
     const lm = this.gmLocalMount;
     const horse = Actor.from(Game.getFormEx(lm.id));
     if (!horse) { this.gmLocalMount = null; return false; } // gone (the cleaner, a cell change): made again next time
+    if (Date.now() - this.gmLocalMountCollAt >= 2000) { this.gmLocalMountCollAt = Date.now(); try { gmSetCollision(lm.id, false); } catch (e) { /* the next time */ } } // it only shows them riding: it shoves nobody
     if (!seated) {
       if (horse.is3DLoaded() && Date.now() - this.gmSeatTryAt >= SEAT_TRY_EVERY_MS) {
         this.gmSeatTryAt = Date.now();
@@ -1227,6 +1240,9 @@ export class FormView {
     try { SpApiInteractor.getControllerInstance().lookupListener(WorldCleanerService).modWcProtection(lm.id, -1); } catch (e) { /* nothing was protected */ }
     gmCrumb("their own horse removed " + gmHex(lm.id) + " (" + why + ")");
   }
+  private gmNoCollide = false; // GREYMARCH: NO SHOVE WHILE RIDING: this player character's collision is off here
+  private gmNoCollideAt = 0;
+  private gmLocalMountCollAt = 0;
   private gmLocalMount: { id: number, base: number } | null = null; // GREYMARCH: RIDDEN AS THEIR OWN: this game's horse under this other player
   private gmRiding = 0; // GREYMARCH: the horse this character rides, as last seen (gmRideStep)
   private gmMountClearAt = 0; // GREYMARCH: when the horse this player rides last had SkyMP's moves cleared (see update)

@@ -11,6 +11,8 @@ import {
   // @ts-expect-error (TODO: Remove in 2.10.0)
   setCollision
 } from "skyrimPlatform";
+// GREYMARCH: an actor's collision on or off (formView.ts NO SHOVE WHILE RIDING), through the import above (the installed typings lack it)
+export const gmSetCollision = (refrId: number, on: boolean): void => { setCollision(refrId, on); };
 import { Movement } from "./movement";
 import { applyWeapDrawn } from "./movementApply";
 

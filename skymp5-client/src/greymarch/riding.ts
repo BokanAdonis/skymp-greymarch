@@ -12,7 +12,9 @@
 export const RIDE_REPORT_EVERY_MS = 5000;
 export const RIDE_CHECK_EVERY_MS = 250;
 export const SEAT_TRY_EVERY_MS = 3000;
-export const HORSE_RACE = 0x131fd; // HorseRace (Skyrim.esm): only a horse is ever mounted on another player's word
+export const HORSE_RACE = 0x131fd;
+export const RIDE_FLING_UP = 1000; // units a second upward no horse makes (a jump is about 400)
+export const RIDE_FLING_SIDE = 3600; // units a second sideways no horse makes (a sprint is about 1100) // HorseRace (Skyrim.esm): only a horse is ever mounted on another player's word
 
 export interface RideReportState { sent: number; at: number }
 

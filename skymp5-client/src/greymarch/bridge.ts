@@ -1669,7 +1669,27 @@ export class GreymarchBridge {
         this.greymarchLog("map: " + add.length + " new place(s) on the map");
     }
     greymarchRideNext = 0;
-    greymarchOwnHorse: { id: number, base: number, mountedAt: number } | null = null;
+    greymarchOwnHorse: { id: number, base: number, mountedAt: number, good?: number[], at?: number, flings?: number } | null = null;
+    // THE FLING GUARD (2026-10-31, the owner: "player gets near me and me and the horse go flying"; the crumbs: off at z 2206 over ground near -4600 within five
+    // seconds of another player's character being remade here). Whatever shoves the horse, a step no horse makes (up faster than RIDE_FLING_UP a second, or
+    // sideways faster than RIDE_FLING_SIDE) puts it straight back where it last was fine; breadcrumb "fling" with how far, so the next clip says what did it
+    greymarchFlingGuard(oh: any, now: number): any {
+        var sp = this.sp, h: any = null, pos: number[] = [];
+        try { h = sp.ObjectReference.from(sp.Game.getFormEx(oh.id)); if (!h) return; pos = [h.getPositionX(), h.getPositionY(), h.getPositionZ()]; } catch (e) { return; }
+        if (!pos.every(function (n) { return isFinite(n); })) return;
+        var good = oh.good, dt = (now - (oh.at || now)) / 1000;
+        if (good && dt > 0.05 && dt < 2) {
+            var up = (pos[2] - good[2]) / dt, side = Math.hypot(pos[0] - good[0], pos[1] - good[1]) / dt;
+            if (up > rideMod.RIDE_FLING_UP || side > rideMod.RIDE_FLING_SIDE) {
+                oh.flings = (oh.flings || 0) + 1;
+                this.greymarchCrumb("fling " + Math.round(up) + " up, " + Math.round(side) + " sideways a second: put back at " + good.map(function (n: number) { return Math.round(n); }).join(" ") + " (" + oh.flings + ")");
+                try { h.setPosition(good[0], good[1], good[2]); } catch (e) { /* the next check */ }
+                oh.at = now; // the good spot stays the last good one
+                return;
+            }
+        }
+        oh.good = pos; oh.at = now;
+    }
     // RIDDEN AS THEIR OWN: true while this game has a horse of its own out. Off it (1.5 s after getting on, so the mounting itself is not taken for getting off):
     // the server is told where it stands (greymarchDismount; it places the horse NPC there) and this game's horse is removed
     greymarchOwnHorseTick(now: number): boolean {
@@ -1677,7 +1697,7 @@ export class GreymarchBridge {
         var sp = this.sp, pl = sp.Game.getPlayer();
         (Function("return this")() as any).__gmMyHorse = oh.id;
         var on = false; try { on = !!pl && pl.isOnMount(); } catch (e) { on = true; }
-        if (on) { if (!oh.mountedAt) oh.mountedAt = now; return true; }
+        if (on) { if (!oh.mountedAt) oh.mountedAt = now; this.greymarchFlingGuard(oh, now); return true; }
         if (!oh.mountedAt ? !this.greymarchMountWanted : now - oh.mountedAt > 1500) {
             var href = sp.ObjectReference.from(sp.Game.getFormEx(oh.id)), pos: any = null, rot = 0;
             try { if (href) { pos = [href.getPositionX(), href.getPositionY(), href.getPositionZ()]; rot = href.getAngleZ(); } } catch (e) { pos = null; }

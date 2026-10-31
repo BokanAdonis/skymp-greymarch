@@ -117,3 +117,12 @@ test("RIDDEN AS THEIR OWN (2026-10-31: no game shares the horse any more): the r
   assert.ok(formView.includes('this.gmRemoveLocalMount("the rider is gone");'));
   assert.ok(formView.includes("const GM_NPC_BASE_TYPE = 43;"));
 });
+
+test("no shove while riding and the fling guard (2026-10-31: still thrown into the sky when a player came near)", () => {
+  assert.ok(formView.includes("try { gmSetCollision(this.refrId, !gmRidingNow);"), "other players' characters collide with nothing here while this player rides");
+  assert.ok(formView.includes("try { gmSetCollision(lm.id, false); }"), "the horse put under another rider shoves nobody");
+  assert.strictEqual(R.RIDE_FLING_UP, 1000); assert.strictEqual(R.RIDE_FLING_SIDE, 3600);
+  assert.ok(bridge.includes("if (up > rideMod.RIDE_FLING_UP || side > rideMod.RIDE_FLING_SIDE) {"));
+  assert.ok(bridge.includes("try { h.setPosition(good[0], good[1], good[2]); }"));
+  assert.ok(bridge.includes("this.greymarchFlingGuard(oh, now); return true;"));
+});
