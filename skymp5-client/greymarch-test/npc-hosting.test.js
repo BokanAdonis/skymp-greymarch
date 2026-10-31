@@ -80,7 +80,7 @@ test("bodies: the server's death wins over a movement that still has the NPC ali
 test("stuck moves: a move is never at speed 0; an NPC this game becomes the host of has its move stopped; drift breadcrumbs", () => {
   const apply = fs.readFileSync(path.join(__dirname, "..", "src", "sync", "movementApply.ts"), "utf8");
   assert.ok(apply.includes("const speed = Math.max(distance / time, GM_MIN_TRANSLATE_SPEED);") && apply.includes("const GM_MIN_TRANSLATE_SPEED = 100;"));
-  const at = formView.indexOf("if (alreadyHosted && !this.gmWasHost) {");
+  const at = formView.indexOf("if (alreadyHosted && !this.gmWasHost && !gmMyMount) {");
   assert.ok(at > 0 && formView.slice(at, at + 300).includes("stopTranslation()"), "on the change to host");
   assert.ok(formView.includes("this.gmWasHost = alreadyHosted;"));
   const tick = formView.slice(formView.indexOf("private gmHostedTick("), formView.indexOf("public gmIsPlayerLook"));
@@ -205,7 +205,7 @@ test("a stuck runner is only written down, never moved or rebuilt (2026-10-28, t
 test("an armed NPC that runs in place gets its animation state reset, when its host takes it over and when it is caught stuck (2026-10-28: Speed 334, SpeedSampled 0)", () => {
   const view = fs.readFileSync(path.join(__dirname, "..", "src", "view", "formView.ts"), "utf8");
   assert.ok(view.includes('const GM_GRAPH_RESET = "IdleForceDefaultState"'));
-  const start = view.slice(view.indexOf("if (alreadyHosted && !this.gmWasHost) {"), view.indexOf("this.gmWasHost = alreadyHosted;"));
+  const start = view.slice(view.indexOf("if (alreadyHosted && !this.gmWasHost && !gmMyMount) {"), view.indexOf("this.gmWasHost = alreadyHosted;"));
   assert.ok(start.includes("Debug.sendAnimationEvent(gmHa, GM_GRAPH_RESET)"), "at host start");
   const block = view.slice(view.indexOf("A STUCK RUNNER, WATCHED"), view.indexOf("PUT DOWN BY ITS HOST (2026"));
   assert.ok(block.includes('getAnimationVariableFloat("SpeedSampled") < 1') && block.includes("Debug.sendAnimationEvent(npc, GM_GRAPH_RESET)"), "when stuck with a still graph");

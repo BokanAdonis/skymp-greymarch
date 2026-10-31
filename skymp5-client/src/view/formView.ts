@@ -692,7 +692,7 @@ export class FormView {
     }
     // GREYMARCH: STUCK MOVES (greymarch/npcHosting.ts): an NPC this game has just become the host of is taken out of any move SkyMP gave it while it played the
     // server's movement, so the engine's own ground and gravity drive it from now on
-    if (alreadyHosted && !this.gmWasHost) {
+    if (alreadyHosted && !this.gmWasHost && !gmMyMount) { // not the horse this player sits on (RIDING): no stop, no animation reset under its rider
       try { Actor.from(refr)?.stopTranslation(); } catch (e) { /* it was not moving */ }
       // its animation state is reset too (2026-10-28, the owner: the armed encounter skeletons ran in place; breadcrumbs: Speed 334, SpeedSampled 0). Until this
       // game ran it, its own animations were held back (setDefaultAnimsDisabled), and a run its AI started then never began in its graph
@@ -1315,6 +1315,10 @@ export class FormView {
       const npc = Actor.from(refr);
       const me = Game.getPlayer();
       if (!npc || !me || npc.isDead()) return "";
+      // GREYMARCH: RIDING (2026-10-31, the owner: the horse flew about when sprinting, then the game crashed in the horse camera on a deleted horse): a galloping
+      // horse passed the LOCKED HEIGHT test (fast, flat) and was rebuilt (disabled and enabled) with its rider on it; the ground word and the hand-off moved it too.
+      // A horse someone sits on is left alone: no rebuild, no ground fix, no nudge, no hand-off
+      try { if (npc.isBeingRidden()) return ""; } catch (e) { /* checked again next second */ }
       const placeOf = (a: Actor): number => { const w = a.getWorldSpace() || a.getParentCell(); return w ? w.getFormID() : 0; };
       const myPlace = placeOf(me);
       // DIAGNOSTIC (2026-10-24, NPCs walking in the air or half in the ground with only their host's player there): every 3 s, at most 120 lines a game, an NPC

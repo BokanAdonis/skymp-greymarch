@@ -86,3 +86,10 @@ test("getting on (2026-10-31): SkyMP blocks E on NPCs, so the server's greymarch
   assert.ok(bridge.indexOf("var mw = this.greymarchMountWanted;") < bridge.indexOf("if (now < (this.greymarchRideNext || 0)) return;"), "not held back by the 250 ms gate");
   assert.ok(formView.includes("horse.blockActivation(false); horse.activate(ac, true);"));
 });
+
+test("a ridden horse is left alone by the host's NPC care (2026-10-31: a galloping horse was rebuilt under its rider, flew about, and the game crashed on the deleted horse)", () => {
+  const tick = formView.slice(formView.indexOf("private gmHostedTick(refr: ObjectReference): string {"));
+  assert.ok(tick.indexOf('if (npc.isBeingRidden()) return "";') > 0 && tick.indexOf('if (npc.isBeingRidden()) return "";') < tick.indexOf("flatStep("), "before the rebuild, the ground fix and the nudge");
+  assert.ok(formView.includes("if (alreadyHosted && !this.gmWasHost && !gmMyMount) {"), "no stop and animation reset on the horse this player sits on");
+  assert.ok(formView.indexOf("const gmMyMount =") < formView.indexOf("if (alreadyHosted && !this.gmWasHost && !gmMyMount) {"));
+});
