@@ -441,6 +441,7 @@ export class GreymarchBridge {
     greymarchTick(): any {
         this.greymarchRebaseAfterLoad(Date.now()); // "update" runs only once the world is loaded
         this.greymarchMapTick(Date.now());
+        this.greymarchNoFastTravel(Date.now());
         this.greymarchSelectFocusGuard(Date.now());
         this.greymarchDoorNamesApply(Date.now());
         this.greymarchDoorPrompt(Date.now());
@@ -1033,7 +1034,7 @@ export class GreymarchBridge {
             step = "controls"; sp.Game.enablePlayerControls(false, false, true, false, false, false, false, false, 1);
             step = "camera"; sp.Game.showFirstPersonGeometry(true);
             step = "beast form"; sp.Game.setBeastForm(false);
-            step = "fast travel"; sp.Game.enableFastTravel(true);
+            step = "fast travel"; sp.Game.enableFastTravel(false); // never on again (2026-10-30, the owner: fast travel off for everything)
             step = "animation"; sp.Debug.sendAnimationEvent(player, "IdleForceDefaultState"); // the person's animations from their idle
             step = "redraw"; player.queueNiNodeUpdate();
             try { (sp.storage as any)["greymarchWolfOn"] = false; } catch (stErr) { /* nothing was set */ }
@@ -1527,6 +1528,20 @@ export class GreymarchBridge {
     // THE MAP REMEMBERED (gamemode mapmarkers.js, 2026-10-30, the owner: discoveries were lost at every login; restored ones "only show them"): the character's
     // found markers are shown on the map again (AddToMap(false): no fast travel to them), then every 10 s the markers the player has come to see on the map since
     // are told to the server, which keeps them
+    // NO FAST TRAVEL (2026-10-30, the owner: "turn fast travel off for everything"): every 2 s, fast travel found on (a world load, the game's own scripts) is
+    // switched off again; the map shows places, it never takes anyone there
+    greymarchNoFastTravelAt = 0;
+    greymarchNoFastTravelSaid = false;
+    greymarchNoFastTravel(now: number): any {
+        if (now < this.greymarchNoFastTravelAt) return;
+        this.greymarchNoFastTravelAt = now + 2000;
+        try {
+            if (this.sp.Game.isFastTravelEnabled()) {
+                this.sp.Game.enableFastTravel(false);
+                if (!this.greymarchNoFastTravelSaid) { this.greymarchNoFastTravelSaid = true; this.greymarchLog("map: fast travel switched off"); }
+            }
+        } catch (e) { /* the next look */ }
+    }
     greymarchMapState: any = null;
     greymarchMapRef(desc: string): any {
         var st = this.greymarchMapState; if (!st) return null;
@@ -2255,7 +2270,7 @@ export class GreymarchBridge {
             step = "visible"; player.setAlpha(1, false);
             step = "controls"; sp.Game.enablePlayerControls(false, false, true, false, false, false, false, false, 1);
             step = "beast form"; sp.Game.setBeastForm(false);
-            step = "fast travel"; sp.Game.enableFastTravel(true);
+            step = "fast travel"; sp.Game.enableFastTravel(false); // never on again (2026-10-30, the owner: fast travel off for everything)
             this.greymarchShapeWearAt = Date.now() + 1000; // the gear, and the character's own look SkyMP kept aside, a moment later
             this.greymarchLog("shape: changed back (the NPC is gone, the player is visible)");
         } catch (uErr) {
@@ -2336,7 +2351,7 @@ export class GreymarchBridge {
             step = "animation"; sp.Debug.sendAnimationEvent(player, "IdleForceDefaultState");
             step = "controls"; sp.Game.enablePlayerControls(false, false, true, false, false, false, false, false, 1);
             step = "beast form"; sp.Game.setBeastForm(false);
-            step = "fast travel"; sp.Game.enableFastTravel(true);
+            step = "fast travel"; sp.Game.enableFastTravel(false); // never on again (2026-10-30, the owner: fast travel off for everything)
             step = "redraw"; player.queueNiNodeUpdate(); // the head is drawn again
             this.greymarchShapeWearAt = Date.now() + 1000; // the gear, and the character's exact look that SkyMP kept aside (remoteServer.ts), a moment later
             var r = player.getRace();
