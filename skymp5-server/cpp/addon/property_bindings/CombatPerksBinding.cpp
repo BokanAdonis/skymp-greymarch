@@ -26,6 +26,7 @@ Napi::Value CombatPerksBinding::Get(Napi::Env env, ScampServer& scampServer,
   auto result = Napi::Object::New(env);
   result.Set("sneak", Napi::Boolean::New(env, p.sneak));
   result.Set("jumpPower", Napi::Boolean::New(env, p.jumpPower));
+  result.Set("beast", Napi::Boolean::New(env, p.beast));
   if (p.blockStops.has_value()) {
     result.Set("blockStops", Napi::Number::New(env, *p.blockStops));
   }
@@ -48,6 +49,7 @@ void CombatPerksBinding::Set(Napi::Env env, ScampServer& scampServer,
   p.isSet = true;
   p.sneak = BoolOr(obj, "sneak", true);
   p.jumpPower = BoolOr(obj, "jumpPower", false);
+  p.beast = BoolOr(obj, "beast", false);
   Napi::Value stops = obj.Get("blockStops");
   if (!stops.IsUndefined() && !stops.IsNull()) {
     const float f = NapiHelper::ExtractFloat(stops, "blockStops");

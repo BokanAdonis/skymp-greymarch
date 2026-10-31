@@ -200,8 +200,10 @@ float TES5DamageFormulaImpl::CalcArmorDamagePenalty() const
         .value;
   // GREYMARCH: player against player, the armor counts pvpArmor of itself
   float armorFactor = 1.f;
+  // a beast form's claws skip the PvP rules (2026-10-31, the owner: they are
+  // tuned on their own, gamemode werewolf.js)
   if (balance.pvpArmor.has_value() && aggressor.GetCombatPerks().isSet &&
-      target.GetCombatPerks().isSet) {
+      !aggressor.GetCombatPerks().beast && target.GetCombatPerks().isSet) {
     armorFactor = *balance.pvpArmor;
   }
   return 0.01f *
@@ -302,7 +304,8 @@ float TES5DamageFormulaImpl::CalculateDamage() const
   // GREYMARCH: player against player (both have combat perks from the
   // gamemode): a rank penalty keeps pvpRankKeep of its size, and the hit is
   // times pvpDamage (2026-10-31, the owner: PvP fights shorter and closer)
-  const bool pvp = aggressorPerks.isSet && targetPerks.isSet;
+  const bool pvp =
+    aggressorPerks.isSet && !aggressorPerks.beast && targetPerks.isSet;
   if (pvp && attackerMult < 1.f && balance.pvpRankKeep.has_value()) {
     attackerMult = 1.f - (1.f - attackerMult) * *balance.pvpRankKeep;
   }

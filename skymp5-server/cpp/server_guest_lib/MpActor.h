@@ -215,6 +215,10 @@ public:
     bool jumpPower = false;
     // percent a weapon block stops, 0..100
     std::optional<float> blockStops;
+    // GREYMARCH (2026-10-31, the owner): in a beast form (werewolf, werebear, a
+    // staff creature form); its hits on players skip the PvP rules, its claws
+    // are tuned on their own (gamemode werewolf.js)
+    bool beast = false;
   };
   void SetCombatPerks(const CombatPerks& perks) noexcept;
   const CombatPerks& GetCombatPerks() const noexcept;
