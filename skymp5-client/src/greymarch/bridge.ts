@@ -40,14 +40,14 @@ const LIP_STEP_MS = 110; // a talking mouth changes shape this often
 const LIP_OPEN = [[0, 0.55], [1, 0.45], [6, 0.6], [11, 0.5], [5, 0.45], [8, 0.5]]; // [phoneme, strength]: Aah, BigAah, Eh, Oh, Eee, I
 const LIP_CLOSED = [[2, 0.55], [4, 0.4], [10, 0.4]]; // BMP, DST, N: the lips meet or nearly
 // THE BEAST FORMS' RACES in GreymarchCore.esp (each a copy of the werewolf or werebear race with its own skin): kind -> [the record's id in the plugin, its name]. The wolf's
-// kinds are what the server sends as kind (werewolf.js WOLF_KINDS); black and polar are the werebear's looks. Frost Wolf, Rabid Wolf, Moonborn and Elder Alpha: 2026-10-21; the Silvermane Alpha: 2026-10-30.
+// kinds are what the server sends as kind (werewolf.js WOLF_KINDS); black and polar are the werebear's looks. Frost Wolf, Rabid Wolf, Moonborn and Elder Alpha: 2026-10-21. 2026-10-31: the Elder is shown as the Hircine Champion,
+// and the Silvermane Alpha of 2026-10-30 became the Alpha's own look (0x804 in GreymarchCore.esp; its own records are gone).
 const GM_WOLF_FORMS: { [kind: string]: [number, string] } = {
-  alpha: [0x804, "Alpha"], pup: [0x80a, "pup"], frost: [0x866, "Frost Wolf"], rabid: [0x86b, "Rabid Wolf"], moonborn: [0x870, "Moonborn"], elder: [0x875, "Elder Alpha"],
-  silvermane: [0x87c, "Silvermane Alpha"],
+  alpha: [0x804, "Alpha"], pup: [0x80a, "pup"], frost: [0x866, "Frost Wolf"], rabid: [0x86b, "Rabid Wolf"], moonborn: [0x870, "Moonborn"], elder: [0x875, "Hircine Champion"],
   black: [0x85c, "black bear"], polar: [0x861, "polar bear"],
 };
 // the lists in the server's greymarchWolfAlphas packet, by kind
-const GM_WOLF_LISTS: { [kind: string]: string } = { alpha: "actors", pup: "pups", black: "blackbears", polar: "polarbears", frost: "frosts", rabid: "rabids", moonborn: "moonborns", elder: "elders", silvermane: "silvermanes" };
+const GM_WOLF_LISTS: { [kind: string]: string } = { alpha: "actors", pup: "pups", black: "blackbears", polar: "polarbears", frost: "frosts", rabid: "rabids", moonborn: "moonborns", elder: "elders" };
 const WOLF_ROAR_MS = 0; // R: no wait between roars (2026-10-21, the owner's call; the server has none either: werewolf.js TUNE.howlCooldownMs). One roar per press of R.
 // GREYMARCH: THE HOWL SHOUT (2026-10-23). The vanilla howl is the werewolf's voice: PlayerWerewolfChangeScript puts a howl shout in the voice slot, and the graph's
 // howl (HowlStart) casts it (BeginCastVoice). With none there the howl state had nothing to cast and stalled: the roar played once, then only its sound. A
@@ -1097,7 +1097,7 @@ export class GreymarchBridge {
     }
     greymarchWolfRaceId(): number { return (this.greymarchWolfBearRace && this.greymarchWolfPolar && this.greymarchWolfPolarRaceId()) || (this.greymarchWolfBearRace && this.greymarchWolfBlack && this.greymarchWolfBlackRaceId()) || this.greymarchWolfBearRace || (this.greymarchWolfKind && this.greymarchWolfKindRaceId(this.greymarchWolfKind)) || 0xcdd84; }
     greymarchWolfRace(): any { return this.sp.Race.from(this.sp.Game.getFormEx(this.greymarchWolfRaceId())); }
-    // Other players in one of the forms (GM_WOLF_FORMS: an Alpha, a pup, a Frost Wolf, a Rabid Wolf, a Moonborn, an Elder Alpha, a Silvermane Alpha, a black or polar bear): SkyMP draws them with the race of their appearance, which the server can only set to the normal werewolf. Every second the
+    // Other players in one of the forms (GM_WOLF_FORMS: an Alpha, a pup, a Frost Wolf, a Rabid Wolf, a Moonborn, a Hircine Champion, a black or polar bear): SkyMP draws them with the race of their appearance, which the server can only set to the normal werewolf. Every second the
     // lists become __gmWolfRace (server actor id -> the variant's race), which formView.ts uses to BUILD that player's NPC with the variant's race (it respawns it when
     // the race changes). Never a SetRace on another player's live actor: that rebuilt its skeleton's physics while SkyMP moved it and crashed the game.
     greymarchWolfAlphaOthers(now: number): any {
