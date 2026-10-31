@@ -37,6 +37,7 @@ private:
 private:
   [[nodiscard]] float GetBaseWeaponDamage() const;
   [[nodiscard]] float GetAmmoDamage() const;
+  [[nodiscard]] bool ShotWithPracticeArrow() const;
   [[nodiscard]] float CalcWeaponRating() const;
   [[nodiscard]] float CalcArmorRatingComponent(
     const Inventory::Entry& opponentEquipmentEntry) const;
@@ -107,6 +108,35 @@ float TES5DamageFormulaImpl::GetAmmoDamage() const
       : 0.f;
   }
   return 0.f;
+}
+
+// GREYMARCH: PRACTICE ARROWS DO NO DAMAGE (2026-10-31, the owner: "if someone
+// shoots a practice arrow regardless of the bow it does no damage"). A shot
+// (not a bash) from a bow or crossbow while the shooter has Practice Arrows
+// (Skyrim.esm 000CAB52) equipped hurts no one, whatever the bow.
+constexpr uint32_t kPracticeArrow = 0x000cab52;
+
+bool TES5DamageFormulaImpl::ShotWithPracticeArrow() const
+{
+  if (hitData.isBashAttack) {
+    return false;
+  }
+  const auto weapData =
+    espm::GetData<espm::WEAP>(hitData.source, espmProvider);
+  if (!weapData.weapDNAM ||
+      (weapData.weapDNAM->animType != espm::WEAP::AnimType::Bow &&
+       weapData.weapDNAM->animType != espm::WEAP::AnimType::Crossbow)) {
+    return false;
+  }
+  for (const auto& entry : aggressor.GetEquipment().inv.entries) {
+    if (entry.GetWorn() == Inventory::Worn::None ||
+        espm::GetRecordType(entry.baseId, espmProvider) !=
+          espm::AMMO::kType) {
+      continue;
+    }
+    return entry.baseId == kPracticeArrow;
+  }
+  return false;
 }
 
 float TES5DamageFormulaImpl::CalcWeaponRating() const
@@ -245,6 +275,10 @@ bool TES5DamageFormulaImpl::AggressorJumpedRecently() const
 
 float TES5DamageFormulaImpl::CalculateDamage() const
 {
+  if (ShotWithPracticeArrow()) {
+    return 0.f; // a Practice Arrow: no damage, whatever the bow
+  }
+
   const auto& balance = GreymarchBalance::Get();
   const float incomingDamage = DetermineDamageFromSource(hitData.source);
 
