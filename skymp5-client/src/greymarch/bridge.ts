@@ -1558,7 +1558,7 @@ export class GreymarchBridge {
         if (st.restore) {
             st.restore = false;
             var shown = 0, missing = 0;
-            st.found.forEach((d: string) => { var r = this.greymarchMapRef(d); if (!r) { missing++; return; } try { r.addToMap(true); shown++; } catch (e) { missing++; } // as discovered (2026-10-31, the owner): fast travel is off for everyone (greymarchNoFastTravel), so this takes nobody anywhere });
+            st.found.forEach((d: string) => { var r = this.greymarchMapRef(d); if (!r) { missing++; return; } try { r.addToMap(true); shown++; } catch (e) { missing++; } }); // as discovered (2026-10-31, the owner): fast travel is off for everyone (greymarchNoFastTravel), so this takes nobody anywhere
             this.greymarchLog("map: " + shown + " place(s) found before shown on the map again" + (missing ? ", " + missing + " not in this game" : ""));
             st.checkAt = now + 15000; // the game's own markers settle first
             return;
