@@ -1526,7 +1526,7 @@ export class GreymarchBridge {
     // by then) the look the player has now is exported, the kept parts put in and the result loaded. Nothing is loaded when the parts already match,
     // and nothing while the race menu is open or the body is the werewolf or a creature (done again after changing back).
     // THE MAP REMEMBERED (gamemode mapmarkers.js, 2026-10-30, the owner: discoveries were lost at every login; restored ones "only show them"): the character's
-    // found markers are shown on the map again (AddToMap(false): no fast travel to them), then every 10 s the markers the player has come to see on the map since
+    // found markers are shown on the map again as discovered (AddToMap(true); fast travel itself is off: greymarchNoFastTravel), then every 10 s the markers the player has come to see on the map since
     // are told to the server, which keeps them
     // NO FAST TRAVEL (2026-10-30, the owner: "turn fast travel off for everything"): every 2 s, fast travel found on (a world load, the game's own scripts) is
     // switched off again; the map shows places, it never takes anyone there
@@ -1558,7 +1558,7 @@ export class GreymarchBridge {
         if (st.restore) {
             st.restore = false;
             var shown = 0, missing = 0;
-            st.found.forEach((d: string) => { var r = this.greymarchMapRef(d); if (!r) { missing++; return; } try { if (!r.isMapMarkerVisible()) r.addToMap(false); shown++; } catch (e) { missing++; } });
+            st.found.forEach((d: string) => { var r = this.greymarchMapRef(d); if (!r) { missing++; return; } try { r.addToMap(true); shown++; } catch (e) { missing++; } // as discovered (2026-10-31, the owner): fast travel is off for everyone (greymarchNoFastTravel), so this takes nobody anywhere });
             this.greymarchLog("map: " + shown + " place(s) found before shown on the map again" + (missing ? ", " + missing + " not in this game" : ""));
             st.checkAt = now + 15000; // the game's own markers settle first
             return;
