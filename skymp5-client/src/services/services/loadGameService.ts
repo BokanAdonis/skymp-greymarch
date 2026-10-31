@@ -1,5 +1,6 @@
 import { ClientListener, CombinedController, Sp } from "./clientListener";
 import { ChangeFormNpc } from "skyrimPlatform";
+import { clearTemplateIds } from "../../greymarch/templateIds";
 
 export class LoadGameService extends ClientListener {
     constructor(private sp: Sp, private controller: CombinedController) {
@@ -9,6 +10,7 @@ export class LoadGameService extends ClientListener {
 
     public loadGame(pos: number[], rot: number[], worldOrCell: number, changeFormNpc?: ChangeFormNpc, loadOrder?: string[], time?: { seconds: number, minutes: number, hours: number }) {
         try { (this.controller.emitter as any).emit("greymarchStage", "stage: SkyMP asks the game to load the world (cell " + (worldOrCell != null ? Number(worldOrCell).toString(16) : "?") + ")"); } catch (e) { /* GREYMARCH: diagnostics only */ }
+        this.greymarchClearTemplateIds(); // GREYMARCH: objects with ids the start save also uses are removed first (greymarch/templateIds.ts)
         try {
             // @ts-ignore
             this.sp.loadGame(pos, rot, worldOrCell, changeFormNpc, loadOrder, time);
@@ -21,6 +23,32 @@ export class LoadGameService extends ClientListener {
         this._greymarchLoadAt = Date.now(); // GREYMARCH: see onLoadGame
         this._greymarchAnswered = false; // GREYMARCH: this request has not been answered by a load yet
         (this.controller.emitter as any).emit("greymarchStage", "stage: the game accepted the load request (it has not reported the load yet)");
+    }
+
+    // GREYMARCH: see greymarch/templateIds.ts. What was found goes to the server log, so a crash that still happens here can be traced.
+    private greymarchClearTemplateIds() {
+        const sp = this.sp;
+        try {
+            const r = clearTemplateIds({
+                find: (id: number) => {
+                    const f = sp.Game.getFormEx(id);
+                    if (!f) return null;
+                    const ref = sp.ObjectReference.from(f);
+                    let name = "";
+                    try { name = String((ref ? ref.getDisplayName() : f.getName()) || ""); } catch (e) { name = ""; }
+                    return { isRef: !!ref, isActor: !!(ref && sp.Actor.from(ref)), name, type: f.getType() };
+                },
+                remove: (id: number) => {
+                    const ref = sp.ObjectReference.from(sp.Game.getFormEx(id));
+                    if (!ref) throw new Error("gone");
+                    Promise.resolve(ref.disable(false)).catch(() => { /* deleted anyway */ });
+                    ref.delete();
+                },
+            });
+            if (r.removed.length || r.kept.length) (this.controller.emitter as any).emit("greymarchStage", "stage: before the load, objects with ids the start save also uses: removed [" + r.removed.join(", ") + "]" + (r.kept.length ? ", could not remove [" + r.kept.join(", ") + "]" : ""));
+        } catch (e) {
+            try { (this.controller.emitter as any).emit("greymarchStage", "stage: the start-save id check failed: " + e); } catch (e2) { /* diagnostics only */ }
+        }
     }
 
     private onLoadGame() {
