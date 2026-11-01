@@ -7,6 +7,9 @@ import {
   Spell,
   Ui,
   setInventory,
+  Weapon,
+  once,
+  writeLogs,
 } from 'skyrimPlatform';
 
 import { Entry, Inventory, getInventory } from './inventory';
@@ -122,6 +125,36 @@ export const applyEquipment = (ac: Actor, eq: Equipment): boolean => {
 
   // GREYMARCH: DUAL WIELD (2026-11-01): a left-hand step here (equipping the copy's left-hand weapon again) made a bound sword invisible on the copy
   // (a bound weapon is seen through the glow it starts with); taken out. The copy keeps what setInventory gives it.
+
+  // GREYMARCH: ANOTHER PLAYER'S BOUND BOW (2026-11-01, the owner: invisible for everyone else, while their Bound Sword showed): a bow with no arrows cannot
+  // be drawn, and a bound weapon is only seen drawn. So a copy holding a bound bow is given Bound Arrows and they are equipped, a moment after its gear
+  // (setInventory is not done at once). What the copy then holds goes to the log (test).
+  if (ac.getFormID() !== 0x14) {
+    const hasBoundBow = newInventory.entries.some((e) => {
+      if (!e.worn) return false;
+      const f = Game.getFormEx(e.baseId);
+      const w = f ? Weapon.from(f) : null;
+      return !!w && (w.getWeaponType() === 7 || w.getWeaponType() === 9) && /^bound\b/i.test(w.getName() || "");
+    });
+    if (hasBoundBow) {
+      const actorId = ac.getFormID();
+      const due = Date.now() + 500;
+      const step = () => {
+        if (Date.now() < due) { once('update', step); return; }
+        try {
+          const a = Actor.from(Game.getFormEx(actorId));
+          const arrow = Game.getFormEx(0x10b0a7); // Skyrim.esm boundArrow
+          if (!a || !arrow) return;
+          const had = a.getItemCount(arrow);
+          if (had < 10) a.addItem(arrow, 100 - had, true);
+          a.equipItem(arrow, false, true);
+          const w = a.getEquippedWeapon(false);
+          writeLogs("greymarch", "copy bound bow " + actorId.toString(16) + ": arrows " + had + " -> " + a.getItemCount(arrow) + ", holds " + (w ? w.getFormID().toString(16) : "none") + (a.isWeaponDrawn() ? ", drawn" : ", not drawn"));
+        } catch (e) { /* the copy keeps its gear */ }
+      };
+      once('update', step);
+    }
+  }
 
   syncSpellEquipment(ac, eq.leftSpell, SpellType.Left);
   syncSpellEquipment(ac, eq.rightSpell, SpellType.Right);
