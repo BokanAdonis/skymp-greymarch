@@ -374,6 +374,18 @@ export const withRoundedHealth = (inv: Inventory): Inventory => ({
   }),
 });
 
+// GREYMARCH: a weapon or arrow a conjuring spell gives (its name starts with "Bound": the game's, Dragonborn's, Beyond Skyrim's, Mysticism's)
+const greymarchIsBoundItem = (baseId: number): boolean => {
+  try {
+    const f = Game.getFormEx(baseId);
+    if (!f) return false;
+    const t = f.getType();
+    return (t === FormType.Weapon || t === FormType.Ammo) && /^bound\b/i.test(f.getName() || "");
+  } catch (e) {
+    return false;
+  }
+};
+
 export const applyInventory = (
   refr: ObjectReference,
   newInventory: Inventory,
@@ -384,6 +396,9 @@ export const applyInventory = (
   const serverInv = withRoundedHealth(newInventory);
   const current = getInventory(refr);
   let diff = getDiff(serverInv, current, ignoreWorn).entries;
+  // GREYMARCH (2026-11-01, bound weapons on the server): a conjured weapon or arrow (Bound Sword, Bound Bow and its arrows) exists only in this game,
+  // never in the server's inventory; it is not taken away here, or the spell's weapon vanished a second after the cast. It goes when the spell ends.
+  diff = diff.filter((e) => !(e.count < 0 && greymarchIsBoundItem(e.baseId)));
 
   // Greymarch: Skyrim cannot be told WHICH of several items of one base to remove: AddItemEx hands RemoveItem a new extra list, which is not one of
   // the container's own, so Skyrim takes whichever comes first. With two guard report papers (one base, each its own name and condition) the wrong
