@@ -16,7 +16,7 @@ test("both packets are let through and handled", () => {
 });
 
 test("the stagger: the player's own with sendAnimationEvent, another player's copy through SkyMP's animation path", () => {
-  assert.match(src, /if \(q\[i\]\.self\) \{ this\.sp\.Debug\.sendAnimationEvent\(this\.sp\.Game\.getPlayer\(\), "staggerStart"\); continue; \}/);
+  assert.match(src, /if \(q\[i\]\.self\) \{ var spl = this\.sp\.Game\.getPlayer\(\); if \(spl && !spl\.isOnMount\(\)\) this\.sp\.Debug\.sendAnimationEvent\(spl, "staggerStart"\); continue; \}/); // never on a horse (2026-10-31)
   assert.match(src, /animMod\.applyAnimation\(ref, \{ animEventName: "staggerStart", numChanges: 1 \}/);
 });
 

@@ -126,3 +126,8 @@ test("no shove while riding and the fling guard (2026-10-31: still thrown into t
   assert.ok(bridge.includes("try { h.setPosition(good[0], good[1], good[2]); }"));
   assert.ok(bridge.includes("this.greymarchFlingGuard(oh, now); return true;"));
 });
+
+test("no starving stagger on anyone sitting on a horse (2026-10-31: it threw the rider out of the saddle)", () => {
+  assert.ok(bridge.includes('if (spl && !spl.isOnMount()) this.sp.Debug.sendAnimationEvent(spl, "staggerStart");'));
+  assert.ok(bridge.includes("if (sac && sac.isOnMount()) continue;"));
+});
