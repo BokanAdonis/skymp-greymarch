@@ -7,6 +7,7 @@ import {
   Spell,
   Ui,
   setInventory,
+  writeLogs,
 } from 'skyrimPlatform';
 
 import { Entry, Inventory, getInventory } from './inventory';
@@ -109,6 +110,9 @@ export const syncSpellEquipment = (
   }
 };
 
+let gmDualLogsLeft = 20; // GREYMARCH: dual-wield breadcrumbs in greymarch-logs.txt (test)
+const gmDualLog = (t: string) => { if (gmDualLogsLeft-- > 0) { try { writeLogs("greymarch", t); } catch (e) { /* no log */ } } };
+
 export const applyEquipment = (ac: Actor, eq: Equipment): boolean => {
   ac.removeAllItems(null, false, true);
 
@@ -130,11 +134,14 @@ export const applyEquipment = (ac: Actor, eq: Equipment): boolean => {
         const f = Game.getFormEx(left.baseId);
         if (!f || f.getType() !== FormType.Weapon) continue;
         const bothHands = newInventory.entries.some((e) => e.baseId === left.baseId && e.worn);
-        if (bothHands && ac.getItemCount(f) < 2) ac.addItem(f, 2 - ac.getItemCount(f), true);
+        const had = ac.getItemCount(f);
+        if (bothHands && had < 2) ac.addItem(f, 2 - had, true);
         ac.equipItemEx(f, 2, false, false); // 2: the left hand
         if (bothHands) ac.equipItemEx(f, 1, false, false); // 1: the right hand
+        const r = ac.getEquippedWeapon(false), l = ac.getEquippedWeapon(true);
+        gmDualLog("dual " + ac.getFormID().toString(16) + ": " + left.baseId.toString(16) + (bothHands ? " both hands" : " left") + ", had " + had + ", now " + ac.getItemCount(f) + "; right " + (r ? r.getFormID().toString(16) : "none") + ", left " + (l ? l.getFormID().toString(16) : "none"));
       }
-    } catch (e) { /* the copy keeps what setInventory gave it */ }
+    } catch (e) { gmDualLog("dual failed: " + e); /* the copy keeps what setInventory gave it */ }
   }
 
   syncSpellEquipment(ac, eq.leftSpell, SpellType.Left);
