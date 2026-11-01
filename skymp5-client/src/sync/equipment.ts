@@ -150,7 +150,8 @@ export const applyEquipment = (ac: Actor, eq: Equipment): boolean => {
         if (Date.now() < due) { once('update', step); return; }
         try {
           const a = Actor.from(Game.getFormEx(actorId));
-          const ok = a ? callNative("GreymarchCam", "PlayArt", undefined, a, art, 120) : false;
+          const artNow = Game.getFormEx(BOUND_BOW_ART); // looked up in this frame: a game object from an earlier frame is no longer valid (test: "Invalid indexInPool")
+          const ok = a && artNow ? callNative("GreymarchCam", "PlayArt", undefined, a, artNow, 120) : false;
           writeLogs("greymarch", "copy bound bow " + actorId.toString(16) + ": its art " + (ok ? "played" : "refused") + (a && a.isWeaponDrawn() ? " (drawn)" : ""));
         } catch (e) { writeLogs("greymarch", "copy bound bow " + actorId.toString(16) + ": the art could not be played: " + e); }
       };
