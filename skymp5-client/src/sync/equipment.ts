@@ -9,6 +9,7 @@ import {
   setInventory,
   Weapon,
   once,
+  callNative,
   writeLogs,
 } from 'skyrimPlatform';
 
@@ -112,6 +113,9 @@ export const syncSpellEquipment = (
   }
 };
 
+const BOUND_BOW_ART = 0xe3f0c; // GREYMARCH: Skyrim.esm BoundBowFX art (EnchBoundBowFX's enchant art: the bound bow's shape)
+const gmBowArtOn = new Set<number>(); // GREYMARCH: copies the bound bow's art was put on
+
 export const applyEquipment = (ac: Actor, eq: Equipment): boolean => {
   ac.removeAllItems(null, false, true);
 
@@ -126,33 +130,34 @@ export const applyEquipment = (ac: Actor, eq: Equipment): boolean => {
   // GREYMARCH: DUAL WIELD (2026-11-01): a left-hand step here (equipping the copy's left-hand weapon again) made a bound sword invisible on the copy
   // (a bound weapon is seen through the glow it starts with); taken out. The copy keeps what setInventory gives it.
 
-  // GREYMARCH: ANOTHER PLAYER'S BOUND BOW (2026-11-01, the owner: invisible for everyone else, while their Bound Sword showed): a bow with no arrows cannot
-  // be drawn, and a bound weapon is only seen drawn. So a copy holding a bound bow is given Bound Arrows and they are equipped, a moment after its gear
-  // (setInventory is not done at once). What the copy then holds goes to the log (test).
+  // GREYMARCH: ANOTHER PLAYER'S BOUND BOW (2026-11-01, the owner: invisible for everyone else, while their Bound Sword showed; the copy draws, an arrow is
+  // seen nocked, but no bow). The bound bow's shape is the art of its enchantment's effect (EnchBoundBowFX: BoundBowFX art, Skyrim.esm 000E3F0C), which this
+  // game plays on its own player's bow but never on a copy's. So it is put on the copy with our plugin (GreymarchCam.PlayArt, the game's own ApplyArtObject)
+  // for the bound bow spell's two minutes, once; when the copy's gear has no bound bow any more it is taken off (Papyrus Extender's StopArtObject).
   if (ac.getFormID() !== 0x14) {
+    const actorId = ac.getFormID();
     const hasBoundBow = newInventory.entries.some((e) => {
       if (!e.worn) return false;
       const f = Game.getFormEx(e.baseId);
       const w = f ? Weapon.from(f) : null;
       return !!w && (w.getWeaponType() === 7 || w.getWeaponType() === 9) && /^bound\b/i.test(w.getName() || "");
     });
-    if (hasBoundBow) {
-      const actorId = ac.getFormID();
-      const due = Date.now() + 500;
+    const art = Game.getFormEx(BOUND_BOW_ART);
+    if (hasBoundBow && art && !gmBowArtOn.has(actorId)) {
+      gmBowArtOn.add(actorId);
+      const due = Date.now() + 300;
       const step = () => {
         if (Date.now() < due) { once('update', step); return; }
         try {
           const a = Actor.from(Game.getFormEx(actorId));
-          const arrow = Game.getFormEx(0x10b0a7); // Skyrim.esm boundArrow
-          if (!a || !arrow) return;
-          const had = a.getItemCount(arrow);
-          if (had < 10) a.addItem(arrow, 100 - had, true);
-          a.equipItem(arrow, false, true);
-          const w = a.getEquippedWeapon(false);
-          writeLogs("greymarch", "copy bound bow " + actorId.toString(16) + ": arrows " + had + " -> " + a.getItemCount(arrow) + ", holds " + (w ? w.getFormID().toString(16) : "none") + (a.isWeaponDrawn() ? ", drawn" : ", not drawn"));
-        } catch (e) { /* the copy keeps its gear */ }
+          const ok = a ? callNative("GreymarchCam", "PlayArt", undefined, a, art, 120) : false;
+          writeLogs("greymarch", "copy bound bow " + actorId.toString(16) + ": its art " + (ok ? "played" : "refused") + (a && a.isWeaponDrawn() ? " (drawn)" : ""));
+        } catch (e) { writeLogs("greymarch", "copy bound bow " + actorId.toString(16) + ": the art could not be played: " + e); }
       };
       once('update', step);
+    } else if (!hasBoundBow && art && gmBowArtOn.has(actorId)) {
+      gmBowArtOn.delete(actorId);
+      try { callNative("PO3_SKSEFunctions", "StopArtObject", undefined, ac, art); } catch (e) { /* it ends by itself */ }
     }
   }
 
