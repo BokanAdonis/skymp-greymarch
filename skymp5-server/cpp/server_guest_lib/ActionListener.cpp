@@ -967,6 +967,45 @@ float CalculateCurrentHealthPercentage(const MpActor& actor, float damage,
 // its magnitude every second. The server never counted these: the healed
 // player's game raised their health, the regeneration check took it back down
 // as too fast, and the heal was lost.
+// GREYMARCH: SELF-BUFFS (2026-11-01, the owner: Oakflesh, Stoneflesh and the
+// like did nothing). The armor rating a spell adds while it runs: its
+// strongest beneficial effect that raises DamageResist (the game's armor
+// rating), and how long that lasts. {0, 0} when it has none.
+std::pair<float, float> SpellArmorBuff(WorldState* worldState, uint32_t spellId)
+{
+  auto& browser = worldState->GetEspm().GetBrowser();
+  const auto spellLookup = browser.LookupById(spellId);
+  if (!spellLookup.rec || spellLookup.rec->GetType() != espm::SPEL::kType) {
+    return { 0.f, 0.f };
+  }
+  const auto spellData = espm::GetData<espm::SPEL>(spellId, worldState);
+  float best = 0.f, seconds = 0.f;
+  for (const auto& effect : spellData.effects) {
+    if (!effect.effectItem || effect.effectFormId == 0) {
+      continue;
+    }
+    const uint32_t mgefId = spellLookup.ToGlobalId(effect.effectFormId);
+    const auto mgefLookup = browser.LookupById(mgefId);
+    if (!mgefLookup.rec || mgefLookup.rec->GetType() != espm::MGEF::kType) {
+      continue;
+    }
+    const auto mgef = espm::GetData<espm::MGEF>(mgefId, worldState).data;
+    if ((mgef.effectType != espm::MGEF::EffectType::PeakValueMod &&
+         mgef.effectType != espm::MGEF::EffectType::ValueMod) ||
+        mgef.primaryAV != espm::ActorValue::DamageResist ||
+        mgef.IsFlagSet(espm::MGEF::Flags::Hostile) ||
+        mgef.IsFlagSet(espm::MGEF::Flags::Detrimental)) {
+      continue;
+    }
+    if (effect.effectItem->magnitude > best &&
+        effect.effectItem->duration > 0) {
+      best = effect.effectItem->magnitude;
+      seconds = static_cast<float>(effect.effectItem->duration);
+    }
+  }
+  return { best, seconds };
+}
+
 float SpellHealPoints(WorldState* worldState, uint32_t spellId)
 {
   auto& browser = worldState->GetEspm().GetBrowser();
@@ -1354,6 +1393,27 @@ void ActionListener::OnSpellCast(const RawMessageData& rawMsgData,
   lastCasts[{ caster->GetFormId(), spellCastData.spell }] = {
     std::chrono::steady_clock::now(), spellCastData.isDualCasting
   };
+
+  // GREYMARCH: a self-cast armor spell (Oakflesh ... Ebonyflesh): the server
+  // counts its armor rating on the caster (or the actor it was cast on) until
+  // it runs out (SpellArmorBuff, the damage formula)
+  if (auto [armor, seconds] = SpellArmorBuff(&partOne.worldState, spellCastData.spell);
+      armor > 0.f && seconds > 0.f) {
+    MpActor* who = caster;
+    if (spellCastData.target != 0 &&
+        spellCastData.target != caster->GetFormId()) {
+      auto t = std::dynamic_pointer_cast<MpActor>(
+        partOne.worldState.LookupFormById(spellCastData.target));
+      if (t) {
+        who = t.get();
+      }
+    }
+    who->SetGreymarchArmorBuff(armor, seconds);
+    spdlog::info("ActionListener::OnSpellCast - {:x} cast {:x}: +{} armor "
+                 "on {:x} for {} s",
+                 caster->GetFormId(), spellCastData.spell, armor,
+                 who->GetFormId(), seconds);
+  }
 
   auto& browser = partOne.worldState.GetEspm().GetBrowser();
 

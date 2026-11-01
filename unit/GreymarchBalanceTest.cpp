@@ -279,3 +279,25 @@ TEST_CASE("GreymarchBalance: bound weapons and the spells that conjure them",
   REQUIRE_FALSE(t.MayHoldBound(1093799, learned));
   REQUIRE_FALSE(t.MayHoldBound(12345, learned));
 }
+
+TEST_CASE("Greymarch: a self-cast armor spell (Oakflesh ...) adds its armor rating until it runs out",
+          "[Greymarch]")
+{
+  BalanceReset reset;
+  PartOne& p = GetPartOne();
+  auto& ac = MakeActor(p);
+  GreymarchBalanceTable t;
+  t.armorScaling = 0.5f; // 0.5% of a hit blocked per armor point
+  t.maxArmor = 80.f;
+  GreymarchBalance::Set(t);
+  const float bare = FormulaHit(ac, false, false, false);
+  REQUIRE(ac.GetGreymarchArmorBuff() == 0.f);
+  ac.SetGreymarchArmorBuff(40.f, 60.f);
+  REQUIRE(ac.GetGreymarchArmorBuff() == 40.f);
+  REQUIRE(FormulaHit(ac, false, false, false) == Catch::Approx(bare * 0.8f)); // 40 x 0.5 = 20% blocked
+  ac.SetGreymarchArmorBuff(40.f, 0.f); // ran out
+  REQUIRE(ac.GetGreymarchArmorBuff() == 0.f);
+  REQUIRE(FormulaHit(ac, false, false, false) == Catch::Approx(bare));
+  GreymarchBalance::Set(GreymarchBalanceTable{});
+  DropActor(p);
+}

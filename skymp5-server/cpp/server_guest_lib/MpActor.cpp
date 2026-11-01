@@ -54,6 +54,8 @@ struct MpActor::Impl
   bool isBlockActive = false;
   MpActor::MaxVitalsOverride maxVitalsOverride; // GREYMARCH
   float greymarchDamageMult = 1.f;              // GREYMARCH
+  float greymarchArmorBuff = 0.f;               // GREYMARCH
+  std::chrono::steady_clock::time_point greymarchArmorBuffUntil; // GREYMARCH
   MpActor::RegenBonus regenBonus;               // GREYMARCH
   MpActor::CombatPerks combatPerks;             // GREYMARCH
   // GREYMARCH: the last movement update in a jump (combat perks)
@@ -1808,6 +1810,20 @@ void MpActor::SetGreymarchDamageMult(float mult) noexcept
 float MpActor::GetGreymarchDamageMult() const noexcept
 {
   return pImpl->greymarchDamageMult;
+}
+
+void MpActor::SetGreymarchArmorBuff(float amount, float seconds) noexcept
+{
+  pImpl->greymarchArmorBuff = amount;
+  pImpl->greymarchArmorBuffUntil = std::chrono::steady_clock::now() +
+    std::chrono::milliseconds(static_cast<int64_t>(seconds * 1000.f));
+}
+
+float MpActor::GetGreymarchArmorBuff() const noexcept
+{
+  return std::chrono::steady_clock::now() < pImpl->greymarchArmorBuffUntil
+    ? pImpl->greymarchArmorBuff
+    : 0.f;
 }
 
 void MpActor::SetRegenBonus(const RegenBonus& bonus) noexcept

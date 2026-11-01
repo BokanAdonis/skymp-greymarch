@@ -189,6 +189,11 @@ public:
   // Brawler). 1 = no change. Not saved: the gamemode sets it again.
   void SetGreymarchDamageMult(float mult) noexcept;
   float GetGreymarchDamageMult() const noexcept;
+  // GREYMARCH: armor rating a self-cast spell adds for a while (Oakflesh,
+  // Stoneflesh, Ironflesh, Ebonyflesh): the damage formula counts it with the
+  // worn armor until it runs out. Not saved. A new cast replaces the old one.
+  void SetGreymarchArmorBuff(float amount, float seconds) noexcept;
+  float GetGreymarchArmorBuff() const noexcept;
   // GREYMARCH: regeneration the gamemode grants this actor, in percent added
   // to HealRateMult / MagickaRateMult / StaminaRateMult (a vampire rank's
   // magicka regeneration). The server's regeneration limit counts it, as the

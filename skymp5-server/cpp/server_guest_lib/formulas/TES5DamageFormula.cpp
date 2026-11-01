@@ -199,6 +199,8 @@ float TES5DamageFormulaImpl::CalcOpponentArmorRating() const
   for (auto& entry : eq.inv.entries) {
     combinedArmorRating += CalcArmorRatingComponent(entry);
   }
+  // GREYMARCH: a self-cast armor spell (Oakflesh ... Ebonyflesh) still running
+  combinedArmorRating += target.GetGreymarchArmorBuff();
   return combinedArmorRating;
 }
 
