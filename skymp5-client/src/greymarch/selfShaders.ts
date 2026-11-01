@@ -67,10 +67,12 @@ function playArt(ac: Actor, artId: number, secs: number): void {
 // art are faint, so on top of them the element's strongest body effect plays (Skyrim.esm): fire burns (FireFXShader) with the cloak's hand flames,
 // frost is the Frost Atronach's icy body (AtronachFrostFXS) with the cloak's frosty hands, shock the big crackle (ShockBigFXShader) with its hand
 // sparks. Keyed by the cloak's own shader (FireCloakFXShader, FrostFXShader, ShockPlayerCloakFXShader), so every cloak that uses it gets them.
+// THE NORMAL LOOK (2026-11-01, the owner: "I want them to look like normal flame and frost cloak"): no extra burning, ice or crackle; only the
+// cloak's own pieces: its shader and body art (from the table above) and the hand effects its caster has (the effect's casting art).
 const LOUDER: { [cloakShader: number]: { shaders: number[]; arts: number[] } } = {
-  0x2acd8: { shaders: [0x1b212], arts: [0x36342] }, // fire
-  0x1f03a: { shaders: [0x5fb82], arts: [0x42854] }, // frost
-  0x10f9a6: { shaders: [0xd22fc], arts: [0x5b1bd] }, // shock
+  0x2acd8: { shaders: [], arts: [0x36342] }, // fire: FireCloakHandEffects
+  0x1f03a: { shaders: [], arts: [0x42854] }, // frost: FXIceCloakHandEffects
+  0x10f9a6: { shaders: [], arts: [0x5b1bd] }, // shock: FXShockCloakHandEffects
 };
 let louderIds: Map<number, { shaders: number[]; arts: number[] }> | null = null;
 function louder(): Map<number, { shaders: number[]; arts: number[] }> {
