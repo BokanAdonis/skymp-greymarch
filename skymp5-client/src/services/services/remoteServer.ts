@@ -12,6 +12,7 @@ import {
   on, // TODO: use this.controller.on instead
   once, // TODO: use this.controller.once instead
   storage, // TODO: use this.sp.storage instead
+  writeLogs,
 } from 'skyrimPlatform';
 
 import * as messages from '../../messages';
@@ -104,6 +105,7 @@ let gmBoundBowCheckAt = 0;
 // hand (as the game's own script does) and again only after a refill, never on every check: re-equipping ammo every 0.4 s is the suspect for the bow's
 // look fading out (its glow comes from its enchantment, which a re-equip restarts)
 let gmBoundBowHeld = false;
+let gmOwnHandsWas = "", gmOwnHandsLogs = 200; // GREYMARCH: test breadcrumbs of this player's hands
 on('update', () => {
   if (Date.now() - gmBoundBowCheckAt < 400) return;
   gmBoundBowCheckAt = Date.now();
@@ -118,9 +120,16 @@ on('update', () => {
       boundBow = (t === 7 || t === 9) && /^bound\b/i.test(w.getName() || "");
     }
     const have = pl.getItemCount(arrow);
+    // GREYMARCH: TEST (2026-11-01, the owner: the Bound Bow vanishes after a while, alone too): every change of what this player holds, to the log
+    try {
+      const l = pl.getEquippedWeapon(true);
+      const now = (w ? w.getFormID().toString(16) : "none") + "/" + (l ? l.getFormID().toString(16) : "none") + " arrows " + have + (pl.isWeaponDrawn() ? " drawn" : "");
+      if (now !== gmOwnHandsWas && gmOwnHandsLogs-- > 0) { writeLogs("greymarch", "own hands: " + now); gmOwnHandsWas = now; }
+    } catch (e) { /* the log only */ }
     if (boundBow) {
       let equip = !gmBoundBowHeld; // the bow just came into hand
-      if (have < BOUND_ARROWS_MIN) { pl.addItem(arrow, 100 - have, true); equip = equip || have === 0; }
+      if (have < BOUND_ARROWS_MIN) { pl.addItem(arrow, 100 - have, true); equip = equip || have === 0; writeLogs("greymarch", "own hands: bound arrows topped up from " + have + (equip ? ", equipped" : "")); }
+      else if (equip) writeLogs("greymarch", "own hands: bound arrows equipped");
       if (equip) pl.equipItem(arrow, false, true);
       gmBoundBowHeld = true;
     } else {
