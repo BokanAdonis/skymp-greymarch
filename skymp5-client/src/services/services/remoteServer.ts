@@ -108,6 +108,52 @@ let gmBoundBowHeld = false;
 let gmBoundBowSince = 0, gmBoundBowArmed = false; // GREYMARCH: when the bound bow came into hand; its arrows given yet
 const BOUND_ARROWS_DELAY_MS = 1000;
 let gmOwnHandsWas = "", gmOwnHandsLogs = 200; // GREYMARCH: test breadcrumbs of this player's hands
+
+// GREYMARCH: A BOUND WEAPON LASTS ITS TIME (2026-11-01, the owner: "when I stop looking at someone or they leave my screen the bow vanishes ... make it work").
+// The player's own bound weapon kept ending early, each time with the weapon going from drawn to put away, in ways that could not be pinned to one cause.
+// So the bound-weapon spell the player casts (a spell named Bound ...) is remembered with its time (BOUND_LASTS_MS, the game's two minutes); while that
+// time runs, a bound weapon that is gone is conjured again by the game's own Cast on the player (no magicka) as soon as a weapon is drawn, and when the
+// time is up a bound weapon still in hand is dismissed. Each cast reaches the server and the other games as any cast does.
+const BOUND_LASTS_MS = 120000;
+let gmBoundCast: { spellId: number; at: number } | null = null;
+let gmBoundRecastAt = 0;
+on('spellCast', (e: any) => {
+  try {
+    const caster = e && e.caster;
+    const spell = e && e.spell;
+    if (!caster || caster.getFormID() !== 0x14 || !spell) return;
+    if (!/^bound\b/i.test(spell.getName() || "")) return;
+    if (Date.now() - gmBoundRecastAt < 1500) return; // this game's own recast: the time keeps counting from the first cast
+    gmBoundCast = { spellId: spell.getFormID(), at: Date.now() };
+  } catch (err) { /* not a cast to remember */ }
+});
+const gmHoldsBound = (pl: any): boolean => {
+  const r = pl.getEquippedWeapon(false), l = pl.getEquippedWeapon(true);
+  return (!!r && /^bound\b/i.test(r.getName() || "")) || (!!l && /^bound\b/i.test(l.getName() || ""));
+};
+let gmBoundKeepAt = 0;
+on('update', () => {
+  if (!gmBoundCast || Date.now() - gmBoundKeepAt < 300) return;
+  gmBoundKeepAt = Date.now();
+  try {
+    const pl = Game.getPlayer();
+    if (!pl) return;
+    const spell = Spell.from(Game.getFormEx(gmBoundCast.spellId));
+    if (!spell) { gmBoundCast = null; return; }
+    const holds = gmHoldsBound(pl);
+    if (Date.now() - gmBoundCast.at >= BOUND_LASTS_MS) {
+      gmBoundCast = null;
+      if (holds) { try { pl.dispelSpell(spell); } catch (e) { /* it ends by itself */ } writeLogs("greymarch", "own hands: bound weapon's time is up"); }
+      return;
+    }
+    if (!holds && pl.isWeaponDrawn() && Date.now() - gmBoundRecastAt > 2000) {
+      gmBoundRecastAt = Date.now();
+      spell.cast(pl, pl).catch(() => { /* not conjured */ });
+      writeLogs("greymarch", "own hands: bound weapon gone early, conjured again (" + Math.round((BOUND_LASTS_MS - (Date.now() - gmBoundCast.at)) / 1000) + " s left)");
+    }
+  } catch (e) { /* the next check */ }
+});
+
 on('update', () => {
   if (Date.now() - gmBoundBowCheckAt < 400) return;
   gmBoundBowCheckAt = Date.now();
