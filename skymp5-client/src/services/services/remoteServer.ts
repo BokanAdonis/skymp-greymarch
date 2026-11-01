@@ -1172,6 +1172,16 @@ export class RemoteServer extends ClientListener {
       let selfSpell = false;
       try { const fx = spell ? spell.getNthEffectMagicEffect(0) : null; selfSpell = !!fx && fx.getDeliveryType() === 0; } catch (e) { selfSpell = false; }
       if (spell && selfSpell) {
+        // A BOUND WEAPON (2026-11-01, the owner: then nobody saw the caster's Bound Bow): the weapon that comes through the gear has no look (a bound weapon is
+        // seen through the glow its magic effect starts). So a bound-weapon spell (named "Bound ...") is cast by the caster's copy ON ITSELF here (the game's
+        // Cast with the copy as source and target: nobody else can get it), and the copy holds the game's own bound weapon, glow and all.
+        let bound = false;
+        try { bound = /^bound\b/i.test(spell.getName() || "") && this.greymarchIsPlayerCopy(msg.data.caster); } catch (e) { bound = false; }
+        if (bound) {
+          try { spell.cast(ac, ac).catch(() => { /* not shown */ }); } catch (e) { /* not shown */ }
+          this.greymarchMagicDiag(`magic: saw ${msg.data.caster.toString(16)} conjure ${spell.getFormID().toString(16)}: cast on their copy itself`);
+          return;
+        }
         this.greymarchMagicDiag(`magic: saw ${msg.data.caster.toString(16)} cast ${spell.getFormID().toString(16)} on themselves: not replayed here`);
         return;
       }
