@@ -141,7 +141,9 @@ private:
     float radius = 0.f;
     std::chrono::steady_clock::time_point until;
     bool ticking = false;
+    int diagLeft = 3; // GREYMARCH: test notices to the caster left (CloakDiag)
   };
+  void CloakDiag(uint32_t casterId, const std::string& text);
   std::map<uint32_t, ActiveCloak> activeCloaks;
   // GREYMARCH: until when each player was last sent a paralysis (OnSpellHit)
   std::map<uint32_t, std::chrono::steady_clock::time_point> paralyzedUntil;
