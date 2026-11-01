@@ -120,7 +120,30 @@ on('update', () => {
       pl.removeItem(arrow, have, true, null);
     }
   } catch (e) { /* the next check */ }
+  // GREYMARCH: THE BOUND SHIELD (2026-11-01, the owner): Mysticism's Bound Shield is a script effect (MAG_BoundShield_Script adds and equips the shield),
+  // and that script does not run here either. While the effect is on the player the shield is given and worn; when it ends it is taken away. The server
+  // lets them hold it (gamemode tools/bound-weapons.js SCRIPTED: the same pairs).
+  for (const s of BOUND_SCRIPTED) {
+    try {
+      const pl = Game.getPlayer();
+      const effect = Game.getFormFromFile(s.effect, s.file);
+      const item = Game.getFormFromFile(s.item, s.file);
+      if (!pl || !effect || !item) continue;
+      const on = pl.hasMagicEffect(effect as any);
+      const have = pl.getItemCount(item);
+      if (on) {
+        if (have < 1) pl.addItem(item, 1, true);
+        if (!pl.isEquipped(item)) pl.equipItem(item, false, true);
+      } else if (have > 0) {
+        pl.removeItem(item, have, true, null);
+      }
+    } catch (e) { /* the next check */ }
+  }
 });
+const BOUND_SCRIPTED = [
+  { effect: 0xdc48d9, item: 0xdbf7d7, file: "MysticismMagic.esp" }, // Bound Shield
+  { effect: 0xdc48db, item: 0xdc48d8, file: "MysticismMagic.esp" }, // Bound Shield (Mystic Binding)
+];
 
 const unequipIronHelmet = () => {
   const ironHelment = Armor.from(Game.getFormEx(0x00012e4d));

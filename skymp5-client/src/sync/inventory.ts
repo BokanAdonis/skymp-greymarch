@@ -380,7 +380,7 @@ const greymarchIsBoundItem = (baseId: number): boolean => {
     const f = Game.getFormEx(baseId);
     if (!f) return false;
     const t = f.getType();
-    return (t === FormType.Weapon || t === FormType.Ammo) && /^bound\b/i.test(f.getName() || "");
+    return (t === FormType.Weapon || t === FormType.Ammo || t === FormType.Armor) && /^bound\b/i.test(f.getName() || ""); // Armor: Mysticism's Bound Shield
   } catch (e) {
     return false;
   }
