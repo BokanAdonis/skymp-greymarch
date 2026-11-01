@@ -1221,6 +1221,8 @@ export class FormView {
     if (!seated) {
       if (horse.is3DLoaded() && Date.now() - this.gmSeatTryAt >= SEAT_TRY_EVERY_MS) {
         this.gmSeatTryAt = Date.now();
+        // left behind (the rider was moved: a teleport gets them off first): the horse comes to them before they are put on it
+        try { if (Math.hypot(horse.getPositionX() - ac.getPositionX(), horse.getPositionY() - ac.getPositionY()) > 500) horse.moveTo(ac, 0, 0, 0, false); } catch (e) { /* put on it where it is */ }
         gmCrumb("seat " + gmHex(me) + " on their own horse " + gmHex(lm.id));
         try { ac.stopTranslation(); ac.clearKeepOffsetFromActor(); } catch (e) { /* not moving */ }
         try { horse.blockActivation(false); horse.activate(ac, true); } catch (e) { gmCrumb("seat failed " + gmHex(me) + ": " + e); }

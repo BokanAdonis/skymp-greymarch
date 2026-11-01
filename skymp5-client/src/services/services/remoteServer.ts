@@ -277,11 +277,27 @@ export class RemoteServer extends ClientListener {
         );
       };
       const actor = Actor.from(refr);
-      if (actor /*&& actor.getFormID() === 0x14*/) {
-        ragdollService.safeRemoveRagdollFromWorld(actor, removeRagdollCallback);
-      } else {
-        removeRagdollCallback();
-      }
+      const go = () => {
+        if (actor /*&& actor.getFormID() === 0x14*/) {
+          ragdollService.safeRemoveRagdollFromWorld(actor, removeRagdollCallback);
+        } else {
+          removeRagdollCallback();
+        }
+      };
+      // GREYMARCH: NEVER MOVED ON A HORSE (2026-10-31, the owner: "fix any and all conflicts these horses need"). Every server move (staff teleports, saved spots,
+      // freezes, dungeons, encounters, /stuck, guard escorts, vampire feeding, the guard's put-back) took the character out of the physics and moved it while it
+      // sat on a horse, which threw horse and rider about and once crashed the game in the horse camera. A mounted character gets off first (up to 3 s), then moves
+      let gmMounted = false;
+      try { gmMounted = !!actor && actor.isOnMount(); } catch (e) { gmMounted = false; }
+      if (!gmMounted) { go(); return; }
+      try { actor!.dismount(); } catch (e) { /* moved anyway after the wait */ }
+      const gmSince = Date.now();
+      const gmWait = () => {
+        let still = false;
+        try { still = !!actor && actor.isOnMount(); } catch (e) { still = false; }
+        if (!still || Date.now() - gmSince > 3000) go(); else once('update', gmWait);
+      };
+      once('update', gmWait);
     });
   }
 

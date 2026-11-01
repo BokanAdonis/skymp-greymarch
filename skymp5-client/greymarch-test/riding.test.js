@@ -131,3 +131,11 @@ test("no starving stagger on anyone sitting on a horse (2026-10-31: it threw the
   assert.ok(bridge.includes('if (spl && !spl.isOnMount()) this.sp.Debug.sendAnimationEvent(spl, "staggerStart");'));
   assert.ok(bridge.includes("if (sac && sac.isOnMount()) continue;"));
 });
+
+test("conflicts on a horse (2026-10-31, the owner: fix any and all conflicts): a server move gets a mounted character off first; werewolf and creature changes wait until the player is off; another rider's horse left behind comes to them", () => {
+  const remote = fs.readFileSync(path.join(__dirname, "..", "src", "services", "services", "remoteServer.ts"), "utf8");
+  assert.ok(remote.includes("try { gmMounted = !!actor && actor.isOnMount(); }") && remote.includes("try { actor!.dismount(); }") && remote.includes("if (!still || Date.now() - gmSince > 3000) go(); else once('update', gmWait);"));
+  assert.ok(bridge.includes('try { if (player.isOnMount()) { player.dismount(); this.greymarchCrumb("beast: off the horse first"); return; } }'));
+  assert.ok(bridge.includes("try { if (want && want.race !== raceId && player.isOnMount()) { player.dismount(); return; } }"));
+  assert.ok(formView.includes("horse.moveTo(ac, 0, 0, 0, false);"));
+});

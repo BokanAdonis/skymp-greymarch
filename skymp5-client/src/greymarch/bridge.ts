@@ -990,6 +990,8 @@ export class GreymarchBridge {
     // waitForAnimationEvent (not a Papyrus event, so SkyMP does not block it); WOLF_MORPH_MS is the fallback if it never comes. greymarchWolfTick then calls greymarchWolfChange.
     // SkyMP sends the player's animation events to the other games, so other players see the transformation too.
     greymarchWolfBecome(player: any): any {
+        // never on a horse (2026-10-31, the horses): off it first; the change starts on a later tick
+        try { if (player.isOnMount()) { player.dismount(); this.greymarchCrumb("beast: off the horse first"); return; } } catch (mErr) { /* changes as before */ }
         this.greymarchCrumb("beast: change starts");
         var sp = this.sp;
         this.greymarchWolfOn = true;
@@ -2062,6 +2064,8 @@ export class GreymarchBridge {
             var race = player.getRace();
             var raceId = race ? race.getFormID() : 0;
             var want = this.greymarchShapeWant;
+            // never changed on a horse (2026-10-31, the horses): off it first; the change comes on a later tick
+            try { if (want && want.race !== raceId && player.isOnMount()) { player.dismount(); return; } } catch (mErr) { /* changes as before */ }
             if (want && now - (this.greymarchShapeWordAt || 0) > SHAPE_SILENCE_MS) {
                 this.greymarchLog("shape: no word from the server for " + SHAPE_SILENCE_MS / 1000 + " seconds: changing back");
                 this.greymarchShapeWant = want = null;
