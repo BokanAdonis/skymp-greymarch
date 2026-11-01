@@ -71,7 +71,9 @@ const removeUnnecessaryExtra = (inv: Inventory, ignoreAmmo: boolean): Inventory 
       if (ignoreAmmo) {
         r.count = Ammo.from(Game.getFormEx(x.baseId)) ? r.count : 1;
       } else {
-        r.count = Ammo.from(Game.getFormEx(x.baseId)) ? 1000 : 1;
+        // GREYMARCH (2026-11-01, the owner: two Bound Swords, one in each hand, showed as one): the same weapon in both hands is one entry worn in
+        // both, and a count of 1 gave the copy only one of it
+        r.count = Ammo.from(Game.getFormEx(x.baseId)) ? 1000 : x.worn && x.wornLeft ? 2 : 1;
       }
       delete r.name;
       return r;

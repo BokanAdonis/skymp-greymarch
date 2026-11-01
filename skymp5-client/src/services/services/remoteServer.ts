@@ -100,6 +100,10 @@ on('update', () => {
 const BOUND_ARROW = 0x10b0a7; // Skyrim.esm boundArrow
 const BOUND_ARROWS_MIN = 50;
 let gmBoundBowCheckAt = 0;
+// GREYMARCH (2026-11-01, test: the Bound Bow showed, then went invisible while it still shot): the arrows are equipped ONCE when the bound bow comes into
+// hand (as the game's own script does) and again only after a refill, never on every check: re-equipping ammo every 0.4 s is the suspect for the bow's
+// look fading out (its glow comes from its enchantment, which a re-equip restarts)
+let gmBoundBowHeld = false;
 on('update', () => {
   if (Date.now() - gmBoundBowCheckAt < 400) return;
   gmBoundBowCheckAt = Date.now();
@@ -115,10 +119,13 @@ on('update', () => {
     }
     const have = pl.getItemCount(arrow);
     if (boundBow) {
-      if (have < BOUND_ARROWS_MIN) pl.addItem(arrow, 100 - have, true);
-      if (!pl.isEquipped(arrow)) pl.equipItem(arrow, false, true);
-    } else if (have > 0) {
-      pl.removeItem(arrow, have, true, null);
+      let equip = !gmBoundBowHeld; // the bow just came into hand
+      if (have < BOUND_ARROWS_MIN) { pl.addItem(arrow, 100 - have, true); equip = equip || have === 0; }
+      if (equip) pl.equipItem(arrow, false, true);
+      gmBoundBowHeld = true;
+    } else {
+      gmBoundBowHeld = false;
+      if (have > 0) pl.removeItem(arrow, have, true, null);
     }
   } catch (e) { /* the next check */ }
   // GREYMARCH: THE BOUND SHIELD (2026-11-01, the owner): Mysticism's Bound Shield is a script effect (MAG_BoundShield_Script adds and equips the shield),
