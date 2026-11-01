@@ -114,7 +114,7 @@ export const syncSpellEquipment = (
 };
 
 const BOUND_BOW_ART = 0xe3f0c; // GREYMARCH: Skyrim.esm BoundBowFX art (EnchBoundBowFX's enchant art: the bound bow's shape)
-const gmBowArtOn = new Set<number>(); // GREYMARCH: copies the bound bow's art was put on
+const gmBowArtOn = new Map<number, number>(); // GREYMARCH: copies the bound bow's art was put on -> when
 
 export const applyEquipment = (ac: Actor, eq: Equipment): boolean => {
   ac.removeAllItems(null, false, true);
@@ -143,14 +143,20 @@ export const applyEquipment = (ac: Actor, eq: Equipment): boolean => {
       return !!w && (w.getWeaponType() === 7 || w.getWeaponType() === 9) && /^bound\b/i.test(w.getName() || "");
     });
     const art = Game.getFormEx(BOUND_BOW_ART);
-    if (hasBoundBow && art && !gmBowArtOn.has(actorId)) {
-      gmBowArtOn.add(actorId);
+    // AGAIN AFTER A REBUILD (2026-11-01, the owner: walking away and back, the other player's bow was invisible again): a copy rebuilt when its player comes back
+    // into range is dressed again here, and the art is played again unless it was played in the last few seconds or the copy already shows it
+    const playedAt = gmBowArtOn.get(actorId) || 0;
+    if (hasBoundBow && art && Date.now() - playedAt > 3000) {
+      gmBowArtOn.set(actorId, Date.now());
       const due = Date.now() + 300;
       const step = () => {
         if (Date.now() < due) { once('update', step); return; }
         try {
           const a = Actor.from(Game.getFormEx(actorId));
           const artNow = Game.getFormEx(BOUND_BOW_ART); // looked up in this frame: a game object from an earlier frame is no longer valid (test: "Invalid indexInPool")
+          let shown = 0;
+          try { shown = a && artNow ? Number(callNative("PO3_SKSEFunctions", "HasArtObject", undefined, a, artNow, true)) || 0 : 0; } catch (e) { shown = 0; }
+          if (shown > 0) { writeLogs("greymarch", "copy bound bow " + actorId.toString(16) + ": its art is still on"); return; }
           const ok = a && artNow ? callNative("GreymarchCam", "PlayArt", undefined, a, artNow, 120) : false;
           writeLogs("greymarch", "copy bound bow " + actorId.toString(16) + ": its art " + (ok ? "played" : "refused") + (a && a.isWeaponDrawn() ? " (drawn)" : ""));
         } catch (e) { writeLogs("greymarch", "copy bound bow " + actorId.toString(16) + ": the art could not be played: " + e); }
