@@ -116,6 +116,7 @@ const gmWithEyes = (ap: any, eyeId: number): any => {
 // NPC in a way that has crashed games (spawning, removing, a model refresh, gear, an idle or a beast's animation). Every line is flushed (SkyrimPlatform's writeLogs ends
 // it with std::endl), so after a crash the last lines say what this game was doing. The launcher keeps the previous session's file and puts both in the support file.
 const gmCrumbStart = Date.now();
+let gmGearWeaponLogs = 30; // GREYMARCH: "gear weapons" breadcrumb lines left (two Bound Swords showed as one)
 let gmEchoLeft = 60; // GREYMARCH: "own anim" breadcrumb lines left (ITS OWN ANIMATIONS BACK)
 // GREYMARCH: an actor's cell for the drift lines: its id and whether it is loaded ("attached"), or "none"
 const gmCellOf = (a: Actor): string => { try { const c = a.getParentCell(); return c ? gmHex(c.getFormID()) + (c.isAttached() ? " attached" : " NOT attached") : "none"; } catch (e) { return "?"; } };
@@ -1008,7 +1009,15 @@ export class FormView {
         ) {
           //if (this.spawnMoment > 0 && Date.now() - this.spawnMoment > 5000) {
           gmCrumb("gear " + gmHex(ac.getFormID()) + (gmBeastLook ? " beast" : ""));
+          // GREYMARCH (2026-11-01, the owner: two Bound Swords, one in each hand, showed as one): a player's copy's weapons as the server sends them, to the log
+          if (model.appearance && gmGearWeaponLogs > 0) {
+            try {
+              const ws = (model.equipment.inv.entries || []).filter((e: any) => { const f = Game.getFormEx(e.baseId); return !!f && f.getType() === FormType.Weapon; });
+              if (ws.length) { gmGearWeaponLogs--; writeLogs("greymarch", "gear weapons " + gmHex(ac.getFormID()) + ": " + ws.map((e: any) => gmHex(e.baseId) + " x" + e.count + (e.worn ? " R" : "") + (e.wornLeft ? " L" : "")).join(", ")); }
+            } catch (e) { /* the log only */ }
+          }
           if (applyEquipment(ac, model.equipment)) {
+            if (model.appearance && gmGearWeaponLogs > 0) { const acRef = ac; once("update", () => { try { const r = acRef.getEquippedWeapon(false), l = acRef.getEquippedWeapon(true); writeLogs("greymarch", "gear weapons " + gmHex(acRef.getFormID()) + " now: right " + (r ? gmHex(r.getFormID()) : "none") + ", left " + (l ? gmHex(l.getFormID()) : "none")); } catch (e) { /* the log only */ } }); }
             this.eqState.lastNumChanges = model.equipment.numChanges;
             this.gmGearDone = true;
             if (this.gmWasHost) gmQuiver(ac); // the game that runs it: a bow comes with arrows

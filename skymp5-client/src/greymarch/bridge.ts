@@ -203,6 +203,7 @@ export class GreymarchBridge {
         if (type === "greymarchMenuReply") { this.greymarchMenuToPage("reply", msg); return; }
         if (type === "greymarchShape") { this.greymarchShapeMsg(msg); return; }
         if (type === "greymarchBuildAngle") { if (Number(msg.id) > 0 && typeof msg.z === "number" && isFinite(msg.z)) (this.greymarchBuildAngleQueue || (this.greymarchBuildAngleQueue = [])).push({ id: Number(msg.id) >>> 0, z: Number(msg.z) }); return; } // a piece a GM placed was turned (gamemode buildsys.js): SkyMP's SetAngle reaches only the server's copy, so this game turns its own (greymarchBuildAngleTick)
+        if (type === "greymarchParalyze") { var ps = Number(msg.seconds); if (ps > 0 && ps <= 60) { this.greymarchParalyzeUntil = Math.max(this.greymarchParalyzeUntil || 0, Date.now() + ps * 1000); this.greymarchParalyzeStart = true; } return; } // a paralysis spell hit this player (our server build: OnSpellHit); greymarchParalyzeDrive
         if (type === "greymarchStagger") { if (Number(msg.actor) > 0) (this.greymarchStaggerQueue || (this.greymarchStaggerQueue = [])).push({ actor: Number(msg.actor), self: msg.self === true }); return; } // a starving character staggers (gamemode hunger.js; played in greymarchHungerDrive, for everyone near)
         if (type === "greymarchMagicBlock") { var mb: any = {}; if (Array.isArray(msg.effects)) for (var mi = 0; mi < msg.effects.length && mi < 5000; mi++) mb[Number(msg.effects[mi]) >>> 0] = true; this.greymarchMagicBlock = mb; return; } // the raise-the-dead and summon effects to end when an NPC casts them (gamemode magicblock.js)
         if (type === "greymarchHunger") { this.greymarchHudToPage("hunger", { stage: String(msg.stage || "fed") }); return; } // the hunger bowl on the HUD (right, level with the voice display; gamemode hunger.js)
@@ -478,6 +479,7 @@ export class GreymarchBridge {
         this.greymarchEffects(); // staff effects: noclip, speed, frozen, ghosts (cheap: does real work every 400 ms)
         this.greymarchTgmFrame(); // TGM: full magicka and stamina and no shout cooldown, every frame
         this.greymarchHungerDrive(); // hunger: the stagger, regeneration off while starving
+        this.greymarchParalyzeDrive(); // a paralysis spell from another player or an NPC
         this.greymarchNoticeTick(); // plain notices from the server, the game's own top-left message
         this.greymarchStandUpTick(Date.now()); // the server asked the player to get up from their furniture (the end of a won mining game)
         this.greymarchBuildAngleTick(); // a piece a GM placed was turned: this game turns its copy
@@ -2436,6 +2438,27 @@ export class GreymarchBridge {
         this.greymarchStandUpLog("still in the furniture after " + (now - job.at) + " ms: IdleForceDefaultState");
     }
     greymarchStandUpLog(text: string): any { if ((this.greymarchStandUpLogged = (this.greymarchStandUpLogged || 0) + 1) <= 30) this.greymarchLog("standup: " + text); }
+    // PARALYSIS (2026-11-01, the owner: the Paralyze spell did nothing to another player). A spell runs in the caster's game only, so its paralysis froze this
+    // player's copy there, never this player. The server sends greymarchParalyze { seconds } when such a hit lands on them; this game paralyzes its player
+    // with the game's own Paralysis actor value (they fall and lie still) for that long, then lets them up. A new hit while paralyzed makes it last longer.
+    greymarchParalyzeDrive(): any {
+        var until = this.greymarchParalyzeUntil || 0;
+        if (!until) return;
+        var pl = this.sp.Game.getPlayer();
+        if (!pl) return;
+        try {
+            if (this.greymarchParalyzeStart) {
+                this.greymarchParalyzeStart = false;
+                pl.setActorValue("Paralysis", 1);
+                this.greymarchLog("paralysis: paralyzed for " + Math.round((until - Date.now()) / 100) / 10 + " s");
+            }
+            if (Date.now() >= until) {
+                this.greymarchParalyzeUntil = 0;
+                pl.setActorValue("Paralysis", 0);
+                this.greymarchLog("paralysis: over");
+            }
+        } catch (pErr) { this.greymarchParalyzeUntil = 0; }
+    }
     greymarchHungerDrive(): any {
         var q = this.greymarchStaggerQueue;
         if (q && q.length) {
