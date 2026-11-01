@@ -1166,6 +1166,15 @@ export class RemoteServer extends ClientListener {
         this.greymarchMagicDiag(`magic: saw ${msg.data.caster.toString(16)} buff themselves with ${spell.getFormID().toString(16)}: its look shown`);
         return;
       }
+      // GREYMARCH (2026-11-01, the owner: another player's Bound Bow was given to someone else, or made the bow in their hands invisible): any other spell cast
+      // on oneself (delivery Self: a bound weapon, a summon on self ...) is never launched here either: launched as a projectile it landed on whoever stood
+      // nearest in this game, and its effect (a bound weapon) went to them. What it gives the caster reaches this game through their gear.
+      let selfSpell = false;
+      try { const fx = spell ? spell.getNthEffectMagicEffect(0) : null; selfSpell = !!fx && fx.getDeliveryType() === 0; } catch (e) { selfSpell = false; }
+      if (spell && selfSpell) {
+        this.greymarchMagicDiag(`magic: saw ${msg.data.caster.toString(16)} cast ${spell.getFormID().toString(16)} on themselves: not replayed here`);
+        return;
+      }
       // GREYMARCH (2026-11-01, a crash in a Skeleton's behavior graph in Bonechill Passage, weapon out, its magic modifier running): castSpellImmediate
       // first writes the caster's game's animation variables into this copy's graph, slot by slot, as if it were the same graph. For a player's copy it is
       // (the human graph); an NPC's is its own (a draugr's, a Falmer's ...), and the writes broke its state machine. An NPC another game runs is shown
