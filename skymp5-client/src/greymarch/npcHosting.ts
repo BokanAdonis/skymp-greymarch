@@ -99,3 +99,34 @@ export function withoutHosted(hosted: unknown, remoteId: number): number[] {
   const list = Array.isArray(hosted) ? hosted as number[] : [];
   return list.filter((x) => x !== remoteId && x !== remoteId + 0x100000000);
 }
+
+// FROZEN IN A FIGHT (2026-11-01, the owner: "some of the NPCs in Embershard are not fighting back"; breadcrumbs: four of six bandits in combat, their target
+// 50 to 140 units away, Speed 0, not moving, no attack, until they died; the one whose first copy this game had thrown away and built again fought normally).
+// A hosted NPC in a fight that neither moves nor attacks nor blocks for FROZEN_STEPS checks in a row is rebuilt where it stands (the LOCKED HEIGHT cure, its
+// gear kept) and sent back at its target. Next to its target (FROZEN_NEAR) any NPC counts; farther (up to FROZEN_FAR, seeing it) only one that fights hand to
+// hand, since an archer or a mage stands still on purpose. At most once each FROZEN_REBUILD_EVERY_MS for one NPC. Breadcrumb "frozen".
+export const FROZEN_NEAR = 300;
+export const FROZEN_FAR = 1500;
+export const FROZEN_MAX_MOVE = 25; // moved less than this in a second ...
+export const FROZEN_MAX_SPEED = 10; // ... with its graph's Speed under this
+export const FROZEN_STEPS = 4; // this many seconds in a row: rebuilt
+export const FROZEN_REBUILD_EVERY_MS = 15000;
+export interface FrozenSample {
+  inCombat: boolean; hasTarget: boolean; gap: number; sees: boolean; moved: number; speed: number;
+  attacking: boolean; blocking: boolean; ranged: boolean;
+}
+// one second of a hosted NPC in a fight: does it look frozen?
+export function frozenNow(s: FrozenSample): boolean {
+  if (!s.inCombat || !s.hasTarget || !Number.isFinite(s.gap)) return false;
+  if (s.attacking || s.blocking) return false;
+  if (!(s.moved < FROZEN_MAX_MOVE) || !(s.speed < FROZEN_MAX_SPEED)) return false;
+  if (s.gap <= FROZEN_NEAR) return true;
+  return s.gap <= FROZEN_FAR && s.sees && !s.ranged;
+}
+// the count of frozen seconds in a row after this one, and whether to rebuild now
+export function frozenStep(count: number, frozen: boolean, now: number, lastRebuildAt: number): { count: number, rebuild: boolean } {
+  if (!frozen) return { count: 0, rebuild: false };
+  const next = count + 1;
+  if (next >= FROZEN_STEPS && now - lastRebuildAt >= FROZEN_REBUILD_EVERY_MS) return { count: 0, rebuild: true };
+  return { count: Math.min(next, FROZEN_STEPS), rebuild: false };
+}

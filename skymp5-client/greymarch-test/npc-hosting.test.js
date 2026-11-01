@@ -108,10 +108,11 @@ test("locked height: a server NPC is not resurrected at its spawn; one that runs
   assert.ok(spawn.includes("this.resurrect(refrId, beastLook, !appearance)"));
   const tick = formView.slice(formView.indexOf("private gmHostedTick("), formView.indexOf("public gmIsPlayerLook"));
   assert.ok(tick.includes("(this.gmFlatSteps >= FLAT_STEPS || this.gmGroundForce) && Date.now() - this.gmRegroundAt >= REGROUND_EVERY_MS"), "flat for 3 s, or the server saw it off the ground (2026-10-28)");
-  assert.ok(tick.includes("npc.disable(false).then(") && tick.includes("again.enable(false).then("), "rebuilt where it stands");
+  const rebuild = formView.slice(formView.indexOf("private gmRebuild("), formView.indexOf("private gmHostedTick("));
+  assert.ok(tick.includes("this.gmRebuild(npc);") && rebuild.includes("npc.disable(false).then(") && rebuild.includes("again.enable(false).then("), "rebuilt where it stands (gmRebuild, shared with FROZEN IN A FIGHT since 2026-11-01)");
   const reground = tick.slice(tick.indexOf("if ((this.gmFlatSteps >= FLAT_STEPS || this.gmGroundForce)"), tick.indexOf("if (Date.now() - this.gmDriftAt"));
   assert.ok(!reground.includes("setPosition("), "the LOCKED HEIGHT rebuild never lifts it (a lift fell back, 2026-10-24)");
-  assert.ok(tick.includes("applyEquipment(ac, gmEq)") && tick.includes("this.eqState = this.getDefaultEquipState();"), "its gear put back after (it was drawn anew: other loadouts)");
+  assert.ok(rebuild.includes("applyEquipment(ac, gmEq)") && rebuild.includes("this.eqState = this.getDefaultEquipState();"), "its gear put back after (it was drawn anew: other loadouts)");
   assert.ok(formView.includes("this.gmLastEquipment = model.equipment;"));
   assert.ok(tick.includes('", cell " + gmCellOf(npc) + " (player " + gmCellOf(me) + ")"'), "the drift lines say which cell");
   assert.ok(tick.indexOf("reground") < tick.indexOf("if (!others.length)"), "also when its player is alone");
@@ -180,7 +181,7 @@ test("a bandit put down keeps its fight: back at its target, weapon drawn, after
   const tick = view.slice(view.indexOf("private gmHostedTick("), view.indexOf("private gmHostedTick(") + 20000);
   assert.ok(tick.includes("this.gmGroundTargetId = t.getFormID()"), "its target remembered when it is first put down");
   const setAt = tick.indexOf("npc.moveTo(npc, 0, 0, gmGround + GM_GROUND_LIFT - gmZ, false)"); assert.ok(setAt > 0 && tick.indexOf("this.gmGroundRefight(npc)", setAt) - setAt < 200, "right after it is set down");
-  assert.ok(tick.includes("if (ac) this.gmGroundRefight(ac);"), "after it is rebuilt");
+  assert.ok(view.slice(view.indexOf("private gmRebuild("), view.indexOf("private gmHostedTick(")).includes("if (ac) this.gmGroundRefight(ac);"), "after it is rebuilt (gmRebuild)");
 });
 
 
@@ -238,4 +239,44 @@ test("an empty-handed NPC mid-fight is dressed at once when the gear brings it a
   const view = fs.readFileSync(path.join(__dirname, "..", "src", "view", "formView.ts"), "utf8");
   const fn = view.slice(view.indexOf("function gmGearArms("), view.indexOf("function gmHoldsWeapon("));
   assert.ok(fn.includes("(e.worn || e.wornLeft)") && fn.includes("f.getType() === 41"), "a weapon worn in the new gear");
+});
+
+// FROZEN IN A FIGHT (2026-11-01, the owner: some Embershard bandits did not fight back; breadcrumbs: in combat, target 50-140 units away, Speed 0, no move or
+// attack until they died): a hosted NPC that neither moves nor attacks nor blocks in a fight for FROZEN_STEPS seconds is rebuilt where it stands
+test("frozen in a fight: next to its target and doing nothing counts; attacking, blocking, moving, out of a fight never do", () => {
+  const base = { inCombat: true, hasTarget: true, gap: 90, sees: true, moved: 0, speed: 0, attacking: false, blocking: false, ranged: false };
+  assert.strictEqual(H.frozenNow(base), true, "the Embershard bandit: 90 units from the player, Speed 0, no attack");
+  assert.strictEqual(H.frozenNow({ ...base, attacking: true }), false, "swinging");
+  assert.strictEqual(H.frozenNow({ ...base, blocking: true }), false, "blocking");
+  assert.strictEqual(H.frozenNow({ ...base, moved: 120, speed: 200 }), false, "on its way");
+  assert.strictEqual(H.frozenNow({ ...base, inCombat: false }), false, "not in a fight");
+  assert.strictEqual(H.frozenNow({ ...base, hasTarget: false, gap: Infinity }), false, "no target");
+  assert.strictEqual(H.frozenNow({ ...base, ranged: true }), true, "an archer next to its target that does nothing is frozen too");
+});
+
+test("frozen in a fight, from afar: only one that fights hand to hand and sees its target (an archer or a mage stands still on purpose)", () => {
+  const far = { inCombat: true, hasTarget: true, gap: 700, sees: true, moved: 3, speed: 0, attacking: false, blocking: false, ranged: false };
+  assert.strictEqual(H.frozenNow(far), true, "a swordsman that never comes");
+  assert.strictEqual(H.frozenNow({ ...far, ranged: true }), false, "an archer at range");
+  assert.strictEqual(H.frozenNow({ ...far, sees: false }), false, "it cannot see its target (it may be finding a way)");
+  assert.strictEqual(H.frozenNow({ ...far, gap: H.FROZEN_FAR + 1 }), false, "too far to judge");
+});
+
+test("frozen in a fight: rebuilt after FROZEN_STEPS frozen seconds in a row, at most once each FROZEN_REBUILD_EVERY_MS; a good second starts the count again", () => {
+  let c = 0, last = 0, t = 100000, rebuilt = 0;
+  for (let i = 0; i < H.FROZEN_STEPS; i++) { const r = H.frozenStep(c, true, t += 1000, last); c = r.count; if (r.rebuild) { rebuilt++; last = t; } }
+  assert.strictEqual(rebuilt, 1, "after FROZEN_STEPS seconds");
+  for (let i = 0; i < H.FROZEN_STEPS * 2; i++) { const r = H.frozenStep(c, true, t += 1000, last); c = r.count; if (r.rebuild) { rebuilt++; last = t; } }
+  assert.strictEqual(rebuilt, 1, "not again within FROZEN_REBUILD_EVERY_MS");
+  t += H.FROZEN_REBUILD_EVERY_MS;
+  assert.strictEqual(H.frozenStep(c, true, t, last).rebuild, true, "after it, again");
+  assert.deepStrictEqual(H.frozenStep(3, false, t, 0), { count: 0, rebuild: false }, "a second it moved or swung: the count starts again");
+});
+
+test("frozen in a fight: formView checks every hosted NPC each second, rebuilds it with the shared rebuild (the reground one) and sends it back at its target", () => {
+  assert.ok(formView.includes("frozenNow({ inCombat: !!gmFTarget"), "the sample");
+  assert.ok(formView.includes('gmFB("IsAttacking")') && formView.includes('gmFB("IsBlocking")'), "attacking and blocking read from its graph");
+  assert.ok(/this\.gmGroundTargetId = gmFTarget\.getFormID\(\);[\s\S]{0,600}this\.gmRebuild\(npc\);/.test(formView), "its target kept, then rebuilt");
+  assert.ok(/height locked; rebuilt, gear kept\)"\);\s*this\.gmRebuild\(npc\);/.test(formView), "the reground uses the same rebuild");
+  assert.ok(/private gmRebuild\(npc: Actor\): void \{[\s\S]{0,900}applyEquipment\(ac, gmEq\)[\s\S]{0,300}this\.gmGroundRefight\(ac\);/.test(formView), "gear put back, back at its target");
 });

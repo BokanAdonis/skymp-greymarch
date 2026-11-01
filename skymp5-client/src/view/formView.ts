@@ -90,7 +90,7 @@ import { ModelApplyUtils } from "./modelApplyUtils";
 import { localIdToRemoteId, remoteIdToLocalId, getViewFromStorage } from "./worldViewMisc";
 import { ridingOf, ridersMap, noteRider, riddenByOther, seatStep, HORSE_RACE, SEAT_TRY_EVERY_MS } from "../greymarch/riding";
 const GM_NPC_BASE_TYPE = 43; // FormType NPC_: greymarchRiding names a breed (RIDDEN AS THEIR OWN), not a placed horse
-import { flatStep, FLAT_STEPS, REGROUND_EVERY_MS, regroundExempt } from "../greymarch/npcHosting";
+import { flatStep, FLAT_STEPS, REGROUND_EVERY_MS, regroundExempt, frozenNow, frozenStep } from "../greymarch/npcHosting";
 import { CHECK_EVERY_MS as GM_HOST_CHECK_MS, shouldRelease, pickTarget, markReleased, isReleased, withoutHosted, shouldReleaseUnloaded, movementDead, buildWhileDead, BODY_KILL_EVERY_MS } from "../greymarch/npcHosting";
 import { SpApiInteractor } from "../services/spApiInteractor";
 import { WorldCleanerService } from "../services/services/worldCleanerService";
@@ -1396,6 +1396,25 @@ export class FormView {
       if (!npc.isWeaponDrawn()) npc.drawWeapon();
     } catch (e) { /* the next check tries again */ }
   }
+  // GREYMARCH: its body rebuilt where it stands (disabled and enabled again; LOCKED HEIGHT, FROZEN IN A FIGHT). Enabled again, the game draws its gear anew from
+  // its outfit lists ("bandits respawn with other loadouts"): the server's record of what it wore is put back on it at once, and once more by the normal gear
+  // step (its change count is reset). Rebuilt, it forgot its fight (2026-10-28): back at the one it fought (gmGroundTargetId), weapon drawn
+  private gmRebuild(npc: Actor): void {
+    const gmRid = npc.getFormID();
+    const gmEq = this.gmLastEquipment;
+    try {
+      npc.disable(false).then(() => {
+        const again = ObjectReference.from(Game.getFormEx(gmRid));
+        if (!again) return;
+        return again.enable(false).then(() => {
+          const ac = Actor.from(Game.getFormEx(gmRid));
+          if (ac && gmEq) { try { applyEquipment(ac, gmEq); } catch (e) { /* the gear step tries again */ } }
+          this.eqState = this.getDefaultEquipState();
+          if (ac) this.gmGroundRefight(ac);
+        });
+      }).catch(() => { /* the next check tries again */ });
+    } catch (e) { /* the next check tries again */ }
+  }
   // GREYMARCH: an NPC this game hosts, checked once a second (greymarch/npcHosting.ts). "released" when it was handed on.
   private gmHostedTick(refr: ObjectReference): string {
     try {
@@ -1422,20 +1441,7 @@ export class FormView {
         // gear anew from its outfit lists ("bandits respawn with other loadouts"): the server's record of what it wore is put back on it at once, and once more
         // by the normal gear step (its change count is reset)
         gmCrumb("reground " + gmHex(this.remoteRefrId as number) + " at " + gmNow.map(Math.round).join(" ") + " (height locked; rebuilt, gear kept)");
-        const gmRid = npc.getFormID();
-        const gmEq = this.gmLastEquipment;
-        try {
-          npc.disable(false).then(() => {
-            const again = ObjectReference.from(Game.getFormEx(gmRid));
-            if (!again) return;
-            return again.enable(false).then(() => {
-              const ac = Actor.from(Game.getFormEx(gmRid));
-              if (ac && gmEq) { try { applyEquipment(ac, gmEq); } catch (e) { /* the gear step tries again */ } }
-              this.eqState = this.getDefaultEquipState();
-              if (ac) this.gmGroundRefight(ac); // rebuilt, it forgot its fight (2026-10-28): back at the one it fought, weapon drawn
-            });
-          }).catch(() => { /* the next check tries again */ });
-        } catch (e) { /* the next check tries again */ }
+        this.gmRebuild(npc);
       }
       if (Date.now() - this.gmDriftAt >= 3000 && gmDriftLeft > 0) {
         const hd = Math.hypot(npc.getPositionX() - me.getPositionX(), npc.getPositionY() - me.getPositionY());
@@ -1472,6 +1478,35 @@ export class FormView {
             }
           } else this.gmRunStuck = 0;
           this.gmRunPos = gmRP; this.gmRunAt = gmRNow;
+        }
+      }
+      // GREYMARCH: FROZEN IN A FIGHT (greymarch/npcHosting.ts, 2026-11-01): in a fight, its target near (or seen, for one that fights hand to hand), and for
+      // FROZEN_STEPS seconds it neither moved nor attacked nor blocked: rebuilt where it stands and sent back at its target (breadcrumb "frozen")
+      {
+        const gmFNow = Date.now();
+        const gmFP = [npc.getPositionX(), npc.getPositionY()];
+        let gmFTarget: Actor | null = null; try { gmFTarget = npc.isInCombat() ? npc.getCombatTarget() : null; } catch (e) { gmFTarget = null; }
+        if (gmFTarget && gmFTarget.isDead()) gmFTarget = null;
+        const gmFGap = gmFTarget ? Math.hypot(gmFTarget.getPositionX() - gmFP[0], gmFTarget.getPositionY() - gmFP[1]) : Infinity;
+        const gmFB = (n: string) => { try { return npc.getAnimationVariableBool(n); } catch (e) { return false; } };
+        let gmFSpeed = 0; try { gmFSpeed = npc.getAnimationVariableFloat("Speed"); } catch (e) { gmFSpeed = 0; }
+        let gmFRanged = false;
+        try {
+          const w = npc.getEquippedWeapon(false);
+          const wt = w ? w.getWeaponType() : -1;
+          gmFRanged = wt === 7 || wt === 8 || wt === 9 || (!w && (!!npc.getEquippedSpell(0) || !!npc.getEquippedSpell(1))); // a bow, a staff, a crossbow, or spells in empty hands
+        } catch (e) { gmFRanged = true; } // not known: never taken for frozen from afar
+        let gmFSees = false; try { gmFSees = !!gmFTarget && npc.hasLOS(gmFTarget); } catch (e) { gmFSees = false; }
+        const gmFMoved = this.gmFrozenPos ? Math.hypot(gmFP[0] - this.gmFrozenPos[0], gmFP[1] - this.gmFrozenPos[1]) : Infinity;
+        this.gmFrozenPos = gmFP;
+        const gmFrozen = frozenNow({ inCombat: !!gmFTarget, hasTarget: !!gmFTarget, gap: gmFGap, sees: gmFSees, moved: gmFMoved, speed: gmFSpeed, attacking: gmFB("IsAttacking"), blocking: gmFB("IsBlocking"), ranged: gmFRanged });
+        const gmFStep = frozenStep(this.gmFrozenCount, gmFrozen, gmFNow, this.gmFrozenAt);
+        this.gmFrozenCount = gmFStep.count;
+        if (gmFStep.rebuild && gmFTarget) {
+          this.gmFrozenAt = gmFNow;
+          this.gmGroundTargetId = gmFTarget.getFormID();
+          gmCrumb("frozen " + gmHex(this.remoteRefrId as number) + " base " + gmHex(npc.getBaseObject() ? npc.getBaseObject()!.getFormID() : 0) + ": in a fight, target " + gmHex(gmFTarget.getFormID()) + (gmFTarget.getFormID() === 0x14 ? " (me)" : "") + " " + Math.round(gmFGap) + " away, sees it " + gmFSees + ", " + (gmFRanged ? "ranged" : "hand to hand") + ", no move or attack for a while: rebuilt where it stands");
+          this.gmRebuild(npc);
         }
       }
       // GREYMARCH: PUT DOWN BY ITS HOST (2026-10-28, the owner: bandits still walked on air and sank into the ground chasing people). The server saw this NPC
@@ -1563,6 +1598,9 @@ export class FormView {
   private gmGroundForce = false; // the server saw it off the ground and its stopped move did not bring it down: rebuilt at the next check (gmHostedTick)
   private gmGroundTargetId = 0; // the one it fought when it was put down (gmGroundRefight)
   private gmRegroundAt = 0;
+  private gmFrozenCount = 0; // FROZEN IN A FIGHT: seconds in a row it looked frozen, when it was last rebuilt for it, where it was a second ago
+  private gmFrozenAt = 0;
+  private gmFrozenPos: number[] | null = null;
   private gmUnloadedSince = 0; // GREYMARCH: since when this game hosts this NPC without having it loaded (0: loaded)
   private gmBodyKillAt = 0;
   private gmPuppetReady = false;
