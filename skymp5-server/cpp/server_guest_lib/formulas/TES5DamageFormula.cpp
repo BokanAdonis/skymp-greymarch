@@ -485,7 +485,10 @@ float TES5SpellDamageFormulaImpl::GetBaseSpellDamage() const
 
   float damage = 0.f;
 
+  bool firstEffect = true;
   for (const auto& effect : spellData.effects) {
+    const bool isFirst = firstEffect;
+    firstEffect = false;
 
     if (!effect.effectItem || effect.effectFormId == 0) {
       continue;
@@ -506,7 +509,10 @@ float TES5SpellDamageFormulaImpl::GetBaseSpellDamage() const
     // effect (200 Health, only with the perk on a nearly dead target) made
     // Sparks, Lightning Storm and Chain Lightning hit for 200 more every hit.
     // Visible damage effects with a condition (Mysticism's frost) still count.
-    if (magicEffect.hasConditions &&
+    // A spell's FIRST effect is its own and always counts (2026-11-01: Mysticism
+    // hides the Frost and Lightning Cloak damage and gives it conditions, so the
+    // cloaks did no damage); a perk's extra is never first.
+    if (!isFirst && magicEffect.hasConditions &&
         magicEffect.data.IsFlagSet(espm::MGEF::Flags::HideInUI)) {
       continue;
     }
