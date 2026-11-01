@@ -1,6 +1,7 @@
 import {
   Actor,
   Ammo,
+  FormType,
   Game,
   ObjectReference,
   Spell,
@@ -118,6 +119,23 @@ export const applyEquipment = (ac: Actor, eq: Equipment): boolean => {
   const newInventory = removeUnnecessaryExtra(filterWorn(eq.inv), ac.getFormID() === 0x14);
 
   setInventory(ac.getFormID(), newInventory);
+
+  // GREYMARCH: DUAL WIELD (2026-11-01, the owner: two Bound Swords, one in each hand, showed as one). The server sends the same weapon in both hands as
+  // two entries, one worn right and one worn left ("58f5f x1 L, 58f5f x1 R" in the log), and setInventory left the copy one of it, in the right hand.
+  // A weapon worn left is put in the left hand here: the copy is given a second one when the right hand holds the same, and it is equipped to the left.
+  if (ac.getFormID() !== 0x14) {
+    try {
+      for (const left of newInventory.entries) {
+        if (!left.wornLeft) continue;
+        const f = Game.getFormEx(left.baseId);
+        if (!f || f.getType() !== FormType.Weapon) continue;
+        const bothHands = newInventory.entries.some((e) => e.baseId === left.baseId && e.worn);
+        if (bothHands && ac.getItemCount(f) < 2) ac.addItem(f, 2 - ac.getItemCount(f), true);
+        ac.equipItemEx(f, 2, false, false); // 2: the left hand
+        if (bothHands) ac.equipItemEx(f, 1, false, false); // 1: the right hand
+      }
+    } catch (e) { /* the copy keeps what setInventory gave it */ }
+  }
 
   syncSpellEquipment(ac, eq.leftSpell, SpellType.Left);
   syncSpellEquipment(ac, eq.rightSpell, SpellType.Right);
