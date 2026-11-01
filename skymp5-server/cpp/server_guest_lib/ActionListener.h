@@ -131,6 +131,23 @@ private:
   };
   std::map<std::pair<uint32_t, uint32_t>, LastCast> lastCasts;
 
+  // GREYMARCH: CLOAKS ON THE SERVER (2026-11-01, the owner: Frost Cloak did no
+  // damage; the game reports no hit for its ticks). A cloak's caster -> its
+  // damage spell, radius and end; the server hits everyone that close once a
+  // second (CloakTick), and the game's own cloak hits are not taken.
+  struct ActiveCloak
+  {
+    uint32_t damageSpell = 0;
+    float radius = 0.f;
+    std::chrono::steady_clock::time_point until;
+    bool ticking = false;
+  };
+  std::map<uint32_t, ActiveCloak> activeCloaks;
+  // GREYMARCH: until when each player was last sent a paralysis (OnSpellHit)
+  std::map<uint32_t, std::chrono::steady_clock::time_point> paralyzedUntil;
+  void StartCloak(MpActor* caster, uint32_t spellId);
+  void CloakTick(uint32_t casterId);
+
   // GREYMARCH: last hit time per (caster, target, spell), for
   // ConcentrationHitSeconds
   std::map<std::tuple<uint32_t, uint32_t, uint32_t>,

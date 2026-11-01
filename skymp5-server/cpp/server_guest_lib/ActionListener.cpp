@@ -1006,6 +1006,39 @@ std::pair<float, float> SpellArmorBuff(WorldState* worldState, uint32_t spellId)
   return { best, seconds };
 }
 
+// GREYMARCH: PARALYSIS (2026-11-01, the owner: Paralyze did nothing to another
+// player). How long a spell paralyzes whoever it hits: its longest hostile
+// Paralysis effect (a perk's hidden conditional extra is left out). 0: none.
+uint32_t SpellParalysisSeconds(WorldState* worldState, uint32_t spellId)
+{
+  auto& browser = worldState->GetEspm().GetBrowser();
+  const auto spellLookup = browser.LookupById(spellId);
+  if (!spellLookup.rec || spellLookup.rec->GetType() != espm::SPEL::kType) {
+    return 0;
+  }
+  const auto spellData = espm::GetData<espm::SPEL>(spellId, worldState);
+  uint32_t best = 0;
+  for (const auto& effect : spellData.effects) {
+    if (!effect.effectItem || effect.effectFormId == 0) {
+      continue;
+    }
+    const uint32_t mgefId = spellLookup.ToGlobalId(effect.effectFormId);
+    const auto mgefLookup = browser.LookupById(mgefId);
+    if (!mgefLookup.rec || mgefLookup.rec->GetType() != espm::MGEF::kType) {
+      continue;
+    }
+    const auto mgef = espm::GetData<espm::MGEF>(mgefId, worldState);
+    if (mgef.data.effectType != espm::MGEF::EffectType::Paralysis ||
+        !mgef.data.IsFlagSet(espm::MGEF::Flags::Hostile) ||
+        (mgef.hasConditions &&
+         mgef.data.IsFlagSet(espm::MGEF::Flags::HideInUI))) {
+      continue;
+    }
+    best = std::max(best, effect.effectItem->duration);
+  }
+  return std::min<uint32_t>(best, 60);
+}
+
 float SpellHealPoints(WorldState* worldState, uint32_t spellId)
 {
   auto& browser = worldState->GetEspm().GetBrowser();
@@ -1278,10 +1311,16 @@ void ActionListener::OnHit(const RawMessageData& rawMsgData,
   // of the equipment goes stale whenever one equipment update is refused
   // (for example an item the server does not know of in the other hand), and
   // then every spell hit was dropped: Flames did no damage.
+  // GREYMARCH: a cloak's damage is the server's own (CloakTick): the game's
+  // report of it is not taken, or it would hit twice
+  if (isSourceSpell &&
+      IsDamageOfRecentCloak(aggressor->GetFormId(), hitData.source)) {
+    return;
+  }
+
   if (isSourceSpell &&
       (equipment.IsSpellEquipped(hitData.source) ||
-       aggressor->IsSpellLearned(hitData.source) ||
-       IsDamageOfRecentCloak(aggressor->GetFormId(), hitData.source))) {
+       aggressor->IsSpellLearned(hitData.source))) {
     OnSpellHit(aggressor, targetRef, hitData);
     return;
   }
@@ -1415,6 +1454,8 @@ void ActionListener::OnSpellCast(const RawMessageData& rawMsgData,
                  who->GetFormId(), seconds);
   }
 
+  StartCloak(caster, spellCastData.spell); // GREYMARCH: a cloak: the server ticks it
+
   auto& browser = partOne.worldState.GetEspm().GetBrowser();
 
   const std::array<VarValue, 1> args{ VarValue(
@@ -1536,6 +1577,119 @@ void ActionListener::OnSpellHit(MpActor* aggressor,
                "damage, {4} healing. By caster: {3:x})",
                spellCastData.target, spellCastData.spell, damage,
                spellCastData.caster, heal);
+
+  // GREYMARCH: a paralysis spell on a player: their own game paralyzes them
+  // (the spell ran in the caster's game only). Once per paralysis, not on
+  // every tick of a held spell.
+  if (const uint32_t seconds =
+        SpellParalysisSeconds(&partOne.worldState, hitData.source);
+      seconds > 0 && !targetActorPtr->IsDead()) {
+    const auto userId = partOne.serverState.UserByActor(targetActorPtr);
+    const auto now = std::chrono::steady_clock::now();
+    auto& until = paralyzedUntil[targetActorPtr->GetFormId()];
+    if (userId != Networking::InvalidUserId && now >= until) {
+      until = now + std::chrono::seconds(seconds);
+      partOne.SendCustomPacket(
+        userId,
+        nlohmann::json{ { "customPacketType", "greymarchParalyze" },
+                        { "seconds", seconds },
+                        { "spell", hitData.source } }
+          .dump());
+      spdlog::info("OnSpellHit - {:x} paralyzed {:x} for {} s ({:x})",
+                   aggressor->GetFormId(), targetActorPtr->GetFormId(),
+                   seconds, hitData.source);
+    }
+  }
+}
+
+void ActionListener::StartCloak(MpActor* caster, uint32_t spellId)
+{
+  auto& browser = partOne.worldState.GetEspm().GetBrowser();
+  const auto spellLookup = browser.LookupById(spellId);
+  if (!caster || !spellLookup.rec ||
+      spellLookup.rec->GetType() != espm::SPEL::kType) {
+    return;
+  }
+  const auto spellData = espm::GetData<espm::SPEL>(spellId, &partOne.worldState);
+  for (const auto& effect : spellData.effects) {
+    if (!effect.effectItem || effect.effectFormId == 0) {
+      continue;
+    }
+    const uint32_t mgefId = spellLookup.ToGlobalId(effect.effectFormId);
+    const auto mgefLookup = browser.LookupById(mgefId);
+    if (!mgefLookup.rec || mgefLookup.rec->GetType() != espm::MGEF::kType) {
+      continue;
+    }
+    const auto mgef = espm::GetData<espm::MGEF>(mgefId, &partOne.worldState).data;
+    if (mgef.effectType != espm::MGEF::EffectType::Cloak ||
+        mgef.associatedItem == 0 || effect.effectItem->duration == 0) {
+      continue;
+    }
+    // the cloak's magnitude is its reach in feet (a game foot is 21.33 units)
+    constexpr float kUnitsPerFoot = 21.33f;
+    const float radius =
+      std::clamp(effect.effectItem->magnitude * kUnitsPerFoot, 128.f, 1000.f);
+    auto& c = activeCloaks[caster->GetFormId()];
+    c.damageSpell = mgefLookup.ToGlobalId(mgef.associatedItem);
+    c.radius = radius;
+    c.until = std::chrono::steady_clock::now() +
+      std::chrono::seconds(effect.effectItem->duration);
+    spdlog::info("cloak: {:x} cast {:x}: {:x} hits everyone within {} for {} s",
+                 caster->GetFormId(), spellId, c.damageSpell, radius,
+                 effect.effectItem->duration);
+    if (!c.ticking) {
+      c.ticking = true;
+      const uint32_t casterId = caster->GetFormId();
+      partOne.worldState.SetTimer(std::chrono::seconds(1))
+        .Then([this, casterId](Viet::Void) { CloakTick(casterId); });
+    }
+    return;
+  }
+}
+
+void ActionListener::CloakTick(uint32_t casterId)
+{
+  auto it = activeCloaks.find(casterId);
+  if (it == activeCloaks.end()) {
+    return;
+  }
+  auto caster = std::dynamic_pointer_cast<MpActor>(
+    partOne.worldState.LookupFormById(casterId));
+  if (!caster || caster->IsDead() ||
+      std::chrono::steady_clock::now() >= it->second.until) {
+    activeCloaks.erase(it);
+    return;
+  }
+  const ActiveCloak cloak = it->second;
+  std::set<MpActor*> near;
+  for (auto listener : caster->GetActorListeners()) {
+    near.insert(listener);
+  }
+  for (auto emitter : caster->GetEmitters()) {
+    if (MpActor* a = emitter->AsActor()) {
+      near.insert(a);
+    }
+  }
+  const auto& here = caster->GetPos();
+  for (MpActor* target : near) {
+    if (!target || target == caster.get() || target->IsDead() ||
+        target->IsDisabled() ||
+        !(target->GetCellOrWorld() == caster->GetCellOrWorld())) {
+      continue;
+    }
+    const auto& p = target->GetPos();
+    const float dx = p.x - here.x, dy = p.y - here.y, dz = p.z - here.z;
+    if (dx * dx + dy * dy + dz * dz > cloak.radius * cloak.radius) {
+      continue;
+    }
+    HitData hit;
+    hit.aggressor = casterId;
+    hit.target = target->GetFormId();
+    hit.source = cloak.damageSpell;
+    OnSpellHit(caster.get(), target, hit);
+  }
+  partOne.worldState.SetTimer(std::chrono::seconds(1))
+    .Then([this, casterId](Viet::Void) { CloakTick(casterId); });
 }
 
 bool ActionListener::IsDamageOfRecentCloak(uint32_t casterId,
