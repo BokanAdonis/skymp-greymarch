@@ -92,6 +92,36 @@ on('update', () => {
   }
 });
 
+// GREYMARCH: A BOUND BOW'S ARROWS (2026-11-01, test: the Bound Bow had no arrows and shot the player's own). The game's BoundBowEffectScript, which gives
+// 100 Bound Arrows and equips them, does not run in this multiplayer game. So while a bound bow (a bow or crossbow named Bound ...) is in hand, the player
+// has at least BOUND_ARROWS_MIN Bound Arrows (topped up to 100) and they are equipped; with no bound bow in hand they are taken away. The server lets the
+// player hold them and takes nothing for a shot (our server build: the balance table's "bound"; inventory.ts never takes them away either).
+const BOUND_ARROW = 0x10b0a7; // Skyrim.esm boundArrow
+const BOUND_ARROWS_MIN = 50;
+let gmBoundBowCheckAt = 0;
+on('update', () => {
+  if (Date.now() - gmBoundBowCheckAt < 400) return;
+  gmBoundBowCheckAt = Date.now();
+  try {
+    const pl = Game.getPlayer();
+    const arrow = Game.getFormEx(BOUND_ARROW);
+    if (!pl || !arrow) return;
+    const w = pl.getEquippedWeapon(false);
+    let boundBow = false;
+    if (w) {
+      const t = w.getWeaponType(); // 7 bow, 9 crossbow
+      boundBow = (t === 7 || t === 9) && /^bound\b/i.test(w.getName() || "");
+    }
+    const have = pl.getItemCount(arrow);
+    if (boundBow) {
+      if (have < BOUND_ARROWS_MIN) pl.addItem(arrow, 100 - have, true);
+      if (!pl.isEquipped(arrow)) pl.equipItem(arrow, false, true);
+    } else if (have > 0) {
+      pl.removeItem(arrow, have, true, null);
+    }
+  } catch (e) { /* the next check */ }
+});
+
 const unequipIronHelmet = () => {
   const ironHelment = Armor.from(Game.getFormEx(0x00012e4d));
   const pl = Game.getPlayer();
