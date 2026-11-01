@@ -1186,6 +1186,18 @@ export class RemoteServer extends ClientListener {
         // Cast with the copy as source and target: nobody else can get it), and the copy holds the game's own bound weapon, glow and all.
         let bound = false;
         try { bound = /^bound\b/i.test(spell.getName() || "") && this.greymarchIsPlayerCopy(msg.data.caster); } catch (e) { bound = false; }
+        // NEVER WHILE THIS PLAYER HOLDS ONE (2026-11-01, test: this player's own Bound Bow vanished each time another player's was conjured here; alone it lasted
+        // its full two minutes): a bound weapon starting on the copy ended this player's own, so while they hold a bound weapon the copy's is not conjured
+        let mineHeld = false;
+        try {
+          const me = Game.getPlayer();
+          const r = me ? me.getEquippedWeapon(false) : null, l = me ? me.getEquippedWeapon(true) : null;
+          mineHeld = (!!r && /^bound\b/i.test(r.getName() || "")) || (!!l && /^bound\b/i.test(l.getName() || ""));
+        } catch (e) { mineHeld = true; }
+        if (bound && mineHeld) {
+          this.greymarchMagicDiag(`magic: saw ${msg.data.caster.toString(16)} conjure ${spell.getFormID().toString(16)}: not on their copy (this player holds a bound weapon)`);
+          return;
+        }
         if (bound) {
           try { spell.cast(ac, ac).catch(() => { /* not shown */ }); } catch (e) { /* not shown */ }
           this.greymarchMagicDiag(`magic: saw ${msg.data.caster.toString(16)} conjure ${spell.getFormID().toString(16)}: cast on their copy itself`);
