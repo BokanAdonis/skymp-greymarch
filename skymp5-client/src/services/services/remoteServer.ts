@@ -18,6 +18,7 @@ import * as messages from '../../messages';
 
 /* eslint-disable @typescript-eslint/no-empty-function */
 import { ObjectReferenceEx } from '../../extensions/objectReferenceEx';
+import { showSelfBuff } from '../../greymarch/selfShaders';
 import { IdManager } from '../../lib/idManager';
 import { nameof } from '../../lib/nameof';
 import { setActorValuePercentage } from '../../sync/actorvalues';
@@ -1152,6 +1153,12 @@ export class RemoteServer extends ClientListener {
       }
 
       this.greymarchMagicDiag(`magic: saw ${msg.data.caster.toString(16)} cast ${msg.data.spell.toString(16)} hand ${msg.data.castingSource} (their copy holds ${held ? held.getFormID().toString(16) : "nothing"}, casting ${spell ? spell.getFormID().toString(16) : "nothing"})`);
+      // GREYMARCH (2026-11-01, the owner: a fire or frost cloak was never seen by others): a spell cast on oneself has no projectile, so the launch below
+      // showed nothing; its look (each effect's shader on the caster) is played instead, and nothing else is run here (greymarch/selfShaders.ts)
+      if (spell && showSelfBuff(ac, spell.getFormID())) {
+        this.greymarchMagicDiag(`magic: saw ${msg.data.caster.toString(16)} buff themselves with ${spell.getFormID().toString(16)}: its look shown`);
+        return;
+      }
       // GREYMARCH (2026-11-01, a crash in a Skeleton's behavior graph in Bonechill Passage, weapon out, its magic modifier running): castSpellImmediate
       // first writes the caster's game's animation variables into this copy's graph, slot by slot, as if it were the same graph. For a player's copy it is
       // (the human graph); an NPC's is its own (a draugr's, a Falmer's ...), and the writes broke its state machine. An NPC another game runs is shown
