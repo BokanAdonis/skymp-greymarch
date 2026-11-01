@@ -48,6 +48,8 @@ function playArt(ac: Actor, artId: number, secs: number): void {
   try {
     own = callNative("PO3_SKSEFunctions", "GetArtObject", undefined, vfx);
     callNative("PO3_SKSEFunctions", "SetArtObject", undefined, vfx, art);
+    const now: any = callNative("PO3_SKSEFunctions", "GetArtObject", undefined, vfx);
+    if (!now || typeof now.getFormID !== "function" || now.getFormID() !== art.getFormID()) { artBroken = true; return; } // the swap did not happen: never the atronach's own effect
     vfx.play(ac, secs, null);
   } catch (e) {
     artBroken = true; // no Papyrus Extender: the shader alone from now on
