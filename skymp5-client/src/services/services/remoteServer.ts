@@ -105,6 +105,8 @@ let gmBoundBowCheckAt = 0;
 // hand (as the game's own script does) and again only after a refill, never on every check: re-equipping ammo every 0.4 s is the suspect for the bow's
 // look fading out (its glow comes from its enchantment, which a re-equip restarts)
 let gmBoundBowHeld = false;
+let gmBoundBowSince = 0, gmBoundBowArmed = false; // GREYMARCH: when the bound bow came into hand; its arrows given yet
+const BOUND_ARROWS_DELAY_MS = 1000;
 let gmOwnHandsWas = "", gmOwnHandsLogs = 200; // GREYMARCH: test breadcrumbs of this player's hands
 on('update', () => {
   if (Date.now() - gmBoundBowCheckAt < 400) return;
@@ -126,14 +128,23 @@ on('update', () => {
       const now = (w ? w.getFormID().toString(16) : "none") + "/" + (l ? l.getFormID().toString(16) : "none") + " arrows " + have + (pl.isWeaponDrawn() ? " drawn" : "");
       if (now !== gmOwnHandsWas && gmOwnHandsLogs-- > 0) { writeLogs("greymarch", "own hands: " + now); gmOwnHandsWas = now; }
     } catch (e) { /* the log only */ }
+    // A SECOND LATER (2026-11-01, the owner: their own Bound Bow was sometimes invisible right after the cast): the arrows are given and equipped
+    // BOUND_ARROWS_DELAY_MS after the bow came into hand, so the bow's appearing is not cut short by an equip in the same moment
     if (boundBow) {
-      let equip = !gmBoundBowHeld; // the bow just came into hand
-      if (have < BOUND_ARROWS_MIN) { pl.addItem(arrow, 100 - have, true); equip = equip || have === 0; writeLogs("greymarch", "own hands: bound arrows topped up from " + have + (equip ? ", equipped" : "")); }
-      else if (equip) writeLogs("greymarch", "own hands: bound arrows equipped");
-      if (equip) pl.equipItem(arrow, false, true);
-      gmBoundBowHeld = true;
+      if (!gmBoundBowHeld) { gmBoundBowHeld = true; gmBoundBowSince = Date.now(); gmBoundBowArmed = false; }
+      if (!gmBoundBowArmed && Date.now() - gmBoundBowSince >= BOUND_ARROWS_DELAY_MS) {
+        gmBoundBowArmed = true;
+        if (have < BOUND_ARROWS_MIN) pl.addItem(arrow, 100 - have, true);
+        pl.equipItem(arrow, false, true);
+        writeLogs("greymarch", "own hands: bound arrows given and equipped (had " + have + ")");
+      } else if (gmBoundBowArmed && have < BOUND_ARROWS_MIN) {
+        pl.addItem(arrow, 100 - have, true);
+        if (have === 0) pl.equipItem(arrow, false, true);
+        writeLogs("greymarch", "own hands: bound arrows topped up from " + have);
+      }
     } else {
       gmBoundBowHeld = false;
+      gmBoundBowArmed = false;
       if (have > 0) pl.removeItem(arrow, have, true, null);
     }
   } catch (e) { /* the next check */ }
