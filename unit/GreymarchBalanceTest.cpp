@@ -264,3 +264,18 @@ TEST_CASE("Greymarch: a shield block stops the shield's own percent from shieldS
 
   DropActor(p);
 }
+
+TEST_CASE("GreymarchBalance: bound weapons and the spells that conjure them",
+          "[GreymarchBalance]")
+{
+  auto t = GreymarchBalanceTable::FromJson(nlohmann::json::parse(
+    R"({"bound": {"364383": [135659, 7], "1093799": [135661], "5": "x", "0": [1], "6": []}})"));
+  REQUIRE(t.boundItems.size() == 2);
+  REQUIRE(t.boundItems.at(364383) == std::vector<uint32_t>{ 135659, 7 });
+  auto learned = [](uint32_t s) { return s == 7; };
+  auto none = [](uint32_t) { return false; };
+  REQUIRE(t.MayHoldBound(364383, learned));
+  REQUIRE_FALSE(t.MayHoldBound(364383, none));
+  REQUIRE_FALSE(t.MayHoldBound(1093799, learned));
+  REQUIRE_FALSE(t.MayHoldBound(12345, learned));
+}

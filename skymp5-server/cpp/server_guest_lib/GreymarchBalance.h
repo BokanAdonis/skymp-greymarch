@@ -3,6 +3,7 @@
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <unordered_map>
+#include <vector>
 
 // GREYMARCH: the balance table the gamemode sets live (balance.js, the F7 Balance tab):
 //   mp.set(0, "greymarchBalance", "<json text>")
@@ -22,6 +23,10 @@
 //   pvpDamage / pvpArmor / pvpRankKeep   PLAYER AGAINST PLAYER only (2026-10-31, the owner: PvP fights too long and too far apart): the hit times
 //                               pvpDamage; the defender's armor counts pvpArmor of what it would; a rank penalty (damageMult below 1) keeps pvpRankKeep of
 //                               its size. A player is an actor the gamemode gave combat perks to (combatPerks). None = as for everyone.
+//   bound     { "<global form id>": [spell ids] }   BOUND WEAPONS (2026-11-01, the owner: conjuration weapons on the server): a weapon or arrow a
+//               conjuring spell puts in the caster's hands exists only in their own game, never in the server's inventory. A player may still hold
+//               it (their equipment update is not refused for it) and hit with it while they know one of these spells; a shot with a bound arrow
+//               takes nothing from the inventory.
 struct GreymarchBalanceTable
 {
   std::unordered_map<uint32_t, float> weaponDamage;
@@ -42,6 +47,23 @@ struct GreymarchBalanceTable
   std::optional<float> pvpDamage;
   std::optional<float> pvpArmor;
   std::optional<float> pvpRankKeep;
+  std::unordered_map<uint32_t, std::vector<uint32_t>> boundItems; // GREYMARCH: bound weapons and arrows -> the spells that conjure them
+
+  // GREYMARCH: a bound weapon or arrow the actor may hold: one of its spells is learned (isLearned(spellId))
+  template <class F>
+  bool MayHoldBound(uint32_t itemId, F isLearned) const
+  {
+    auto it = boundItems.find(itemId);
+    if (it == boundItems.end()) {
+      return false;
+    }
+    for (uint32_t s : it->second) {
+      if (isLearned(s)) {
+        return true;
+      }
+    }
+    return false;
+  }
 
   // Throws on text that is not a JSON object. Values out of range are left out (the plugin's value is used).
   static GreymarchBalanceTable FromJson(const nlohmann::json& j);

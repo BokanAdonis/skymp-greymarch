@@ -71,6 +71,31 @@ GreymarchBalanceTable GreymarchBalanceTable::FromJson(const nlohmann::json& j)
   t.pvpDamage = Number(j, "pvpDamage", 0.f, 10.f);
   t.pvpArmor = Number(j, "pvpArmor", 0.f, 1.f);
   t.pvpRankKeep = Number(j, "pvpRankKeep", 0.f, 1.f);
+  if (auto it = j.find("bound"); it != j.end() && it->is_object()) {
+    for (auto& [k, v] : it->items()) {
+      if (!v.is_array()) {
+        continue;
+      }
+      try {
+        const unsigned long long id = std::stoull(k);
+        if (id == 0 || id > 0xffffffffull) {
+          continue;
+        }
+        std::vector<uint32_t> spells;
+        for (auto& s : v) {
+          if (s.is_number_unsigned() && s.get<unsigned long long>() > 0 &&
+              s.get<unsigned long long>() <= 0xffffffffull) {
+            spells.push_back(static_cast<uint32_t>(s.get<unsigned long long>()));
+          }
+        }
+        if (!spells.empty()) {
+          t.boundItems[static_cast<uint32_t>(id)] = std::move(spells);
+        }
+      } catch (...) {
+        // not a form id: skipped
+      }
+    }
+  }
   return t;
 }
 

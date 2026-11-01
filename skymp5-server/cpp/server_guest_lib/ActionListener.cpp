@@ -305,6 +305,14 @@ void ActionListener::OnUpdateEquipment(const RawMessageData& rawMsgData,
 
   const auto& inventory = actor->GetInventory();
   for (auto& entry : equipmentInv.entries) {
+    // GREYMARCH: a bound weapon or arrow (a conjuring spell's, only in the
+    // player's own game) while they know one of its spells (GreymarchBalance)
+    if (!inventory.HasItem(entry.baseId) &&
+        GreymarchBalance::Get().MayHoldBound(
+          entry.baseId,
+          [&](uint32_t s) { return actor->IsSpellLearned(s); })) {
+      continue;
+    }
     if (!inventory.HasItem(entry.baseId)) {
       spdlog::warn(
         "ActionListener::OnUpdateEquipment {:x} - rejected equipment "
@@ -629,6 +637,11 @@ void ActionListener::OnPlayerBowShot(const RawMessageData& rawMsgData,
       ac->GetFormId(), msg.ammoId);
   }
 
+  // GREYMARCH: a bound arrow is not in the inventory (GreymarchBalance bound)
+  if (!ac->GetInventory().HasItem(msg.ammoId) &&
+      GreymarchBalance::Get().boundItems.count(msg.ammoId)) {
+    return;
+  }
   ac->RemoveItem(msg.ammoId, 1, nullptr);
 }
 
