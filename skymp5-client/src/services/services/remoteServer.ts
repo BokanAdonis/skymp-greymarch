@@ -1099,6 +1099,20 @@ export class RemoteServer extends ClientListener {
       }
 
       this.greymarchMagicDiag(`magic: saw ${msg.data.caster.toString(16)} cast ${msg.data.spell.toString(16)} hand ${msg.data.castingSource} (their copy holds ${held ? held.getFormID().toString(16) : "nothing"}, casting ${spell ? spell.getFormID().toString(16) : "nothing"})`);
+      // GREYMARCH (2026-11-01, a crash in a Skeleton's behavior graph in Bonechill Passage, weapon out, its magic modifier running): castSpellImmediate
+      // first writes the caster's game's animation variables into this copy's graph, slot by slot, as if it were the same graph. For a player's copy it is
+      // (the human graph); an NPC's is its own (a draugr's, a Falmer's ...), and the writes broke its state machine. An NPC another game runs is shown
+      // casting with the game's own plain Cast instead (the spell's projectile from it, nothing written into its graph); a held spell is not shown
+      if (spell && !this.greymarchIsPlayerCopy(msg.data.caster)) {
+        if (!isHeld) {
+          try {
+            const tgt = msg.data.target ? ObjectReference.from(Game.getFormEx(remoteIdToLocalId(msg.data.target))) : null;
+            spell.cast(ac, tgt).catch(() => { /* not shown */ });
+          } catch (e) { /* not shown */ }
+        }
+        this.greymarchMagicDiag(`magic: saw NPC ${msg.data.caster.toString(16)} cast ${spell.getFormID().toString(16)}: ${isHeld ? "held, not shown" : "plain cast"}`);
+        return;
+      }
       if (spell) {
         castSpellImmediate(ac.getFormID(), msg.data.castingSource, spell.getFormID(), remoteIdToLocalId(msg.data.target),
           msg.data.aimAngle, msg.data.aimHeading, actorAnimationVariables);
