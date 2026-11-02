@@ -278,5 +278,18 @@ test("frozen in a fight: formView checks every hosted NPC each second, rebuilds 
   assert.ok(formView.includes('gmFB("IsAttacking")') && formView.includes('gmFB("IsBlocking")'), "attacking and blocking read from its graph");
   assert.ok(/this\.gmGroundTargetId = gmFTarget\.getFormID\(\);[\s\S]{0,600}this\.gmRebuild\(npc\);/.test(formView), "its target kept, then rebuilt");
   assert.ok(/height locked; rebuilt, gear kept\)"\);\s*this\.gmRebuild\(npc\);/.test(formView), "the reground uses the same rebuild");
-  assert.ok(/private gmRebuild\(npc: Actor\): void \{[\s\S]{0,900}applyEquipment\(ac, gmEq\)[\s\S]{0,300}this\.gmGroundRefight\(ac\);/.test(formView), "gear put back, back at its target");
+  assert.ok(/private gmRebuild\(npc: Actor\): boolean \{[\s\S]{0,1600}applyEquipment\(ac, gmEq\)[\s\S]{0,300}this\.gmGroundRefight\(ac\);/.test(formView), "gear put back, back at its target");
+});
+
+test("a rebuild never while the NPC's body loads (2026-11-02, the owner: crashes in a dungeon fight, a bandit rebuilt while its face and AI were loading)", () => {
+  const t = 1000000, L = H.REBUILD_LOADED_MS;
+  const ok = (o) => H.rebuildAllowed({ loaded: true, loadedSince: t - L, rebuilding: false, rebuiltAt: 0, now: t, ...o });
+  assert.strictEqual(ok({}), true, "loaded long enough, nothing running: rebuilt");
+  assert.strictEqual(ok({ loaded: false }), false, "not loaded");
+  assert.strictEqual(ok({ loadedSince: 0 }), false, "just rebuilt or never seen loaded");
+  assert.strictEqual(ok({ loadedSince: t - L + 1 }), false, "loaded, but not long enough");
+  assert.strictEqual(ok({ rebuilding: true }), false, "one at a time");
+  assert.strictEqual(ok({ rebuiltAt: t - L + 1 }), false, "not again right after the last");
+  assert.ok(/rebuildAllowed\(\{ loaded, loadedSince: this\.gm3DSince/.test(formView), "formView's gmRebuild asks it");
+  assert.ok(/this\.gm3DSince = 0; \/\/ after it/.test(formView), "after a rebuild its body counts as new");
 });

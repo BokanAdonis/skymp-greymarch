@@ -130,3 +130,12 @@ export function frozenStep(count: number, frozen: boolean, now: number, lastRebu
   if (next >= FROZEN_STEPS && now - lastRebuildAt >= FROZEN_REBUILD_EVERY_MS) return { count: 0, rebuild: true };
   return { count: Math.min(next, FROZEN_STEPS), rebuild: false };
 }
+
+// NEVER WHILE IT LOADS (2026-11-02, the owner: two players crashed in a dungeon fight, the game loading a Bandit Outlaw's face and choosing its target while
+// its body was being rebuilt): an NPC's body is rebuilt only once it has been loaded for REBUILD_LOADED_MS, one rebuild at a time, and not again within
+// REBUILD_LOADED_MS of the last. loadedSince: when its body was last seen loaded after being unloaded or rebuilt (0: not loaded).
+export const REBUILD_LOADED_MS = 10000;
+export function rebuildAllowed(s: { loaded: boolean, loadedSince: number, rebuilding: boolean, rebuiltAt: number, now: number }): boolean {
+  if (!s.loaded || !s.loadedSince || s.rebuilding) return false;
+  return s.now - s.loadedSince >= REBUILD_LOADED_MS && s.now - s.rebuiltAt >= REBUILD_LOADED_MS;
+}

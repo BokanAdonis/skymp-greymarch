@@ -90,7 +90,7 @@ import { ModelApplyUtils } from "./modelApplyUtils";
 import { localIdToRemoteId, remoteIdToLocalId, getViewFromStorage } from "./worldViewMisc";
 import { ridingOf, ridersMap, noteRider, riddenByOther, seatStep, HORSE_RACE, SEAT_TRY_EVERY_MS } from "../greymarch/riding";
 const GM_NPC_BASE_TYPE = 43; // FormType NPC_: greymarchRiding names a breed (RIDDEN AS THEIR OWN), not a placed horse
-import { flatStep, FLAT_STEPS, REGROUND_EVERY_MS, regroundExempt, frozenNow, frozenStep } from "../greymarch/npcHosting";
+import { flatStep, FLAT_STEPS, REGROUND_EVERY_MS, regroundExempt, frozenNow, frozenStep, rebuildAllowed } from "../greymarch/npcHosting";
 import { CHECK_EVERY_MS as GM_HOST_CHECK_MS, shouldRelease, pickTarget, markReleased, isReleased, withoutHosted, shouldReleaseUnloaded, movementDead, buildWhileDead, BODY_KILL_EVERY_MS } from "../greymarch/npcHosting";
 import { SpApiInteractor } from "../services/spApiInteractor";
 import { WorldCleanerService } from "../services/services/worldCleanerService";
@@ -1390,9 +1390,18 @@ export class FormView {
   // GREYMARCH: its body rebuilt where it stands (disabled and enabled again; LOCKED HEIGHT, FROZEN IN A FIGHT). Enabled again, the game draws its gear anew from
   // its outfit lists ("bandits respawn with other loadouts"): the server's record of what it wore is put back on it at once, and once more by the normal gear
   // step (its change count is reset). Rebuilt, it forgot its fight (2026-10-28): back at the one it fought (gmGroundTargetId), weapon drawn
-  private gmRebuild(npc: Actor): void {
+  // NEVER WHILE IT LOADS (greymarch/npcHosting.ts rebuildAllowed, 2026-11-02): refused, it is tried again at the next check that asks for it
+  private gmRebuild(npc: Actor): boolean {
+    const gmNowMs = Date.now();
+    let loaded = false; try { loaded = npc.is3DLoaded(); } catch (e) { loaded = false; }
+    if (!rebuildAllowed({ loaded, loadedSince: this.gm3DSince, rebuilding: this.gmRebuilding, rebuiltAt: this.gmRebuiltAt, now: gmNowMs })) {
+      gmCrumb("rebuild " + gmHex(this.remoteRefrId as number) + " put off: " + (!loaded ? "not loaded" : this.gmRebuilding ? "a rebuild is running" : "loaded or rebuilt too recently"));
+      return false;
+    }
+    this.gmRebuilding = true; this.gmRebuiltAt = gmNowMs; this.gm3DSince = 0; // after it, its body counts as new again
     const gmRid = npc.getFormID();
     const gmEq = this.gmLastEquipment;
+    const done = () => { this.gmRebuilding = false; };
     try {
       npc.disable(false).then(() => {
         const again = ObjectReference.from(Game.getFormEx(gmRid));
@@ -1403,8 +1412,9 @@ export class FormView {
           this.eqState = this.getDefaultEquipState();
           if (ac) this.gmGroundRefight(ac);
         });
-      }).catch(() => { /* the next check tries again */ });
-    } catch (e) { /* the next check tries again */ }
+      }).then(done, done);
+    } catch (e) { done(); }
+    return true;
   }
   // GREYMARCH: an NPC this game hosts, checked once a second (greymarch/npcHosting.ts). "released" when it was handed on.
   private gmHostedTick(refr: ObjectReference): string {
@@ -1416,6 +1426,7 @@ export class FormView {
       // horse passed the LOCKED HEIGHT test (fast, flat) and was rebuilt (disabled and enabled) with its rider on it; the ground word and the hand-off moved it too.
       // A horse someone sits on is left alone: no rebuild, no ground fix, no nudge, no hand-off
       try { if (npc.isBeingRidden()) return ""; } catch (e) { /* checked again next second */ }
+      try { if (npc.is3DLoaded()) { if (!this.gm3DSince) this.gm3DSince = Date.now(); } else this.gm3DSince = 0; } catch (e) { this.gm3DSince = 0; }
       const placeOf = (a: Actor): number => { const w = a.getWorldSpace() || a.getParentCell(); return w ? w.getFormID() : 0; };
       const myPlace = placeOf(me);
       // DIAGNOSTIC (2026-10-24, NPCs walking in the air or half in the ground with only their host's player there): every 3 s, at most 120 lines a game, an NPC
@@ -1591,6 +1602,9 @@ export class FormView {
   private gmRegroundAt = 0;
   private gmFrozenCount = 0; // FROZEN IN A FIGHT: seconds in a row it looked frozen, when it was last rebuilt for it, where it was a second ago
   private gmFrozenAt = 0;
+  private gm3DSince = 0; // GREYMARCH: since when this NPC's body is loaded (0: not loaded, or just rebuilt); gmRebuild waits REBUILD_LOADED_MS
+  private gmRebuilding = false;
+  private gmRebuiltAt = 0;
   private gmFrozenPos: number[] | null = null;
   private gmUnloadedSince = 0; // GREYMARCH: since when this game hosts this NPC without having it loaded (0: loaded)
   private gmBodyKillAt = 0;
