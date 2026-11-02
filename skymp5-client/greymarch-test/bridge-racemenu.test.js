@@ -136,10 +136,48 @@ test("a SkyrimPlatform without the preset functions, or no RaceMenu, logs once a
   delete s.sp.readCharGenPreset;
   s.say({ customPacketType: "greymarchRaceMenuLook", look: MINE });
   for (let i = 0; i < 10; i++) s.step();
-  assert.strictEqual(s.log.lines.filter((l) => /cannot read RaceMenu presets/.test(l)).length, 1);
+  assert.strictEqual(s.log.lines.filter((l) => /can read RaceMenu presets, the extra sliders are not kept/.test(l)).length, 1);
   const t = make();
   t.sp.callNative = () => undefined; // RaceMenu not installed: no file written
   t.say({ customPacketType: "greymarchRaceMenuLook", look: MINE });
   for (let i = 0; i < 10; i++) t.step();
   assert.strictEqual(t.log.lines.filter((l) => /RaceMenu wrote no preset/.test(l)).length, 1);
+});
+
+test("a SkyrimPlatform without the preset functions uses GreymarchCamera.dll 1.8, piece by piece (2026-11-02, the owner: the extra face sliders were never kept)", () => {
+  const s = make();
+  delete s.sp.readCharGenPreset; delete s.sp.writeCharGenPreset;
+  const charGen = s.sp.callNative;
+  const pieces = { read: 0, write: 0 };
+  s.sp.callNative = (cls, fn, self, ...args) => {
+    if (cls !== "GreymarchCam") return charGen(cls, fn, self, ...args);
+    const file = Buffer.from(s.log.files[args[0]] || "", "utf8");
+    if (fn === "ReadCharGenPresetPart") { pieces.read++; return file.subarray(args[1], args[1] + 8000).toString("utf8"); }
+    if (fn === "WriteCharGenPresetPart") { pieces.write++; s.log.files[args[0]] = (args[2] ? (s.log.files[args[0]] || "") : "") + args[1]; return true; }
+    throw new Error("unexpected " + fn);
+  };
+  // a long preset (over one piece) with a character outside ASCII
+  const big = { morphs: { custom: Array.from({ length: 900 }, (_, i) => ({ name: "Slideré" + i, value: 0.5 })) } };
+  s.menu(true); s.step();
+  s.body.live = preset(big);
+  s.menu(false); s.step(100); s.step(1000);
+  assert.strictEqual(s.log.sent.length, 1, "sent");
+  assert.deepStrictEqual(s.log.sent[0].look, rm.pickRaceMenuParts(preset(big)), "read back whole, across the pieces");
+  assert.ok(pieces.read > 2, "read in pieces");
+  // after a relog the kept parts are written for RaceMenu through the DLL and loaded
+  const t = make();
+  delete t.sp.readCharGenPreset; delete t.sp.writeCharGenPreset;
+  const charGen2 = t.sp.callNative;
+  t.sp.callNative = (cls, fn, self, ...args) => {
+    if (cls !== "GreymarchCam") return charGen2(cls, fn, self, ...args);
+    const file = Buffer.from(t.log.files[args[0]] || "", "utf8");
+    if (fn === "ReadCharGenPresetPart") return file.subarray(args[1], args[1] + 8000).toString("utf8");
+    if (fn === "WriteCharGenPresetPart") { t.log.files[args[0]] = (args[2] ? (t.log.files[args[0]] || "") : "") + args[1]; return true; }
+    throw new Error("unexpected " + fn);
+  };
+  t.body.live = preset({});
+  t.say({ customPacketType: "greymarchRaceMenuLook", look: rm.pickRaceMenuParts(preset(big)) });
+  for (let i = 0; i < 6; i++) t.step();
+  assert.strictEqual(loads(t.log).length, 1);
+  assert.deepStrictEqual(t.body.live.morphs.custom, big.morphs.custom, "the sliders are back");
 });

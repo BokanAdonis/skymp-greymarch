@@ -122,6 +122,9 @@ const GREYMARCH_PERK_CRITICAL_CHARGE = 0x000CB406;
 const GREYMARCH_FAST_DRAW_SPEED = 1.15; // fast draw: the bow drawn 15% faster on top of Quick Shot (greymarchFastDrawApply)
 const GREYMARCH_PERK_GREAT_CRITICAL_CHARGE = 0x000CB407;
 
+// the bytes a string takes in UTF-8 (GreymarchCam.ReadCharGenPresetPart counts its offset in bytes)
+const utf8Length = (t: string): number => { var n = 0; for (var i = 0; i < t.length; i++) { var c = t.charCodeAt(i); if (c < 0x80) n += 1; else if (c < 0x800) n += 2; else if (c >= 0xd800 && c <= 0xdbff) { n += 4; i++; } else n += 3; } return n; };
+
 export class GreymarchBridge {
     [key: string]: any;
 
@@ -1820,7 +1823,7 @@ export class GreymarchBridge {
             var current = this.greymarchRaceMenuExport(player);
             if (!current) return;
             if (rmMod.sameRaceMenuParts(current, rm.want)) { rm.done = key; rm.tries = 0; return; }
-            sp.writeCharGenPreset(rmMod.PRESET_NAME, JSON.stringify(rmMod.spliceRaceMenuParts(current, rm.want)));
+            if (!this.greymarchPresetWrite(rmMod.PRESET_NAME, JSON.stringify(rmMod.spliceRaceMenuParts(current, rm.want)))) { this.greymarchLog("racemenu: the kept sliders could not be written for RaceMenu (try " + rm.tries + " of 3)"); return; }
             var ok = sp.callNative("CharGen", "LoadCharacterPresetEx", undefined, player, rmMod.PRESET_NAME, null, rmMod.APPLY_ALL);
             if (!ok) { this.greymarchLog("racemenu: RaceMenu did not load the kept sliders (try " + rm.tries + " of 3)"); return; }
             rm.done = key; rm.tries = 0;
@@ -1829,14 +1832,48 @@ export class GreymarchBridge {
             this.greymarchLog("racemenu: the sliders could not be put back (try " + rm.tries + " of 3): " + err);
         }
     }
+    // RACEMENU PRESET FILES (2026-11-02, the owner: the extra face sliders, ears, noses, the finer face shaping, were never kept): SkyrimPlatform's own
+    // readCharGenPreset/writeCharGenPreset are in our build of it only, not the one players run, so these read and write the file through GreymarchCamera.dll
+    // 1.8 (GreymarchCam.ReadCharGenPresetPart / WriteCharGenPresetPart, a piece at a time) when SkyrimPlatform has none. "sp" | "dll" | "" (neither)
+    greymarchPresetIo(): string {
+        var sp = this.sp;
+        if (typeof sp.readCharGenPreset === "function" && typeof sp.writeCharGenPreset === "function") return "sp";
+        if (this.greymarchPresetDll === undefined) {
+            try { this.greymarchPresetDll = typeof sp.callNative("GreymarchCam", "ReadCharGenPresetPart", undefined, "greymarch-probe", 0) === "string"; } catch (e) { this.greymarchPresetDll = false; }
+        }
+        return this.greymarchPresetDll ? "dll" : "";
+    }
+    greymarchPresetRead(name: string): string {
+        var sp = this.sp, io = this.greymarchPresetIo();
+        if (io === "sp") return String(sp.readCharGenPreset(name) || "");
+        if (io !== "dll") return "";
+        var out = "", bytes = 0;
+        for (var i = 0; i < 2000; i++) { // at most 8000 bytes a piece: 16 MB, past RaceMenu's own limit
+            var piece = String(sp.callNative("GreymarchCam", "ReadCharGenPresetPart", undefined, name, bytes) || "");
+            if (!piece) break;
+            out += piece;
+            bytes += utf8Length(piece);
+        }
+        return out;
+    }
+    greymarchPresetWrite(name: string, text: string): boolean {
+        var sp = this.sp, io = this.greymarchPresetIo();
+        if (io === "sp") { sp.writeCharGenPreset(name, text); return true; }
+        if (io !== "dll") return false;
+        if (!text) return !!sp.callNative("GreymarchCam", "WriteCharGenPresetPart", undefined, name, "", false);
+        for (var at = 0; at < text.length; at += 4000) { // 4000 characters a piece (at most 12000 bytes)
+            if (!sp.callNative("GreymarchCam", "WriteCharGenPresetPart", undefined, name, text.slice(at, at + 4000), at > 0)) return false;
+        }
+        return true;
+    }
     // RaceMenu's preset of the player's look right now, or null (no RaceMenu, or a SkyrimPlatform without readCharGenPreset). Logged once per reason.
     greymarchRaceMenuExport(player: any): any {
         var sp = this.sp, rm = this.greymarchRmState();
         var say = (why: string) => { if (!rm.said[why]) { rm.said[why] = true; this.greymarchLog("racemenu: " + why); } return null; };
-        if (typeof sp.readCharGenPreset !== "function" || typeof sp.writeCharGenPreset !== "function") return say("this SkyrimPlatform cannot read RaceMenu presets, the extra sliders are not kept");
-        sp.writeCharGenPreset(rmMod.PRESET_NAME, ""); // a failed export is never mistaken for an older one
+        if (!this.greymarchPresetIo()) return say("neither SkyrimPlatform nor GreymarchCamera.dll (1.8) can read RaceMenu presets, the extra sliders are not kept");
+        this.greymarchPresetWrite(rmMod.PRESET_NAME, ""); // a failed export is never mistaken for an older one
         sp.callNative("CharGen", "SaveCharacterPreset", undefined, player, rmMod.PRESET_NAME);
-        var text = sp.readCharGenPreset(rmMod.PRESET_NAME);
+        var text = this.greymarchPresetRead(rmMod.PRESET_NAME);
         if (!text) return say("RaceMenu wrote no preset (is RaceMenu installed?)");
         return JSON.parse(text);
     }
