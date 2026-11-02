@@ -1332,7 +1332,7 @@ void ActionListener::OnHit(const RawMessageData& rawMsgData,
   }
 
   if (aggressor->IsDead()) {
-    spdlog::debug(fmt::format("{:x} actor is dead and can't attack. "
+    spdlog::info(fmt::format("hit dropped: {:x} actor is dead and can't attack. "
                               "requesting respawn in order to fix death state",
                               aggressor->GetFormId()));
     aggressor->RespawnWithDelay(true);
@@ -1358,8 +1358,15 @@ void ActionListener::OnHit(const RawMessageData& rawMsgData,
     return;
   }
 
+  // GREYMARCH (2026-11-02, the server log: "spell hit refused: ff000427
+  // neither holds nor has learned spell 3e07d", an NPC's spell): an NPC's
+  // spells come from its own record and are never "learned", and the server's
+  // copy of its hands is not always current; the game that runs it reported
+  // the hit, and OnHit has checked that game is its host. Its spells count.
+  const bool npcCaster = partOne.serverState.UserByActor(aggressor) ==
+    Networking::InvalidUserId;
   if (isSourceSpell &&
-      (equipment.IsSpellEquipped(hitData.source) ||
+      (npcCaster || equipment.IsSpellEquipped(hitData.source) ||
        aggressor->IsSpellLearned(hitData.source))) {
     OnSpellHit(aggressor, targetRef, hitData);
     return;
@@ -1827,6 +1834,17 @@ void ActionListener::OnWeaponHit(MpActor* aggressor,
 
   auto* targetActorPtr = targetRef ? targetRef->AsActor() : nullptr;
   if (!targetActorPtr) {
+    // GREYMARCH (2026-11-02, the owner: an NPC nobody could hurt with a
+    // weapon, only with magic; no line at all for those hits): a weapon hit
+    // whose target the server does not have as an actor goes to the log
+    if (partOne.serverState.UserByActor(aggressor) !=
+        Networking::InvalidUserId) {
+      spdlog::info("hit dropped: {:x} -> {:x} with {:x}: the target is not "
+                   "an actor on the server (base {:x})",
+                   aggressor->GetFormId(),
+                   targetRef ? targetRef->GetFormId() : 0, hitData.source,
+                   targetRef ? targetRef->GetBaseId() : 0);
+    }
     return; // Not an actor, damage calculation is not needed
   }
 
@@ -2019,11 +2037,15 @@ void ActionListener::OnWeaponHit(MpActor* aggressor,
         Networking::InvalidUserId &&
       partOne.serverState.UserByActor(aggressor) !=
         Networking::InvalidUserId) {
-    spdlog::info("hit on npc: player {:x} -> {:x} (base {:x}) with {:x}{}{}: "
-                 "attacker x{:.2f}, damage {:.1f}, health {:.1f} -> {:.1f} "
-                 "of {:.0f}",
+    auto hostIt = partOne.worldState.hosters.find(targetActor.GetFormId());
+    spdlog::info("hit on npc: player {:x} -> {:x} (base {:x}, run by {:x}) "
+                 "with {:x}{}{}: attacker x{:.2f}, damage {:.1f}, health "
+                 "{:.1f} -> {:.1f} of {:.0f}",
                  aggressor->GetFormId(), targetActor.GetFormId(),
-                 targetActor.GetBaseId(), hitData.source,
+                 targetActor.GetBaseId(),
+                 hostIt == partOne.worldState.hosters.end() ? 0
+                                                            : hostIt->second,
+                 hitData.source,
                  hitData.isPowerAttack ? " power" : "",
                  hitData.isHitBlocked ? " blocked" : "",
                  aggressor->GetGreymarchDamageMult(), damage,
