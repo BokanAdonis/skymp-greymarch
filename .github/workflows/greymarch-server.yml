@@ -16,5 +16,6 @@ jobs:
     uses: ./.github/workflows/linux-build-base.yml
     with:
       base_system: ubuntu-vcpkg-deps
+      ccache: true # keep compiled objects between runs: a build after a small change only recompiles what changed
       skip_tests: ${{ !inputs.run_tests }}
       extra_build_args: ${{ inputs.run_tests && '--target=skymp5-server --target=unit' || '--target=skymp5-server' }}

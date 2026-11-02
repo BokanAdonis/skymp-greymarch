@@ -16,6 +16,11 @@ on:
         description: 'Shell-escaped args for `./build.sh --build`. Example: `--target=skymp5-server`'
         required: false
         default: ''
+      ccache:
+        type: boolean
+        description: 'GREYMARCH: keep a compile cache (ccache) between runs, so a build after a small change only recompiles what changed'
+        required: false
+        default: false
       auto_merge_action_config:
         type: string
         description: Auto-merge action config
@@ -28,6 +33,10 @@ on:
 
 env:
     BUILD_TYPE: RelWithDebInfo
+    # GREYMARCH: ccache settings for the build container (both empty when the ccache input is off). No CCACHE_BASEDIR: it would rewrite the
+    # /src paths in the debug info to relative ones, so the binary would differ from a build without the cache (the build is always in /src).
+    CCACHE_DOCKER_ARGS: ${{ inputs.ccache && '-e CCACHE_DIR=/src/.ccache -e CCACHE_NOHASHDIR=1 -e CCACHE_MAXSIZE=3G' || '' }}
+    CCACHE_CMAKE_ARGS: ${{ inputs.ccache && '-DCMAKE_C_COMPILER_LAUNCHER=/src/.ccache-bin/ccache -DCMAKE_CXX_COMPILER_LAUNCHER=/src/.ccache-bin/ccache' || '' }}
 
 jobs:
     linux-build-base:
@@ -165,6 +174,29 @@ jobs:
               url: "https://gitlab.com/pospelov/se-data/-/raw/main/Dragonborn.esm"
               target: ${{github.workspace}}/skyrim_data_files/
 
+          # GREYMARCH: compile cache. A static ccache (checksum pinned) goes in /src/.ccache-bin and its cache in /src/.ccache; the cache
+          # of the last run on this branch (or the default branch) is restored here, and a new one is saved after the build.
+          - name: Get ccache
+            if: ${{ inputs.ccache }}
+            run: |
+              v=4.14.2
+              name="ccache-$v-linux-x86_64-musl-static"
+              curl -fsSL -o /tmp/ccache.tar.xz "https://github.com/ccache/ccache/releases/download/v$v/$name.tar.xz"
+              echo "b20ff6415151226ac5a10dfd6839700c694bd67d1871c8fddb266d366ff25bfb  /tmp/ccache.tar.xz" | sha256sum -c -
+              tar xJf /tmp/ccache.tar.xz -C /tmp
+              mkdir -p .ccache-bin .ccache
+              cp "/tmp/$name/ccache" .ccache-bin/ccache
+              .ccache-bin/ccache --version | head -1
+
+          - name: Restore ccache
+            if: ${{ inputs.ccache }}
+            uses: actions/cache/restore@v4
+            with:
+              path: .ccache
+              key: ccache-${{ inputs.base_system }}-${{ env.BUILD_TYPE }}-${{ github.run_id }}
+              restore-keys: |
+                ccache-${{ inputs.base_system }}-${{ env.BUILD_TYPE }}-
+
           - name: Prepare
             run: |
               docker run --rm -v "${{ github.workspace }}:/src" -w /src -u root localhost/buildimage \
@@ -175,7 +207,7 @@ jobs:
             run: |
               docker run --rm -v "${{ github.workspace }}:/src" -w /src -u skymp localhost/buildimage \
                 ./build.sh --configure \
-                -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} \
+                -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} $CCACHE_CMAKE_ARGS \
                 -DUNIT_DATA_DIR="/src/skyrim_data_files"
 
           - name: Upload vcpkg logs
@@ -202,8 +234,24 @@ jobs:
 
           - name: Build
             run: |
-              docker run --rm -v "${{ github.workspace }}:/src" -w /src -u skymp localhost/buildimage \
+              if [ -n "$CCACHE_DOCKER_ARGS" ]; then
+                docker run --rm -v "${{ github.workspace }}:/src" -w /src -u skymp $CCACHE_DOCKER_ARGS localhost/buildimage .ccache-bin/ccache --zero-stats
+              fi
+              docker run --rm -v "${{ github.workspace }}:/src" -w /src -u skymp $CCACHE_DOCKER_ARGS localhost/buildimage \
                 ./build.sh --build ${{ inputs.extra_build_args }}
+
+          - name: ccache stats
+            if: ${{ always() && inputs.ccache }}
+            run: |
+              docker run --rm -v "${{ github.workspace }}:/src" -w /src -u skymp $CCACHE_DOCKER_ARGS localhost/buildimage \
+                sh -c '.ccache-bin/ccache --cleanup && .ccache-bin/ccache --show-stats --verbose' | tee -a $GITHUB_STEP_SUMMARY
+
+          - name: Save ccache
+            if: ${{ always() && inputs.ccache }}
+            uses: actions/cache/save@v4
+            with:
+              path: .ccache
+              key: ccache-${{ inputs.base_system }}-${{ env.BUILD_TYPE }}-${{ github.run_id }}
 
           - name: Prepare dist.tar.gz
             run: |
