@@ -33,8 +33,9 @@ on:
 
 env:
     BUILD_TYPE: RelWithDebInfo
-    # GREYMARCH: ccache settings for the build container (both empty when the ccache input is off)
-    CCACHE_DOCKER_ARGS: ${{ inputs.ccache && '-e CCACHE_DIR=/src/.ccache -e CCACHE_BASEDIR=/src -e CCACHE_NOHASHDIR=1 -e CCACHE_MAXSIZE=3G' || '' }}
+    # GREYMARCH: ccache settings for the build container (both empty when the ccache input is off). No CCACHE_BASEDIR: it would rewrite the
+    # /src paths in the debug info to relative ones, so the binary would differ from a build without the cache (the build is always in /src).
+    CCACHE_DOCKER_ARGS: ${{ inputs.ccache && '-e CCACHE_DIR=/src/.ccache -e CCACHE_NOHASHDIR=1 -e CCACHE_MAXSIZE=3G' || '' }}
     CCACHE_CMAKE_ARGS: ${{ inputs.ccache && '-DCMAKE_C_COMPILER_LAUNCHER=/src/.ccache-bin/ccache -DCMAKE_CXX_COMPILER_LAUNCHER=/src/.ccache-bin/ccache' || '' }}
 
 jobs:
