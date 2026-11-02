@@ -42,7 +42,7 @@ test("pick keeps only RaceMenu's sections; splice puts them on another preset an
 
 function make() {
   const log = { lines: [], sent: [], natives: [], files: {} };
-  const mods = { "../messages": { MsgType: { CustomPacket: 77 } }, "../view/worldViewMisc": {}, "../sync/appearance": {}, "../services/services/remoteServer": { RemoteServer: {} }, "../services/services/singlePlayerService": { SinglePlayerService: {} }, "./racemenuLook": rm };
+  const mods = { "../messages": { MsgType: { CustomPacket: 77 } }, "../view/worldViewMisc": { remoteIdToLocalId: (id) => id }, "../sync/appearance": {}, "../services/services/remoteServer": { RemoteServer: {} }, "../services/services/singlePlayerService": { SinglePlayerService: {} }, "./racemenuLook": rm };
   const bridge = load("bridge.ts", mods);
   let menuOpen = false;
   const body = { live: preset({}), loaded: true }; // what RaceMenu holds for the player right now
@@ -200,4 +200,35 @@ test("the sliders just made are never put back over before they are sent (2026-1
   assert.strictEqual(s.log.sent.length, 1);
   assert.deepStrictEqual(s.log.sent[0].look, rm.pickRaceMenuParts(preset(MINE)), "the new sliders are what is sent");
   assert.deepStrictEqual(s.body.live.morphs.custom, MINE.morphs.custom, "and still on the body");
+});
+
+test("others see them (2026-11-02, the owner): another player's kept sliders are put on this game's copy of them once it has been loaded 4 s, again after it is rebuilt", () => {
+  const s = make();
+  const copy = { live: preset({}), loaded: true, id: 0x42 };
+  const copyActor = { is3DLoaded: () => copy.loaded, isDisabled: () => false, getRace: () => ({ getName: () => "Nord" }) };
+  s.sp.Actor = { from: (f) => (f === copy ? copyActor : null) };
+  s.sp.Game.getFormEx = (id) => (id === copy.id ? copy : null);
+  const charGen = s.sp.callNative;
+  s.sp.callNative = (cls, fn, self, ...args) => {
+    if (args[0] === copyActor) {
+      s.log.natives.push(["copy:" + fn]);
+      if (fn === "SaveCharacterPreset") { s.log.files[args[1]] = JSON.stringify(copy.live); return undefined; }
+      if (fn === "LoadCharacterPresetEx") { copy.live = JSON.parse(s.log.files[args[1]]); return true; }
+    }
+    return charGen(cls, fn, self, ...args);
+  };
+  s.gm.greymarchRmCopies = null;
+  s.say({ customPacketType: "greymarchRaceMenuLookOf", actorId: 0x42, look: MINE.morphs ? { morphs: MINE.morphs } : {} });
+  const copyLoads = () => s.log.natives.filter((n) => n[0] === "copy:LoadCharacterPresetEx").length;
+  for (let i = 0; i < 3; i++) s.gm.greymarchRaceMenuCopiesTick(200000 + i * 1000);
+  assert.strictEqual(copyLoads(), 0, "waits until the copy has been there 4 s");
+  for (let i = 3; i < 7; i++) s.gm.greymarchRaceMenuCopiesTick(200000 + i * 1000);
+  assert.strictEqual(copyLoads(), 1, "then put on");
+  assert.deepStrictEqual(copy.live.morphs.custom, MINE.morphs.custom, "the copy has them");
+  for (let i = 7; i < 12; i++) s.gm.greymarchRaceMenuCopiesTick(200000 + i * 1000);
+  assert.strictEqual(copyLoads(), 1, "once");
+  copy.loaded = false; s.gm.greymarchRaceMenuCopiesTick(212000);
+  copy.loaded = true; copy.live = preset({}); // rebuilt: the copy lost them
+  for (let i = 13; i < 20; i++) s.gm.greymarchRaceMenuCopiesTick(200000 + i * 1000);
+  assert.strictEqual(copyLoads(), 2, "again after a rebuild");
 });

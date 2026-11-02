@@ -6,6 +6,7 @@
 // exports the look SkyMP just applied, puts the kept sections into that export and loads it back (CharGen.LoadCharacterPresetEx), so the vanilla
 // parts always stay exactly what SkyMP applied. Pure functions only: the calls into the game are in bridge.ts (greymarchRaceMenuTick).
 
+export const COPY_PRESET_NAME = "greymarch-copy"; // the scratch file for another player's copy (OTHERS SEE THEM)
 export const PRESET_NAME = "greymarch-look"; // the one scratch file this uses (written before every load, so nothing stale is ever loaded)
 export const APPLY_ALL = 15; // PresetInterface::kPresetApplyAll: the face (always) + overrides, body morphs, transforms, skin overrides
 

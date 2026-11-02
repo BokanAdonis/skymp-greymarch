@@ -225,6 +225,12 @@ export class GreymarchBridge {
         if (type === "greymarchSpellEdits") { this.greymarchSpellEditWant = msg.edits && typeof msg.edits === "object" ? msg.edits : {}; this.greymarchSpellEditTold = {}; return; } // the Magic balance tab's durations and strengths (greymarchSpellEditTick)
         if (type === "greymarchFavorites") { var favList = Array.isArray(msg.fav) ? msg.fav.filter((x: any) => x && Number(x.f) > 0).slice(0, 300) : []; var favWant: any = {}; favList.forEach((x: any) => { favWant[Number(x.f) >>> 0] = Number(x.k) >= 0 && Number(x.k) <= 7 ? Number(x.k) : -1; }); this.greymarchFavState = { pending: favList.map((x: any) => ({ f: Number(x.f) >>> 0, k: favWant[Number(x.f) >>> 0] })), want: favWant, restoreUntil: Date.now() + 60000, restoreAt: 0, loginAt: Date.now(), nextAt: Date.now() + 2000, lastSent: JSON.stringify(Object.keys(favWant).map((k) => ({ f: Number(k), k: favWant[k] })).sort((p: any, q: any) => p.f - q.f)), put: 0, menuSeen: false }; return; } // favorites remembered (greymarchFavTick)
         if (type === "greymarchMapMarkers") { this.greymarchMapState = { all: Array.isArray(msg.all) ? msg.all.filter((x: any) => typeof x === "string").slice(0, 5000) : [], found: new Set(Array.isArray(msg.found) ? msg.found.filter((x: any) => typeof x === "string") : []), restore: true, checkAt: 0, refs: {} }; return; } // the map remembered (greymarchMapTick)
+        if (type === "greymarchRaceMenuLookOf") { // OTHERS SEE THEM: another player's kept sliders, for this game's copy of them (greymarchRaceMenuCopiesTick)
+            var rmc = this.greymarchRmCopies || (this.greymarchRmCopies = {});
+            var rmcId = Number(msg.actorId) >>> 0;
+            if (rmcId) rmc[rmcId] = { actor: rmcId, want: msg.look && typeof msg.look === "object" ? msg.look : {}, done: null, loadedSince: 0, tries: 0 };
+            return;
+        }
         if (type === "greymarchRaceMenuLook") { var rm0 = this.greymarchRmState(); rm0.want = msg.look && typeof msg.look === "object" ? msg.look : {}; rm0.tries = 0; return; } // RaceMenu's extra sliders of this character, kept by the server (greymarchRaceMenuTick)
         if (type === "greymarchVampire") { this.greymarchVampWant = msg.on ? msg : null; this.greymarchVampCostTold = {}; this.greymarchHudToPage("blood", { on: !!msg.on, blood: msg.blood, empty: !!msg.empty }); return; } // a vampire's state: the blood drop and what the game applies (greymarchVampTick)
         if (type === "greymarchVampLooks") { this.greymarchVampLookList = Array.isArray(msg.vampires) ? msg.vampires : []; if (Number(msg.me) > 0) this.greymarchMeActor = Number(msg.me) >>> 0; return; } // (me: which of them is this player: the ghosts and effects packets that also say so may not have come yet, and without it the player's own eyes and fangs were never put on) // how every vampire in the world looks (eyes and fangs)
@@ -501,6 +507,7 @@ export class GreymarchBridge {
         this.greymarchShapeDrive(); // a creature form as an NPC: moved every frame like SkyMP moves other players; other players' creature attacks
         this.greymarchShapeTick(); // a creature form staff put the player in (a goat, a giant ...): the server decides, the body is changed here
         this.greymarchRaceMenuTick(Date.now()); // RaceMenu's extra sliders: sent when the race menu closes, put back after a relog (racemenuLook.ts)
+        this.greymarchRaceMenuCopiesTick(Date.now()); // and put on the other players' copies (OTHERS SEE THEM)
         this.greymarchWolfTick(); // the werewolf form: the game's Beast Form power is the trigger, the server decides, the change is done here
         this.greymarchSpellCostTick(); // the Spells balance tab's costs on the spell records (GreymarchCamera.dll 1.5)
         this.greymarchSpellEditTick(); // the Magic balance tab's durations and strengths on the spell records
@@ -1797,6 +1804,49 @@ export class GreymarchBridge {
         var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchRide", horse: send }) };
         this.controller.emitter.emit("sendMessage", { message: message, reliability: "reliable" });
         if (send !== was) this.greymarchCrumb(send ? "ride " + send.toString(16) + " (here " + local.toString(16) + ")" : "ride off");
+    }
+    // OTHERS SEE THEM (2026-11-02, the owner: others could not see the differences): another player's kept sliders (greymarchRaceMenuLookOf) are put on this
+    // game's copy of them as on the player's own body: its preset exported (RaceMenu's CharGen.SaveCharacterPreset on the copy), the kept parts spliced in,
+    // loaded back (LoadCharacterPresetEx). Once the copy has been loaded 4 s; again when it was unloaded and comes back (a rebuild); never on a werewolf or
+    // creature body; at most one copy a second, three tries for each look.
+    greymarchRaceMenuCopiesTick(now: number): any {
+        var copies = this.greymarchRmCopies;
+        if (!copies || now < (this.greymarchRmCopiesNext || 0)) return;
+        this.greymarchRmCopiesNext = now + 1000;
+        var sp = this.sp, did = false;
+        for (var k in copies) {
+            var c = copies[k];
+            try {
+                var local = misc.remoteIdToLocalId(c.actor);
+                var ac = local ? sp.Actor.from(sp.Game.getFormEx(local)) : null;
+                if (!ac || !ac.is3DLoaded() || ac.isDisabled()) { c.loadedSince = 0; c.done = null; continue; }
+                if (!c.loadedSince) c.loadedSince = now;
+                if (now - c.loadedSince < 4000 || did) continue;
+                var key = JSON.stringify(c.want);
+                if (c.done === key || c.tries >= 3) continue;
+                var race = ac.getRace(), rname = race ? String(race.getName() || "") : "";
+                if (/were|vampire lord|beast/i.test(rname)) continue; // a creature form: not the character's own body
+                if (!this.greymarchPresetIo()) continue;
+                did = true; c.tries++;
+                this.greymarchPresetWrite(rmMod.COPY_PRESET_NAME, "");
+                sp.callNative("CharGen", "SaveCharacterPreset", undefined, ac, rmMod.COPY_PRESET_NAME);
+                var text = this.greymarchPresetRead(rmMod.COPY_PRESET_NAME);
+                if (!text) { this.greymarchRmCopyLog(c.actor, "RaceMenu wrote no preset for the copy (try " + c.tries + " of 3)"); continue; }
+                var current = JSON.parse(text);
+                if (rmMod.sameRaceMenuParts(current, c.want)) { c.done = key; c.tries = 0; continue; }
+                if (!this.greymarchPresetWrite(rmMod.COPY_PRESET_NAME, JSON.stringify(rmMod.spliceRaceMenuParts(current, c.want)))) continue;
+                var ok = sp.callNative("CharGen", "LoadCharacterPresetEx", undefined, ac, rmMod.COPY_PRESET_NAME, null, rmMod.APPLY_ALL);
+                if (!ok) { this.greymarchRmCopyLog(c.actor, "RaceMenu did not load the sliders on the copy (try " + c.tries + " of 3)"); continue; }
+                c.done = key; c.tries = 0;
+                this.greymarchRmCopyLog(c.actor, "sliders put on their copy (" + this.greymarchRaceMenuSay(c.want) + ")");
+            } catch (err) {
+                this.greymarchRmCopyLog(c.actor, "the sliders could not be put on the copy (try " + c.tries + " of 3): " + err);
+            }
+        }
+    }
+    greymarchRmCopyLog(actor: number, text: string): any {
+        this.greymarchRmCopyLogs = (this.greymarchRmCopyLogs || 0) + 1;
+        if (this.greymarchRmCopyLogs <= 60) this.greymarchLog("racemenu: " + (actor >>> 0).toString(16) + ": " + text);
     }
     greymarchRmState(): any {
         return this.greymarchRm || (this.greymarchRm = { menuWas: false, sendAt: 0, want: null, done: null, loadedSince: 0, next: 0, tries: 0, beast: false, said: {} });
