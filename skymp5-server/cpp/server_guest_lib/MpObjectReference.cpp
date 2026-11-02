@@ -1865,6 +1865,15 @@ void MpObjectReference::SendInventoryUpdate()
 void MpObjectReference::SendOpenContainer(uint32_t targetId)
 {
   auto actor = AsActor();
+  // GREYMARCH (2026-11-02, the owner: "when a bandit stands up from a chair it
+  // will TP a player to them"): this message names no actor, so the game that
+  // gets it activates the furniture, container or activator with its own
+  // player. For an NPC it went to the player whose game runs that NPC (its
+  // hoster, GetActorToSendTo), who was put in the bandit's chair. Only a
+  // player's own activation is sent back now; an NPC's game did it already.
+  if (actor && actor->GetUserId() == Networking::InvalidUserId) {
+    return;
+  }
   if (actor) {
     OpenContainerMessage msg;
     msg.target = targetId;
