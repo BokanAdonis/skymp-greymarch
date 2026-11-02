@@ -151,3 +151,12 @@ export function gearKey(eq: { inv?: { entries?: any[] }, leftSpell?: number, rig
     .sort();
   return worn.join(",") + "|" + [eq.leftSpell, eq.rightSpell, eq.voiceSpell, eq.instantSpell].map((x) => (Number(x) || 0).toString(16)).join(",");
 }
+
+// NO CLOAKS & CAPES ON AN NPC (2026-11-02, the owner: every NPC that weapons could not hurt wore a fur cloak; players wearing them take damage). Cloaks&Capes.esp
+// puts its 25 cloaks on body slots 40 and 46; on an NPC they left it unhittable by weapons. An NPC never wears one: left out of its gear, and taken off it.
+export const NO_NPC_CLOAK_MOD = "Cloaks&Capes.esp";
+export const NO_NPC_CLOAK_SLOTS = (1 << (40 - 30)) | (1 << (46 - 30)); // body slots 40 and 46
+export function withoutModItems<T extends { baseId: number }>(entries: T[], modIndex: number | null): T[] {
+  if (modIndex === null || !(modIndex >= 0 && modIndex < 0xfe)) return entries;
+  return entries.filter((e) => ((Number(e.baseId) >>> 24) & 0xff) !== modIndex);
+}

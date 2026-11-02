@@ -308,3 +308,13 @@ test("same gear, no re-dress (2026-11-02, the owner: a player's character was re
   assert.ok(/this\.eqState\.lastKey = gmKey;/.test(formView), "kept once dressed");
   assert.ok(/lastEqMoment: 0, lastKey: ""/.test(formView), "a new or rebuilt body is dressed again (the equip state is reset)");
 });
+
+test("no Cloaks & Capes on an NPC (2026-11-02, the owner: every NPC weapons could not hurt wore a fur cloak): its items left out of an NPC's gear, a player's copy untouched", () => {
+  const e = [{ baseId: 0x17000d62, worn: true }, { baseId: 0x12eb7, worn: true }, { baseId: 0x17abc, worn: true }];
+  assert.deepStrictEqual(H.withoutModItems(e, 0x17).map((x) => x.baseId), [0x12eb7, 0x17abc], "only that plugin's items (index 0x17) go");
+  assert.strictEqual(H.withoutModItems(e, null), e, "the mod not loaded: nothing changes");
+  assert.strictEqual(H.withoutModItems(e, 0xfe), e, "a light plugin index is never taken for it");
+  assert.strictEqual(H.NO_NPC_CLOAK_SLOTS, (1 << 10) | (1 << 16), "slots 40 and 46");
+  assert.ok(/if \(model\.equipment && !model\.appearance\) \{[\s\S]{0,200}withoutModItems\(model\.equipment\.inv\.entries/.test(formView), "an NPC's gear only (no appearance)");
+  assert.ok(/getWornForm\(NO_NPC_CLOAK_SLOTS\)[\s\S]{0,400}ac\.unequipItem\(worn[\s\S]{0,100}ac\.removeItem\(worn/.test(formView), "one worn anyway is taken off and away");
+});

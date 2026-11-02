@@ -90,7 +90,7 @@ import { ModelApplyUtils } from "./modelApplyUtils";
 import { localIdToRemoteId, remoteIdToLocalId, getViewFromStorage } from "./worldViewMisc";
 import { ridingOf, ridersMap, noteRider, riddenByOther, seatStep, HORSE_RACE, SEAT_TRY_EVERY_MS } from "../greymarch/riding";
 const GM_NPC_BASE_TYPE = 43; // FormType NPC_: greymarchRiding names a breed (RIDDEN AS THEIR OWN), not a placed horse
-import { flatStep, FLAT_STEPS, REGROUND_EVERY_MS, regroundExempt, frozenNow, frozenStep, rebuildAllowed, gearKey } from "../greymarch/npcHosting";
+import { flatStep, FLAT_STEPS, REGROUND_EVERY_MS, regroundExempt, frozenNow, frozenStep, rebuildAllowed, gearKey, withoutModItems, NO_NPC_CLOAK_MOD, NO_NPC_CLOAK_SLOTS } from "../greymarch/npcHosting";
 import { CHECK_EVERY_MS as GM_HOST_CHECK_MS, shouldRelease, pickTarget, markReleased, isReleased, withoutHosted, shouldReleaseUnloaded, movementDead, buildWhileDead, BODY_KILL_EVERY_MS } from "../greymarch/npcHosting";
 import { SpApiInteractor } from "../services/spApiInteractor";
 import { WorldCleanerService } from "../services/services/worldCleanerService";
@@ -121,6 +121,13 @@ let gmEchoLeft = 60; // GREYMARCH: "own anim" breadcrumb lines left (ITS OWN ANI
 const gmCellOf = (a: Actor): string => { try { const c = a.getParentCell(); return c ? gmHex(c.getFormID()) + (c.isAttached() ? " attached" : " NOT attached") : "none"; } catch (e) { return "?"; } };
 let gmDriftLeft = 120; // GREYMARCH: drift diagnostic lines left (gmHostedTick)
 const GM_HOLD_MAX_MS = 3000; // GREYMARCH: an NPC nobody hosts is held where the server has it for at most this long (see the movement branch)
+// GREYMARCH: Cloaks&Capes.esp's load index in this game (null: not loaded or a light plugin), looked up once
+let gmNoCloakMod: number | null | undefined;
+const gmNoCloakModIndex = (): number | null => {
+  if (gmNoCloakMod !== undefined) return gmNoCloakMod;
+  try { const i = Game.getModByName(NO_NPC_CLOAK_MOD); gmNoCloakMod = i >= 0 && i < 0xfe ? i : null; } catch (e) { gmNoCloakMod = null; }
+  return gmNoCloakMod;
+};
 export const gmCrumb = (text: string): void => { try { writeLogs("greymarch-crumbs", ((Date.now() - gmCrumbStart) / 1000).toFixed(1) + "s " + text); } catch (e) { /* a breadcrumb is a nicety */ } };
 const gmHex = (n: any): string => (Number(n) >>> 0).toString(16);
 
@@ -963,6 +970,11 @@ export class FormView {
       }
     }
 
+    // GREYMARCH: NO CLOAKS & CAPES ON AN NPC (npcHosting.ts): an NPC's gear comes without them; a player's copy keeps everything
+    if (model.equipment && !model.appearance) {
+      const gmKept = withoutModItems(model.equipment.inv.entries, gmNoCloakModIndex());
+      if (gmKept.length !== model.equipment.inv.entries.length) model.equipment = { ...model.equipment, inv: { ...model.equipment.inv, entries: gmKept } };
+    }
     if (model.equipment) {
       this.gmLastEquipment = model.equipment; // GREYMARCH: what it wears, for a rebuild (gmHostedTick, "reground")
       if (this.eqState.lastNumChanges !== model.equipment.numChanges) {
@@ -1017,6 +1029,25 @@ export class FormView {
           //const res: boolean = applyEquipment(ac, model.equipment);
           //if (res) this.eqState.lastNumChanges = model.equipment.numChanges;
         }
+      }
+    }
+
+    // GREYMARCH: NO CLOAKS & CAPES ON AN NPC: one its own outfit gave it (the game dresses a fresh NPC from its record) is taken off and away, every 2 s
+    if (!model.appearance && Date.now() - this.gmCloakCheckAt >= 2000) {
+      this.gmCloakCheckAt = Date.now();
+      const gmMod = gmNoCloakModIndex();
+      if (gmMod !== null) {
+        try {
+          const ac = Actor.from(refr);
+          if (ac && ac.is3DLoaded() && !ac.isDead()) {
+            const worn = ac.getWornForm(NO_NPC_CLOAK_SLOTS);
+            if (worn && ((worn.getFormID() >>> 24) & 0xff) === gmMod) {
+              gmCrumb("cloak off " + gmHex(ac.getFormID()) + ": " + gmHex(worn.getFormID()) + " (Cloaks & Capes, an NPC unhittable by weapons)");
+              ac.unequipItem(worn, false, true);
+              ac.removeItem(worn, ac.getItemCount(worn), true, null);
+            }
+          }
+        } catch (e) { /* the next check */ }
       }
     }
 
@@ -1614,6 +1645,7 @@ export class FormView {
   private gmRegroundAt = 0;
   private gmFrozenCount = 0; // FROZEN IN A FIGHT: seconds in a row it looked frozen, when it was last rebuilt for it, where it was a second ago
   private gmFrozenAt = 0;
+  private gmCloakCheckAt = 0; // GREYMARCH: NO CLOAKS & CAPES ON AN NPC, the last check
   private gmSameGearCrumbs = 20; // GREYMARCH: "gear same" breadcrumbs left for this character
   private gm3DSince = 0; // GREYMARCH: since when this NPC's body is loaded (0: not loaded, or just rebuilt); gmRebuild waits REBUILD_LOADED_MS
   private gmRebuilding = false;
