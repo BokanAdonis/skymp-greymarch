@@ -189,6 +189,13 @@ public:
   // Brawler). 1 = no change. Not saved: the gamemode sets it again.
   void SetGreymarchDamageMult(float mult) noexcept;
   float GetGreymarchDamageMult() const noexcept;
+  // GREYMARCH: when above 0, every weapon or claw hit this actor lands on a
+  // player takes that player's maximum health / hits, whatever their armor,
+  // health or the attacker's multiplier (a blocked hit still lets less
+  // through). Set by the gamemode (the werewolf pup: 6). 0 = the normal
+  // formula. Not saved: the gamemode sets it again.
+  void SetGreymarchHitsToKill(int hits) noexcept;
+  int GetGreymarchHitsToKill() const noexcept;
   // GREYMARCH: armor rating a self-cast spell adds for a while (Oakflesh,
   // Stoneflesh, Ironflesh, Ebonyflesh): the damage formula counts it with the
   // worn armor until it runs out. Not saved. A new cast replaces the old one.

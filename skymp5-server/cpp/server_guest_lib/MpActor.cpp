@@ -54,6 +54,7 @@ struct MpActor::Impl
   bool isBlockActive = false;
   MpActor::MaxVitalsOverride maxVitalsOverride; // GREYMARCH
   float greymarchDamageMult = 1.f;              // GREYMARCH
+  int greymarchHitsToKill = 0;                  // GREYMARCH
   float greymarchArmorBuff = 0.f;               // GREYMARCH
   std::chrono::steady_clock::time_point greymarchArmorBuffUntil; // GREYMARCH
   MpActor::RegenBonus regenBonus;               // GREYMARCH
@@ -1810,6 +1811,16 @@ void MpActor::SetGreymarchDamageMult(float mult) noexcept
 float MpActor::GetGreymarchDamageMult() const noexcept
 {
   return pImpl->greymarchDamageMult;
+}
+
+void MpActor::SetGreymarchHitsToKill(int hits) noexcept
+{
+  pImpl->greymarchHitsToKill = hits;
+}
+
+int MpActor::GetGreymarchHitsToKill() const noexcept
+{
+  return pImpl->greymarchHitsToKill;
 }
 
 void MpActor::SetGreymarchArmorBuff(float amount, float seconds) noexcept

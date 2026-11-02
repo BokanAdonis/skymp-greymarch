@@ -1934,6 +1934,7 @@ void ActionListener::OnWeaponHit(MpActor* aggressor,
   ActorValues currentActorValues = targetActor.GetChangeForm().actorValues;
 
   float healthPercentage = currentActorValues.healthPercentage;
+  bool blockedByShield = false; // GREYMARCH: for hitsToKill below
 
   if (targetActor.IsBlockActive()) {
     if (ShouldBeBlocked(*aggressor, targetActor)) {
@@ -1978,6 +1979,7 @@ void ActionListener::OnWeaponHit(MpActor* aggressor,
 
       if (!isRemoteBowAttack || isBlockingByShield) {
         hitData.isHitBlocked = true;
+        blockedByShield = isBlockingByShield;
       }
     }
   }
@@ -1987,6 +1989,26 @@ void ActionListener::OnWeaponHit(MpActor* aggressor,
   float outBaseHealth = 0.f;
   currentActorValues.healthPercentage = CalculateCurrentHealthPercentage(
     targetActor, damage, healthPercentage, &outBaseHealth);
+
+  // GREYMARCH (2026-11-02, the owner: "Werewolf pup hits should take 6 hits
+  // to kill a player"): an attacker with hitsToKill N takes 1/N of a
+  // player's maximum health a hit, whatever their armor, health, power or
+  // sneak attack and the attacker's multiplier (Bloodlust, the pack). A
+  // blocked hit lets through what the balance table says for a shield or a
+  // weapon block. A hair over 1/N so N hits always finish the job.
+  const int hitsToKill = aggressor->GetGreymarchHitsToKill();
+  if (hitsToKill > 0 &&
+      partOne.serverState.UserByActor(&targetActor) !=
+        Networking::InvalidUserId) {
+    float share = 1.f / static_cast<float>(hitsToKill) + 0.0005f;
+    if (hitData.isHitBlocked) {
+      const auto& balance = GreymarchBalance::Get();
+      share *= (blockedByShield ? balance.shieldBlock : balance.weaponBlock)
+                 .value_or(0.1f);
+    }
+    currentActorValues.healthPercentage = healthPercentage - share;
+    damage = share * outBaseHealth;
+  }
 
   currentActorValues.healthPercentage =
     currentActorValues.healthPercentage < 0.f

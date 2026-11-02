@@ -48,6 +48,7 @@ PropertyBindingFactory::CreateStandardPropertyBindings()
   result["locationalData"] = std::make_shared<LocationalDataBinding>();
   result["maxVitals"] = std::make_shared<MaxVitalsBinding>(); // GREYMARCH
   result["damageMult"] = std::make_shared<DamageMultBinding>(); // GREYMARCH
+  result["hitsToKill"] = std::make_shared<HitsToKillBinding>(); // GREYMARCH
   result["regenBonus"] = std::make_shared<RegenBonusBinding>(); // GREYMARCH
   result["combatPerks"] = std::make_shared<CombatPerksBinding>(); // GREYMARCH
   result["greymarchBalance"] =
