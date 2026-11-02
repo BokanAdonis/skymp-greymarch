@@ -90,7 +90,7 @@ import { ModelApplyUtils } from "./modelApplyUtils";
 import { localIdToRemoteId, remoteIdToLocalId, getViewFromStorage } from "./worldViewMisc";
 import { ridingOf, ridersMap, noteRider, riddenByOther, seatStep, HORSE_RACE, SEAT_TRY_EVERY_MS } from "../greymarch/riding";
 const GM_NPC_BASE_TYPE = 43; // FormType NPC_: greymarchRiding names a breed (RIDDEN AS THEIR OWN), not a placed horse
-import { flatStep, FLAT_STEPS, REGROUND_EVERY_MS, regroundExempt, frozenNow, frozenStep, rebuildAllowed, gearKey, withoutModItems, NO_NPC_CLOAK_MOD, NO_NPC_CLOAK_SLOTS } from "../greymarch/npcHosting";
+import { flatStep, FLAT_STEPS, REGROUND_EVERY_MS, regroundExempt, frozenNow, frozenStep, rebuildAllowed, gearKey, withoutModItems, NO_NPC_CLOAK_MOD, NO_NPC_CLOAK_SLOTS, refreshStep, REFRESH_EVERY_MS } from "../greymarch/npcHosting";
 import { CHECK_EVERY_MS as GM_HOST_CHECK_MS, shouldRelease, pickTarget, markReleased, isReleased, withoutHosted, shouldReleaseUnloaded, movementDead, buildWhileDead, BODY_KILL_EVERY_MS } from "../greymarch/npcHosting";
 import { SpApiInteractor } from "../services/spApiInteractor";
 import { WorldCleanerService } from "../services/services/worldCleanerService";
@@ -122,6 +122,7 @@ const gmCellOf = (a: Actor): string => { try { const c = a.getParentCell(); retu
 let gmDriftLeft = 120; // GREYMARCH: drift diagnostic lines left (gmHostedTick)
 const GM_HOLD_MAX_MS = 3000; // GREYMARCH: an NPC nobody hosts is held where the server has it for at most this long (see the movement branch)
 // GREYMARCH: Cloaks&Capes.esp's load index in this game (null: not loaded or a light plugin), looked up once
+let gmPlayerRefreshAt = 0; // GREYMARCH: the last refresh of this player's own model a came-on-screen refresh asked for
 let gmNoCloakMod: number | null | undefined;
 const gmNoCloakModIndex = (): number | null => {
   if (gmNoCloakMod !== undefined) return gmNoCloakMod;
@@ -959,12 +960,24 @@ export class FormView {
           screenPoint[0] < 1 &&
           screenPoint[1] < 1 &&
           screenPoint[2] < 1;
+        // GREYMARCH: A MODEL REFRESH NEVER WHILE A HEAD IS BUILT (greymarch/npcHosting.ts refreshStep): only once loaded 3 s, at most once each 10 s
+        const gmRNow = Date.now();
+        let gmLoaded = false; try { gmLoaded = actor.is3DLoaded(); } catch (e) { gmLoaded = false; }
+        if (!gmLoaded) this.gmRefreshLoadedAt = 0; else if (!this.gmRefreshLoadedAt) this.gmRefreshLoadedAt = gmRNow;
         if (isOnScreen != this.isOnScreen) {
-          this.isOnScreen = isOnScreen;
           if (isOnScreen && !gmBeastLook) {
-            gmCrumb("model refresh " + gmHex(actor.getFormID()) + " (came on screen)");
-            actor.queueNiNodeUpdate();
-            (Game.getPlayer() as Actor).queueNiNodeUpdate();
+            const gmStep = refreshStep({ loadedSince: this.gmRefreshLoadedAt, lastRefresh: this.gmRefreshAt, now: gmRNow });
+            if (gmStep !== "wait") {
+              this.isOnScreen = true;
+              if (gmStep === "refresh") {
+                this.gmRefreshAt = gmRNow;
+                gmCrumb("model refresh " + gmHex(actor.getFormID()) + " (came on screen)");
+                actor.queueNiNodeUpdate();
+                if (gmRNow - gmPlayerRefreshAt >= REFRESH_EVERY_MS) { gmPlayerRefreshAt = gmRNow; (Game.getPlayer() as Actor).queueNiNodeUpdate(); }
+              }
+            }
+          } else {
+            this.isOnScreen = isOnScreen;
           }
         }
       }
@@ -1645,7 +1658,9 @@ export class FormView {
   private gmRegroundAt = 0;
   private gmFrozenCount = 0; // FROZEN IN A FIGHT: seconds in a row it looked frozen, when it was last rebuilt for it, where it was a second ago
   private gmFrozenAt = 0;
-  private gmCloakCheckAt = 0; // GREYMARCH: NO CLOAKS & CAPES ON AN NPC, the last check
+  private gmCloakCheckAt = 0;
+  private gmRefreshAt = 0; // GREYMARCH: the last came-on-screen model refresh of this character
+  private gmRefreshLoadedAt = 0; // and since when its 3D is loaded (0: not loaded) // GREYMARCH: NO CLOAKS & CAPES ON AN NPC, the last check
   private gmSameGearCrumbs = 20; // GREYMARCH: "gear same" breadcrumbs left for this character
   private gm3DSince = 0; // GREYMARCH: since when this NPC's body is loaded (0: not loaded, or just rebuilt); gmRebuild waits REBUILD_LOADED_MS
   private gmRebuilding = false;

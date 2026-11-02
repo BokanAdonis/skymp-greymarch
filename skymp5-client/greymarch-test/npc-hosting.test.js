@@ -318,3 +318,14 @@ test("no Cloaks & Capes on an NPC (2026-11-02, the owner: every NPC weapons coul
   assert.ok(/if \(model\.equipment && !model\.appearance\) \{[\s\S]{0,200}withoutModItems\(model\.equipment\.inv\.entries/.test(formView), "an NPC's gear only (no appearance)");
   assert.ok(/getWornForm\(NO_NPC_CLOAK_SLOTS\)[\s\S]{0,400}ac\.unequipItem\(worn[\s\S]{0,100}ac\.removeItem\(worn/.test(formView), "one worn anyway is taken off and away");
 });
+
+test("a model refresh never while a head is built (2026-11-02: a crash building another player's head, KS Hairdo's Crow, as the KS scalps)", () => {
+  const L = H.REFRESH_LOADED_MS, E = H.REFRESH_EVERY_MS, t = 1000000;
+  assert.strictEqual(H.refreshStep({ loadedSince: 0, lastRefresh: 0, now: t }), "wait", "not loaded");
+  assert.strictEqual(H.refreshStep({ loadedSince: t - L + 1, lastRefresh: 0, now: t }), "wait", "loaded, not long enough");
+  assert.strictEqual(H.refreshStep({ loadedSince: t - L, lastRefresh: 0, now: t }), "refresh");
+  assert.strictEqual(H.refreshStep({ loadedSince: t - L, lastRefresh: t - E + 1, now: t }), "skip", "not again so soon");
+  assert.ok(/const gmStep = refreshStep\(\{ loadedSince: this\.gmRefreshLoadedAt/.test(formView), "formView asks it");
+  assert.ok(!/this\.isOnScreen = isOnScreen;\s*if \(isOnScreen && !gmBeastLook\) \{\s*gmCrumb\("model refresh/.test(formView), "no refresh on every came-on-screen any more");
+  assert.ok(/gmRNow - gmPlayerRefreshAt >= REFRESH_EVERY_MS/.test(formView), "the viewer's own model at most once each 10 s");
+});

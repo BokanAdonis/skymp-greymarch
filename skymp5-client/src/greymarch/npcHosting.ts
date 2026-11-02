@@ -160,3 +160,16 @@ export function withoutModItems<T extends { baseId: number }>(entries: T[], modI
   if (modIndex === null || !(modIndex >= 0 && modIndex < 0xfe)) return entries;
   return entries.filter((e) => ((Number(e.baseId) >>> 24) & 0xff) !== modIndex);
 }
+
+// A MODEL REFRESH NEVER WHILE A HEAD IS BUILT (2026-11-02, the owner's player on live crashed building another player's head in the background, KS Hairdo's
+// "Crow", SkyrimSE.exe+0CEC9C8 with QueuedHead, the same crash as the two KS scalps): SkyMP refreshed a player's whole model (and the viewer's own) each
+// time their head came on screen, several times a second at the screen's edge, also while the head was still being built. Now only once the character
+// has been loaded REFRESH_LOADED_MS (it waits until then), and at most once each REFRESH_EVERY_MS.
+export const REFRESH_LOADED_MS = 3000;
+export const REFRESH_EVERY_MS = 10000;
+// "wait": not yet (try again next frame); "skip": refreshed too recently (counted as done); "refresh"
+export function refreshStep(s: { loadedSince: number, lastRefresh: number, now: number }): "wait" | "skip" | "refresh" {
+  if (!s.loadedSince || s.now - s.loadedSince < REFRESH_LOADED_MS) return "wait";
+  if (s.now - s.lastRefresh < REFRESH_EVERY_MS) return "skip";
+  return "refresh";
+}
