@@ -7,6 +7,7 @@ const GM_PUPPET_HOLD = 140; // in a fight it waits until the player is this far 
 const GM_PUPPET_LUNGE_MS = 1100; // a server-driven animal's lunge: its animation moves it this long, not the frames (gmPuppetMove, 2026-10-28)
 import { Appearance, applyAppearance } from "../sync/appearance";
 import { isBadMenuShown, applyEquipment } from "../sync/equipment";
+import { gmLookDiff } from "../greymarch/lookDiff";
 import { RespawnNeededError } from "../lib/errors";
 import { MsgType } from "../messages";
 const GM_GROUND_FIX_MS = 8000; // the server's word on where the ground is under an NPC holds this long (gmHostedTick)
@@ -131,6 +132,9 @@ const gmNoCloakModIndex = (): number | null => {
 };
 export const gmCrumb = (text: string): void => { try { writeLogs("greymarch-crumbs", ((Date.now() - gmCrumbStart) / 1000).toFixed(1) + "s " + text); } catch (e) { /* a breadcrumb is a nicety */ } };
 const gmHex = (n: any): string => (Number(n) >>> 0).toString(16);
+// GREYMARCH: WHY A PLAYER'S COPY IS BUILT AGAIN (2026-11-02, the owner: hits went straight through a player in an enchanted cape; the attacker's log showed that
+// player's copy removed and spawned again every 3-8 s). Each rebuild says why: their cell changed, their look changed (and which parts), the copy was gone or got
+// a new base, or the movement code asked for it. Diagnostics only.
 
 export interface ScreenResolution {
   width: number;
@@ -151,12 +155,19 @@ export const getScreenResolution = (): ScreenResolution => {
 export class FormView {
   constructor(private remoteRefrId?: number) { }
 
+  private gmWhyLeft = 40; // rebuild reasons written for this copy (a copy rebuilt every few seconds would fill the log)
+  private gmWhy(text: string): void {
+    if (this.gmWhyLeft-- <= 0) return;
+    gmCrumb("rebuild " + gmHex(this.getRemoteRefrId() || 0) + " (" + gmHex(this.refrId) + "): " + text);
+  }
+
   update(model: FormModel): void {
     // Other players mutate into PC clones when moving to another location
     if (model.movement) {
       if (!this.lastWorldOrCell)
         this.lastWorldOrCell = model.movement.worldOrCell;
       if (this.lastWorldOrCell !== model.movement.worldOrCell) {
+        this.gmWhy("their cell changed " + gmHex(this.lastWorldOrCell) + " -> " + gmHex(model.movement.worldOrCell));
         printConsole(
           `[1] worldOrCell changed, destroying FormView ${this.lastWorldOrCell.toString(
             16
@@ -187,6 +198,7 @@ export class FormView {
         worldOrCell !== 0 &&
         model.movement.worldOrCell !== worldOrCell
       ) {
+        if (this.refrId !== 0) this.gmWhy("hidden: they are in " + gmHex(model.movement.worldOrCell) + ", I am in " + gmHex(worldOrCell));
         this.destroy();
         this.refrId = 0;
         return;
@@ -234,6 +246,7 @@ export class FormView {
             gmCrumb("back to person " + gmHex(this.refrId) + " (the same body)");
           } else {
             this.gmKeptLook = null;
+            this.gmWhy("look changed (change " + model.numAppearanceChanges + "): " + gmLookDiff(this.appearanceState.appearance, model.appearance));
             // Force re-apply appearance on the next getAppearanceBasedBase call
             this.appearanceBasedBaseId = 0;
             //printConsole("Appearance updated");
@@ -324,10 +337,13 @@ export class FormView {
       let respawnRequired = false;
       if (!refr) {
         respawnRequired = true;
+        if (this.refrId !== 0) this.gmWhy("its copy is gone from this game");
       } else if (!refr.getBaseObject()) {
         respawnRequired = true;
+        this.gmWhy("its copy has no base");
       } else if ((refr.getBaseObject() as Form).getFormID() !== base.getFormID()) {
         respawnRequired = true;
+        this.gmWhy("new base " + gmHex((refr.getBaseObject() as Form).getFormID()) + " -> " + gmHex(base.getFormID()));
       }
 
       if (respawnRequired) {
@@ -848,6 +864,7 @@ export class FormView {
             applyMovement(refr, model.movement, !!model.isMyClone);
           } catch (e) {
             if (e instanceof RespawnNeededError) {
+              this.gmWhy("the movement code asked for it (" + String((e as any).message || e).slice(0, 80) + ")");
               this.lastWorldOrCell = model.movement.worldOrCell;
               this.destroy();
               this.refrId = 0;
