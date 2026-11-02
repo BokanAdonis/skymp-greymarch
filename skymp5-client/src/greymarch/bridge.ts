@@ -3060,6 +3060,13 @@ export class GreymarchBridge {
             this.greymarchNoPrompt(actor, !dead);
         }
     }
+    // NO FOOTSTEPS FROM AN INVISIBLE GM (2026-11-02, the owner: F7 staff invisibility still let their footsteps be heard): GreymarchCam.SetFootstepsMuted
+    // (GreymarchCamera.dll 1.9) passes over that body's footstep sounds here. Without the DLL it is logged once and they are only unseen, as before.
+    greymarchMuteFeet(actor: any, muted: boolean): any {
+        var ok = false, why = "";
+        try { ok = !!this.sp.callNative("GreymarchCam", "SetFootstepsMuted", undefined, actor, muted); } catch (e) { why = String(e); }
+        if (!this.greymarchMuteFeetLogged) { this.greymarchMuteFeetLogged = true; this.greymarchLog("invisible footsteps: " + (ok ? "muted (GreymarchCamera)" : "not muted (" + (why || "refused") + ")")); }
+    }
     greymarchInvisApply(now: any): any {
         var sp = this.sp;
         var list = this.greymarchInvisList || [];
@@ -3076,6 +3083,7 @@ export class GreymarchBridge {
             if (!actor) continue;
             try { actor.setAlpha(0, false); } catch (aErr) { if (!this.greymarchInvErr) { this.greymarchInvErr = true; this.greymarchLog("staff: invisible: setAlpha failed (" + aErr + ")"); } continue; }
             this.greymarchNoPrompt(actor, true); // nothing to talk to: no prompt, no activation
+            this.greymarchMuteFeet(actor, true); // and no footsteps (GreymarchCamera.dll 1.9, 2026-11-02)
             if (!cur || cur.removing) this.greymarchLog("staff: invisible on " + localId.toString(16));
             applied[localId] = { at: now };
         }
@@ -3083,7 +3091,7 @@ export class GreymarchBridge {
             if (seen[key]) continue;
             var old = applied[key];
             var gone = null; try { gone = sp.Actor.from(sp.Game.getFormEx(Number(key))); } catch (e2) { gone = null; }
-            if (!old.removing) { if (gone) { try { gone.setAlpha(1, false); } catch (e3) { /* nothing to restore */ } this.greymarchNoPrompt(gone, false); } applied[key] = { removing: true, at: now, passes: 0 }; this.greymarchLog("staff: invisible removed from " + Number(key).toString(16)); continue; }
+            if (!old.removing) { if (gone) { try { gone.setAlpha(1, false); } catch (e3) { /* nothing to restore */ } this.greymarchNoPrompt(gone, false); this.greymarchMuteFeet(gone, false); } applied[key] = { removing: true, at: now, passes: 0 }; this.greymarchLog("staff: invisible removed from " + Number(key).toString(16)); continue; }
             if (old.passes === 0 && now - old.at >= 600) { if (gone) { try { gone.setAlpha(1, false); } catch (e4) { /* fine */ } } old.passes = 1; }
             else if (old.passes === 1 && now - old.at >= 2500) { if (gone) { try { gone.setAlpha(1, false); } catch (e5) { /* fine */ } this.greymarchNoPrompt(gone, false); } delete applied[key]; }
         }
