@@ -196,3 +196,11 @@ test("a dying body is not killed again a second later (2026-10-28, the owner: a 
   const m = hosting.match(/export const BODY_KILL_EVERY_MS = (\d+);/);
   assert.ok(m && Number(m[1]) >= 5000, "seconds, not one: the death animation plays out first");
 });
+
+test("a server-driven animal is fearless before it ever moves (2026-11-02, the owner: milk cows ran away when hit)", () => {
+  const fv = require("fs").readFileSync(require("path").join(__dirname, "..", "src", "view", "formView.ts"), "utf8");
+  const body = fv.slice(fv.indexOf("private gmPuppetMove("), fv.indexOf("private gmPuppetMove(") + 3000);
+  const fearless = body.indexOf('ac.setActorValue("Confidence", 4)'), needsMove = body.indexOf("if (!model.movement)");
+  assert.ok(fearless > 0 && needsMove > fearless, "Confidence 4 is set before the movement is needed");
+  assert.match(fv, /ac\.setActorValue\("Confidence", puppet \? 4 : 0\)/, "a peaceful animal known to be server-driven never runs either");
+});
