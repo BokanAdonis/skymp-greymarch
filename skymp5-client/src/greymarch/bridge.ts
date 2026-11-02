@@ -196,6 +196,7 @@ export class GreymarchBridge {
         if (type === "greymarchAdminReply") { var brids = this.greymarchBuildRids; if (brids && brids[msg.rid]) { delete brids[msg.rid]; this.greymarchBuildCamSay(msg.ok ? (msg.data && msg.data.message) || "Done." : String(msg.error || "That did not work.")); return; } this.greymarchAdminToPage("reply", msg); return; }
         if (type === "greymarchNotice") { if (msg.title && String(msg.title).indexOf("(test)") >= 0) this.greymarchLog("notice " + msg.title + ": " + msg.text); if (msg.title) { this.greymarchToast(msg); return; } var nq = this.greymarchNoticeQueue || (this.greymarchNoticeQueue = []); if (nq.length < 20) nq.push(String(msg.text).slice(0, 300)); return; } // a plain notice: the game's own top-left message, shown from the update phase (greymarchNoticeTick: Debug.notification does nothing from here)
         if (type === "greymarchStandUp") { this.greymarchStandUpWanted = Date.now(); return; } // get up from the furniture the player is in (gamemode professions.js, after a won mining game): done in greymarchStandUpTick
+        if (type === "greymarchBarberSpots") { this.greymarchBarberSpots = Array.isArray(msg.spots) ? msg.spots.filter(function (k: any) { return typeof k === "string"; }) : []; this.greymarchBarberPrice = Number(msg.price) >= 0 ? Number(msg.price) : 0; this.greymarchBarberNext = 0; return; } // the barber spots' names (greymarchBarberLabels)
         if (type === "greymarchStats") { this.greymarchStatsWant = msg.stats && typeof msg.stats === "object" ? msg.stats : null; return; }
         if (type === "greymarchKill") { this.greymarchKillMe(); return; }
         if (type === "greymarchKnown") { this.greymarchKnown = msg.names && typeof msg.names === "object" ? msg.names : {}; this.greymarchNamesNext = 0; try { (Function("return this")() as any).__gmKnown = this.greymarchKnown; } catch (e) { /* the floating names keep showing IDs */ } return; }
@@ -2756,7 +2757,7 @@ export class GreymarchBridge {
         this.greymarchFxNext = now + 400;
         var want = this.greymarchFxWant;
         var ghosts = this.greymarchGhostList;
-        if (!want && !(ghosts && ghosts.length) && !this.greymarchGhostApplied && !(this.greymarchInvisList && this.greymarchInvisList.length) && !this.greymarchInvApplied && !(this.greymarchOthers && this.greymarchOthers.length) && !this.greymarchStatsWant && !(this.greymarchCombatWant !== undefined && this.greymarchCombatWant !== this.greymarchCombatHave) && !this.greymarchPerksDue(now) && (this.greymarchSelfCleared || !this.greymarchMeActor)) return;
+        if (!want && !(ghosts && ghosts.length) && !this.greymarchGhostApplied && !(this.greymarchInvisList && this.greymarchInvisList.length) && !this.greymarchInvApplied && !(this.greymarchOthers && this.greymarchOthers.length) && !this.greymarchStatsWant && !(this.greymarchBarberSpots && this.greymarchBarberSpots.length) && !(this.greymarchBarberOrig && Object.keys(this.greymarchBarberOrig).length) && !(this.greymarchCombatWant !== undefined && this.greymarchCombatWant !== this.greymarchCombatHave) && !this.greymarchPerksDue(now) && (this.greymarchSelfCleared || !this.greymarchMeActor)) return;
         try {
             var sp = this.sp;
             var player = sp.Game.getPlayer();
@@ -2776,7 +2777,7 @@ export class GreymarchBridge {
                 }
             }
             this.greymarchNoHostApply(now, player, !!have.god);
-            this.greymarchGhostApply(now, ghosts || []); this.greymarchNamesApply(now); this.greymarchInvisApply(now); this.greymarchNoTalkApply(now); this.greymarchSeenLog(now); this.greymarchStatsApply(player); this.greymarchCombatApply(player); this.greymarchPerksApply(now, player); this.greymarchFastDrawApply(now, player);
+            this.greymarchGhostApply(now, ghosts || []); this.greymarchNamesApply(now); this.greymarchInvisApply(now); this.greymarchNoTalkApply(now); this.greymarchSeenLog(now); this.greymarchStatsApply(player); this.greymarchBarberLabels(now); this.greymarchCombatApply(player); this.greymarchPerksApply(now, player); this.greymarchFastDrawApply(now, player);
         } catch (err) {
             if (!this.greymarchFxErr) { this.greymarchFxErr = true; this.greymarchLog("staff effects error (shown once): " + err); }
         }
@@ -2899,6 +2900,41 @@ export class GreymarchBridge {
         }
     }
     // STAT MAXIMUMS set by staff (1 to 1000): the base value is set and the stat filled. Done once per value, so the game is never fought with.
+    // BARBER SPOTS EASY TO FIND (2026-11-02, the owner; gamemode barber.js announce): each spot is named "Barber's <its name> (<price> gold)" on this game, so the
+    // prompt over it reads "Sit Barber's Chair (100 gold)". Every 2 s (a cell loaded again shows the old name). A spot no longer listed gets its own name back.
+    // a spot key -> its reference here: "ff:<hex>" an object the server placed (its server ID), "<hex>:<plugin>" one from a plugin; null when not loaded
+    greymarchBarberRef(key: string): any {
+        var sp: any = this.sp, m: any;
+        try {
+            if ((m = /^ff:([0-9a-f]+)$/i.exec(key))) { var lid = misc.remoteIdToLocalId(parseInt(m[1], 16)); return lid ? sp.ObjectReference.from(sp.Game.getFormEx(lid)) : null; }
+            if ((m = /^([0-9a-f]+):(.+)$/i.exec(key))) return sp.ObjectReference.from(sp.Game.getFormFromFile(parseInt(m[1], 16), m[2]));
+        } catch (e) { /* not here */ }
+        return null;
+    }
+    greymarchBarberLabels(now: any): any {
+        if (now < (this.greymarchBarberNext || 0)) return;
+        this.greymarchBarberNext = now + 2000;
+        var sp: any = this.sp, list: string[] = this.greymarchBarberSpots || [], price = this.greymarchBarberPrice || 0;
+        var orig = this.greymarchBarberOrig || (this.greymarchBarberOrig = {});
+        var seen: any = {};
+        for (var i = 0; i < list.length; i++) {
+            var key = list[i], ref: any = this.greymarchBarberRef(key);
+            if (!ref) continue;
+            seen[key] = true;
+            var base = ""; try { var b = ref.getBaseObject(); base = b ? String(b.getName() || "") : ""; } catch (e2) { base = ""; }
+            if (orig[key] === undefined) { try { orig[key] = String(ref.getDisplayName() || base); } catch (e3) { orig[key] = base; } }
+            var want = "Barber's " + (base || orig[key] || "Chair") + (price > 0 ? " (" + price + " gold)" : "");
+            var now2 = ""; try { now2 = String(ref.getDisplayName() || ""); } catch (e4) { now2 = ""; }
+            if (now2 === want) continue;
+            try { ref.setDisplayName(want, true); } catch (e5) { if (!this.greymarchBarberErr) { this.greymarchBarberErr = true; this.greymarchLog("barber: could not name a spot (" + e5 + ")"); } }
+        }
+        for (var k in orig) {
+            if (seen[k]) continue;
+            var back: any = this.greymarchBarberRef(k);
+            if (back) { try { back.setDisplayName(orig[k], true); } catch (e7) { /* left */ } }
+            delete orig[k];
+        }
+    }
     greymarchStatsApply(player: any): any {
         var want = this.greymarchStatsWant;
         if (!want) return;
