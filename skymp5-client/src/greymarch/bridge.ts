@@ -2904,13 +2904,19 @@ export class GreymarchBridge {
         if (!want) return;
         var have = this.greymarchStatsHave || (this.greymarchStatsHave = {});
         var names = { health: "Health", stamina: "Stamina", magicka: "Magicka" };
+        // PUT BACK WHEN THE GAME RESETS IT (2026-11-02, the owner: the Warrior's health bonus never showed, its stamina did): SkyMP sets the base values again
+        // from the server's record when the character is spawned (a respawn, loading in), and this used to set each value only when the number changed.
+        // Stamina came back because hunger changes its number now and then; health never changes, so it stayed at the reset. Now the base value itself is
+        // checked (every 400 ms, with the effects) and put back without filling the bar (no free heal); a new number from the server still fills it.
         for (var k in names) {
             var n = want[k];
-            if (!(n >= 1 && n <= 1000) || have[k] === n) continue;
+            if (!(n >= 1 && n <= 1000)) continue;
+            var base = NaN; try { base = Number(player.getBaseActorValue(names[k])); } catch (bErr) { base = NaN; }
+            if (have[k] === n && (isNaN(base) || Math.abs(base - n) < 0.5)) continue;
             player.setActorValue(names[k], n);
-            player.restoreActorValue(names[k], n);
+            if (have[k] !== n) { player.restoreActorValue(names[k], n); this.greymarchLog("staff: my " + k + " maximum is now " + n); }
+            else if ((this.greymarchStatsResetSaid = (this.greymarchStatsResetSaid || 0) + 1) <= 5) this.greymarchLog("stats: my " + k + " maximum had been reset to " + base + " by the game, put back to " + n);
             have[k] = n;
-            this.greymarchLog("staff: my " + k + " maximum is now " + n);
         }
     }
     // WORLD VIEW GUARD. SkyMP draws other players only while its world view is switched ON. It switches it on one second after the game starts (and one second after the race menu closes),
