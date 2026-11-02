@@ -1378,6 +1378,16 @@ export class FormView {
     } catch (e) { /* the next one */ }
   }
   // GREYMARCH: an NPC put down (PUT DOWN BY ITS HOST) goes back at the one it fought, weapon drawn: being set down or rebuilt ended its fight (2026-10-28)
+  // GREYMARCH: FROZEN IN A FIGHT, the soft cure (gmHostedTick): nothing is torn down
+  private gmFrozenNudge(npc: Actor, target: Actor): void {
+    try {
+      if (!npc.is3DLoaded() || npc.isDead() || target.isDead()) return;
+      Debug.sendAnimationEvent(npc, GM_GRAPH_RESET);
+      npc.startCombat(target);
+      if (!npc.isWeaponDrawn()) npc.drawWeapon();
+      npc.evaluatePackage();
+    } catch (e) { /* the next check tries again */ }
+  }
   private gmGroundRefight(npc: Actor): void {
     if (!this.gmGroundTargetId) return;
     try {
@@ -1507,8 +1517,11 @@ export class FormView {
         if (gmFStep.rebuild && gmFTarget) {
           this.gmFrozenAt = gmFNow;
           this.gmGroundTargetId = gmFTarget.getFormID();
-          gmCrumb("frozen " + gmHex(this.remoteRefrId as number) + " base " + gmHex(npc.getBaseObject() ? npc.getBaseObject()!.getFormID() : 0) + ": in a fight, target " + gmHex(gmFTarget.getFormID()) + (gmFTarget.getFormID() === 0x14 ? " (me)" : "") + " " + Math.round(gmFGap) + " away, sees it " + gmFSees + ", " + (gmFRanged ? "ranged" : "hand to hand") + ", no move or attack for a while: rebuilt where it stands");
-          this.gmRebuild(npc);
+          gmCrumb("frozen " + gmHex(this.remoteRefrId as number) + " base " + gmHex(npc.getBaseObject() ? npc.getBaseObject()!.getFormID() : 0) + ": in a fight, target " + gmHex(gmFTarget.getFormID()) + (gmFTarget.getFormID() === 0x14 ? " (me)" : "") + " " + Math.round(gmFGap) + " away, sees it " + gmFSees + ", " + (gmFRanged ? "ranged" : "hand to hand") + ", no move or attack for a while: nudged");
+          // A NUDGE, NEVER A REBUILD (2026-11-02, the owner: "I really want dungeons to work"; crashes in dungeon fights, and the breadcrumbs showed bandits
+          // rebuilt mid-fight after standing 70-100 units from their target for a few seconds, which a sword fight does): its body is left as it is; its
+          // animation state is reset, it is sent at its target again with its weapon drawn, and its AI looks at its package again
+          this.gmFrozenNudge(npc, gmFTarget);
         }
       }
       // GREYMARCH: PUT DOWN BY ITS HOST (2026-10-28, the owner: bandits still walked on air and sank into the ground chasing people). The server saw this NPC

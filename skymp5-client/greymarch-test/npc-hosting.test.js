@@ -276,7 +276,9 @@ test("frozen in a fight: rebuilt after FROZEN_STEPS frozen seconds in a row, at 
 test("frozen in a fight: formView checks every hosted NPC each second, rebuilds it with the shared rebuild (the reground one) and sends it back at its target", () => {
   assert.ok(formView.includes("frozenNow({ inCombat: !!gmFTarget"), "the sample");
   assert.ok(formView.includes('gmFB("IsAttacking")') && formView.includes('gmFB("IsBlocking")'), "attacking and blocking read from its graph");
-  assert.ok(/this\.gmGroundTargetId = gmFTarget\.getFormID\(\);[\s\S]{0,600}this\.gmRebuild\(npc\);/.test(formView), "its target kept, then rebuilt");
+  assert.ok(/this\.gmGroundTargetId = gmFTarget\.getFormID\(\);[\s\S]{0,1200}this\.gmFrozenNudge\(npc, gmFTarget\);/.test(formView), "its target kept, then nudged");
+  assert.ok(!/no move or attack for a while: [^"]*"\);\s*this\.gmRebuild/.test(formView), "a frozen NPC is never rebuilt (2026-11-02: rebuilt mid-fight, the dungeon crashes)");
+  assert.ok(/private gmFrozenNudge\(npc: Actor, target: Actor\): void \{[\s\S]{0,200}is3DLoaded\(\)[\s\S]{0,200}GM_GRAPH_RESET[\s\S]{0,80}startCombat\(target\)/.test(formView), "the nudge: loaded, graph reset, back at its target");
   assert.ok(/height locked; rebuilt, gear kept\)"\);\s*this\.gmRebuild\(npc\);/.test(formView), "the reground uses the same rebuild");
   assert.ok(/private gmRebuild\(npc: Actor\): boolean \{[\s\S]{0,1600}applyEquipment\(ac, gmEq\)[\s\S]{0,300}this\.gmGroundRefight\(ac\);/.test(formView), "gear put back, back at its target");
 });
