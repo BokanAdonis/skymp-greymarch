@@ -42,7 +42,8 @@ private:
   [[nodiscard]] float CalcArmorRatingComponent(
     const Inventory::Entry& opponentEquipmentEntry) const;
   [[nodiscard]] float CalcOpponentArmorRating() const;
-  [[nodiscard]] float CalcMagicEffects(const Effects& effects) const;
+  [[nodiscard]] float CalcMagicEffects(const Effects& effects,
+                                      const espm::LookupResult& owner) const;
   [[nodiscard]] float DetermineDamageFromSource(uint32_t source) const;
   [[nodiscard]] float CalcUnarmedDamage() const;
   [[nodiscard]] float CalcArmorDamagePenalty() const;
@@ -145,12 +146,21 @@ float TES5DamageFormulaImpl::CalcWeaponRating() const
   return GetBaseWeaponDamage() + GetAmmoDamage();
 }
 
-float TES5DamageFormulaImpl::CalcMagicEffects(const Effects& effects) const
+// GREYMARCH (2026-11-02): an effect id inside a record is local to the plugin that holds the record (its own master list), so it goes through
+// owner.ToGlobalId; one that is not a magic effect is left out instead of throwing (see CalcArmorRatingComponent)
+float TES5DamageFormulaImpl::CalcMagicEffects(
+  const Effects& effects, const espm::LookupResult& owner) const
 {
+  auto& browser = espmProvider->GetEspm().GetBrowser();
   float armorRating = 0.f;
   for (const auto& effect : effects) {
+    const uint32_t mgefId = owner.ToGlobalId(effect.effectId);
+    const auto mgefLookup = browser.LookupById(mgefId);
+    if (!mgefLookup.rec || mgefLookup.rec->GetType() != espm::MGEF::kType) {
+      continue;
+    }
     const auto actorValueType =
-      espm::GetData<espm::MGEF>(effect.effectId, espmProvider).data.primaryAV;
+      espm::GetData<espm::MGEF>(mgefId, espmProvider).data.primaryAV;
     if (actorValueType == espm::ActorValue::DamageResist) {
       armorRating += effect.magnitude;
     }
@@ -173,11 +183,23 @@ float TES5DamageFormulaImpl::CalcArmorRatingComponent(
     float ac = it != balance.end()
       ? it->second
       : static_cast<float>(armorData.baseRatingX100) / 100;
-    if (armorData.enchantmentFormId) {
+    // GREYMARCH: GOD MODE IN AN ENCHANTED CLOAK (2026-11-02, the owner: "hits go straight through me"). The armor's enchantment id is local to
+    // the armor's plugin: 1nivWICCloaks.esp (masters Skyrim, Update) writes its own enchantment as 0200db5a, which in the load order is a
+    // Dawnguard.esm REFR. GetData<ENCH> threw "Expected record 0x200db5a to be ENCH, but found REFR" and the whole hit was dropped, so anyone
+    // wearing a mod item enchanted from its own plugin (cloaks, pouches, satchels, lanterns) could not be hurt by weapons. It goes through
+    // ToGlobalId now (as the resist code below already did), and a wrong record is skipped, never thrown.
+    auto& browser = espmProvider->GetEspm().GetBrowser();
+    const auto armorLookup = browser.LookupById(opponentEquipmentEntry.baseId);
+    const uint32_t enchId = armorData.enchantmentFormId && armorLookup.rec
+      ? armorLookup.ToGlobalId(armorData.enchantmentFormId)
+      : 0;
+    const auto enchLookup =
+      enchId ? browser.LookupById(enchId) : espm::LookupResult();
+    if (enchLookup.rec && enchLookup.rec->GetType() == espm::ENCH::kType) {
       // TODO(#632) refactor this effect with actor effect system
       const auto enchantmentData =
-        espm::GetData<espm::ENCH>(armorData.enchantmentFormId, espmProvider);
-      float enchantBonus = CalcMagicEffects(enchantmentData.effects);
+        espm::GetData<espm::ENCH>(enchId, espmProvider);
+      float enchantBonus = CalcMagicEffects(enchantmentData.effects, enchLookup);
       // GREYMARCH: the balance table's cap on what one piece's enchantment
       // adds (about one tier's worth); none = all of it, as the game
       if (const auto& cap = GreymarchBalance::Get().enchantArmorCap;
