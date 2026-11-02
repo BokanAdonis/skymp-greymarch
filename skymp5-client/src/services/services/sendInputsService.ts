@@ -8,7 +8,7 @@ import { getMovement } from "../../sync/movementGet";
 import * as worldViewMisc from "../../view/worldViewMisc";
 
 import { Animation, AnimationSource } from "../../sync/animation";
-import { Actor, EquipEvent, FormType } from "skyrimPlatform";
+import { Actor, EquipEvent, FormType, writeLogs } from "skyrimPlatform";
 import { getAppearance } from "../../sync/appearance";
 import { ActorValues, getActorValues } from "../../sync/actorvalues";
 import { getEquipment } from "../../sync/equipment";
@@ -64,6 +64,7 @@ export class SendInputsService extends ClientListener {
         if (type !== FormType.Book && type !== FormType.Potion && type !== FormType.Ingredient) {
             // Trigger UpdateEquipment only for equips that are not spell tomes, potions, ingredients
             this.equipmentChanged = true;
+            this.gmEquipCrumb("equip", event);
         }
 
         // Send OnEquip for any equips including spell tomes, potions, ingredients
@@ -81,7 +82,20 @@ export class SendInputsService extends ClientListener {
 
         if (event.actor.getFormID() === playerFormId) {
             this.equipmentChanged = true;
+            this.gmEquipCrumb("unequip", event);
         }
+    }
+
+    // GREYMARCH: TEST (2026-11-02, the owner: a player's character was re-dressed every few seconds in other games): each equip and unequip of this player,
+    // what it was, to the breadcrumbs file (at most 300 lines a game), so the next file shows what keeps flipping
+    private gmEquipCrumbsLeft = 300;
+    private gmEquipCrumbStart = Date.now();
+    private gmEquipCrumb(what: string, event: EquipEvent) {
+        if (this.gmEquipCrumbsLeft-- <= 0) return;
+        try {
+            const b = event.baseObj;
+            writeLogs("greymarch-crumbs", ((Date.now() - this.gmEquipCrumbStart) / 1000).toFixed(1) + "s my " + what + " " + (b.getFormID() >>> 0).toString(16) + " " + (b.getName() || "") + " (type " + b.getType() + ")");
+        } catch (e) { /* the log only */ }
     }
 
     private onLoadGame() {

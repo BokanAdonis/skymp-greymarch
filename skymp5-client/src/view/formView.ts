@@ -90,7 +90,7 @@ import { ModelApplyUtils } from "./modelApplyUtils";
 import { localIdToRemoteId, remoteIdToLocalId, getViewFromStorage } from "./worldViewMisc";
 import { ridingOf, ridersMap, noteRider, riddenByOther, seatStep, HORSE_RACE, SEAT_TRY_EVERY_MS } from "../greymarch/riding";
 const GM_NPC_BASE_TYPE = 43; // FormType NPC_: greymarchRiding names a breed (RIDDEN AS THEIR OWN), not a placed horse
-import { flatStep, FLAT_STEPS, REGROUND_EVERY_MS, regroundExempt, frozenNow, frozenStep, rebuildAllowed } from "../greymarch/npcHosting";
+import { flatStep, FLAT_STEPS, REGROUND_EVERY_MS, regroundExempt, frozenNow, frozenStep, rebuildAllowed, gearKey } from "../greymarch/npcHosting";
 import { CHECK_EVERY_MS as GM_HOST_CHECK_MS, shouldRelease, pickTarget, markReleased, isReleased, withoutHosted, shouldReleaseUnloaded, movementDead, buildWhileDead, BODY_KILL_EVERY_MS } from "../greymarch/npcHosting";
 import { SpApiInteractor } from "../services/spApiInteractor";
 import { WorldCleanerService } from "../services/services/worldCleanerService";
@@ -1007,11 +1007,19 @@ export class FormView {
           !gmIsDead(ac)
         ) {
           //if (this.spawnMoment > 0 && Date.now() - this.spawnMoment > 5000) {
+          // SAME GEAR, NO RE-DRESS (greymarch/npcHosting.ts gearKey, 2026-11-02): an update that changes nothing it visibly wears is taken as seen
+          const gmKey = gearKey(model.equipment);
+          if (gmKey && gmKey === this.eqState.lastKey) {
+            this.eqState.lastNumChanges = model.equipment.numChanges;
+            if (this.gmSameGearCrumbs-- > 0) gmCrumb("gear same " + gmHex(ac.getFormID()) + ": not dressed again");
+          } else {
           gmCrumb("gear " + gmHex(ac.getFormID()) + (gmBeastLook ? " beast" : ""));
           if (applyEquipment(ac, model.equipment)) {
             this.eqState.lastNumChanges = model.equipment.numChanges;
+            this.eqState.lastKey = gmKey;
             this.gmGearDone = true;
             if (this.gmWasHost) gmQuiver(ac); // the game that runs it: a bow comes with arrows
+          }
           }
           this.eqState.lastEqMoment = Date.now();
           //}
@@ -1147,7 +1155,7 @@ export class FormView {
   }
 
   private getDefaultEquipState() {
-    return { lastNumChanges: 0, lastEqMoment: 0 };
+    return { lastNumChanges: 0, lastEqMoment: 0, lastKey: "" }; // lastKey: what it was last dressed in (gearKey; SAME GEAR, NO RE-DRESS)
   };
 
   private getDefaultAppearanceState() {
@@ -1615,6 +1623,7 @@ export class FormView {
   private gmRegroundAt = 0;
   private gmFrozenCount = 0; // FROZEN IN A FIGHT: seconds in a row it looked frozen, when it was last rebuilt for it, where it was a second ago
   private gmFrozenAt = 0;
+  private gmSameGearCrumbs = 20; // GREYMARCH: "gear same" breadcrumbs left for this character
   private gm3DSince = 0; // GREYMARCH: since when this NPC's body is loaded (0: not loaded, or just rebuilt); gmRebuild waits REBUILD_LOADED_MS
   private gmRebuilding = false;
   private gmRebuiltAt = 0;

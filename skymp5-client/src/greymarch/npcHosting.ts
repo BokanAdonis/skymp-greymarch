@@ -139,3 +139,15 @@ export function rebuildAllowed(s: { loaded: boolean, loadedSince: number, rebuil
   if (!s.loaded || !s.loadedSince || s.rebuilding) return false;
   return s.now - s.loadedSince >= REBUILD_LOADED_MS && s.now - s.rebuiltAt >= REBUILD_LOADED_MS;
 }
+
+// SAME GEAR, NO RE-DRESS (2026-11-02, the owner: a player's character was emptied and dressed again every 3-5 s for two minutes in another game's
+// breadcrumbs; every re-dress strips and re-equips everything, the kind of churn the dungeon crashes come from). What a character visibly wears: its worn
+// items (which hand), and its spells. A gear update with the same key is not put on again. Counts are left out (an arrow shot changes the quiver's count).
+export function gearKey(eq: { inv?: { entries?: any[] }, leftSpell?: number, rightSpell?: number, voiceSpell?: number, instantSpell?: number } | null | undefined): string {
+  if (!eq) return "";
+  const worn = ((eq.inv && eq.inv.entries) || [])
+    .filter((e: any) => e && (e.worn || e.wornLeft))
+    .map((e: any) => (Number(e.baseId) >>> 0).toString(16) + (e.worn ? "r" : "") + (e.wornLeft ? "l" : ""))
+    .sort();
+  return worn.join(",") + "|" + [eq.leftSpell, eq.rightSpell, eq.voiceSpell, eq.instantSpell].map((x) => (Number(x) || 0).toString(16)).join(",");
+}

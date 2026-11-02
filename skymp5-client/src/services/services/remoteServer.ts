@@ -94,31 +94,6 @@ on('update', () => {
   }
 });
 
-// GREYMARCH: TEST (2026-11-02, the owner: on live every bound weapon spell is cast, sound and all, and no weapon comes; on test it does): for 8 s after
-// this player casts a bound weapon spell, every change of their hands and of the spell's effect goes to the log
-let gmBoundWatchUntil = 0, gmBoundWatchWas = "", gmBoundWatchSpell = 0;
-on('spellCast', (e: any) => {
-  try {
-    if (!e || !e.caster || e.caster.getFormID() !== 0x14 || !e.spell || !/^bound\b/i.test(e.spell.getName() || "")) return;
-    const pl = Game.getPlayer();
-    gmBoundWatchUntil = Date.now() + 8000; gmBoundWatchWas = ""; gmBoundWatchSpell = e.spell.getFormID();
-    let race = "?"; try { const rc = pl ? pl.getRace() : null; race = rc ? rc.getFormID().toString(16) : "?"; } catch (err) { race = "?"; }
-    writeLogs("greymarch", "bound watch: cast " + gmBoundWatchSpell.toString(16) + " (" + e.spell.getName() + "), race " + race);
-  } catch (err) { /* the log only */ }
-});
-on('update', () => {
-  if (Date.now() > gmBoundWatchUntil) return;
-  try {
-    const pl = Game.getPlayer(); if (!pl) return;
-    const w = (x: any) => (x ? x.getName() + " " + x.getFormID().toString(16) : "none");
-    const sp = Spell.from(Game.getFormEx(gmBoundWatchSpell));
-    let on = "?"; try { const m = sp ? sp.getNthEffectMagicEffect(0) : null; on = m ? String(pl.hasMagicEffect(m)) : "?"; } catch (err) { on = "?"; }
-    const s0 = pl.getEquippedSpell(0), s1 = pl.getEquippedSpell(1);
-    const now = "right " + w(pl.getEquippedWeapon(false)) + ", left " + w(pl.getEquippedWeapon(true)) + ", spells " + (s0 ? s0.getFormID().toString(16) : "-") + "/" + (s1 ? s1.getFormID().toString(16) : "-") + ", effect on " + on + (pl.isWeaponDrawn() ? ", drawn" : "");
-    if (now !== gmBoundWatchWas) { writeLogs("greymarch", "bound watch: " + now); gmBoundWatchWas = now; }
-  } catch (err) { writeLogs("greymarch", "bound watch: the check failed: " + err); gmBoundWatchUntil = 0; }
-});
-
 let gmBoundScriptedAt = 0;
 on('update', () => {
   if (Date.now() - gmBoundScriptedAt < 400) return;

@@ -295,3 +295,16 @@ test("a rebuild never while the NPC's body loads (2026-11-02, the owner: crashes
   assert.ok(/rebuildAllowed\(\{ loaded, loadedSince: this\.gm3DSince/.test(formView), "formView's gmRebuild asks it");
   assert.ok(/this\.gm3DSince = 0; \/\/ after it/.test(formView), "after a rebuild its body counts as new");
 });
+
+test("same gear, no re-dress (2026-11-02, the owner: a player's character was re-dressed every few seconds): what it visibly wears, counts left out", () => {
+  const eq = (entries, sp = {}) => ({ inv: { entries }, numChanges: 1, ...sp });
+  const a = H.gearKey(eq([{ baseId: 0x12eb7, count: 1, worn: true }, { baseId: 0x1397d, count: 30, worn: true }, { baseId: 0xf, count: 50 }]));
+  assert.strictEqual(H.gearKey(eq([{ baseId: 0x1397d, count: 12, worn: true }, { baseId: 0x12eb7, count: 1, worn: true }, { baseId: 0xf, count: 9 }])), a, "an arrow shot or gold spent: the same");
+  assert.notStrictEqual(H.gearKey(eq([{ baseId: 0x12eb7, count: 1, wornLeft: true }, { baseId: 0x1397d, count: 30, worn: true }])), a, "the other hand: not the same");
+  assert.notStrictEqual(H.gearKey(eq([{ baseId: 0x12eb7, count: 1, worn: true }])), a, "something taken off: not the same");
+  assert.notStrictEqual(H.gearKey(eq([{ baseId: 0x12eb7, count: 1, worn: true }, { baseId: 0x1397d, count: 30, worn: true }], { rightSpell: 0x12fcd })), a, "a spell in hand: not the same");
+  assert.strictEqual(H.gearKey(null), "", "none: never taken as the same");
+  assert.ok(/const gmKey = gearKey\(model\.equipment\);\s*if \(gmKey && gmKey === this\.eqState\.lastKey\)/.test(formView), "the gear step asks it before applyEquipment");
+  assert.ok(/this\.eqState\.lastKey = gmKey;/.test(formView), "kept once dressed");
+  assert.ok(/lastEqMoment: 0, lastKey: ""/.test(formView), "a new or rebuilt body is dressed again (the equip state is reset)");
+});
