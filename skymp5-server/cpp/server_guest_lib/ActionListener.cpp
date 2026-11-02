@@ -255,7 +255,9 @@ void ActionListener::OnUpdateEquipment(const RawMessageData& rawMsgData,
   bool isAllowed = true;
   const auto actorFormId = actor->GetFormId();
   const Equipment& data = msg.data;
-  const Inventory& equipmentInv = data.inv;
+  // GREYMARCH: a copy, so an item the server does not know the player has can be
+  // left out of it (below) while the rest is kept
+  Inventory equipmentInv = data.inv;
   uint32_t leftSpell = data.leftSpell.value_or(0);
   uint32_t rightSpell = data.rightSpell.value_or(0);
   uint32_t voiceSpell = data.voiceSpell.value_or(0);
@@ -302,6 +304,7 @@ void ActionListener::OnUpdateEquipment(const RawMessageData& rawMsgData,
   }
 
   std::vector<uint32_t> itemIdsToUnequip;
+  std::vector<uint32_t> missingItems; // GREYMARCH: worn in the update, not in the inventory
 
   const auto& inventory = actor->GetInventory();
   for (auto& entry : equipmentInv.entries) {
@@ -313,14 +316,32 @@ void ActionListener::OnUpdateEquipment(const RawMessageData& rawMsgData,
           [&](uint32_t s) { return actor->IsSpellLearned(s); })) {
       continue;
     }
+    // GREYMARCH (2026-11-02, the owner: NPCs nobody could hurt with a weapon,
+    // only with magic): an item the server does not know the player has (the
+    // start save's Iron War Axe and arrows at every login, an item their game
+    // kept after the server took it) is left out of the equipment and taken
+    // off in their game; the rest of the update is kept. It used to refuse the
+    // whole update: the server then never had the weapon they drew, every hit
+    // with it was dropped (OnHit: "weapon is not equipped"), and only their
+    // spells hurt anyone.
     if (!inventory.HasItem(entry.baseId)) {
       spdlog::warn(
-        "ActionListener::OnUpdateEquipment {:x} - rejected equipment "
-        "update: inventory does not contain item {:x}",
+        "ActionListener::OnUpdateEquipment {:x} - item {:x} left out of the "
+        "equipment: the inventory does not contain it",
         actorFormId, entry.baseId);
-      isAllowed = false;
-      break;
+      missingItems.push_back(entry.baseId);
     }
+  }
+  if (!missingItems.empty()) {
+    std::unordered_set<uint32_t> missing(missingItems.begin(),
+                                         missingItems.end());
+    std::vector<Inventory::Entry> kept;
+    for (const auto& entry : equipmentInv.entries) {
+      if (!missing.count(entry.baseId)) {
+        kept.push_back(entry);
+      }
+    }
+    equipmentInv.entries = std::move(kept);
   }
 
   if (isAllowed) {
@@ -408,8 +429,26 @@ void ActionListener::OnUpdateEquipment(const RawMessageData& rawMsgData,
     }
   };
 
+  // GREYMARCH: takes these items off in the player's own game
+  auto unequipInGame = [&](const std::vector<uint32_t>& ids) {
+    for (uint32_t itemId : ids) {
+      SpSnippetObjectArgument itemArg;
+      itemArg.formId = itemId;
+      itemArg.type = "Form";
+      std::vector<std::optional<
+        std::variant<bool, double, std::string, SpSnippetObjectArgument>>>
+        args;
+      args.push_back(itemArg);
+      args.push_back(false);
+      args.push_back(true);
+      SpSnippet("Actor", "UnequipItem", args, actor->GetFormId())
+        .Execute(actor, SpSnippetMode::kNoReturnResult);
+    }
+  };
+
   if (isAllowed) {
     Equipment accepted = data;
+    accepted.inv = equipmentInv; // GREYMARCH: without the items it does not have
     if (spellIdsToRemove[static_cast<size_t>(SpellSlotId::Left)]) {
       accepted.leftSpell.reset();
     }
@@ -425,6 +464,7 @@ void ActionListener::OnUpdateEquipment(const RawMessageData& rawMsgData,
     SendToNeighbours(msg.idx, rawMsgData, true);
     actor->SetEquipment(accepted);
     removeUnlearnedSpells();
+    unequipInGame(missingItems); // GREYMARCH: the items it does not have, off
   } else {
     actor->SendInventoryUpdate();
 
