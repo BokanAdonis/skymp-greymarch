@@ -3187,9 +3187,10 @@ export class GreymarchBridge {
                     // and a dead body is looked at like a player (the server shows what can be taken from a dead wild animal, or says no)
                     var kind = 0;
                     try { var base = ref.getBaseObject(); kind = base ? base.getType() : 0; } catch (e1) { kind = 0; }
-                    var body = false;
-                    try { var ac = this.sp.Actor.from(ref); body = !!ac && ac.isDead(); } catch (e3) { body = false; }
-                    if (kind === 29 || kind === 28) isObject = true; else if (!body) looking = 0;
+                    var body = false, living = false;
+                    try { var ac = this.sp.Actor.from(ref); body = !!ac && ac.isDead(); living = !!ac && !body; } catch (e3) { body = false; living = false; }
+                    // a living animal or NPC is asked about like a door (the server answers: a farm cow has Milk for a Harvester, milking.js; anything else is refused)
+                    if (kind === 29 || kind === 28 || living) isObject = true; else if (!body) looking = 0;
                 }
             }
         } catch (e) { looking = 0; isObject = false; }
