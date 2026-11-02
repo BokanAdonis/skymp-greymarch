@@ -948,7 +948,7 @@ export class GreymarchBridge {
             // R: THE ROAR. Only while changed, not mid-transformation, not in a menu, once per press (no wait since 2026-10-21). A WEREWOLF and a WEREBEAR play the vanilla
             // howl on their OWN body (HowlStart / HowlRelease, with its own sound), and a werebear also a bear's roar sound. (The werebear's howl was taken away on 2026-10-19
             // after it crashed that player's game once, before the Havok memory and other crash fixes; it is back on the owner's call.) It is reported, and the server sends it to
-            // every player near enough, whose games play the SOUND on this player's NPC; they never play a howl event on a beast (formView.ts drops it: SkyMP passes the
+            // every player near enough, whose games play the howl on this player's NPC (greymarchWolfHowlOther; the sound only while it settles); they never play SkyMP's relay of the howl on a beast (formView.ts drops it: SkyMP passes the
             // event on, and played into the watching game's NPC the howl clip crashed it, "WW Howl.hkx", SkyrimSE.exe+0A8C590).
             var roarAt = this.greymarchWolfRoarAt;
             if (roarAt) {
@@ -977,12 +977,21 @@ export class GreymarchBridge {
             var otherRel = this.greymarchWolfOtherRelease;
             if (otherRel) for (var orl in otherRel) { if (now >= otherRel[orl]) { delete otherRel[orl]; try { var oa = sp.Actor.from(sp.Game.getFormEx(Number(orl))); if (oa) sp.Debug.sendAnimationEvent(oa, "HowlRelease"); } catch (oErr) { /* gone */ } } }
             if (this.greymarchWolfRoarRelease && now >= this.greymarchWolfRoarRelease) { this.greymarchWolfRoarRelease = 0; if (this.greymarchWolfOn) sp.Debug.sendAnimationEvent(player, "HowlRelease"); }
-            // other players' roars: the sound on their NPC here (never an animation)
+            // other players' roars: the howl on their NPC here once it has settled (greymarchWolfHowlOther), else the sound only. ONE HOWL, ONE SOUND (2026-10-27):
+            // the howl brings its own sound, so a werewolf NPC that howls gets no second one (played on top it was heard as a repeat); a werebear adds the bear's
+            // roar, as in the roarer's own game. One roar per NPC per tick (R has no wait, so two can come at once: HowlStart twice in a frame).
             var roars = this.greymarchWolfRoarQueue;
             if (roars && roars.length) {
                 this.greymarchWolfRoarQueue = [];
+                var roarSeen: any = {};
                 for (var ri = 0; ri < roars.length && ri < 8; ri++) {
-                    try { var rl = misc.remoteIdToLocalId(roars[ri].actor); var who = rl ? sp.ObjectReference.from(sp.Game.getFormEx(rl)) : null; if (who) { this.greymarchWolfRoarSound(who, roars[ri].bear); this.greymarchWolfHowlOther(rl, now); } } catch (rErr) { /* not drawn here: not heard */ }
+                    try {
+                        var rl = misc.remoteIdToLocalId(roars[ri].actor); var who = rl ? sp.ObjectReference.from(sp.Game.getFormEx(rl)) : null;
+                        if (!who || roarSeen[rl]) continue;
+                        roarSeen[rl] = true;
+                        var howled = this.greymarchWolfHowlOther(rl, now);
+                        if (!howled || roars[ri].bear) this.greymarchWolfRoarSound(who, roars[ri].bear);
+                    } catch (rErr) { /* not drawn here: not heard */ }
                 }
             }
             // the server says the wolf fed (a kill or a corpse): the vanilla feeding animation (PlayerWerewolfChangeScript.Feed plays the idle SpecialFeeding)
@@ -4183,18 +4192,22 @@ export class GreymarchBridge {
     }
     // another player roared: their werewolf NPC here howls too (HowlStart, HowlRelease 200 ms later), with the howl shout in its voice slot so the graph has a voice
     // to cast, and only once that NPC has settled after its race switch (__gmBeastHeld, formView.ts). SkyMP's own relay of the howl stays dropped (formView.ts).
-    greymarchWolfHowlOther(localId: number, now: number): any {
+    // Its voice recovery is cleared first, as the roarer's own game does: after one howl the NPC's voice was recovering and the next HowlStart had nothing to
+    // cast, so watchers saw the first roar, then a half-played start that snapped out at the copy's next movement (2026-10-27). True when the howl was played.
+    greymarchWolfHowlOther(localId: number, now: number): boolean {
         var held: any = (Function("return this")() as any).__gmBeastHeld || {};
-        if (held[localId]) { this.greymarchLog("wolf: a roar from " + (localId >>> 0).toString(16) + ": the sound only (its body is still settling)"); return; }
+        if (held[localId]) { this.greymarchLog("wolf: a roar from " + (localId >>> 0).toString(16) + ": the sound only (its body is still settling)"); return false; }
         var ac = this.sp.Actor.from(this.sp.Game.getFormEx(localId));
-        if (!ac || !this.greymarchIsBeastBody(ac)) return;
+        if (!ac || !this.greymarchIsBeastBody(ac)) return false;
         var howl = this.sp.Shout.from(this.sp.Game.getFormEx(WOLF_HOWL_SHOUT));
-        if (!howl) return;
+        if (!howl) return false;
         var cur = ac.getEquippedShout();
         if (!cur || cur.getFormID() !== WOLF_HOWL_SHOUT) { ac.addShout(howl); ac.equipShout(howl); }
+        try { ac.setVoiceRecoveryTime(0); } catch (vErr) { /* the howl as before */ }
         this.greymarchCrumb("beast: howl on " + (localId >>> 0).toString(16));
         this.sp.Debug.sendAnimationEvent(ac, "HowlStart");
         (this.greymarchWolfOtherRelease || (this.greymarchWolfOtherRelease = {}))[localId] = now + 200;
+        return true;
     }
     greymarchIsBeastBody(actor: any): boolean {
         try {
