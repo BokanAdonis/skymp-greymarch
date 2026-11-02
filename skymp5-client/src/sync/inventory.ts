@@ -375,7 +375,6 @@ export const withRoundedHealth = (inv: Inventory): Inventory => ({
   }),
 });
 
-let gmSyncLogs = 60; // GREYMARCH: test breadcrumbs of the inventory sync on this player
 
 // GREYMARCH: a weapon or arrow a conjuring spell gives (its name starts with "Bound": the game's, Dragonborn's, Beyond Skyrim's, Mysticism's)
 const greymarchIsBoundItem = (baseId: number): boolean => {
@@ -402,10 +401,6 @@ export const applyInventory = (
   // GREYMARCH (2026-11-01, bound weapons on the server): a conjured weapon or arrow (Bound Sword, Bound Bow and its arrows) exists only in this game,
   // never in the server's inventory; it is not taken away here, or the spell's weapon vanished a second after the cast. It goes when the spell ends.
   diff = diff.filter((e) => !(e.count < 0 && greymarchIsBoundItem(e.baseId)));
-  // GREYMARCH: TEST (2026-11-01, the owner: the Bound Bow vanishes after a while): what the sync changes on this player, to the log
-  if (refr.getFormID() === 0x14 && diff.length && gmSyncLogs-- > 0) {
-    try { writeLogs("greymarch", "inventory sync on me: " + diff.map((e) => e.baseId.toString(16) + " " + (e.count > 0 ? "+" : "") + e.count + (e.worn ? " worn" : "") + (e.wornLeft ? " left" : "")).join(", ")); } catch (e) { /* the log only */ }
-  }
 
   // Greymarch: Skyrim cannot be told WHICH of several items of one base to remove: AddItemEx hands RemoveItem a new extra list, which is not one of
   // the container's own, so Skyrim takes whichever comes first. With two guard report papers (one base, each its own name and condition) the wrong

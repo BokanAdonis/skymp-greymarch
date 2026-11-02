@@ -94,106 +94,10 @@ on('update', () => {
   }
 });
 
-// GREYMARCH: A BOUND BOW'S ARROWS (2026-11-01, test: the Bound Bow had no arrows and shot the player's own). The game's BoundBowEffectScript, which gives
-// 100 Bound Arrows and equips them, does not run in this multiplayer game. So while a bound bow (a bow or crossbow named Bound ...) is in hand, the player
-// has at least BOUND_ARROWS_MIN Bound Arrows (topped up to 100) and they are equipped; with no bound bow in hand they are taken away. The server lets the
-// player hold them and takes nothing for a shot (our server build: the balance table's "bound"; inventory.ts never takes them away either).
-const BOUND_ARROW = 0x10b0a7; // Skyrim.esm boundArrow
-const BOUND_ARROWS_MIN = 50;
-let gmBoundBowCheckAt = 0;
-// GREYMARCH (2026-11-01, test: the Bound Bow showed, then went invisible while it still shot): the arrows are equipped ONCE when the bound bow comes into
-// hand (as the game's own script does) and again only after a refill, never on every check: re-equipping ammo every 0.4 s is the suspect for the bow's
-// look fading out (its glow comes from its enchantment, which a re-equip restarts)
-let gmBoundBowHeld = false;
-let gmBoundBowSince = 0, gmBoundBowArmed = false; // GREYMARCH: when the bound bow came into hand; its arrows given yet
-const BOUND_ARROWS_DELAY_MS = 1000;
-let gmOwnHandsWas = "", gmOwnHandsLogs = 200; // GREYMARCH: test breadcrumbs of this player's hands
-
-// GREYMARCH: A BOUND WEAPON LASTS ITS TIME (2026-11-01, the owner: "when I stop looking at someone or they leave my screen the bow vanishes ... make it work").
-// The player's own bound weapon kept ending early, each time with the weapon going from drawn to put away, in ways that could not be pinned to one cause.
-// So the bound-weapon spell the player casts (a spell named Bound ...) is remembered with its time (BOUND_LASTS_MS, the game's two minutes); while that
-// time runs, a bound weapon that is gone is conjured again by the game's own Cast on the player (no magicka) as soon as a weapon is drawn, and when the
-// time is up a bound weapon still in hand is dismissed. Each cast reaches the server and the other games as any cast does.
-const BOUND_LASTS_MS = 120000;
-let gmBoundCast: { spellId: number; at: number } | null = null;
-let gmBoundRecastAt = 0;
-on('spellCast', (e: any) => {
-  try {
-    const caster = e && e.caster;
-    const spell = e && e.spell;
-    if (!caster || caster.getFormID() !== 0x14 || !spell) return;
-    if (!/^bound\b/i.test(spell.getName() || "")) return;
-    if (Date.now() - gmBoundRecastAt < 1500) return; // this game's own recast: the time keeps counting from the first cast
-    gmBoundCast = { spellId: spell.getFormID(), at: Date.now() };
-  } catch (err) { /* not a cast to remember */ }
-});
-const gmHoldsBound = (pl: any): boolean => {
-  const r = pl.getEquippedWeapon(false), l = pl.getEquippedWeapon(true);
-  return (!!r && /^bound\b/i.test(r.getName() || "")) || (!!l && /^bound\b/i.test(l.getName() || ""));
-};
-let gmBoundKeepAt = 0;
+let gmBoundScriptedAt = 0;
 on('update', () => {
-  if (!gmBoundCast || Date.now() - gmBoundKeepAt < 300) return;
-  gmBoundKeepAt = Date.now();
-  try {
-    const pl = Game.getPlayer();
-    if (!pl) return;
-    const spell = Spell.from(Game.getFormEx(gmBoundCast.spellId));
-    if (!spell) { gmBoundCast = null; return; }
-    const holds = gmHoldsBound(pl);
-    if (Date.now() - gmBoundCast.at >= BOUND_LASTS_MS) {
-      gmBoundCast = null;
-      if (holds) { try { pl.dispelSpell(spell); } catch (e) { /* it ends by itself */ } writeLogs("greymarch", "own hands: bound weapon's time is up"); }
-      return;
-    }
-    if (!holds && pl.isWeaponDrawn() && Date.now() - gmBoundRecastAt > 2000) {
-      gmBoundRecastAt = Date.now();
-      spell.cast(pl, pl).catch(() => { /* not conjured */ });
-      writeLogs("greymarch", "own hands: bound weapon gone early, conjured again (" + Math.round((BOUND_LASTS_MS - (Date.now() - gmBoundCast.at)) / 1000) + " s left)");
-    }
-  } catch (e) { /* the next check */ }
-});
-
-on('update', () => {
-  if (Date.now() - gmBoundBowCheckAt < 400) return;
-  gmBoundBowCheckAt = Date.now();
-  try {
-    const pl = Game.getPlayer();
-    const arrow = Game.getFormEx(BOUND_ARROW);
-    if (!pl || !arrow) return;
-    const w = pl.getEquippedWeapon(false);
-    let boundBow = false;
-    if (w) {
-      const t = w.getWeaponType(); // 7 bow, 9 crossbow
-      boundBow = (t === 7 || t === 9) && /^bound\b/i.test(w.getName() || "");
-    }
-    const have = pl.getItemCount(arrow);
-    // GREYMARCH: TEST (2026-11-01, the owner: the Bound Bow vanishes after a while, alone too): every change of what this player holds, to the log
-    try {
-      const l = pl.getEquippedWeapon(true);
-      const now = (w ? w.getFormID().toString(16) : "none") + "/" + (l ? l.getFormID().toString(16) : "none") + " arrows " + have + (pl.isWeaponDrawn() ? " drawn" : "");
-      if (now !== gmOwnHandsWas && gmOwnHandsLogs-- > 0) { writeLogs("greymarch", "own hands: " + now); gmOwnHandsWas = now; }
-    } catch (e) { /* the log only */ }
-    // A SECOND LATER (2026-11-01, the owner: their own Bound Bow was sometimes invisible right after the cast): the arrows are given and equipped
-    // BOUND_ARROWS_DELAY_MS after the bow came into hand, so the bow's appearing is not cut short by an equip in the same moment
-    if (boundBow) {
-      if (!gmBoundBowHeld) { gmBoundBowHeld = true; gmBoundBowSince = Date.now(); gmBoundBowArmed = false; }
-      if (!gmBoundBowArmed && Date.now() - gmBoundBowSince >= BOUND_ARROWS_DELAY_MS) {
-        gmBoundBowArmed = true;
-        if (have < BOUND_ARROWS_MIN) pl.addItem(arrow, 100 - have, true);
-        pl.equipItem(arrow, false, true);
-        writeLogs("greymarch", "own hands: bound arrows given and equipped (had " + have + ")");
-      } else if (gmBoundBowArmed && have < BOUND_ARROWS_MIN) {
-        pl.addItem(arrow, 100 - have, true);
-        if (have === 0) pl.equipItem(arrow, false, true);
-        writeLogs("greymarch", "own hands: bound arrows topped up from " + have);
-      }
-    } else {
-      gmBoundBowHeld = false;
-      gmBoundBowArmed = false;
-      if (have > 0) pl.removeItem(arrow, have, true, null);
-    }
-  } catch (e) { /* the next check */ }
+  if (Date.now() - gmBoundScriptedAt < 400) return;
+  gmBoundScriptedAt = Date.now();
   // GREYMARCH: THE BOUND SHIELD (2026-11-01, the owner): Mysticism's Bound Shield is a script effect (MAG_BoundShield_Script adds and equips the shield),
   // and that script does not run here either. While the effect is on the player the shield is given and worn; when it ends it is taken away. The server
   // lets them hold it (gamemode tools/bound-weapons.js SCRIPTED: the same pairs).

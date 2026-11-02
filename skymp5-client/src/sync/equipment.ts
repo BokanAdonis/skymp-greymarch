@@ -113,9 +113,6 @@ export const syncSpellEquipment = (
   }
 };
 
-const BOUND_BOW_ART = 0xe3f0c; // GREYMARCH: Skyrim.esm BoundBowFX art (EnchBoundBowFX's enchant art: the bound bow's shape)
-const gmBowArtOn = new Map<number, number>(); // GREYMARCH: copies the bound bow's art was put on -> when
-
 export const applyEquipment = (ac: Actor, eq: Equipment): boolean => {
   ac.removeAllItems(null, false, true);
 
@@ -129,44 +126,6 @@ export const applyEquipment = (ac: Actor, eq: Equipment): boolean => {
 
   // GREYMARCH: DUAL WIELD (2026-11-01): a left-hand step here (equipping the copy's left-hand weapon again) made a bound sword invisible on the copy
   // (a bound weapon is seen through the glow it starts with); taken out. The copy keeps what setInventory gives it.
-
-  // GREYMARCH: ANOTHER PLAYER'S BOUND BOW (2026-11-01, the owner: invisible for everyone else, while their Bound Sword showed; the copy draws, an arrow is
-  // seen nocked, but no bow). The bound bow's shape is the art of its enchantment's effect (EnchBoundBowFX: BoundBowFX art, Skyrim.esm 000E3F0C), which this
-  // game plays on its own player's bow but never on a copy's. So it is put on the copy with our plugin (GreymarchCam.PlayArt, the game's own ApplyArtObject)
-  // for the bound bow spell's two minutes, once; when the copy's gear has no bound bow any more it is taken off (Papyrus Extender's StopArtObject).
-  if (ac.getFormID() !== 0x14) {
-    const actorId = ac.getFormID();
-    const hasBoundBow = newInventory.entries.some((e) => {
-      if (!e.worn) return false;
-      const f = Game.getFormEx(e.baseId);
-      const w = f ? Weapon.from(f) : null;
-      return !!w && (w.getWeaponType() === 7 || w.getWeaponType() === 9) && /^bound\b/i.test(w.getName() || "");
-    });
-    const art = Game.getFormEx(BOUND_BOW_ART);
-    // AGAIN AFTER A REBUILD (2026-11-01, the owner: walking away and back, the other player's bow was invisible again): a copy rebuilt when its player comes back
-    // into range is dressed again here, and the art is played again unless it was played in the last few seconds or the copy already shows it
-    const playedAt = gmBowArtOn.get(actorId) || 0;
-    if (hasBoundBow && art && Date.now() - playedAt > 3000) {
-      gmBowArtOn.set(actorId, Date.now());
-      const due = Date.now() + 300;
-      const step = () => {
-        if (Date.now() < due) { once('update', step); return; }
-        try {
-          const a = Actor.from(Game.getFormEx(actorId));
-          const artNow = Game.getFormEx(BOUND_BOW_ART); // looked up in this frame: a game object from an earlier frame is no longer valid (test: "Invalid indexInPool")
-          let shown = 0;
-          try { shown = a && artNow ? Number(callNative("PO3_SKSEFunctions", "HasArtObject", undefined, a, artNow, true)) || 0 : 0; } catch (e) { shown = 0; }
-          if (shown > 0) { writeLogs("greymarch", "copy bound bow " + actorId.toString(16) + ": its art is still on"); return; }
-          const ok = a && artNow ? callNative("GreymarchCam", "PlayArt", undefined, a, artNow, 120) : false;
-          writeLogs("greymarch", "copy bound bow " + actorId.toString(16) + ": its art " + (ok ? "played" : "refused") + (a && a.isWeaponDrawn() ? " (drawn)" : ""));
-        } catch (e) { writeLogs("greymarch", "copy bound bow " + actorId.toString(16) + ": the art could not be played: " + e); }
-      };
-      once('update', step);
-    } else if (!hasBoundBow && art && gmBowArtOn.has(actorId)) {
-      gmBowArtOn.delete(actorId);
-      try { callNative("PO3_SKSEFunctions", "StopArtObject", undefined, ac, art); } catch (e) { /* it ends by itself */ }
-    }
-  }
 
   syncSpellEquipment(ac, eq.leftSpell, SpellType.Left);
   syncSpellEquipment(ac, eq.rightSpell, SpellType.Right);
