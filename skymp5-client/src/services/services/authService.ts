@@ -199,7 +199,6 @@ export class AuthService extends ClientListener {
       case 'greymarchFx':
       case 'greymarchGhosts':
       case 'greymarchStats':
-      case 'greymarchBarberSpots':
       case 'greymarchKill':
       case 'greymarchKnown':
       case 'greymarchMenuReply':
