@@ -196,7 +196,7 @@ export class GreymarchBridge {
         if (type === "greymarchAdminReply") { var brids = this.greymarchBuildRids; if (brids && brids[msg.rid]) { delete brids[msg.rid]; this.greymarchBuildCamSay(msg.ok ? (msg.data && msg.data.message) || "Done." : String(msg.error || "That did not work.")); return; } this.greymarchAdminToPage("reply", msg); return; }
         if (type === "greymarchNotice") { if (msg.title && String(msg.title).indexOf("(test)") >= 0) this.greymarchLog("notice " + msg.title + ": " + msg.text); if (msg.title) { this.greymarchToast(msg); return; } var nq = this.greymarchNoticeQueue || (this.greymarchNoticeQueue = []); if (nq.length < 20) nq.push(String(msg.text).slice(0, 300)); return; } // a plain notice: the game's own top-left message, shown from the update phase (greymarchNoticeTick: Debug.notification does nothing from here)
         if (type === "greymarchStandUp") { this.greymarchStandUpWanted = Date.now(); return; } // get up from the furniture the player is in (gamemode professions.js, after a won mining game): done in greymarchStandUpTick
-        if (type === "greymarchBarberSpots") { this.greymarchBarberSpots = Array.isArray(msg.spots) ? msg.spots.filter(function (k: any) { return typeof k === "string"; }) : []; this.greymarchBarberPrice = Number(msg.price) >= 0 ? Number(msg.price) : 0; this.greymarchBarberNext = 0; return; } // the barber spots' names (greymarchBarberLabels)
+        if (type === "greymarchBarberSpots") { this.greymarchBarberSpots = Array.isArray(msg.spots) ? msg.spots.filter(function (k: any) { return typeof k === "string"; }) : []; this.greymarchBarberPrice = Number(msg.price) >= 0 ? Number(msg.price) : 0; this.greymarchBarberGlow = typeof msg.glow === "string" ? msg.glow : "off"; this.greymarchBarberNext = 0; return; } // the barber spots' names (greymarchBarberLabels)
         if (type === "greymarchStats") { this.greymarchStatsWant = msg.stats && typeof msg.stats === "object" ? msg.stats : null; return; }
         if (type === "greymarchKill") { this.greymarchKillMe(); return; }
         if (type === "greymarchKnown") { this.greymarchKnown = msg.names && typeof msg.names === "object" ? msg.names : {}; this.greymarchNamesNext = 0; try { (Function("return this")() as any).__gmKnown = this.greymarchKnown; } catch (e) { /* the floating names keep showing IDs */ } return; }
@@ -2911,6 +2911,28 @@ export class GreymarchBridge {
         } catch (e) { /* not here */ }
         return null;
     }
+    // THE GLOW (2026-11-02, the owner: "glowing slightly"): the effect staff picked (/barber glow, gamemode barber.js GLOWS) plays on each loaded spot, without end;
+    // played again when its 3D comes back (a cell loaded again), stopped when the glow changes or the spot is taken away. Skyrim.esm effect shaders.
+    greymarchBarberShader(name: string): any {
+        var ids: any = { white: 0x0c34b1, shine: 0x0b6bfa, gold: 0x012fd9, green: 0x084b39 }; // MS04MemoryObjectFXShader, AzuraGoodCrystal, HealFXS, KynesPeaceFXS
+        var id = ids[name]; if (!id) return null;
+        try { return this.sp.EffectShader.from(this.sp.Game.getFormEx(id)); } catch (e) { return null; }
+    }
+    greymarchBarberGlowOn(key: string, ref: any): any {
+        var on = this.greymarchBarberGlowing || (this.greymarchBarberGlowing = {});
+        var want = this.greymarchBarberGlow || "off", cur = on[key];
+        var loaded = false; try { loaded = !!ref.is3DLoaded(); } catch (e) { loaded = false; }
+        if (cur && (cur !== want || !loaded)) { var old = this.greymarchBarberShader(cur); try { if (old) old.stop(ref); } catch (e2) { /* gone with its 3D */ } delete on[key]; cur = undefined; }
+        if (cur || want === "off" || !loaded) return;
+        var sh = this.greymarchBarberShader(want); if (!sh) return;
+        try { sh.play(ref, -1); on[key] = want; } catch (e3) { if (!this.greymarchBarberGlowErr) { this.greymarchBarberGlowErr = true; this.greymarchLog("barber: the glow could not play (" + e3 + ")"); } }
+    }
+    greymarchBarberGlowOff(key: string, ref: any): any {
+        var on = this.greymarchBarberGlowing || {};
+        if (!on[key]) return;
+        var sh = this.greymarchBarberShader(on[key]); try { if (sh && ref) sh.stop(ref); } catch (e) { /* gone */ }
+        delete on[key];
+    }
     greymarchBarberLabels(now: any): any {
         if (now < (this.greymarchBarberNext || 0)) return;
         this.greymarchBarberNext = now + 2000;
@@ -2921,6 +2943,7 @@ export class GreymarchBridge {
             var key = list[i], ref: any = this.greymarchBarberRef(key);
             if (!ref) continue;
             seen[key] = true;
+            this.greymarchBarberGlowOn(key, ref);
             var base = ""; try { var b = ref.getBaseObject(); base = b ? String(b.getName() || "") : ""; } catch (e2) { base = ""; }
             if (orig[key] === undefined) { try { orig[key] = String(ref.getDisplayName() || base); } catch (e3) { orig[key] = base; } }
             var want = "Barber's " + (base || orig[key] || "Chair") + (price > 0 ? " (" + price + " gold)" : "");
@@ -2931,6 +2954,7 @@ export class GreymarchBridge {
         for (var k in orig) {
             if (seen[k]) continue;
             var back: any = this.greymarchBarberRef(k);
+            this.greymarchBarberGlowOff(k, back);
             if (back) { try { back.setDisplayName(orig[k], true); } catch (e7) { /* left */ } }
             delete orig[k];
         }
