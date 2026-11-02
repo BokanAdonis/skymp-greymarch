@@ -229,6 +229,7 @@ export class AuthService extends ClientListener {
       case 'greymarchParalyze': // a paralysis spell hit this player (our server build: OnSpellHit)
       case 'greymarchStandUp': // get up from the furniture (gamemode professions.js, the end of a won mining game) // a starving character staggers (gamemode hunger.js)
       case 'greymarchBuildAngle': // a piece a GM placed was turned: this game turns its copy (gamemode buildsys.js)
+      case 'greymarchFoodFx': // a food's effects kept back: how long the block has left (gamemode foodeffects.js, bridge.ts greymarchFoodFxNote)
       case 'greymarchHungerFx': // starving: regeneration off
       case 'greymarchHunger': // the hunger bowl on the HUD
       case 'greymarchEnergy': // the energy bar on the HUD while working or resting (gamemode exhaustion.js)

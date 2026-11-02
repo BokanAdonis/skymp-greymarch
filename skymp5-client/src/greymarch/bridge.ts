@@ -211,6 +211,7 @@ export class GreymarchBridge {
         if (type === "greymarchMagicBlock") { var mb: any = {}; if (Array.isArray(msg.effects)) for (var mi = 0; mi < msg.effects.length && mi < 5000; mi++) mb[Number(msg.effects[mi]) >>> 0] = true; this.greymarchMagicBlock = mb; return; } // the raise-the-dead and summon effects to end when an NPC casts them (gamemode magicblock.js)
         if (type === "greymarchHunger") { this.greymarchHudToPage("hunger", { stage: String(msg.stage || "fed") }); return; } // the hunger bowl on the HUD (right, level with the voice display; gamemode hunger.js)
         if (type === "greymarchEnergy") { this.greymarchHudToPage("energy", { v: Number(msg.v), state: String(msg.state || "") }); return; } // the energy bar on the HUD, always on screen above the hunger bowl (gamemode exhaustion.js)
+        if (type === "greymarchFoodFx") { var ffUntil = Date.now() + Math.max(0, Math.min(30 * 60000, Number(msg.ms) || 0)); if (ffUntil > (this.greymarchFoodFxUntil || 0)) this.greymarchFoodFxUntil = ffUntil; return; } // the server kept a food's effects back: how long its block has left (greymarchFoodFxNote)
         if (type === "greymarchHungerFx") { this.greymarchHungerRegen = msg.regen !== false; return; } // starving: no health or stamina regeneration (greymarchHungerDrive)
         if (type === "greymarchFaceOf") { this.greymarchFaceOf(msg); return; } // another player's face from the emote wheel (gamemode faces.js; put on in greymarchFaceTick)
         if (type === "greymarchGround") { if (Number(msg.id) > 0 && typeof msg.z === "number" && isFinite(msg.z)) { const gl: any = Function("return this")(); const fx: any = gl.__gmGroundFix || (gl.__gmGroundFix = {}); const gr: any = msg.grid && Array.isArray(msg.grid.h) && msg.grid.h.length === 25 && [msg.grid.x, msg.grid.y, msg.grid.step].every((n: any) => typeof n === "number" && isFinite(n)) && msg.grid.step > 0 ? { x: msg.grid.x, y: msg.grid.y, step: msg.grid.step, h: msg.grid.h.map((v: any) => (typeof v === "number" && isFinite(v) ? v : null)) } : null; fx[String(Number(msg.id) >>> 0)] = { z: msg.z, off: Number(msg.off) || 0, at: Date.now(), grid: gr }; if ((this.greymarchGroundCrumbs = (this.greymarchGroundCrumbs || 0) + 1) <= 40 && typeof this.greymarchCrumb === "function") this.greymarchCrumb("ground word " + (Number(msg.id) >>> 0).toString(16) + ": " + Math.round(Number(msg.off) || 0) + " off, the ground at " + Math.round(msg.z)); } return; } // the server saw an NPC off the ground: where the ground is (formView gmHostedTick puts it down if this game hosts it; gamemode groundclamp.js)
@@ -4051,6 +4052,7 @@ export class GreymarchBridge {
             var pot = this.sp.Potion.from(baseObj);
             if (!pot) return;
             var id = emoteMod.consumeEmoteId({ food: !!pot.isFood(), poison: !!pot.isPoison(), name: String(baseObj.getName() || "") });
+            if (pot.isFood() && !pot.isPoison()) this.greymarchFoodFxNote(pot, baseObj);
             if (id === "potion") {
                 var fid = baseObj.getFormID() >>> 0;
                 var blood = 0; try { blood = this.greymarchVampForm("potion") >>> 0; } catch (bErr) { blood = 0; }
@@ -4061,6 +4063,25 @@ export class GreymarchBridge {
             if (id) { var cq = this.greymarchConsumeQueue || (this.greymarchConsumeQueue = []); if (cq.length < 5) cq.push({ id: id, at: Date.now() }); } // in turn: a meal never replaces the one playing
             if (id === "bread" || id === "mug") this.greymarchConsumeCloseMenu(); // food or a drink: the inventory closes so the meal is seen (a potion leaves it open: several in a row)
         } catch (err) { /* not something eaten */ }
+    }
+    // ONE FOOD EFFECT AT A TIME (gamemode foodeffects.js; 2026-11-02, the owner: "make sure no food that gives an effect can be stacked so no one becomes
+    // unkillable or able to sprint forever"). A food with an effect works once; one eaten while that effect is still on (its longest effect, at least a minute)
+    // only fills hunger: the server keeps its effects back, and here the game's own copy of them is ended and health, magicka and stamina go back to the
+    // frame before (greymarchPotionUndoTick, as a potion's first drink). The server says how long a block has left when it keeps one back (greymarchFoodFx).
+    greymarchFoodFxNote(pot: any, baseObj: any): any {
+        var now = Date.now(), n = 0, longest = 0, mgefs: any = {};
+        try { n = pot.getNumEffects(); } catch (e) { n = 0; }
+        for (var i = 0; i < n && i < 16; i++) {
+            try { var m = pot.getNthEffectMagicEffect(i); if (m) mgefs[m.getFormID() >>> 0] = true; } catch (mErr) { /* that one */ }
+            try { longest = Math.max(longest, Number(pot.getNthEffectDuration(i)) || 0); } catch (dErr) { /* an instant one */ }
+        }
+        if (!n) return; // bread, plain food: no effect to stack
+        if (now < (this.greymarchFoodFxUntil || 0)) {
+            this.greymarchPotionUndo = { mgefs: mgefs, effects: [], snap: this.greymarchAvSnap ? { health: this.greymarchAvSnap.health, magicka: this.greymarchAvSnap.magicka, stamina: this.greymarchAvSnap.stamina } : null, until: now + emoteMod.POTION_UNDO_MS };
+            this.greymarchLog("food: " + String(baseObj.getName() || "") + " only fills (the last meal's effect has " + Math.ceil((this.greymarchFoodFxUntil - now) / 1000) + " s left)");
+            return;
+        }
+        this.greymarchFoodFxUntil = now + Math.min(30 * 60000, Math.max(60000, longest * 1000));
     }
     // POTIONS TAKE A SWIG (gamemode potions.js). The player drinks: the swig plays, and the server keeps the effects back, puts that one potion back after the swig and
     // has this game drink it again (the server's Papyrus Actor.EquipItem); that second drink's effects stay. The game itself applies the first drink at once, so
