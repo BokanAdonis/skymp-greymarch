@@ -1379,13 +1379,23 @@ void ActionListener::OnHit(const RawMessageData& rawMsgData,
     return;
   }
 
-  if (aggressor->GetInventory().HasItem(hitData.source) == false) {
-    spdlog::debug("{:x} actor has no {:x} weapon and can't attack",
-                  hitData.aggressor, hitData.source);
+  // GREYMARCH (2026-11-02, the owner: a bandit nobody could hurt with a
+  // weapon): a dropped weapon hit goes to the log (it was a debug line, never
+  // written), with what the server thinks the attacker wears
+  {
+    std::string worn;
+    for (const auto& entry : equipment.inv.entries) {
+      if (entry.GetWorn() != Inventory::Worn::None) {
+        worn += fmt::format("{}{:x}", worn.empty() ? "" : ",", entry.baseId);
+      }
+    }
+    spdlog::info("hit dropped: {:x} -> {:x} with {:x}: not in the attacker's "
+                 "equipment (in the inventory: {}); worn: {}",
+                 hitData.aggressor, hitData.target, hitData.source,
+                 aggressor->GetInventory().HasItem(hitData.source) ? "yes"
+                                                                    : "no",
+                 worn.empty() ? "nothing" : worn);
   }
-
-  spdlog::debug("{:x} weapon is not equipped by {:x} actor and cannot be used",
-                hitData.source, hitData.aggressor);
 }
 
 void ActionListener::OnUpdateAnimVariables(
@@ -2001,6 +2011,25 @@ void ActionListener::OnWeaponHit(MpActor* aggressor,
       aggressor->GetGreymarchDamageMult(), damage,
       healthPercentage * outBaseHealth,
       currentActorValues.healthPercentage * outBaseHealth, outBaseHealth);
+  }
+
+  // GREYMARCH (2026-11-02, the owner: a bandit nobody could hurt with a
+  // weapon): every weapon hit by a player on an NPC goes to the log too
+  if (partOne.serverState.UserByActor(&targetActor) ==
+        Networking::InvalidUserId &&
+      partOne.serverState.UserByActor(aggressor) !=
+        Networking::InvalidUserId) {
+    spdlog::info("hit on npc: player {:x} -> {:x} (base {:x}) with {:x}{}{}: "
+                 "attacker x{:.2f}, damage {:.1f}, health {:.1f} -> {:.1f} "
+                 "of {:.0f}",
+                 aggressor->GetFormId(), targetActor.GetFormId(),
+                 targetActor.GetBaseId(), hitData.source,
+                 hitData.isPowerAttack ? " power" : "",
+                 hitData.isHitBlocked ? " blocked" : "",
+                 aggressor->GetGreymarchDamageMult(), damage,
+                 healthPercentage * outBaseHealth,
+                 currentActorValues.healthPercentage * outBaseHealth,
+                 outBaseHealth);
   }
 
   targetActor.NetSetPercentages(
