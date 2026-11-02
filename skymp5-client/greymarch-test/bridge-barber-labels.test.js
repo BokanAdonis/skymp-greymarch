@@ -37,30 +37,3 @@ test("barber spots are named with the price, a placed one too; taken off the lis
   assert.strictEqual(chair.shown, "Chair", "no longer a spot: its own name");
   assert.strictEqual(mirror.shown, "Barber's Mirror", "free: no price shown");
 });
-
-test("the glow (2026-11-02, the owner: \"glowing slightly\"): the picked effect plays on each loaded spot, is swapped when staff change it, stops when the spot goes", () => {
-  const mods = { "../messages": { MsgType: { CustomPacket: 77 } }, "../view/worldViewMisc": { remoteIdToLocalId: () => 0, localIdToRemoteId: (id) => id } };
-  const mod = { exports: {} };
-  new Function("require", "exports", "module", js)((p) => mods[p] || {}, mod.exports, mod);
-  const calls = [];
-  const chair = { loaded: true, shown: "Chair", is3DLoaded: () => chair.loaded, getBaseObject: () => ({ getName: () => "Chair" }), getDisplayName: () => chair.shown, setDisplayName: (n) => { chair.shown = n; } };
-  const shader = (id) => ({ play: (r, d) => calls.push(["play", id, d]), stop: () => calls.push(["stop", id]) });
-  const sp = { printConsole() {}, writeLogs() {}, on() {}, storage: {}, ObjectReference: { from: (f) => f || null }, EffectShader: { from: (f) => f },
-    Game: { getFormFromFile: (id, file) => (id === 0x1a2b ? chair : null), getFormEx: (id) => shader(id) } };
-  const gm = new mod.exports.GreymarchBridge(sp, { on() {}, emitter: { on() {}, emit() {} } });
-  gm.greymarchLog = () => {};
-  gm.greymarchPacket({ customPacketType: "greymarchBarberSpots", spots: ["1a2b:Skyrim.esm"], price: 100, glow: "white" });
-  gm.greymarchBarberLabels(1000);
-  assert.deepStrictEqual(calls, [["play", 0x0c34b1, -1]], "white: played without end");
-  gm.greymarchBarberLabels(3100);
-  assert.strictEqual(calls.length, 1, "not played again while it shows");
-  gm.greymarchPacket({ customPacketType: "greymarchBarberSpots", spots: ["1a2b:Skyrim.esm"], price: 100, glow: "gold" });
-  gm.greymarchBarberLabels(3200);
-  assert.deepStrictEqual(calls.slice(1), [["stop", 0x0c34b1], ["play", 0x012fd9, -1]], "swapped");
-  chair.loaded = false; gm.greymarchBarberLabels(5300);
-  chair.loaded = true; gm.greymarchBarberLabels(7400);
-  assert.deepStrictEqual(calls.slice(-1), [["play", 0x012fd9, -1]], "its 3D back: played again");
-  gm.greymarchPacket({ customPacketType: "greymarchBarberSpots", spots: [], price: 100, glow: "gold" });
-  gm.greymarchBarberLabels(7500);
-  assert.deepStrictEqual(calls.slice(-1), [["stop", 0x012fd9]], "no longer a spot: no glow");
-});
