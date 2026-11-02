@@ -1312,9 +1312,11 @@ export class FormView {
 
   private gmPuppetMove(refr: ObjectReference, model: FormModel): string {
     const ac = Actor.from(refr);
-    if (!ac || !model.movement) return "";
+    if (!ac) return "";
     // DEAD (2026-10-28: animals that could not be killed): a body is never moved, and its last "alive" frame is never played again (applyMovement would bring it back)
     if (model.isDead || ac.isDead()) return "";
+    // FEARLESS FROM THE START (2026-11-02, the owner: milk cows ran away when hit): a milk cow never moves, so it never had a movement here and was never made
+    // fearless below; the peaceful animals' "runs when hit" stayed, and it fled in the game of whoever hit it. Now it is set before any movement is needed.
     if (!this.gmPuppetReady) {
       this.gmPuppetReady = true;
       // its own AI never moves it (2026-10-28, the owner's cow clip: hit, it jumped back and forth, its own flight against the server's frames): never a fight
@@ -1323,6 +1325,7 @@ export class FormView {
       // its own pace, never the peaceful animals' slower one (gmMakePeaceful, before it was known to be the server's): the server's frames set how fast it goes
       try { if (ac.getActorValue("SpeedMult") !== 100) { ac.setActorValue("SpeedMult", 100); ac.modActorValue("CarryWeight", 0.1); ac.modActorValue("CarryWeight", -0.1); } } catch (e) { /* as it is */ } // never a fight of its own, never local damage
     }
+    if (!model.movement) { try { if (ac.isInCombat()) ac.stopCombat(); } catch (e) { /* next frame */ } return ""; } // nothing to play yet (a cow on its spot)
     try { if (ac.isInCombat()) ac.stopCombat(); } catch (e) { /* next frame */ }
     // the bridge's frames: through the global first (see bridge.ts greymarchBeastFrames, 2026-10-28), storage as before
     const frames = ((Function("return this")() as any).__gmBeastFrames || storage["greymarchBeastFrames"] || {}) as Record<string, { pos: number[]; heading: number; speed: number; anim: string; at: number; hp?: number; hunt?: number; ev?: string; mine?: number; reach?: number; run?: number }>;
@@ -1783,7 +1786,7 @@ function gmMakePeaceful(refrId: number, puppet = false): boolean {
     const id = race.getFormID();
     if (!GM_PEACEFUL_RACES.includes(id) && !(gmGlowDeerRace && id === gmGlowDeerRace)) return false;
     ac.setActorValue("Aggression", 0); // unaggressive: never starts a fight
-    ac.setActorValue("Confidence", 0); // cowardly: runs when hit
+    ac.setActorValue("Confidence", puppet ? 4 : 0); // cowardly: runs when hit; a server-driven one never runs on its own (the server moves it: a milk cow stays)
     // SLOWER (2026-10-30, the owner: "make sure all animals are slowed down", cows were fast): Skyrim's own speed, cut to GM_PEACEFUL_SPEED %, so a running
     // player catches them (the server's own animals run slower than a player already, wildlifedata.js BRAIN). The game takes a new speed when the carried
     // weight changes, so it is nudged
