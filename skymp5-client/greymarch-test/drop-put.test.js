@@ -25,3 +25,11 @@ test("a drop is told to the server without a reference on the event (the dropped
   assert.ok(gate.includes("isPlayer &&") && gate.includes("noContainer &&") && !gate.includes("isReference &&"), "the gate no longer needs a reference");
   assert.ok(src.includes("if (!numFound)"), "a change with no dropped copy nearby (a drink, a poison on a blade) is still not a drop");
 });
+
+test("a take from or put into a container is sent without the worn flag (2026-11-02, the owner: arrows taken from a dungeon chest were gone at the next shot)", () => {
+  const src = svc("containersService.ts");
+  // this game marks every arrow of an equipped kind worn; the server keeps no worn flags on inventory entries, so a worn take found nothing and was refused
+  const build = src.slice(src.indexOf("const msg: PutItemMessage | TakeItemMessage"), src.indexOf("return msg;"));
+  assert.ok(build.includes("delete msg.worn;") && build.includes("delete msg.wornLeft;"), "the flags are dropped from every put and take");
+  assert.ok(build.indexOf("delete msg.worn;") > build.indexOf("msg.count = Math.abs(msg.count);"), "after the message is built from the diff");
+});

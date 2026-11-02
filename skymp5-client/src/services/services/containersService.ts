@@ -61,6 +61,14 @@ export class ContainersService extends ClientListener {
                                     : localIdToRemoteId(e.oldContainer.getFormID())
                             };
                             msg.count = Math.abs(msg.count);
+                            // GREYMARCH (2026-11-02, the owner: arrows taken from a dungeon chest were all gone at the next shot): the diff above keeps
+                            // the worn flag, and this game marks EVERY arrow of an equipped kind worn (inventory.ts extractExtraData), so taking Iron
+                            // Arrows while wearing Iron Arrows was sent as "6 worn Iron Arrows". The server keeps no worn flags on inventory entries
+                            // (the equipment is separate), so it found no such entry in the chest, refused the take, and the arrows were only in this
+                            // game: the next inventory from the server (after a shot) took them away. A put into a container failed the same way.
+                            // An item moving between a container and the pack is never worn there.
+                            delete msg.worn;
+                            delete msg.wornLeft;
                             if (this.sp.Game.getFormEx(entry.baseId)?.getName() === msg.name) {
                                 delete msg.name;
                             }
