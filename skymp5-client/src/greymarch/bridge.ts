@@ -1809,7 +1809,9 @@ export class GreymarchBridge {
         if (open) { rm.sendAt = 0; return; } // RaceMenu is the editor while it is open
         if (this.greymarchWolfOn || this.greymarchShapeOn) { rm.beast = true; rm.loadedSince = 0; return; }
         if (rm.beast) { rm.beast = false; rm.done = null; rm.tries = 0; } // back in the character's own body: the sliders go on again
-        if (rm.sendAt && now >= rm.sendAt) { rm.sendAt = 0; this.greymarchRaceMenuReport(); return; }
+        // NOTHING PUT BACK WHILE A SAVE WAITS (2026-11-02, the owner: "it all set back"; the log: "sliders put back" a second BEFORE "sent after the race menu"):
+        // in the second after the menu closes, the server's older sliders were loaded over the ones the player had just made, and those were then sent
+        if (rm.sendAt) { if (now >= rm.sendAt) { rm.sendAt = 0; this.greymarchRaceMenuReport(); } return; }
         if (rm.want === null || now < rm.next) return;
         rm.next = now + 1000;
         try {

@@ -181,3 +181,23 @@ test("a SkyrimPlatform without the preset functions uses GreymarchCamera.dll 1.8
   assert.strictEqual(loads(t.log).length, 1);
   assert.deepStrictEqual(t.body.live.morphs.custom, big.morphs.custom, "the sliders are back");
 });
+
+test("the sliders just made are never put back over before they are sent (2026-11-02, the owner: it all set back; the server had none kept yet)", () => {
+  const s = make();
+  const OLD = { morphs: { custom: [{ name: "EarPoint", value: 0.9 }] } };
+  s.body.live = preset({});
+  s.say({ customPacketType: "greymarchRaceMenuLook", look: OLD }); // after logging in: the kept sliders are put back
+  for (let i = 0; i < 8; i++) s.step();
+  assert.strictEqual(loads(s.log).length, 1, "put back once at login");
+  s.menu(true); s.step();
+  s.say({ customPacketType: "greymarchRaceMenuLook", look: {} }); // a different kept look arrives while the menu is open
+  s.step();
+  s.body.live = preset(MINE); // the player moves RaceMenu's sliders
+  s.menu(false);
+  for (let i = 0; i < 10; i++) s.step(100); // the second after the menu closes, step by step
+  for (let i = 0; i < 6; i++) s.step();
+  assert.strictEqual(loads(s.log).length, 1, "nothing loaded over the new sliders after the menu closed");
+  assert.strictEqual(s.log.sent.length, 1);
+  assert.deepStrictEqual(s.log.sent[0].look, rm.pickRaceMenuParts(preset(MINE)), "the new sliders are what is sent");
+  assert.deepStrictEqual(s.body.live.morphs.custom, MINE.morphs.custom, "and still on the body");
+});
