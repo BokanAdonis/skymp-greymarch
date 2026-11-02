@@ -69,3 +69,20 @@ void HitsToKillBinding::Set(Napi::Env, ScampServer& scampServer,
   actor.SetGreymarchHitsToKill(
     static_cast<int>(std::clamp(std::round(hits), 0.f, 50.f)));
 }
+
+Napi::Value UnharmedBinding::Get(Napi::Env env, ScampServer& scampServer,
+                                 uint32_t formId)
+{
+  auto& actor =
+    scampServer.GetPartOne()->worldState.GetFormAt<MpActor>(formId);
+  return Napi::Boolean::New(env, actor.IsGreymarchUnharmed());
+}
+
+void UnharmedBinding::Set(Napi::Env, ScampServer& scampServer,
+                          uint32_t formId, Napi::Value newValue)
+{
+  auto& actor =
+    scampServer.GetPartOne()->worldState.GetFormAt<MpActor>(formId);
+  actor.SetGreymarchUnharmed(newValue.IsBoolean() &&
+                             newValue.As<Napi::Boolean>().Value());
+}

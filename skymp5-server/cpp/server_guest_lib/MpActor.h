@@ -196,6 +196,10 @@ public:
   // formula. Not saved: the gamemode sets it again.
   void SetGreymarchHitsToKill(int hits) noexcept;
   int GetGreymarchHitsToKill() const noexcept;
+  // GREYMARCH: no weapon, fist or spell hit on this actor does anything (the
+  // milk cows, 2026-11-01). Not saved: the gamemode sets it again.
+  void SetGreymarchUnharmed(bool unharmed) noexcept;
+  bool IsGreymarchUnharmed() const noexcept;
   // GREYMARCH: armor rating a self-cast spell adds for a while (Oakflesh,
   // Stoneflesh, Ironflesh, Ebonyflesh): the damage formula counts it with the
   // worn armor until it runs out. Not saved. A new cast replaces the old one.

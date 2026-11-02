@@ -1339,6 +1339,13 @@ void ActionListener::OnHit(const RawMessageData& rawMsgData,
     return;
   }
 
+  // GREYMARCH: a hit on an actor the gamemode keeps unharmed (the milk cows)
+  // does nothing
+  if (auto* targetActor = targetRef->AsActor();
+      targetActor && targetActor->IsGreymarchUnharmed()) {
+    return;
+  }
+
   auto sourceInEspm =
     partOne.GetEspm().GetBrowser().LookupById(hitData.source);
 

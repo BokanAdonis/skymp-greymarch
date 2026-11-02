@@ -25,6 +25,17 @@ public:
            Napi::Value newValue) override;
 };
 
+// GREYMARCH: mp.set(actorId, "unharmed", true) makes every weapon, fist or spell hit on that actor do nothing (the milk cows).
+class UnharmedBinding : public PropertyBinding
+{
+public:
+  std::string GetPropertyName() const override { return "unharmed"; }
+  Napi::Value Get(Napi::Env env, ScampServer& scampServer,
+                  uint32_t formId) override;
+  void Set(Napi::Env env, ScampServer& scampServer, uint32_t formId,
+           Napi::Value newValue) override;
+};
+
 // GREYMARCH: mp.set(actorId, "damageMult", 0.88) multiplies every weapon or fist hit that actor lands (0.1 to 5; 1 = no change).
 class DamageMultBinding : public PropertyBinding
 {
