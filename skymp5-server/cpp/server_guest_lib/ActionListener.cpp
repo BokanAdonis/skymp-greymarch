@@ -1637,11 +1637,6 @@ void ActionListener::StartCloak(MpActor* caster, uint32_t spellId)
     spdlog::info("cloak: {:x} cast {:x}: {:x} hits everyone within {} for {} s",
                  caster->GetFormId(), spellId, c.damageSpell, radius,
                  effect.effectItem->duration);
-    c.diagLeft = 3;
-    CloakDiag(caster->GetFormId(),
-              fmt::format("Cloak {:x}: damage spell {:x}, reach {:.0f}, {} s",
-                          spellId, c.damageSpell, radius,
-                          effect.effectItem->duration));
     if (!c.ticking) {
       c.ticking = true;
       const uint32_t casterId = caster->GetFormId();
@@ -1650,30 +1645,6 @@ void ActionListener::StartCloak(MpActor* caster, uint32_t spellId)
     }
     return;
   }
-}
-
-// GREYMARCH: a short notice to the cloak's caster (test: the server's cloak
-// ticks did nothing and the server log cannot be read from the owner's PC)
-void ActionListener::CloakDiag(uint32_t casterId, const std::string& text)
-{
-  spdlog::info("cloak: {:x}: {}", casterId, text);
-  auto caster = std::dynamic_pointer_cast<MpActor>(
-    partOne.worldState.LookupFormById(casterId));
-  if (!caster) {
-    return;
-  }
-  const auto userId = partOne.serverState.UserByActor(caster.get());
-  if (userId == Networking::InvalidUserId) {
-    return;
-  }
-  partOne.SendCustomPacket(
-    userId,
-    nlohmann::json{ { "customPacketType", "greymarchNotice" },
-                    { "kind", "info" },
-                    { "title", "Cloak (test)" },
-                    { "text", text },
-                    { "ms", 4000 } }
-      .dump());
 }
 
 void ActionListener::CloakTick(uint32_t casterId)
@@ -1700,7 +1671,6 @@ void ActionListener::CloakTick(uint32_t casterId)
     }
   }
   const auto& here = caster->GetPos();
-  int inReach = 0;
   for (MpActor* target : near) {
     if (!target || target == caster.get() || target->IsDead() ||
         target->IsDisabled() ||
@@ -1712,17 +1682,11 @@ void ActionListener::CloakTick(uint32_t casterId)
     if (dx * dx + dy * dy + dz * dz > cloak.radius * cloak.radius) {
       continue;
     }
-    ++inReach;
     HitData hit;
     hit.aggressor = casterId;
     hit.target = target->GetFormId();
     hit.source = cloak.damageSpell;
     OnSpellHit(caster.get(), target, hit);
-  }
-  if (it->second.diagLeft > 0) {
-    --it->second.diagLeft;
-    CloakDiag(casterId, fmt::format("Cloak tick: {} near, {} in reach",
-                                    near.size(), inReach));
   }
   partOne.worldState.SetTimer(std::chrono::seconds(1))
     .Then([this, casterId](Viet::Void) { CloakTick(casterId); });
