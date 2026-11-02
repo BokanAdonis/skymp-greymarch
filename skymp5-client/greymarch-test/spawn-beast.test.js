@@ -63,13 +63,14 @@ test("formView.ts: a beast look gets no full model refresh when it comes on scre
   assert.ok(fv.includes("this.gmSpawnedBeast = gmBeastSpawn;"), "the spawn remembers a beast");
   assert.ok(fv.includes("const gmHoldStill = this.gmSpawnedBeast && beastHeld(this.gmBeast, Date.now());"), "a fresh beast is held still while it settles");
   assert.ok(/!gmHoldStill && \(\s*\+\(model\.numMovementChanges as number\)/.test(fv), "SkyMP's movement waits for it (the movement controller crashed the half-built graph)");
-  const removal = fv.slice(fv.indexOf("if (refrId >= 0xff000000 && gmBeast) {"), fv.indexOf("if (refrId >= 0xff000000 && gmBeast) {") + 2400);
+  const removal = fv.slice(fv.indexOf("      if (refrId >= 0xff000000) {"), fv.indexOf("      if (refrId >= 0xff000000) {") + 2400);
   assert.ok(/gone\.delete\(\);[\s\S]{0,120}unprotect\(\);\s*\}\);/.test(removal), "the world cleaner's protection is dropped only after the delete (a second delete by the cleaner crashed the watching game)");
   assert.ok(!/modWcProtection\(refrId, -1\);\s*return;/.test(removal), "not at once any more");
   assert.ok(fv.includes("if (gmBeastMove) { try { const gmAc = Actor.from(refr); if (gmAc) forcedWeapDrawn = gmAc.isWeaponDrawn(); }"), "a beast's NPC is never ordered to draw (ActionDraw played WerewolfDraw and crashed the watching game)");
   assert.ok(fv.indexOf("forcedWeapDrawn = gmAc.isWeaponDrawn()") < fv.indexOf("applyMovement(refr, model.movement"), "decided before the movement is applied");
   assert.ok(fv.includes("/^skympfake/i.test("), "nor given SkyMP's fake equip");
-  assert.ok(/if \(refrId >= 0xff000000 && gmBeast\) \{[\s\S]{0,1500}refr\.disable\(false\)\.then\(\(\) => \{[\s\S]{0,120}gone\.delete\(\);[\s\S]{0,200}return;/.test(fv), "a beast NPC is disabled, then deleted, and given nothing after");
+  assert.ok(/ {6}if \(refrId >= 0xff000000\) \{[\s\S]{0,1500}refr\.disable\(false\)\.then\(\(\) => \{[\s\S]{0,120}gone\.delete\(\);[\s\S]{0,200}return;/.test(fv), "every copy (a beast, a server NPC, a player: 2026-11-02) is disabled, then deleted, and given nothing after");
+  assert.ok(!/refr\.delete\(\);\s*\}\s*SpApiInteractor/.test(fv), "no copy is deleted while still enabled any more (a player's copy crashed the movement code, 2026-11-02)");
 });
 
 test("crash breadcrumbs: formView.ts writes a flushed line before each risky step on another NPC (spawn, remove, model refresh, gear, an idle or a beast animation)", () => {

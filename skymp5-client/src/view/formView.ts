@@ -541,6 +541,9 @@ export class FormView {
     // GREYMARCH: AND EVERY SERVER NPC BUILT FROM ITS OWN RECORD (2026-10-29: a player's game crashed in a Falmer's animation-graph physics step,
     // GraphPhysicsStepListener -> FalmerBehavior.hkb reading nothing, Duskglow Crevice 2026-10-22; and a Soul Cairn skeleton in its character physics,
     // Halldir's Cairn 2026-10-29): the same delete while still enabled, its graph and bodies still being stepped. Disabled first, deleted once that is done.
+    // GREYMARCH: AND A PLAYER'S COPY TOO (2026-11-02, the owner's game 32 s after logging in after a restart, everyone reconnecting: the movement code read a
+    // player's copy, #JDNM, deleted while still enabled with a movement order queued, MovementControllerNPC / IMovementMessageInterface). Every copy is now
+    // disabled first and deleted once that is done.
     const gmBeast = this.gmSpawnedBeast || this.gmSpawnedNoLook;
     this.gmSpawnedBeast = false; this.gmSpawnedNoLook = false;
     this.gmBeast = null; this.gmKeptLook = null;
@@ -554,9 +557,9 @@ export class FormView {
       this.removeNickname();
       return;
     }
-    if (refrId >= 0xff000000) gmCrumb("remove " + gmHex(refrId) + (gmBeast ? " (disable first)" : ""));
+    if (refrId >= 0xff000000) gmCrumb("remove " + gmHex(refrId) + " (disable first)" + (gmBeast ? " beast" : ""));
     once("update", () => {
-      if (refrId >= 0xff000000 && gmBeast) {
+      if (refrId >= 0xff000000) {
         // The world cleaner's protection is dropped only AFTER the delete (2026-10-20). Dropped at once, the NPC was unprotected and not yet disabled for the frames
         // the disable takes, and the world cleaner (one random nearby actor a frame) could pick it and disable and delete it too: a second delete of the same actor,
         // the crash of a watching game the moment a beast player changed back.
@@ -573,18 +576,6 @@ export class FormView {
           unprotect();
         });
         return;
-      }
-      if (refrId >= 0xff000000) {
-        const refr = ObjectReference.from(Game.getFormEx(refrId));
-        if (refr) {
-          try { const gmMover = Actor.from(refr); if (gmMover) { gmMover.stopTranslation(); gmMover.clearKeepOffsetFromActor(); } } catch (e) { /* it was not moving */ } // (its moves stopped first, as above)
-          refr.delete();
-        }
-        SpApiInteractor.getControllerInstance().lookupListener(WorldCleanerService).modWcProtection(refrId, -1);
-        const ac = Actor.from(refr);
-        if (ac) {
-          TESModPlatform.setWeaponDrawnMode(ac, -1);
-        }
       }
     })
 
