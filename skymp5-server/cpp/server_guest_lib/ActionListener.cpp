@@ -1610,6 +1610,13 @@ void ActionListener::OnSpellHit(MpActor* aggressor,
     partOne.serverState.UserByActor(aggressor) != Networking::InvalidUserId;
   damage *= casterIsPlayer ? balance.playerSpells.value_or(1.f)
                            : balance.npcSpells.value_or(1.f);
+  // GREYMARCH (2026-11-02, the owner: dungeon mages a little weaker): an NPC's
+  // own damage multiplier counts for its spells too, as for its weapons (a
+  // dungeon tier's damage percent, the NPC balance), so a tier I mage hits at
+  // 70%. A player's multiplier (rank and skill) stays out of their spells.
+  if (!casterIsPlayer) {
+    damage *= aggressor->GetGreymarchDamageMult();
+  }
 
   // GREYMARCH: a heal raises the target's health here, and the new value is
   // sent to them, so their own regeneration check no longer takes it back
