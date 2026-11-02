@@ -490,6 +490,52 @@ test("another player's roar: the sound, and the howl on their werewolf NPC here 
   delete g.__gmBeastHeld;
 });
 
+// a settled werewolf (or werebear) NPC of another player, logging what is done to it
+const roarNpc = (s, id, recovery) => {
+  const order = [];
+  const npc = { id, getFormID: () => id, getRace: () => ({ getFormID: () => BEAST }), getBaseObject: () => null, getEquippedShout: () => ({ getFormID: () => 0x0ce218 }), addShout: () => {}, equipShout: () => {},
+    getVoiceRecoveryTime: () => recovery.v, setVoiceRecoveryTime: (t) => { recovery.v = t; order.push("recovery " + t); } };
+  const prevFrom = s.sp.Actor.from; s.sp.Actor.from = (f) => (f && f.id === id ? npc : prevFrom(f));
+  s.sp.Shout = { from: (f) => (f ? { id: f.id, getFormID: () => f.id } : null) };
+  const send = s.sp.Debug.sendAnimationEvent; s.sp.Debug.sendAnimationEvent = (ref, name) => { if (ref === npc) order.push(name); send(ref, name); };
+  return order;
+};
+
+test("watchers: every roar of another player plays the howl on their NPC, its voice recovery cleared first (after one howl the next HowlStart stalled half-played)", () => {
+  const s = make({ others: { 701: 0xff000d01 }, actors: {} });
+  const recovery = { v: 0 };
+  const order = roarNpc(s, 0xff000d01, recovery);
+  s.say({ customPacketType: "greymarchWolfRoar", actor: 701, bear: false }); s.tick(); s.tick(300);
+  recovery.v = 30; // the first howl left the NPC's voice recovering
+  s.say({ customPacketType: "greymarchWolfRoar", actor: 701, bear: false }); s.tick(); s.tick(300);
+  assert.deepStrictEqual(order, ["recovery 0", "HowlStart", "HowlRelease", "recovery 0", "HowlStart", "HowlRelease"], "cleared just before each HowlStart; one start, one release per roar");
+  assert.strictEqual(recovery.v, 0);
+});
+
+test("watchers: a werewolf NPC that howls gets no second howl sound (the howl brings its own); a werebear adds the bear's roar; a settling one the sound only", () => {
+  const s = make({ others: { 711: 0xff000e01, 712: 0xff000e02 }, actors: {} });
+  roarNpc(s, 0xff000e01, { v: 0 }); roarNpc(s, 0xff000e02, { v: 0 });
+  s.say({ customPacketType: "greymarchWolfRoar", actor: 711, bear: false });
+  s.say({ customPacketType: "greymarchWolfRoar", actor: 712, bear: true });
+  s.tick();
+  assert.deepStrictEqual(s.log.sounds, [[0x0f95bb, 0xff000e02]], "the werewolf's howl sound comes from its howl only; the werebear also roars");
+  const g = Function("return this")();
+  g.__gmBeastHeld = { [0xff000e01]: true };
+  s.log.sounds.length = 0;
+  s.say({ customPacketType: "greymarchWolfRoar", actor: 711, bear: false }); s.tick();
+  assert.deepStrictEqual(s.log.sounds, [[0x101008, 0xff000e01]], "still settling: no howl, so the sound is played");
+  delete g.__gmBeastHeld;
+});
+
+test("watchers: two roars of one player in the same tick (R mashed, no wait) are one howl on their NPC", () => {
+  const s = make({ others: { 721: 0xff000f01 }, actors: {} });
+  const order = roarNpc(s, 0xff000f01, { v: 0 });
+  s.say({ customPacketType: "greymarchWolfRoar", actor: 721, bear: false });
+  s.say({ customPacketType: "greymarchWolfRoar", actor: 721, bear: false });
+  s.tick(); s.tick(300);
+  assert.deepStrictEqual(order.filter((e) => /^howl/i.test(e)), ["HowlStart", "HowlRelease"]);
+});
+
 test("the walk: the run mode falls back to the graph's Speed (the werewolf graph never sets SpeedSampled); a copy of a beast is ended out of combat", () => {
   const mg = fs.readFileSync(path.join(__dirname, "..", "src", "sync", "movementGet.ts"), "utf8");
   assert.ok(mg.includes('const speed = ac.getAnimationVariableFloat("SpeedSampled") || ac.getAnimationVariableFloat("Speed");'));
