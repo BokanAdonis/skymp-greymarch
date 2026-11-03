@@ -72,3 +72,9 @@ test("two report papers with their own condition stay two entries, and the serve
   assert.deepStrictEqual(withRoundedHealth(inv({ baseId: SWORD, count: 2, health: 1.01 })).entries, [{ baseId: SWORD, count: 2 }], "no condition is dropped");
   assert.strictEqual(server.entries[0].health, 1.0199999809265137, "the server's copy itself is not changed");
 });
+
+test("a poisoned weapon is the same as the server's plain one (2026-11-03, the owner: applying a poison unequipped the weapon)", () => {
+  const server = inv({ baseId: SWORD, count: 1, worn: true });
+  const game = inv({ baseId: SWORD, count: 1, worn: true, poisonId: 0x73f34, poisonCount: 1 });
+  assert.deepStrictEqual(getDiff(server, game, false).entries, [], "nothing to take away or put back: the weapon stays in the hand with its poison");
+});

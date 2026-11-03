@@ -129,8 +129,9 @@ const extrasEqual = (a: Entry, b: Entry, ignoreWorn = false) => {
     //a.chargePercent === b.chargePercent &&
     namesEqual(a, b) && // Greymarch: on again, or differently named papers were merged into one stack in chests
     a.soul === b.soul &&
-    a.poisonId === b.poisonId &&
-    a.poisonCount === b.poisonCount &&
+    // GREYMARCH (2026-11-03, the owner: applying a poison unequipped the weapon): the poison on a weapon lives only in this game (the server uses the poison
+    // up but never puts it on its copy of the weapon), so it is not compared: otherwise the poisoned weapon differed from the server's, was taken away and a plain
+    // one put back, off the hand and without the poison
     ((!!a.worn === !!b.worn && !!a.wornLeft === !!b.wornLeft) || ignoreWorn)
   );
 };
