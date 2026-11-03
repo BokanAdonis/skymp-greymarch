@@ -22,7 +22,7 @@ function make(opts = {}) {
     playIdle: (idle) => { log.idles.push(idle.id); return !state.refuse; },
     placeAtMe: (base) => { const n = (log.ghosts || []).length; const g = { base, at: null, rot: null, gone: false, id: 0xff000100 + n, getFormID: () => g.id, getBaseObject: () => ({ getFormID: () => base.id }), blockActivation: (v) => { g.blocked = v; }, setMotionType: (t) => { g.motion = t; g.motions = (g.motions || 0) + 1; }, setPosition: (x, y, z) => { g.at = [x, y, z]; g.moves = (g.moves || 0) + 1; }, setAngle: (a, b, c) => { g.rot = [a, b, c]; }, getAngleZ: () => (g.rot ? g.rot[2] : 0), getAngleX: () => (g.rot ? g.rot[0] : 0), getPositionX: () => (g.at ? g.at[0] + (g.fell || 0) : 0), getPositionY: () => (g.at ? g.at[1] : 0), getPositionZ: () => (g.at ? g.at[2] - (g.fell || 0) : 0), is3DLoaded: () => !state.no3d, translateTo: (...a) => { (g.turns = g.turns || []).push(a); }, disable() { g.gone = true; }, delete() { g.gone = true; } }; if (base.id === 0x5eae2) { g.id = 0xff100000 + (log.lights || []).length; (log.lights = log.lights || []).push(g); } else (log.ghosts = log.ghosts || []).push(g); (log.world = log.world || {})[g.id] = g; return g; },
     setActorValue: (n, v) => { (log.avSet = log.avSet || []).push([n, v]); }, getActorValue: (n) => (state.av || {})[n] || 0, damageActorValue: (n, v) => { log.damage = (log.damage || []).concat([[n, Math.round(v)]]); state.av[n] -= v; },
-    isWeaponDrawn: () => state.drawn, sheatheWeapon: () => { log.sheathed = (log.sheathed || 0) + 1; state.sheathing = true; }, isDead: () => !!state.dead, isOnMount: () => !!state.mounted,
+    getFormID: () => 0x14, isWeaponDrawn: () => state.drawn, sheatheWeapon: () => { log.sheathed = (log.sheathed || 0) + 1; state.sheathing = true; }, isDead: () => !!state.dead, isOnMount: () => !!state.mounted,
     getHeadingAngle: () => 30, getAngleZ: () => 100, setAngle: (a, b, c) => { log.turned = c; }, setPosition: (x, y, z) => { log.stood = [x, y, z]; }, moveTo: (ref, dx, dy, dz, match) => { log.movedTo = [ref.id, dx, dy, dz, match]; }, getPositionX: () => (log.stood ? log.stood[0] : 480), getPositionY: () => (log.stood ? log.stood[1] : 560), getPositionZ: () => (log.stood ? log.stood[2] : 44),
     getFurnitureReference: () => (state.furn ? { getFormID: () => state.furn } : null),
     getSitState: () => state.sitState || 0,
@@ -34,7 +34,7 @@ function make(opts = {}) {
     printConsole() {}, writeLogs: (n, l) => log.lines.push(l),
     Game: { getPlayer: () => player, getFormEx: (id) => (log.world && log.world[id] ? (log.world[id].gone ? null : log.world[id]) : { id }), getFormFromFile: (id, file) => (file === "Missing.esp" ? null : { id, file, getFormID: () => id }), forceThirdPerson: () => { log.thirdPerson++; state.cam = 9; }, forceFirstPerson: () => { log.firstPerson = (log.firstPerson || 0) + 1; state.cam = 0; }, getCameraState: () => (state.cam === undefined ? 9 : state.cam), disablePlayerControls: (...a) => (a[2] === true && !a[0] && !a[1] ? (log.pov = log.pov || []) : (log.controls = log.controls || [])).push(["off", ...a]), enablePlayerControls: (...a) => (a[2] === true && !a[0] && !a[1] ? (log.pov = log.pov || []) : (log.controls = log.controls || [])).push(["on", ...a]) },
     callNative: (cls, fn, self, a, b) => { (log.natives = log.natives || []).push([cls, fn, a]); if (cls !== "GreymarchCam" || state.noDll) throw new Error("Native function not found"); if (fn === "GetFurnitureMarker") return state.marker ? state.marker[b] : -99999; if (fn === "SetFreeCamera") { state.free = !!a; return true; } if (fn === "IsFreeCamera") return !!state.free; if (fn === "GetCamera") return (state.cam || [0, 0, 0, 0, 1, 0])[a]; return undefined; },
-    Idle: { from: (f) => f || null }, ObjectReference: { from: (f) => (f && f.setPosition ? f : f && f.id ? { id: f.id, getPositionX: () => 500, getPositionY: () => 600, getPositionZ: () => 10, getAngleZ: () => 90 } : null) }, Actor: { from: (f) => (f && actors[f.id]) || null }, Potion: { from: (f) => (f && f.potion) || null },
+    EffectShader: { from: (f) => (f ? { shaderId: f.id } : null) }, Idle: { from: (f) => f || null }, ObjectReference: { from: (f) => (f && f.setPosition ? f : f && f.id ? { id: f.id, getPositionX: () => 500, getPositionY: () => 600, getPositionZ: () => 10, getAngleZ: () => 90 } : null) }, Actor: { from: (f) => (f && actors[f.id]) || null }, Potion: { from: (f) => (f && f.potion) || null },
     Debug: { sendAnimationEvent: (ref, name) => log.events.push(name), notification: (t) => log.notes.push(t) },
     Ui: { isMenuOpen: (name) => name === state.menu },
     Input: { tapKey: (k) => { log.taps = (log.taps || []).concat([k]); if (state.menu === "InventoryMenu" || state.menu === "FavoritesMenu") state.menu = null; }, getMappedKey: (c) => (c === "Tween Menu" ? state.tweenKey || 15 : 0) },
@@ -946,4 +946,17 @@ test("a poison put on the weapon in hand is reported to the server (2026-11-03: 
   assert.strictEqual(s.log.sent.filter((m) => m.customPacketType === "greymarchPoisonApplied").length, 1, "once");
   s.state.inv = [{ baseId: 0x557f5, count: 1, worn: false, poisonId: 0x73f31 }, { baseId: 0x12eb7, count: 1, worn: true }]; s.tick(600);
   assert.strictEqual(s.log.sent.filter((m) => m.customPacketType === "greymarchPoisonApplied").length, 1, "a poisoned weapon in the pack is not in hand");
+});
+
+test("a poisoned blade glows (2026-11-03): the server's list goes to GreymarchCam.SetWeaponGlow on the weapon, again when it is drawn or put away and every 5 s, off when the poison is used", () => {
+  const OTHER = 0xff000777;
+  const s = make({ others: { [OTHER]: 0xff000abc } });
+  const glows = () => (s.log.natives || []).filter((n) => n[1] === "SetWeaponGlow");
+  s.say({ customPacketType: "greymarchPoisoned", actors: [OTHER] }); s.tick(600);
+  assert.strictEqual(glows().length, 1, "another player's blade glows in this game");
+  s.tick(600); assert.strictEqual(glows().length, 1, "not asked again at once");
+  s.tick(5000); assert.strictEqual(glows().length, 2, "asked again after 5 s (a body drawn again loses it)");
+  s.say({ customPacketType: "greymarchPoisoned", actors: [] }); s.tick(600);
+  assert.strictEqual(glows().length, 3, "taken off");
+  s.tick(600); s.tick(5000); assert.strictEqual(glows().length, 3, "nothing more");
 });

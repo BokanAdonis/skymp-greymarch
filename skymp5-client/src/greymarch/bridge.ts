@@ -36,6 +36,7 @@ const SHAPE_REST_MS = 800, SHAPE_POWER_REST_MS = 1600; // a creature's attacks: 
 const SHAPE_LAND_MS = 450; // a creature's swing is reported this long after it starts (about when it lands)
 const SHAPE_NPC_READY_MS = 8000; // a creature NPC that is not ready this long after it was placed is placed again
 const SHAPE_SILENCE_MS = 20000; // a creature form: with no word from the server for this long the player changes back by themselves (the server repeats "on" every 5 seconds)
+const POISON_GLOW_SHADER = 0x5d606; // EnchGreenFXShader (Skyrim.esm): the green glow the game puts on an enchanted weapon, for a poisoned blade (greymarchPoisonGlowTick)
 const SIT_RESET_MS = 2000; // standing up from the wheel's sitting: the body is put back to normal this long after the stand-up starts (greymarchSitResetTick)
 const WORK_SHEATHE_MS = 1500; // profession work: the kneel waits this long after the weapon is put away (the put-away animation ends first)
 const EMOTE_ONCE_POV_MS = 5000; // a one-off emote (a wave, a bow): first person stays off this long (greymarchEmotePovLock)
@@ -270,6 +271,7 @@ export class GreymarchBridge {
         if (type === "greymarchEmote") { if (typeof msg.emote === "string" && msg.emote.length < 40) this.greymarchServerEmote = { id: msg.emote, ms: Math.max(500, Math.min(30000, Number(msg.ms) || 4000)), at: Date.now() }; return; } // the server asks for an emote (a Harvester or Chef kneeling at a salt deposit): played in greymarchEmoteTick
         if (type === "greymarchMinigame") { this.greymarchMiniShow(msg); return; } // a profession mini game before the work (gamemode minigames.js)
         if (type === "greymarchMinigameDone") { this.greymarchMiniDone(msg); return; }
+        if (type === "greymarchPoisoned") { this.greymarchPoisonedWant = Array.isArray(msg.actors) ? msg.actors.map((a: any) => Number(a) >>> 0).filter((a: number) => a > 0).slice(0, 64) : []; return; } // THE GLOW (greymarchPoisonGlowTick)
         if (type === "greymarchPoisonUsed") { this.greymarchPoisonStripWanted = Date.now(); return; } // POISONS ON WEAPONS (greymarchPoisonTick)
         if (type === "greymarchPoisonFx") { var pz = Number(msg.paralyze); if (pz > 0 && pz <= 60) this.greymarchPoisonParalyzeWanted = pz; return; }
         if (type === "greymarchOwnLook") { if (msg.look && typeof msg.look === "object" && Array.isArray(msg.look.headpartIds) && msg.look.headpartIds.length) { this.greymarchOwnLookWant = msg.look; this.greymarchOwnLookRebuild = msg.rebuild === true; } return; } // the barber refused a race or sex change (gamemode barber.js): the old look back on this body (greymarchOwnLookTick)
@@ -4261,6 +4263,7 @@ export class GreymarchBridge {
         }
         this.greymarchSitResetTick(now);
         this.greymarchPoisonTick(now);
+        this.greymarchPoisonGlowTick(now);
         this.greymarchEmotePovLock(!!this.greymarchEmoteNow || now < (this.greymarchEmotePovUntil || 0) || !!this.greymarchMiniOn || !!this.greymarchForgeAnim || !!this.greymarchForgeOn || now - (this.greymarchWorkStartAt || -1e12) < 1500 || !!this.greymarchSitResetAt, now); // standing up from sitting: third person until the body is back to normal, THEN first person (2026-11-02, the owner: going back to first person mid stand-up made them fall and float) // a meal too, and profession work (2026-11-02, the owner)
         if (this.greymarchMealLocked && !(this.greymarchEmoteNow && this.greymarchEmoteNow.meal)) this.greymarchMealLock(false, "the meal ended another way"); // never left frozen (a beast form, an emote dropped elsewhere)
         var cur = this.greymarchEmoteNow;
@@ -4459,6 +4462,34 @@ export class GreymarchBridge {
     // POISONS ON WEAPONS (2026-11-03, the owner: the poison stayed on the blade; gamemode weaponpoison.js does what it does to whoever is hit). The server says
     // when a hit has used it: it comes off the weapon in hand (sync/inventory.ts greymarchStripPoison). A paralysing poison that hit THIS player: paralysed
     // (the Paralysis actor value) for its seconds, and let go after; let go too if they die meanwhile.
+    // A POISONED BLADE GLOWS (2026-11-03, the owner: on the sword only). The server says who carries one (greymarchPoisoned); each of them that this game draws
+    // gets the game's green enchantment glow (EnchGreenFXShader) on the weapon alone, through GreymarchCamera.dll 1.10 (GreymarchCam.SetWeaponGlow). Asked
+    // again when they draw or sheathe it and every 5 s (a body drawn again loses it); taken off when the poison is used. Without the DLL: nothing, said once.
+    greymarchPoisonGlowTick(now: number): any {
+        if (now < (this.greymarchPoisonGlowAt || 0)) return;
+        this.greymarchPoisonGlowAt = now + 500;
+        var sp = this.sp, self = this, want = this.greymarchPoisonedWant || [], shown = this.greymarchPoisonGlowOn || (this.greymarchPoisonGlowOn = {});
+        if (!want.length && !Object.keys(shown).length) return;
+        var shader: any = null; try { shader = sp.EffectShader.from(sp.Game.getFormEx(POISON_GLOW_SHADER)); } catch (e) { shader = null; }
+        if (!shader) return;
+        var call = function (actor: any, on: boolean): boolean { try { return !!sp.callNative("GreymarchCam", "SetWeaponGlow", undefined, actor, shader, on); } catch (e) { if (!self.greymarchPoisonGlowSaid) { self.greymarchPoisonGlowSaid = true; self.greymarchLog("poison glow: GreymarchCamera.dll has no SetWeaponGlow (" + e + ")"); } return false; } };
+        var still: any = {};
+        for (var i = 0; i < want.length; i++) {
+            var local = this.greymarchMeActor && want[i] === this.greymarchMeActor ? 0x14 : misc.remoteIdToLocalId(want[i]);
+            if (!local) continue;
+            var a: any = null; try { a = sp.Actor.from(sp.Game.getFormEx(local)); } catch (e) { a = null; }
+            if (!a) continue;
+            var drawn = false; try { drawn = !!a.isWeaponDrawn(); } catch (e) { drawn = false; }
+            still[local] = true;
+            var was = shown[local];
+            if (!was || was.drawn !== drawn || now - was.at >= 5000) { call(a, true); shown[local] = { drawn: drawn, at: now }; }
+        }
+        for (var k in shown) {
+            if (still[k]) continue;
+            delete shown[k];
+            try { var b = sp.Actor.from(sp.Game.getFormEx(Number(k))); if (b) call(b, false); } catch (e) { /* gone */ }
+        }
+    }
     greymarchPoisonTick(now: number): any {
         var sp = this.sp;
         // A POISON PUT ON (2026-11-03, the owner's test: the poison came back to the pack and did nothing): the game sends no equip event when a poison goes on a
