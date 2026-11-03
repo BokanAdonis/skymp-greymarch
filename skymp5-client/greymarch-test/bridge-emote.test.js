@@ -617,7 +617,9 @@ test("profession work in third person (2026-11-02, the owner: skinning with the 
   assert.strictEqual(s.log.pov.at(-1)[0], "off", "no first person");
   assert.deepStrictEqual(s.log.idles, [], "the kneel waits for the bow");
   assert.ok(!s.log.notes.includes("Sheathe your weapon first"), "no complaint");
-  s.state.drawn = false; s.tick();
+  s.state.drawn = false; s.tick(300);
+  assert.deepStrictEqual(s.log.idles, [], "not while the put-away animation still plays (the game says not drawn as it starts)");
+  s.tick(1300);
   assert.deepStrictEqual(s.log.idles, [emotes.emoteById("searchbody").idle], "then the kneel");
   s.say({ customPacketType: "greymarchMinigameDone", ok: true, target: 0x1234 });
   for (let i = 0; i < 40; i++) s.tick(50);

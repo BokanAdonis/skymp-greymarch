@@ -35,6 +35,7 @@ const SHAPE_REST_MS = 800, SHAPE_POWER_REST_MS = 1600; // a creature's attacks: 
 const SHAPE_LAND_MS = 450; // a creature's swing is reported this long after it starts (about when it lands)
 const SHAPE_NPC_READY_MS = 8000; // a creature NPC that is not ready this long after it was placed is placed again
 const SHAPE_SILENCE_MS = 20000; // a creature form: with no word from the server for this long the player changes back by themselves (the server repeats "on" every 5 seconds)
+const WORK_SHEATHE_MS = 1500; // profession work: the kneel waits this long after the weapon is put away (the put-away animation ends first)
 const EMOTE_ONCE_POV_MS = 5000; // a one-off emote (a wave, a bow): first person stays off this long (greymarchEmotePovLock)
 const WOLF_BACK_GRACE_MS = 2000; // Z changes back, but not in the first 2 seconds after the body changed
 const STANDUP_FALLBACK_MS = 1500; // greymarchStandUp: still in the furniture this long after the get-up animation was asked for, the player is snapped to standing
@@ -4047,13 +4048,15 @@ export class GreymarchBridge {
             this.greymarchWorkStartWanted = 0; this.greymarchWorkStartAt = now; // locked from now (the station animation starts a moment later)
             if (!this.greymarchWolfOn && !this.greymarchShapeOn) {
                 this.greymarchEmotePovNote();
-                try { var wp = this.sp.Game.getPlayer(); if (wp && wp.isWeaponDrawn()) { wp.sheatheWeapon(); this.greymarchCrumb("work: weapon put away"); } } catch (shErr) { /* the kneel waits or is skipped */ }
+                try { var wp = this.sp.Game.getPlayer(); if (wp && wp.isWeaponDrawn()) { wp.sheatheWeapon(); this.greymarchWorkSheathedAt = now; this.greymarchCrumb("work: weapon put away"); } } catch (shErr) { /* the kneel waits or is skipped */ }
                 try { this.sp.Game.forceThirdPerson(); } catch (tpErr) { /* the lock still holds */ }
             }
         }
         var play = this.greymarchEmotePlayWanted;
         var playDrawn = false; if (play && play.work) { try { playDrawn = !!this.sp.Game.getPlayer().isWeaponDrawn(); } catch (pdErr) { playDrawn = false; } }
-        if (play && playDrawn && now - play.at <= 4000) play = null; // the weapon is still being put away: the kneel waits (up to 4 s)
+        // the weapon is still being put away: the kneel waits (up to 4 s). The game says "not drawn" as the put-away animation STARTS, and a kneel played then is
+        // swallowed by it (2026-11-02, the owner: the bow went away but no kneel; the log had the kneel 0.7 s after), so it also waits WORK_SHEATHE_MS after it
+        if (play && play.work && (playDrawn || now < (this.greymarchWorkSheathedAt || 0) + WORK_SHEATHE_MS) && now - play.at <= 4000) play = null;
         if (play) {
             this.greymarchEmotePlayWanted = null;
             var em = emoteMod.emoteById(play.id);
