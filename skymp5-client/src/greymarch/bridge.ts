@@ -950,7 +950,7 @@ export class GreymarchBridge {
             if (!this.greymarchWolfOn && raceId && !this.greymarchWolfIsBeast(raceId)) this.greymarchWolfHumanRace = raceId; // the race to go back to
             if (now >= (this.greymarchWolfPowerNext || 0)) { // for the log: is Beast Form in the player's spell list?
                 this.greymarchWolfPowerNext = now + 5000;
-                try { var pw = sp.Spell.from(sp.Game.getFormEx(0x92c48)); var has = !!pw && player.hasSpell(pw); if (has !== this.greymarchWolfHadPower) { this.greymarchWolfHadPower = has; this.greymarchLog("wolf: the Beast Form power is " + (has ? "in" : "NOT in") + " the player's spell list"); } } catch (pErr) { /* not important */ }
+                try { var pw = sp.Spell.from(sp.Game.getFormEx(0x92c48)); var has = !!pw && player.hasSpell(pw); if (has !== this.greymarchWolfHadPower) { this.greymarchWolfHadPower = has; this.greymarchLog("wolf: the Beast Form power is " + (has ? "in" : "NOT in") + " the player's spell list"); if (has && !this.greymarchWolfOn) { /* GREYMARCH (2026-11-03, the owner: the power back when the hour is over): given again, it goes straight into the power slot (Z); the server's own equip may not reach this game */ try { var eqNow = player.getEquippedSpell(2); if (!eqNow || eqNow.getFormID() !== 0x92c48) { player.equipSpell(pw, 2); this.greymarchLog("wolf: Beast Form put in the power slot"); } } catch (eqSetErr) { /* the player equips it from the Magic menu */ } } } } catch (pErr) { /* not important */ }
             }
             try { // the power's effect on the player is a signal too (in case the game events are missed)
                 var fx = sp.MagicEffect.from(sp.Game.getFormEx(0x92c45));
