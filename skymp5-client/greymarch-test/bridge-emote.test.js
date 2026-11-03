@@ -905,3 +905,15 @@ test("standing up from sitting puts the body back to normal 2 seconds later (202
   c.page({ type: "emote", id: "sit" }); c.tick(); c.key(17, true); c.tick(); c.state.sitState = 3;
   c.tick(2500); assert.ok(!c.log.events.includes("IdleForceDefaultState"), "in a real seat: left alone");
 });
+
+test("sitting in first person: back to first person only after the stand-up is over (2026-11-02, the owner: going back mid stand-up made them fall and float)", () => {
+  const s = make(); s.state.refuse = true; s.state.cam = 0;
+  s.page({ type: "emote", id: "sit" }); s.tick();
+  assert.strictEqual(s.state.cam, 9);
+  s.key(17, true); s.tick();
+  assert.strictEqual(s.state.cam, 9, "still third person as the stand-up starts");
+  s.tick(1500); assert.strictEqual(s.state.cam, 9, "and while it plays");
+  s.tick(600);
+  assert.strictEqual(s.log.events.at(-1), "IdleForceDefaultState");
+  assert.strictEqual(s.state.cam, 0, "then first person");
+});

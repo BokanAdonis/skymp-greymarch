@@ -4078,7 +4078,7 @@ export class GreymarchBridge {
             }
         }
         this.greymarchSitResetTick(now);
-        this.greymarchEmotePovLock(!!this.greymarchEmoteNow || now < (this.greymarchEmotePovUntil || 0) || !!this.greymarchMiniOn || !!this.greymarchForgeAnim || !!this.greymarchForgeOn || now - (this.greymarchWorkStartAt || -1e12) < 1500, now); // a meal too, and profession work (2026-11-02, the owner)
+        this.greymarchEmotePovLock(!!this.greymarchEmoteNow || now < (this.greymarchEmotePovUntil || 0) || !!this.greymarchMiniOn || !!this.greymarchForgeAnim || !!this.greymarchForgeOn || now - (this.greymarchWorkStartAt || -1e12) < 1500 || !!this.greymarchSitResetAt, now); // standing up from sitting: third person until the body is back to normal, THEN first person (2026-11-02, the owner: going back to first person mid stand-up made them fall and float) // a meal too, and profession work (2026-11-02, the owner)
         if (this.greymarchMealLocked && !(this.greymarchEmoteNow && this.greymarchEmoteNow.meal)) this.greymarchMealLock(false, "the meal ended another way"); // never left frozen (a beast form, an emote dropped elsewhere)
         var cur = this.greymarchEmoteNow;
         if (!cur) { this.greymarchEmoteStopWanted = 0; return; }
