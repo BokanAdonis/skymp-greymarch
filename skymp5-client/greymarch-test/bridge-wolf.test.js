@@ -32,7 +32,7 @@ function make(opts = {}) {
   const pass = (f) => (f ? f : null);
   const sp = {
     printConsole() {}, writeLogs: (n, l) => log.lines.push(l),
-    Game: { getPlayer: () => player, getFormEx: (id) => ({ id }), getFormFromFile: (id, file) => (opts.noAlpha || file !== "GreymarchCore.esp" ? null : id === 0x804 ? { getFormID: () => ALPHA } : id === 0x80a ? { getFormID: () => PUP } : id === 0x85c ? { getFormID: () => BLACK } : id === 0x861 ? { getFormID: () => POLAR } : ({ 0x866: FROST, 0x86b: RABID, 0x870: MOONBORN, 0x875: ELDER })[id] ? { getFormID: () => ({ 0x866: FROST, 0x86b: RABID, 0x870: MOONBORN, 0x875: ELDER })[id] } : null), setBeastForm() {}, enableFastTravel() {}, disablePlayerControls() {}, enablePlayerControls() {}, forceThirdPerson() {}, showFirstPersonGeometry() {} },
+    Game: { getPlayer: () => player, getFormEx: (id) => ({ id }), getFormFromFile: (id, file) => (opts.noAlpha || file !== "GreymarchCore.esp" ? null : id === 0x804 ? { getFormID: () => ALPHA } : id === 0x80a ? { getFormID: () => PUP } : id === 0x85c ? { getFormID: () => BLACK } : id === 0x861 ? { getFormID: () => POLAR } : ({ 0x866: FROST, 0x86b: RABID, 0x870: MOONBORN, 0x875: ELDER })[id] ? { getFormID: () => ({ 0x866: FROST, 0x86b: RABID, 0x870: MOONBORN, 0x875: ELDER })[id] } : null), setBeastForm() {}, enableFastTravel() {}, disablePlayerControls() {}, enablePlayerControls() {}, forceThirdPerson: () => { log.third = (log.third || 0) + 1; }, showFirstPersonGeometry() {} },
     Spell: { from: pass }, MagicEffect: { from: pass }, Race: { from: (f) => race(f.id) }, Actor: { from: (f) => (f && opts.actors && opts.actors[f.id]) || null }, Idle: { from: pass }, FormList: { from: () => null }, ImageSpaceModifier: { from: () => null }, Sound: { from: (f) => (f ? { play: (at) => { log.sounds.push([f.id, at && at.id !== undefined ? at.id : "player"]); return 1; } } : null) }, ObjectReference: { from: (f) => (f ? { id: f.id } : null) }, ActorBase: { from: () => null },
     Debug: { sendAnimationEvent: (ref, name) => log.events.push(name), notification() {} },
     Utility: { isInMenuMode: () => menu },
@@ -541,4 +541,18 @@ test("the walk: the run mode falls back to the graph's Speed (the werewolf graph
   assert.ok(mg.includes('const speed = ac.getAnimationVariableFloat("SpeedSampled") || ac.getAnimationVariableFloat("Speed");'));
   const fv = fs.readFileSync(path.join(__dirname, "..", "src", "view", "formView.ts"), "utf8");
   assert.ok(fv.includes("if (this.gmSpawnedBeast && !gmHoldStill) { try { const gmCb = Actor.from(refr); if (gmCb && gmCb.isInCombat()) gmCb.stopCombat(); }"));
+});
+
+test("changing back puts the camera behind them (2026-11-02: after a werewolf death the respawn left the death camera on; changing back did not end it), and again with the look a second later", () => {
+  const s = make();
+  s.say({ customPacketType: "greymarchWolfForm", on: true });
+  for (let i = 0; i < 16; i++) s.tick(300);
+  assert.strictEqual(s.race(), BEAST);
+  const before = s.log.third || 0;
+  s.say({ customPacketType: "greymarchWolfForm", on: false });
+  s.tick();
+  assert.strictEqual(s.race(), NORD);
+  assert.strictEqual(s.log.third, before + 1, "the change back forces the third-person camera");
+  for (let i = 0; i < 5; i++) s.tick(300);
+  assert.strictEqual(s.log.third, before + 2, "and once more when their look goes back on");
 });

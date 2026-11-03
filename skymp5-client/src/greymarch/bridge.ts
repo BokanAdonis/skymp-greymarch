@@ -1077,6 +1077,11 @@ export class GreymarchBridge {
             step = "camera"; sp.Game.showFirstPersonGeometry(true);
             step = "beast form"; sp.Game.setBeastForm(false);
             step = "fast travel"; sp.Game.enableFastTravel(false); // never on again (2026-10-30, the owner: fast travel off for everything)
+            // THE CAMERA BACK BEHIND THEM (2026-11-02, the owner: after a werewolf death and the respawn at the Shrine of Hircine the camera stayed looking at them,
+            // they could move but not look around; F did nothing, changing into the beast again fixed it). The change back comes the moment they are up, while the
+            // game is still in its death camera; the change INTO the beast forces the third-person camera (which ends any other camera state), the change back did not.
+            // Now it does too, and once more with the look a second later (greymarchWolfDress), in case the respawn was still under way.
+            step = "camera reset"; sp.Game.forceThirdPerson();
             step = "animation"; sp.Debug.sendAnimationEvent(player, "IdleForceDefaultState"); // the person's animations from their idle
             step = "redraw"; player.queueNiNodeUpdate();
             try { (sp.storage as any)["greymarchWolfOn"] = false; } catch (stErr) { /* nothing was set */ }
@@ -1107,6 +1112,7 @@ export class GreymarchBridge {
         this.greymarchWolfWearAt = 0;
         var sp = this.sp;
         var kept = null; try { kept = (sp.storage as any)["greymarchPendingAppearance"]; (sp.storage as any)["greymarchPendingAppearance"] = null; } catch (kErr) { kept = null; }
+        if (!this.greymarchShapeOn) { try { sp.Game.forceThirdPerson(); } catch (cErr) { /* the change back already did */ } } // THE CAMERA BACK BEHIND THEM (greymarchWolfUnbecome)
         if (kept && !this.greymarchShapeOn) { try { appearanceMod.applyAppearanceToPlayer(kept); this.greymarchLog("wolf: the character's own look put back"); } catch (aErr) { this.greymarchLog("wolf: the own look could not be put back: " + aErr); } }
         var list = this.greymarchWolfWear || [];
         this.greymarchWolfWear = [];
