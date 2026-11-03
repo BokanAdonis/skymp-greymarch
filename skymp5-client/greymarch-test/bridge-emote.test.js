@@ -532,7 +532,7 @@ test("the pointer: while a window holds the mouse and has the focus but the game
   assert.strictEqual(s.log.focused.length, m, "no window open: nothing");
 });
 
-test("a meal while sitting: the seated eating or drinking idle in a chair or on an edge, ended with ChairEatingStop (still sitting); cross-legged on the ground: nothing", () => {
+test("a meal while sitting: the seated eating or drinking idle in a chair or on an edge, ended with the IdleStop event (still sitting); cross-legged on the ground: nothing", () => {
   const s = make();
   s.state.sitState = 3; // in a chair
   s.eat("Venison Stew"); s.tick();
@@ -540,18 +540,18 @@ test("a meal while sitting: the seated eating or drinking idle in a chair or on 
   assert.ok(s.gm.greymarchEmoteNow && s.gm.greymarchEmoteNow.meal, "a meal: five seconds, the controls locked");
   for (let i = 0; i < 102; i++) s.tick(50);
   assert.strictEqual(s.gm.greymarchEmoteNow, null, "over after five seconds");
-  assert.deepStrictEqual(s.log.events, ["ChairEatingStop"], "back to sitting: no IdleStop");
-  assert.ok(!s.log.idles.includes(emotes.IDLE_STOP));
+  assert.deepStrictEqual(s.log.events, ["IdleStop"], "back to sitting: the event the chair graph listens to");
+  assert.ok(!s.log.idles.includes(emotes.IDLE_STOP), "not the IdleStop_Loose idle");
   s.log.idles.length = 0; s.log.events.length = 0;
   s.eat("Nord Mead"); s.tick(); assert.deepStrictEqual(s.log.idles, [0x65d07], "a drink: ChairDrinkingStart");
-  for (let i = 0; i < 102; i++) s.tick(50); assert.deepStrictEqual(s.log.events, ["ChairEatingStop"]);
+  for (let i = 0; i < 102; i++) s.tick(50); assert.deepStrictEqual(s.log.events, ["IdleStop"]);
 
   const e = make(); // on an edge (the wheel): the game wants a real seat, so the event itself; still sitting on the edge after
   e.page({ type: "emote", id: "sitledge" }); e.tick(); e.state.refuse = true; e.log.events.length = 0;
   e.eat("Apple Pie"); e.tick();
   assert.deepStrictEqual(e.log.events, ["ChairEatingStart"]);
   for (let i = 0; i < 102; i++) e.tick(50);
-  assert.deepStrictEqual(e.log.events, ["ChairEatingStart", "ChairEatingStop"]);
+  assert.deepStrictEqual(e.log.events, ["ChairEatingStart", "IdleStop"]);
   assert.ok(e.gm.greymarchEmoteNow && e.gm.greymarchEmoteNow.id === "sitledge", "still sitting on the edge: moving stands up as before");
   e.state.speed = 100; for (let i = 0; i < 20; i++) e.tick(50);
   assert.strictEqual(e.gm.greymarchEmoteNow, null); assert.strictEqual(e.log.events.at(-1), "IdleChairExitStart");
