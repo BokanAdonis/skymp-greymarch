@@ -61,6 +61,10 @@ const WOLF_ROAR_MS = 0; // R: no wait between roars (2026-10-21, the owner's cal
 const WOLF_HOWL_SHOUT = 0x0ce218;
 const WOLF_ROAR_SOUND = 0x101008, BEAR_ROAR_SOUND = 0x0f95bb; // NPCWerewolfShout (the werewolf's howl) and NPCBearAggroWarning01 (a bear's warning roar), Skyrim.esm
 // vampires (gamemode vampire.js): the game's own records, inside Dawnguard.esm (read from the game files); the real IDs are looked up with Game.getFormFromFile
+// DRAINED TO DEATH (2026-11-03, the owner: "if the player dies and wakes up in the temple they drunk walk for 5 minutes"): the server says { greymarchDrunk on, ms };
+// the game's own drunk walk (IdleDrunkStart, Skyrim.esm 0CEFD0; IdleDrunkStop 0CEFD1 ends it) and a swimming screen (BSHeartland's CYRWE14RevelerDrunkImod 0C9CC5),
+// both put on again every DRUNK_AGAIN_MS (a jump, a fight or a load ends the walk)
+const DRUNK_IDLE_START = 0x0cefd0, DRUNK_IDLE_STOP = 0x0cefd1, DRUNK_IMOD = 0x0c9cc5, DRUNK_AGAIN_MS = 10000;
 const FEED_REPLAY_MS = 6000; // the held feeding: the standing feed is played again at most this often (greymarchVampFeedHeld)
 const FEED_RETRY_MS = 300; // ... and when the game refused it (still finishing the last one), tried again this soon
 const FEED_RESET_AFTER = 4; // refused this many times in a row: the biter is put back to the default pose first (the game will not start a paired idle over a stuck one)
@@ -238,6 +242,7 @@ export class GreymarchBridge {
         if (type === "greymarchRaceMenuLook") { var rm0 = this.greymarchRmState(); rm0.want = msg.look && typeof msg.look === "object" ? msg.look : {}; rm0.tries = 0; return; } // RaceMenu's extra sliders of this character, kept by the server (greymarchRaceMenuTick)
         if (type === "greymarchVampire") { this.greymarchVampWant = msg.on ? msg : null; this.greymarchVampCostTold = {}; this.greymarchHudToPage("blood", { on: !!msg.on, blood: msg.blood, empty: !!msg.empty }); return; } // a vampire's state: the blood drop and what the game applies (greymarchVampTick)
         if (type === "greymarchVampLooks") { this.greymarchVampLookList = Array.isArray(msg.vampires) ? msg.vampires : []; if (Number(msg.me) > 0) this.greymarchMeActor = Number(msg.me) >>> 0; return; } // (me: which of them is this player: the ghosts and effects packets that also say so may not have come yet, and without it the player's own eyes and fangs were never put on) // how every vampire in the world looks (eyes and fangs)
+        if (type === "greymarchDrunk") { this.greymarchDrunkWant = msg.on ? { until: Date.now() + Math.max(0, Number(msg.ms) || 0), at: 0 } : { off: true }; return; } // drained to death: the drunk walk after waking (greymarchDrunkTick)
         if (type === "greymarchVampFeed") { if (!msg.on && this.greymarchVampFeedHold) this.greymarchLog("vampire: the server ended the feeding" + (msg.why ? " (" + String(msg.why).slice(0, 80) + ")" : "")); this.greymarchVampFeedWant = msg.on ? { role: msg.role, partner: msg.partner, at: Date.now(), done: false } : { off: true }; return; } // the feeding scene (held until the vampire stops: greymarchVampFeedHeld)
         if (type === "greymarchVampMist") { if (!msg.on) this.greymarchVampMistEnd = true; return; } // Mist Form refused or over: the game's own mist is ended
         if (type === "greymarchVampLord") { if (this.greymarchVampLordWas !== !!msg.on) { this.greymarchVampLordWas = !!msg.on; this.greymarchLog("vampire: the server says the Lord's shape is " + (msg.on ? "on" : "off")); } return; } // the body itself is the creature form (greymarchShape)
@@ -1407,17 +1412,20 @@ export class GreymarchBridge {
             try { var lid = misc.remoteIdToLocalId(fd.partner); other = lid ? sp.Actor.from(sp.Game.getFormEx(lid)) : null; } catch (oErr) { other = null; }
             if (fd.off) {
                 this.greymarchVampFeedWant = null; this.greymarchVampFeedHold = null;
+                this.greymarchVampFeedLock(false);
                 try { sp.Debug.sendAnimationEvent(player, "IdleForceDefaultState"); } catch (e1) { /* it ends by itself */ }
                 var was = this.greymarchVampFeedOther; this.greymarchVampFeedOther = null;
                 if (was) { try { sp.Debug.sendAnimationEvent(was, "IdleForceDefaultState"); } catch (e2) { /* gone */ } }
             } else {
                 // held until the server says off: the animation is played again whenever it ran out, and the vampire's own movement key asks the server to end it
                 this.greymarchVampFeedHold = { role: fd.role, partner: fd.partner, playedAt: 0, keysUp: {}, asked: false };
+                this.greymarchVampFeedLock(true);
                 if (!other) this.greymarchLog("vampire: the feeding partner is not loaded here");
                 else { this.greymarchVampFeedOther = other; this.greymarchVampFeedPlay(player, other, now, true); }
             }
         }
         this.greymarchVampFeedHeld(player, now);
+        this.greymarchDrunkTick(player, now);
         this.greymarchVampFangsWear(now); // the worn fangs the server gave: put on (SkyMP then shows them to everyone)
         this.greymarchVampEyes(now); // every vampire's blue eyes, on this screen
     }
@@ -1441,6 +1449,39 @@ export class GreymarchBridge {
             if (h.refused === 1 || h.refused === FEED_RESET_AFTER) this.greymarchLog("vampire: feeding (" + h.role + "), the animation " + (first ? "" : "again ") + "was refused by the game" + (h.refused === FEED_RESET_AFTER ? " " + FEED_RESET_AFTER + " times: resetting the pose" : ""));
             h.playedAt = now - FEED_REPLAY_MS + FEED_RETRY_MS; // soon again
         }
+    }
+    // LOCKED IN THE FEEDING (2026-11-03, the owner: "both players get locked in feed animation ... until the vampire cancels feed"): neither walks, fights, sneaks
+    // or uses things while it lasts; the camera and the menus stay. The vampire still ends it with a movement key (read from the keyboard, not the controls).
+    greymarchVampFeedLock(on: boolean): any {
+        var sp = this.sp;
+        if (on === !!this.greymarchVampFeedLocked) return;
+        try {
+            if (on) sp.Game.disablePlayerControls(true, true, false, false, true, false, true, false, 0);
+            else sp.Game.enablePlayerControls(true, true, false, false, true, false, true, false, 0);
+            this.greymarchVampFeedLocked = on;
+            this.greymarchLog("vampire: feeding " + (on ? "locks" : "unlocks") + " the controls");
+        } catch (e) { this.greymarchLog("vampire: the controls could not be " + (on ? "locked" : "unlocked") + ": " + String(e).slice(0, 120)); }
+    }
+    greymarchDrunkTick(player: any, now: number): any {
+        var sp = this.sp, d = this.greymarchDrunkWant; if (!d) return;
+        var off = d.off || now >= d.until;
+        var imod: any = null; try { imod = sp.ImageSpaceModifier.from(sp.Game.getFormFromFile(DRUNK_IMOD, "BSHeartland.esm")); } catch (iErr) { imod = null; }
+        if (off) {
+            this.greymarchDrunkWant = null;
+            if (!this.greymarchDrunkOn) return;
+            this.greymarchDrunkOn = false;
+            try { var stop = sp.Idle.from(sp.Game.getFormEx(DRUNK_IDLE_STOP)); if (stop) player.playIdle(stop); } catch (sErr) { /* the walk ends with the next idle */ }
+            try { if (imod) sp.ImageSpaceModifier.removeCrossFade(1.0); } catch (rErr) { /* it fades by itself */ }
+            this.greymarchLog("drunk: over");
+            return;
+        }
+        if (now - d.at < DRUNK_AGAIN_MS) return;
+        d.at = now;
+        if (this.greymarchWolfOn || this.greymarchShapeOn || this.greymarchVampFeedHold) return; // a beast's body or the feeding: the walk waits
+        var played = false;
+        try { var start = sp.Idle.from(sp.Game.getFormEx(DRUNK_IDLE_START)); if (start) played = !!player.playIdle(start); } catch (pErr) { played = false; }
+        try { if (imod) imod.applyCrossFade(1.0); } catch (aErr) { /* the walk alone */ }
+        if (!this.greymarchDrunkOn) { this.greymarchDrunkOn = true; this.greymarchLog("drunk: on for " + Math.round((d.until - now) / 1000) + " s (walk " + (played ? "played" : "refused") + ", screen " + (imod ? "on" : "missing") + ")"); }
     }
     greymarchVampFeedHeld(player: any, now: number): any {
         var sp = this.sp, h = this.greymarchVampFeedHold; if (!h) return;

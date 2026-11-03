@@ -249,6 +249,7 @@ export class AuthService extends ClientListener {
       case 'greymarchFavorites': // this character's favorites and hotkeys (gamemode favorites.js)
       case 'greymarchMapMarkers': // every map marker and the ones this character has found (gamemode mapmarkers.js)
       case 'greymarchVampFeed':
+      case 'greymarchDrunk': // drained to death by a vampire: the drunk walk after waking (2026-11-03)
       case 'greymarchVampMist':
       case 'greymarchVampLord':
       case 'greymarchVampMenuReply':
