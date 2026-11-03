@@ -36,6 +36,17 @@ public:
            Napi::Value newValue) override;
 };
 
+// GREYMARCH: mp.set(actorId, "fistMult", 2.25) multiplies only that actor's fist hits, on top of damageMult (0.1 to 5; 1 = no change): the brass knuckles.
+class FistMultBinding : public PropertyBinding
+{
+public:
+  std::string GetPropertyName() const override { return "fistMult"; }
+  Napi::Value Get(Napi::Env env, ScampServer& scampServer,
+                  uint32_t formId) override;
+  void Set(Napi::Env env, ScampServer& scampServer, uint32_t formId,
+           Napi::Value newValue) override;
+};
+
 // GREYMARCH: mp.set(actorId, "damageMult", 0.88) multiplies every weapon or fist hit that actor lands (0.1 to 5; 1 = no change).
 class DamageMultBinding : public PropertyBinding
 {

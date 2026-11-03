@@ -49,6 +49,26 @@ void DamageMultBinding::Set(Napi::Env, ScampServer& scampServer,
   actor.SetGreymarchDamageMult(std::clamp(mult, 0.1f, 5.f));
 }
 
+Napi::Value FistMultBinding::Get(Napi::Env env, ScampServer& scampServer,
+                                 uint32_t formId)
+{
+  auto& actor =
+    scampServer.GetPartOne()->worldState.GetFormAt<MpActor>(formId);
+  return Napi::Number::New(env, actor.GetGreymarchFistMult());
+}
+
+void FistMultBinding::Set(Napi::Env, ScampServer& scampServer,
+                          uint32_t formId, Napi::Value newValue)
+{
+  float mult = NapiHelper::ExtractFloat(newValue, "fistMult");
+  if (!std::isfinite(mult)) {
+    mult = 1.f;
+  }
+  auto& actor =
+    scampServer.GetPartOne()->worldState.GetFormAt<MpActor>(formId);
+  actor.SetGreymarchFistMult(std::clamp(mult, 0.1f, 5.f));
+}
+
 Napi::Value HitsToKillBinding::Get(Napi::Env env, ScampServer& scampServer,
                                    uint32_t formId)
 {

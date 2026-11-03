@@ -189,6 +189,11 @@ public:
   // Brawler). 1 = no change. Not saved: the gamemode sets it again.
   void SetGreymarchDamageMult(float mult) noexcept;
   float GetGreymarchDamageMult() const noexcept;
+  // GREYMARCH: a multiplier on this actor's fist hits only, on top of the one
+  // above (the brass knuckles, 2026-11-03: they work with a weapon in the left
+  // hand, whose hits must not get the knuckles' bonus). 1 = no change.
+  void SetGreymarchFistMult(float mult) noexcept;
+  float GetGreymarchFistMult() const noexcept;
   // GREYMARCH: when above 0, every weapon or claw hit this actor lands on a
   // player takes that player's maximum health / hits, whatever their armor,
   // health or the attacker's multiplier (a blocked hit still lets less

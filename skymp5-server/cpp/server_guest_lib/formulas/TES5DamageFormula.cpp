@@ -368,6 +368,11 @@ float TES5DamageFormulaImpl::CalculateDamage() const
     attackerMult = 1.f - (1.f - attackerMult) * *balance.pvpRankKeep;
   }
   damage *= attackerMult;
+  // GREYMARCH: the fist hits' own multiplier (the brass knuckles), so a weapon
+  // in the other hand keeps only the one above
+  if (IsUnarmedAttack(hitData.source)) {
+    damage *= aggressor.GetGreymarchFistMult();
+  }
   if (pvp && balance.pvpDamage.has_value()) {
     damage *= *balance.pvpDamage;
   }
