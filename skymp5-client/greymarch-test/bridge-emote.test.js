@@ -22,7 +22,7 @@ function make(opts = {}) {
     playIdle: (idle) => { log.idles.push(idle.id); return !state.refuse; },
     placeAtMe: (base) => { const n = (log.ghosts || []).length; const g = { base, at: null, rot: null, gone: false, id: 0xff000100 + n, getFormID: () => g.id, getBaseObject: () => ({ getFormID: () => base.id }), blockActivation: (v) => { g.blocked = v; }, setMotionType: (t) => { g.motion = t; g.motions = (g.motions || 0) + 1; }, setPosition: (x, y, z) => { g.at = [x, y, z]; g.moves = (g.moves || 0) + 1; }, setAngle: (a, b, c) => { g.rot = [a, b, c]; }, getAngleZ: () => (g.rot ? g.rot[2] : 0), getAngleX: () => (g.rot ? g.rot[0] : 0), getPositionX: () => (g.at ? g.at[0] + (g.fell || 0) : 0), getPositionY: () => (g.at ? g.at[1] : 0), getPositionZ: () => (g.at ? g.at[2] - (g.fell || 0) : 0), is3DLoaded: () => !state.no3d, translateTo: (...a) => { (g.turns = g.turns || []).push(a); }, disable() { g.gone = true; }, delete() { g.gone = true; } }; if (base.id === 0x5eae2) { g.id = 0xff100000 + (log.lights || []).length; (log.lights = log.lights || []).push(g); } else (log.ghosts = log.ghosts || []).push(g); (log.world = log.world || {})[g.id] = g; return g; },
     getActorValue: (n) => (state.av || {})[n] || 0, damageActorValue: (n, v) => { log.damage = (log.damage || []).concat([[n, Math.round(v)]]); state.av[n] -= v; },
-    isWeaponDrawn: () => state.drawn, isDead: () => !!state.dead, isOnMount: () => !!state.mounted,
+    isWeaponDrawn: () => state.drawn, sheatheWeapon: () => { log.sheathed = (log.sheathed || 0) + 1; state.sheathing = true; }, isDead: () => !!state.dead, isOnMount: () => !!state.mounted,
     getHeadingAngle: () => 30, getAngleZ: () => 100, setAngle: (a, b, c) => { log.turned = c; }, setPosition: (x, y, z) => { log.stood = [x, y, z]; }, moveTo: (ref, dx, dy, dz, match) => { log.movedTo = [ref.id, dx, dy, dz, match]; }, getPositionX: () => (log.stood ? log.stood[0] : 480), getPositionY: () => (log.stood ? log.stood[1] : 560), getPositionZ: () => (log.stood ? log.stood[2] : 44),
     getFurnitureReference: () => (state.furn ? { getFormID: () => state.furn } : null),
     getSitState: () => state.sitState || 0,
@@ -606,6 +606,23 @@ test("back to first person after an emote or a meal, only if they were in first 
   r.page({ type: "emote", id: "hey" }); r.tick(); r.state.drawn = false; r.state.cam = 9; r.tick();
   r.page({ type: "emote", id: "hey" }); r.tick(); r.state.speed = 100; for (let i = 0; i < 20; i++) r.tick(50);
   assert.strictEqual(r.log.firstPerson, undefined, "a refused emote is forgotten: the next one asks afresh (they were in third person by then)");
+});
+
+test("profession work in third person (2026-11-02, the owner: skinning with the bow out stayed in first person): the weapon is put away, the kneel waits for it, third person and no first person while the mini game is up, first person again after", () => {
+  const s = make(); s.state.cam = 0; s.state.drawn = true;
+  s.say({ customPacketType: "greymarchMinigame", token: "t1", kind: "skin", level: 1, target: 0x1234, emote: "searchbody", animal: "Deer" });
+  s.tick();
+  assert.strictEqual(s.log.sheathed, 1, "the bow is put away");
+  assert.strictEqual(s.state.cam, 9, "third person");
+  assert.strictEqual(s.log.pov.at(-1)[0], "off", "no first person");
+  assert.deepStrictEqual(s.log.idles, [], "the kneel waits for the bow");
+  assert.ok(!s.log.notes.includes("Sheathe your weapon first"), "no complaint");
+  s.state.drawn = false; s.tick();
+  assert.deepStrictEqual(s.log.idles, [emotes.emoteById("searchbody").idle], "then the kneel");
+  s.say({ customPacketType: "greymarchMinigameDone", ok: true, target: 0x1234 });
+  for (let i = 0; i < 40; i++) s.tick(50);
+  assert.strictEqual(s.log.pov.at(-1)[0], "on", "first person allowed again");
+  assert.strictEqual(s.state.cam, 0, "and back in it");
 });
 
 test("a meal cannot be skipped: the controls are locked for its five seconds (not looking, the camera or the menus); moving, a weapon, W or Stop do not end it", () => {

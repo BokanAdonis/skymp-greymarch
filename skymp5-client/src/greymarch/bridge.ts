@@ -3452,7 +3452,8 @@ export class GreymarchBridge {
         // the forge, the pot, the chopping block, the vein)
         // the server names it (msg.emote: examine for mining, searchbody for skinning); an older server: skinning kneels
         var mEm = emoteMod.emoteById(typeof msg.emote === "string" ? msg.emote : msg.kind === "skin" ? "searchbody" : "");
-        if (mEm && mEm.kind !== "face") { this.greymarchEmotePlayWanted = { id: mEm.id, at: Date.now() }; this.greymarchMiniActing = true; }
+        if (mEm && mEm.kind !== "face") { this.greymarchEmotePlayWanted = { id: mEm.id, at: Date.now(), work: true }; this.greymarchMiniActing = true; }
+        this.greymarchWorkStartWanted = Date.now(); // the weapon away, third person (greymarchEmoteTick: PROFESSION WORK)
     }
     greymarchMiniHide(): any {
         if (this.greymarchMiniActing && !this.greymarchMiniOn) { this.greymarchMiniActing = false; this.greymarchEmoteStopWanted = Date.now(); }
@@ -3556,7 +3557,7 @@ export class GreymarchBridge {
     // animation events on, so the others see the smith at work. The window holds the keyboard, so the smith cannot walk off mid-swing.
     // The game's functions cannot be called from a packet or a browser message (SkyrimPlatform: "can't be called in this context"), so open and close
     // only ask; the turn and the animation happen on the next frame (greymarchForgeTick, from the update loop).
-    greymarchForgeAnimStart(forgeId: any): any { this.greymarchForgeAnimWant = { on: true, forge: Number(forgeId) >>> 0 }; }
+    greymarchForgeAnimStart(forgeId: any): any { this.greymarchForgeAnimWant = { on: true, forge: Number(forgeId) >>> 0 }; this.greymarchWorkStartWanted = Date.now(); }
     greymarchForgeAnimEnd(): any { this.greymarchForgeAnimWant = { on: false }; }
     // a station (not the forge): the player is put where the game puts a worker (the furniture's own marker, read by GreymarchCamera.dll 1.4: GetFurnitureMarker), facing
     // its way, and its own animation plays a moment later. A station without a marker or an animation (the kiln, a loom, a mill) only opens the window.
@@ -4039,11 +4040,24 @@ export class GreymarchBridge {
                 else this.greymarchEmoteShow(tapped ? "open" : "hold"); // let go before this frame: a tap, so the wheel stays open for clicks
             }
         }
+        // PROFESSION WORK IN THIRD PERSON (2026-11-02, the owner: "if I go to skin an animal I can stay in first person with my bow out"): as a mini game or a
+        // station's animation starts, the weapon is put away and the camera goes to third person; first person stays off while the work lasts (greymarchEmotePovLock:
+        // the mini game window open, the station animation on) and comes back after if they were in it. The work's kneel (skinning) waits for the weapon to be away.
+        if (this.greymarchWorkStartWanted) {
+            this.greymarchWorkStartWanted = 0; this.greymarchWorkStartAt = now; // locked from now (the station animation starts a moment later)
+            if (!this.greymarchWolfOn && !this.greymarchShapeOn) {
+                this.greymarchEmotePovNote();
+                try { var wp = this.sp.Game.getPlayer(); if (wp && wp.isWeaponDrawn()) { wp.sheatheWeapon(); this.greymarchCrumb("work: weapon put away"); } } catch (shErr) { /* the kneel waits or is skipped */ }
+                try { this.sp.Game.forceThirdPerson(); } catch (tpErr) { /* the lock still holds */ }
+            }
+        }
         var play = this.greymarchEmotePlayWanted;
+        var playDrawn = false; if (play && play.work) { try { playDrawn = !!this.sp.Game.getPlayer().isWeaponDrawn(); } catch (pdErr) { playDrawn = false; } }
+        if (play && playDrawn && now - play.at <= 4000) play = null; // the weapon is still being put away: the kneel waits (up to 4 s)
         if (play) {
             this.greymarchEmotePlayWanted = null;
             var em = emoteMod.emoteById(play.id);
-            if (em && now - play.at <= 2000) { if (em.kind === "face") this.greymarchFaceSet(em); else this.greymarchEmotePlay(em); }
+            if (em && now - play.at <= (play.work ? 4000 : 2000)) { if (em.kind === "face") this.greymarchFaceSet(em); else this.greymarchEmotePlay(em); }
         }
         if (this.greymarchFaceClearWanted) { this.greymarchFaceClearWanted = 0; if (this.greymarchFaceMine) this.greymarchFaceSet(null); }
         this.greymarchServerEmoteTick(now);
@@ -4059,7 +4073,7 @@ export class GreymarchBridge {
                 if (cq.length && (!this.greymarchEmoteNow || emoteMod.SEAT_EMOTES.indexOf(this.greymarchEmoteNow.id) >= 0) && !this.greymarchWolfOn && !this.greymarchShapeOn && !this.greymarchInMenu()) { var next = cq.shift(); this.greymarchConsumePlay(next.id, now); }
             }
         }
-        this.greymarchEmotePovLock(!!this.greymarchEmoteNow || now < (this.greymarchEmotePovUntil || 0), now); // a meal too (2026-11-02, the owner)
+        this.greymarchEmotePovLock(!!this.greymarchEmoteNow || now < (this.greymarchEmotePovUntil || 0) || !!this.greymarchMiniOn || !!this.greymarchForgeAnim || !!this.greymarchForgeOn || now - (this.greymarchWorkStartAt || -1e12) < 1500, now); // a meal too, and profession work (2026-11-02, the owner)
         if (this.greymarchMealLocked && !(this.greymarchEmoteNow && this.greymarchEmoteNow.meal)) this.greymarchMealLock(false, "the meal ended another way"); // never left frozen (a beast form, an emote dropped elsewhere)
         var cur = this.greymarchEmoteNow;
         if (!cur) { this.greymarchEmoteStopWanted = 0; return; }
