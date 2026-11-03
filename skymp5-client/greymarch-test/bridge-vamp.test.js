@@ -375,6 +375,27 @@ test("the Magic balance tab's durations and strengths go on the spell records (d
   assert.ok(/case 'greymarchSpellEdits':/.test(fs.readFileSync(path.join(__dirname, "..", "src", "services", "services", "authService.ts"), "utf8")), "the packet reaches the bridge");
 });
 
+test("spell damage on the server only (2026-11-03): the listed health damage effects are 0 in this game, the other effects untouched, a strength or duration still applies; off puts the record's own back; at most 80 spells a tick", () => {
+  const s = make();
+  // Ice Spike: frost damage 25 (0) and stamina damage 25 (1); Firebolt: fire 25 (0) and a 3 s burn of 2 (1)
+  const recs = { 0x2b96c: [{ dur: 0, mag: 25 }, { dur: 0, mag: 25 }], 0x12fce: [{ dur: 0, mag: 25 }, { dur: 3, mag: 2 }] };
+  for (let i = 0; i < 100; i++) recs[0x90000 + i] = [{ dur: 0, mag: 10 }];
+  s.gm.sp.Game.getFormFromFile = (id, file) => (file === "Skyrim.esm" && recs[id] ? { id, getNumEffects: () => recs[id].length, getNthEffectDuration: (i) => recs[id][i].dur, getNthEffectMagnitude: (i) => recs[id][i].mag,
+    setNthEffectDuration: (i, v) => { recs[id][i].dur = v; }, setNthEffectMagnitude: (i, v) => { recs[id][i].mag = v; } } : null);
+  const tick = () => { s.gm.greymarchSpellEditNext = 0; s.gm.greymarchSpellEditTick(); };
+  const edits = { "2b96c:Skyrim.esm": { zero: [0] }, "12fce:Skyrim.esm": { dur: 6, zero: [0, 1] } };
+  for (let i = 0; i < 100; i++) edits[(0x90000 + i).toString(16) + ":Skyrim.esm"] = { zero: [0] };
+  s.say({ customPacketType: "greymarchSpellEdits", edits });
+  tick();
+  assert.deepStrictEqual(recs[0x2b96c], [{ dur: 0, mag: 0 }, { dur: 0, mag: 25 }], "Ice Spike: no frost damage here, its stamina drain kept");
+  assert.deepStrictEqual(recs[0x12fce], [{ dur: 0, mag: 0 }, { dur: 6, mag: 0 }], "Firebolt: both damage effects 0, the burn's duration still set");
+  assert.ok(Object.keys(recs).filter((k) => k >= 0x90000 && recs[k][0].mag === 0).length < 100, "not every spell in the first tick");
+  for (let i = 0; i < 3; i++) tick();
+  assert.strictEqual(Object.keys(recs).filter((k) => k >= 0x90000 && recs[k][0].mag === 0).length, 100, "the rest in the next ticks");
+  s.say({ customPacketType: "greymarchSpellEdits", edits: {} }); for (let i = 0; i < 3; i++) tick();
+  assert.deepStrictEqual([recs[0x2b96c], recs[0x12fce]], [[{ dur: 0, mag: 25 }, { dur: 0, mag: 25 }], [{ dur: 0, mag: 25 }, { dur: 3, mag: 2 }]], "turned off: the records' own numbers back");
+});
+
 test("another player's eyes are not swapped on their character but built into it (__gmVampEyes for formView.ts), so /eyes leaves nothing out of the face (2026-10-30); this player's own head is swapped as before", () => {
   const s = make({ others: { 0xff000002: 0x5000 } });
   const sp = s.gm.sp;

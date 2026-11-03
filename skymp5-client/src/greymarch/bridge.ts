@@ -1309,6 +1309,8 @@ export class GreymarchBridge {
     // lasts the seconds set (the others keep their share), and every effect's magnitude is the percent set of the record's own. The record's own numbers are kept
     // the first time it is changed and put back when the server no longer sets that part (an empty packet puts every one back). Told again after every edits
     // packet (sent when the player joins and when one changes). Looked at every half second. Only for this game: everyone's game gets the same packet.
+    // zero (2026-11-03): the listed effects' magnitude is 0 here (each spell's health damage), so another player's or an NPC's copy casting it hurts
+    // nobody in this game: the server's damage is the only one.
     greymarchSpellEditTick(): any {
         var now = Date.now();
         if (now < (this.greymarchSpellEditNext || 0)) return;
@@ -1319,19 +1321,24 @@ export class GreymarchBridge {
         var keys: any = {};
         for (var k1 in want) keys[k1] = true;
         for (var k2 in orig) keys[k2] = true;
+        var budget = 80;
         for (var d in keys) {
             var w = want[d] && typeof want[d] === "object" ? want[d] : {};
             var wd = Number(w.dur), wp = Number(w.pct);
             var hasDur = w.dur !== null && w.dur !== undefined && wd >= 0, hasMag = w.pct !== null && w.pct !== undefined && wp >= 0;
-            var sig = (hasDur ? wd : "-") + "|" + (hasMag ? wp : "-");
+            // zero: the spell's health damage effects (indices), made 0 here: the server deals spell damage alone (2026-11-03)
+            var zero: any = {}, hasZero = false;
+            if (Array.isArray(w.zero)) for (var z = 0; z < w.zero.length; z++) { var zi = Number(w.zero[z]); if (zi >= 0 && zi < 64) { zero[zi] = true; hasZero = true; } }
+            var sig = (hasDur ? wd : "-") + "|" + (hasMag ? wp : "-") + "|" + (hasZero ? w.zero.join(",") : "-");
             if (told[d] === sig) continue;
+            if (budget-- <= 0) break; // at most 80 spells a tick: the 700 damage spells on joining spread over a few seconds
             told[d] = sig;
             var spell = this.greymarchVampSpellOf(d);
             if (!spell) continue;
             try {
                 var o = orig[d];
                 if (!o) {
-                    if (!hasDur && !hasMag) continue; // never changed here: nothing to put back
+                    if (!hasDur && !hasMag && !hasZero) continue; // never changed here: nothing to put back
                     o = { dur: [], mag: [] };
                     var n = Number(spell.getNumEffects()) || 0;
                     for (var i = 0; i < n; i++) { o.dur.push(Number(spell.getNthEffectDuration(i)) || 0); o.mag.push(Number(spell.getNthEffectMagnitude(i)) || 0); }
@@ -1341,11 +1348,11 @@ export class GreymarchBridge {
                 for (var j = 0; j < o.dur.length; j++) maxDur = Math.max(maxDur, o.dur[j]);
                 for (var e = 0; e < o.dur.length; e++) {
                     var dd = hasDur && maxDur > 0 && o.dur[e] > 0 ? Math.max(1, Math.round(o.dur[e] * wd / maxDur)) : o.dur[e];
-                    var mm = hasMag ? Math.round(o.mag[e] * wp) / 100 : o.mag[e];
+                    var mm = zero[e] ? 0 : hasMag ? Math.round(o.mag[e] * wp) / 100 : o.mag[e];
                     spell.setNthEffectDuration(e, dd);
                     spell.setNthEffectMagnitude(e, mm);
                 }
-                if (!hasDur && !hasMag) { delete orig[d]; delete told[d]; } // its own numbers are back
+                if (!hasDur && !hasMag && !hasZero) { delete orig[d]; delete told[d]; } // its own numbers are back
             } catch (err) {
                 if (!this.greymarchSpellEditFailed) { this.greymarchSpellEditFailed = true; this.greymarchLog("spell edits: could not change " + d + ": " + err); }
             }
