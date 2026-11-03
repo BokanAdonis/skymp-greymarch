@@ -22,7 +22,7 @@ function make(opts = {}) {
     playIdle: (idle) => { log.idles.push(idle.id); return !state.refuse; },
     placeAtMe: (base) => { const n = (log.ghosts || []).length; const g = { base, at: null, rot: null, gone: false, id: 0xff000100 + n, getFormID: () => g.id, getBaseObject: () => ({ getFormID: () => base.id }), blockActivation: (v) => { g.blocked = v; }, setMotionType: (t) => { g.motion = t; g.motions = (g.motions || 0) + 1; }, setPosition: (x, y, z) => { g.at = [x, y, z]; g.moves = (g.moves || 0) + 1; }, setAngle: (a, b, c) => { g.rot = [a, b, c]; }, getAngleZ: () => (g.rot ? g.rot[2] : 0), getAngleX: () => (g.rot ? g.rot[0] : 0), getPositionX: () => (g.at ? g.at[0] + (g.fell || 0) : 0), getPositionY: () => (g.at ? g.at[1] : 0), getPositionZ: () => (g.at ? g.at[2] - (g.fell || 0) : 0), is3DLoaded: () => !state.no3d, translateTo: (...a) => { (g.turns = g.turns || []).push(a); }, disable() { g.gone = true; }, delete() { g.gone = true; } }; if (base.id === 0x5eae2) { g.id = 0xff100000 + (log.lights || []).length; (log.lights = log.lights || []).push(g); } else (log.ghosts = log.ghosts || []).push(g); (log.world = log.world || {})[g.id] = g; return g; },
     getActorValue: (n) => (state.av || {})[n] || 0, damageActorValue: (n, v) => { log.damage = (log.damage || []).concat([[n, Math.round(v)]]); state.av[n] -= v; },
-    isWeaponDrawn: () => state.drawn, isDead: () => !!state.dead, isOnMount: () => !!state.mounted,
+    isWeaponDrawn: () => state.drawn, sheatheWeapon: () => { log.sheathed = (log.sheathed || 0) + 1; state.sheathing = true; }, isDead: () => !!state.dead, isOnMount: () => !!state.mounted,
     getHeadingAngle: () => 30, getAngleZ: () => 100, setAngle: (a, b, c) => { log.turned = c; }, setPosition: (x, y, z) => { log.stood = [x, y, z]; }, moveTo: (ref, dx, dy, dz, match) => { log.movedTo = [ref.id, dx, dy, dz, match]; }, getPositionX: () => (log.stood ? log.stood[0] : 480), getPositionY: () => (log.stood ? log.stood[1] : 560), getPositionZ: () => (log.stood ? log.stood[2] : 44),
     getFurnitureReference: () => (state.furn ? { getFormID: () => state.furn } : null),
     getSitState: () => state.sitState || 0,
@@ -32,7 +32,7 @@ function make(opts = {}) {
   const actors = {}; for (const local of Object.values(opts.others || {})) actors[local] = faceLog(local.toString(16));
   const sp = {
     printConsole() {}, writeLogs: (n, l) => log.lines.push(l),
-    Game: { getPlayer: () => player, getFormEx: (id) => (log.world && log.world[id] ? (log.world[id].gone ? null : log.world[id]) : { id }), getFormFromFile: (id, file) => (file === "Missing.esp" ? null : { id, file, getFormID: () => id }), forceThirdPerson: () => { log.thirdPerson++; }, disablePlayerControls: (...a) => (log.controls = log.controls || []).push(["off", ...a]), enablePlayerControls: (...a) => (log.controls = log.controls || []).push(["on", ...a]) },
+    Game: { getPlayer: () => player, getFormEx: (id) => (log.world && log.world[id] ? (log.world[id].gone ? null : log.world[id]) : { id }), getFormFromFile: (id, file) => (file === "Missing.esp" ? null : { id, file, getFormID: () => id }), forceThirdPerson: () => { log.thirdPerson++; state.cam = 9; }, forceFirstPerson: () => { log.firstPerson = (log.firstPerson || 0) + 1; state.cam = 0; }, getCameraState: () => (state.cam === undefined ? 9 : state.cam), disablePlayerControls: (...a) => (a[2] === true && !a[0] && !a[1] ? (log.pov = log.pov || []) : (log.controls = log.controls || [])).push(["off", ...a]), enablePlayerControls: (...a) => (a[2] === true && !a[0] && !a[1] ? (log.pov = log.pov || []) : (log.controls = log.controls || [])).push(["on", ...a]) },
     callNative: (cls, fn, self, a, b) => { (log.natives = log.natives || []).push([cls, fn, a]); if (cls !== "GreymarchCam" || state.noDll) throw new Error("Native function not found"); if (fn === "GetFurnitureMarker") return state.marker ? state.marker[b] : -99999; if (fn === "SetFreeCamera") { state.free = !!a; return true; } if (fn === "IsFreeCamera") return !!state.free; if (fn === "GetCamera") return (state.cam || [0, 0, 0, 0, 1, 0])[a]; return undefined; },
     Idle: { from: (f) => f || null }, ObjectReference: { from: (f) => (f && f.setPosition ? f : f && f.id ? { id: f.id, getPositionX: () => 500, getPositionY: () => 600, getPositionZ: () => 10, getAngleZ: () => 90 } : null) }, Actor: { from: (f) => (f && actors[f.id]) || null }, Potion: { from: (f) => (f && f.potion) || null },
     Debug: { sendAnimationEvent: (ref, name) => log.events.push(name), notification: (t) => log.notes.push(t) },
@@ -324,7 +324,7 @@ test("eating, drinking and potions: the matching idle once the menu is closed; e
   assert.deepStrictEqual(s.log.idles, [], "not while a menu is open (one it does not close itself)");
   s.state.menu = null; s.tick();
   assert.deepStrictEqual(s.log.idles, [idleOf("bread")], "the standing eating idle");
-  assert.strictEqual(s.log.thirdPerson, 0, "the camera is left alone"); assert.deepStrictEqual(s.log.notes, [], "no notice");
+  assert.strictEqual(s.log.thirdPerson, 1, "seen in third person (2026-11-02)"); assert.deepStrictEqual(s.log.notes, [], "no notice");
   for (let i = 0; i < 90; i++) s.tick(50); // 4.5 s
   assert.ok(s.gm.greymarchEmoteNow, "still eating");
   for (let i = 0; i < 12; i++) s.tick(50);
@@ -562,6 +562,79 @@ test("a meal while sitting: the seated eating or drinking idle in a chair or on 
   g.page({ type: "emote", id: "sit" }); g.tick(); g.log.idles.length = 0; g.log.events.length = 0;
   g.eat("Apple Pie"); g.tick(); assert.deepStrictEqual([g.log.idles, g.log.events], [[], []]);
   assert.strictEqual(g.gm.greymarchEmoteNow.id, "sit");
+});
+
+test("no first person during an emote or a meal (2026-11-02, the owner: they cannot even try; eating and drinking too): the game's camera switch is off while it lasts, a one-off emote for 5 seconds; on again after; a potion leaves it alone", () => {
+  const s = make();
+  s.page({ type: "emote", id: "hey" }); s.tick();
+  assert.strictEqual(s.log.thirdPerson, 1, "the emote starts in third person");
+  assert.deepStrictEqual((s.log.pov || []).map((c) => c[0]), ["off"], "the camera switch is turned off");
+  s.state.speed = 100; for (let i = 0; i < 20; i++) s.tick(50);
+  assert.strictEqual(s.gm.greymarchEmoteNow, null, "moving ends it");
+  assert.strictEqual(s.log.pov.at(-1)[0], "on", "and the camera switch is on again");
+  const o = make();
+  o.page({ type: "emote", id: "wave" }); o.tick();
+  assert.strictEqual(o.log.pov.at(-1)[0], "off", "a wave too");
+  o.tick(4000); assert.strictEqual(o.log.pov.at(-1)[0], "off", "still off 4 seconds in");
+  o.tick(1500); assert.strictEqual(o.log.pov.at(-1)[0], "on", "on again after 5 seconds");
+  const m = make();
+  m.eat("Venison Stew"); m.tick();
+  assert.strictEqual(m.log.thirdPerson, 1, "eating: third person");
+  assert.strictEqual(m.log.pov.at(-1)[0], "off", "and no first person while eating");
+  for (let i = 0; i < 102; i++) m.tick(50);
+  assert.strictEqual(m.gm.greymarchEmoteNow, null); assert.strictEqual(m.log.pov.at(-1)[0], "on", "back after the meal");
+  const p = make();
+  p.eat("Potion of Healing", false); for (let i = 0; i < 20; i++) p.tick(50);
+  assert.strictEqual(p.log.thirdPerson, 0, "a potion: the camera is left alone"); assert.strictEqual(p.log.pov, undefined);
+});
+
+test("back to first person after an emote or a meal, only if they were in first person before it (2026-11-02, the owner)", () => {
+  const s = make(); s.state.cam = 0;
+  s.page({ type: "emote", id: "hey" }); s.tick();
+  assert.strictEqual(s.state.cam, 9, "third person while it lasts");
+  s.state.speed = 100; for (let i = 0; i < 20; i++) s.tick(50);
+  assert.strictEqual(s.gm.greymarchEmoteNow, null);
+  assert.strictEqual(s.state.cam, 0, "first person again"); assert.strictEqual(s.log.firstPerson, 1);
+  const t = make(); // in third person already: left there
+  t.page({ type: "emote", id: "hey" }); t.tick(); t.state.speed = 100; for (let i = 0; i < 20; i++) t.tick(50);
+  assert.strictEqual(t.log.firstPerson, undefined);
+  const m = make(); m.state.cam = 0;
+  m.eat("Nord Mead"); m.tick(); assert.strictEqual(m.state.cam, 9);
+  for (let i = 0; i < 102; i++) m.tick(50);
+  assert.strictEqual(m.state.cam, 0, "after a drink too");
+  const r = make(); r.state.cam = 0; r.state.drawn = true;
+  r.page({ type: "emote", id: "hey" }); r.tick(); r.state.drawn = false; r.state.cam = 9; r.tick();
+  r.page({ type: "emote", id: "hey" }); r.tick(); r.state.speed = 100; for (let i = 0; i < 20; i++) r.tick(50);
+  assert.strictEqual(r.log.firstPerson, undefined, "a refused emote is forgotten: the next one asks afresh (they were in third person by then)");
+});
+
+test("profession work in third person (2026-11-02, the owner: skinning with the bow out stayed in first person): the weapon is put away, the kneel waits for it, third person and no first person while the mini game is up, first person again after", () => {
+  const s = make(); s.state.cam = 0; s.state.drawn = true;
+  s.say({ customPacketType: "greymarchMinigame", token: "t1", kind: "skin", level: 1, target: 0x1234, emote: "searchbody", animal: "Deer" });
+  s.tick();
+  assert.strictEqual(s.log.sheathed, 1, "the bow is put away");
+  assert.strictEqual(s.state.cam, 9, "third person");
+  assert.strictEqual(s.log.pov.at(-1)[0], "off", "no first person");
+  assert.deepStrictEqual(s.log.idles, [], "the kneel waits for the bow");
+  assert.ok(!s.log.notes.includes("Sheathe your weapon first"), "no complaint");
+  s.state.drawn = false; s.tick(300);
+  assert.deepStrictEqual(s.log.idles, [], "not while the put-away animation still plays (the game says not drawn as it starts)");
+  s.tick(1300);
+  assert.deepStrictEqual(s.log.idles, [emotes.emoteById("searchbody").idle], "then the kneel");
+  s.say({ customPacketType: "greymarchMinigameDone", ok: true, target: 0x1234 });
+  for (let i = 0; i < 40; i++) s.tick(50);
+  assert.strictEqual(s.log.pov.at(-1)[0], "on", "first person allowed again");
+  assert.strictEqual(s.state.cam, 0, "and back in it");
+});
+
+test("the mouse wheel cannot zoom into first person during an emote (2026-11-02): first person is put back to third the next frame", () => {
+  const s = make();
+  s.page({ type: "emote", id: "hey" }); s.tick();
+  const n = s.log.thirdPerson;
+  s.state.cam = 0; s.tick(16);
+  assert.strictEqual(s.state.cam, 9); assert.strictEqual(s.log.thirdPerson, n + 1);
+  const q = make(); q.state.cam = 0; q.tick(16); q.tick(16);
+  assert.strictEqual(q.state.cam, 0, "no emote: first person is theirs");
 });
 
 test("a meal cannot be skipped: the controls are locked for its five seconds (not looking, the camera or the menus); moving, a weapon, W or Stop do not end it", () => {
@@ -815,4 +888,32 @@ test("sitting down (2026-10-30): the game refuses the sitting idle away from a s
   assert.deepStrictEqual(l.log.events, ["IdleSitLedgeEnter"]);
   const g = emotes.EMOTE_GROUPS.find((x) => x.id === "sit");
   assert.deepStrictEqual(g.items.map((x) => x.id), ["sit", "sitledge", "lie", "wounded2", "wounded3"]);
+});
+
+test("standing up from sitting puts the body back to normal 2 seconds later (2026-11-02, the owner: it looked like falling, then they floated); not if another emote started or they sit in a real seat", () => {
+  const s = make(); s.state.refuse = true;
+  s.page({ type: "emote", id: "sit" }); s.tick();
+  s.key(17, true); s.tick();
+  assert.deepStrictEqual(s.log.events.slice(-1), ["IdleChairExitStart"]);
+  s.tick(1500); assert.ok(!s.log.events.includes("IdleForceDefaultState"), "the stand-up plays first");
+  s.tick(600); assert.strictEqual(s.log.events.at(-1), "IdleForceDefaultState", "then the body is back to normal");
+  const e = make(); e.state.refuse = true;
+  e.page({ type: "emote", id: "sit" }); e.tick(); e.key(17, true); e.tick(); e.key(17, false);
+  e.state.refuse = false; e.page({ type: "emote", id: "hey" }); e.tick();
+  e.tick(2500); assert.ok(!e.log.events.includes("IdleForceDefaultState"), "another emote meanwhile: left alone");
+  const c = make(); c.state.refuse = true;
+  c.page({ type: "emote", id: "sit" }); c.tick(); c.key(17, true); c.tick(); c.state.sitState = 3;
+  c.tick(2500); assert.ok(!c.log.events.includes("IdleForceDefaultState"), "in a real seat: left alone");
+});
+
+test("sitting in first person: back to first person only after the stand-up is over (2026-11-02, the owner: going back mid stand-up made them fall and float)", () => {
+  const s = make(); s.state.refuse = true; s.state.cam = 0;
+  s.page({ type: "emote", id: "sit" }); s.tick();
+  assert.strictEqual(s.state.cam, 9);
+  s.key(17, true); s.tick();
+  assert.strictEqual(s.state.cam, 9, "still third person as the stand-up starts");
+  s.tick(1500); assert.strictEqual(s.state.cam, 9, "and while it plays");
+  s.tick(600);
+  assert.strictEqual(s.log.events.at(-1), "IdleForceDefaultState");
+  assert.strictEqual(s.state.cam, 0, "then first person");
 });

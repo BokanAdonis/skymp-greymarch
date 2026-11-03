@@ -451,7 +451,7 @@ test("/disguise (2026-10-30, the owner): the server's disguised list names whose
   s.say({ customPacketType: "greymarchGhosts", ghosts: [], me: 0xff000001 });
   assert.deepStrictEqual(g.__gmDisguised, {}, "an older server sends none: nobody is hidden");
 });
-test("the held feeding: the standing feed is played again once it has run out, until the server says off", () => {
+test("the held feeding: the standing feed is played again the moment it has run out (not before 2 s), until the server says off", () => {
   const realNow = Date.now; let t = 5_000_000; Date.now = () => t;
   try {
     const v = make({ others: { 0xff000002: 0x5000 } });
@@ -459,15 +459,17 @@ test("the held feeding: the standing feed is played again once it has run out, u
     v.say({ customPacketType: "greymarchVampFeed", on: true, role: "vampire", partner: 0xff000002 });
     v.tick();
     assert.strictEqual(v.log.idles.length, 1);
-    t += 3000; v.tick();
-    assert.strictEqual(v.log.idles.length, 1, "not restarted mid-bite");
-    t += 3500; synced = true; v.tick();
+    t += 1000; v.tick();
+    assert.strictEqual(v.log.idles.length, 1, "never restarted before 2 s");
+    t += 2000; synced = true; v.tick();
     assert.strictEqual(v.log.idles.length, 1, "the game says it is still playing");
     synced = false; v.tick();
-    assert.strictEqual(v.log.idles.length, 2, "ran out: played again");
+    assert.strictEqual(v.log.idles.length, 2, "ran out at 3 s: played again at once (2026-11-03: it waited 6 s and the vampire stood up)");
+    synced = true; t += 6000; v.tick();
+    assert.strictEqual(v.log.idles.length, 3, "6 s at the latest, even if the game never says it ended");
     v.say({ customPacketType: "greymarchVampFeed", on: false });
     v.tick(); t += 10000; v.tick();
-    assert.strictEqual(v.log.idles.length, 2, "off: no more");
+    assert.strictEqual(v.log.idles.length, 3, "off: no more");
   } finally { Date.now = realNow; }
 });
 
@@ -488,7 +490,7 @@ test("the held feeding: the vampire's movement key asks the server to end it (on
   victim.tick(); victim.down = true; victim.tick();
   assert.strictEqual(victim.log.sent.filter((m) => m.op === "feed_end").length, 0);
 });
-test("the held feeding: a refused replay is tried again within a second, and after 4 refusals the pose is reset first (test 2026-10-30: it stopped at 7 s)", () => {
+test("the held feeding: a refused replay is tried again within a second, and after 2 refusals BOTH bodies are reset first (2026-11-03: the bitten one stayed in the paired pose)", () => {
   const realNow = Date.now; let t = 7_000_000; Date.now = () => t;
   try {
     const v = make({ others: { 0xff000002: 0x5000 } });
@@ -497,13 +499,13 @@ test("the held feeding: a refused replay is tried again within a second, and aft
     v.say({ customPacketType: "greymarchVampFeed", on: true, role: "vampire", partner: 0xff000002 });
     v.tick();
     assert.strictEqual(v.log.idles.length, 1);
-    refuse = true; t += 6000; v.tick();
-    t += 300; v.tick(); t += 300; v.tick(); t += 300; v.tick();
-    assert.deepStrictEqual(v.log.events.filter((e) => e[1] === "IdleForceDefaultState"), [], "no reset for the first refusals");
+    refuse = true; t += 2500; v.tick();
     t += 300; v.tick();
-    assert.deepStrictEqual(v.log.events.filter((e) => e[1] === "IdleForceDefaultState"), [["me", "IdleForceDefaultState"]], "4 refusals: the pose is reset before the 5th try");
+    assert.deepStrictEqual(v.log.events.filter((e) => e[1] === "IdleForceDefaultState"), [], "no reset for the first 2 refusals");
+    t += 300; v.tick();
+    assert.deepStrictEqual(v.log.events.filter((e) => e[1] === "IdleForceDefaultState"), [["me", "IdleForceDefaultState"], ["them", "IdleForceDefaultState"]], "the biter and the bitten are reset before the 3rd try");
     refuse = false; t += 300; v.tick();
-    assert.strictEqual(v.log.idles.length, 2, "played again 1.5 s after the bite ended, not 6 s");
-    assert.ok(v.log.lines.some((l) => /plays again after 5 refusal/.test(l)));
+    assert.strictEqual(v.log.idles.length, 2, "played again about a second after the bite ended");
+    assert.ok(v.log.lines.some((l) => /plays again after 3 refusal/.test(l)));
   } finally { Date.now = realNow; }
 });

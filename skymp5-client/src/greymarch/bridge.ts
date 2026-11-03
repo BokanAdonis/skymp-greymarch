@@ -35,6 +35,9 @@ const SHAPE_REST_MS = 800, SHAPE_POWER_REST_MS = 1600; // a creature's attacks: 
 const SHAPE_LAND_MS = 450; // a creature's swing is reported this long after it starts (about when it lands)
 const SHAPE_NPC_READY_MS = 8000; // a creature NPC that is not ready this long after it was placed is placed again
 const SHAPE_SILENCE_MS = 20000; // a creature form: with no word from the server for this long the player changes back by themselves (the server repeats "on" every 5 seconds)
+const SIT_RESET_MS = 2000; // standing up from the wheel's sitting: the body is put back to normal this long after the stand-up starts (greymarchSitResetTick)
+const WORK_SHEATHE_MS = 1500; // profession work: the kneel waits this long after the weapon is put away (the put-away animation ends first)
+const EMOTE_ONCE_POV_MS = 5000; // a one-off emote (a wave, a bow): first person stays off this long (greymarchEmotePovLock)
 const WOLF_BACK_GRACE_MS = 2000; // Z changes back, but not in the first 2 seconds after the body changed
 const STANDUP_FALLBACK_MS = 1500; // greymarchStandUp: still in the furniture this long after the get-up animation was asked for, the player is snapped to standing
 const LIP_STEP_MS = 110; // a talking mouth changes shape this often
@@ -65,9 +68,18 @@ const WOLF_ROAR_MS = 0; // R: no wait between roars (2026-10-21, the owner's cal
 const WOLF_HOWL_SHOUT = 0x0ce218;
 const WOLF_ROAR_SOUND = 0x101008, BEAR_ROAR_SOUND = 0x0f95bb; // NPCWerewolfShout (the werewolf's howl) and NPCBearAggroWarning01 (a bear's warning roar), Skyrim.esm
 // vampires (gamemode vampire.js): the game's own records, inside Dawnguard.esm (read from the game files); the real IDs are looked up with Game.getFormFromFile
-const FEED_REPLAY_MS = 6000; // the held feeding: the standing feed is played again at most this often (greymarchVampFeedHeld)
+// DRAINED TO DEATH (2026-11-03, the owner: "if the player dies and wakes up in the temple they drunk walk for 5 minutes"): the server says { greymarchDrunk on, ms };
+// the game's own drunk walk (IdleDrunkStart, Skyrim.esm 0CEFD0; IdleDrunkStop 0CEFD1 ends it) and a swimming screen (BSHeartland's CYRWE14RevelerDrunkImod 0C9CC5),
+// both put on again every DRUNK_AGAIN_MS (a jump, a fight or a load ends the walk)
+const DRUNK_IDLE_START = 0x0cefd0, DRUNK_IDLE_STOP = 0x0cefd1, DRUNK_IMOD = 0x0c9cc5, DRUNK_AGAIN_MS = 10000;
+// THE HELD FEEDING LOOP (2026-11-03, the owner: "It's still not locking into the animation"; the game log showed the bite play once, then the replay 6 s later
+// refused 4 times while both stood): the standing feed is one paired bite of about 5 s. It is now played again the moment it ends (bIsSynced off, checked every
+// frame once FEED_MIN_MS have passed; at FEED_REPLAY_MS at the latest), and a refusal puts BOTH bodies back to the default pose (the bitten one was left in the
+// paired pose, so the game kept refusing) before the next try.
+const FEED_MIN_MS = 2000; // the bite is never restarted before this
+const FEED_REPLAY_MS = 6000; // the held feeding: played again by this time even if the game never says the bite ended (greymarchVampFeedHeld)
 const FEED_RETRY_MS = 300; // ... and when the game refused it (still finishing the last one), tried again this soon
-const FEED_RESET_AFTER = 4; // refused this many times in a row: the biter is put back to the default pose first (the game will not start a paired idle over a stuck one)
+const FEED_RESET_AFTER = 2; // refused this many times in a row: both bodies are put back to the default pose first (the game will not start a paired idle over a stuck one)
 const FEED_STOP_KEYS = [0x11, 0x1e, 0x1f, 0x20]; // W A S D (DirectInput scan codes): the vampire's movement keys end a feeding
 const VAMP_FORMS = { mist: 0x38ba, lord: 0x283b, potionFx: 0x18ef4, potion: 0x18ef3, feedIdle: 0xe6a8 }; // DLC1VampireMistform, DLC1VampireChange, DLC1BloodPotionEffect, DLC1BloodPotion, IdleVampireStandingFeedFront_Loose
 // a vampire's eyes, one colour per bloodline (GreymarchCore.esp, made by tools/vampire-eyes.js in the launcher repo): GM_VampEyes{Male,Female}{Colour}0..6, glow 0 (none) to 6 (a Lord)
@@ -243,6 +255,7 @@ export class GreymarchBridge {
         if (type === "greymarchRaceMenuLook") { var rm0 = this.greymarchRmState(); rm0.want = msg.look && typeof msg.look === "object" ? msg.look : {}; rm0.tries = 0; return; } // RaceMenu's extra sliders of this character, kept by the server (greymarchRaceMenuTick)
         if (type === "greymarchVampire") { this.greymarchVampWant = msg.on ? msg : null; this.greymarchVampCostTold = {}; this.greymarchHudToPage("blood", { on: !!msg.on, blood: msg.blood, empty: !!msg.empty }); return; } // a vampire's state: the blood drop and what the game applies (greymarchVampTick)
         if (type === "greymarchVampLooks") { this.greymarchVampLookList = Array.isArray(msg.vampires) ? msg.vampires : []; if (Number(msg.me) > 0) this.greymarchMeActor = Number(msg.me) >>> 0; return; } // (me: which of them is this player: the ghosts and effects packets that also say so may not have come yet, and without it the player's own eyes and fangs were never put on) // how every vampire in the world looks (eyes and fangs)
+        if (type === "greymarchDrunk") { this.greymarchDrunkWant = msg.on ? { until: Date.now() + Math.max(0, Number(msg.ms) || 0), at: 0 } : { off: true }; return; } // drained to death: the drunk walk after waking (greymarchDrunkTick)
         if (type === "greymarchVampFeed") { if (!msg.on && this.greymarchVampFeedHold) this.greymarchLog("vampire: the server ended the feeding" + (msg.why ? " (" + String(msg.why).slice(0, 80) + ")" : "")); this.greymarchVampFeedWant = msg.on ? { role: msg.role, partner: msg.partner, at: Date.now(), done: false } : { off: true }; return; } // the feeding scene (held until the vampire stops: greymarchVampFeedHeld)
         if (type === "greymarchVampMist") { if (!msg.on) this.greymarchVampMistEnd = true; return; } // Mist Form refused or over: the game's own mist is ended
         if (type === "greymarchVampLord") { if (this.greymarchVampLordWas !== !!msg.on) { this.greymarchVampLordWas = !!msg.on; this.greymarchLog("vampire: the server says the Lord's shape is " + (msg.on ? "on" : "off")); } return; } // the body itself is the creature form (greymarchShape)
@@ -1455,17 +1468,20 @@ export class GreymarchBridge {
             try { var lid = misc.remoteIdToLocalId(fd.partner); other = lid ? sp.Actor.from(sp.Game.getFormEx(lid)) : null; } catch (oErr) { other = null; }
             if (fd.off) {
                 this.greymarchVampFeedWant = null; this.greymarchVampFeedHold = null;
+                this.greymarchVampFeedLock(false);
                 try { sp.Debug.sendAnimationEvent(player, "IdleForceDefaultState"); } catch (e1) { /* it ends by itself */ }
                 var was = this.greymarchVampFeedOther; this.greymarchVampFeedOther = null;
                 if (was) { try { sp.Debug.sendAnimationEvent(was, "IdleForceDefaultState"); } catch (e2) { /* gone */ } }
             } else {
                 // held until the server says off: the animation is played again whenever it ran out, and the vampire's own movement key asks the server to end it
                 this.greymarchVampFeedHold = { role: fd.role, partner: fd.partner, playedAt: 0, keysUp: {}, asked: false };
+                this.greymarchVampFeedLock(true);
                 if (!other) this.greymarchLog("vampire: the feeding partner is not loaded here");
                 else { this.greymarchVampFeedOther = other; this.greymarchVampFeedPlay(player, other, now, true); }
             }
         }
         this.greymarchVampFeedHeld(player, now);
+        this.greymarchDrunkTick(player, now);
         this.greymarchVampFangsWear(now); // the worn fangs the server gave: put on (SkyMP then shows them to everyone)
         this.greymarchVampEyes(now); // every vampire's blue eyes, on this screen
     }
@@ -1478,7 +1494,7 @@ export class GreymarchBridge {
         var biter = h.role === "vampire" ? player : other, bitten = h.role === "vampire" ? other : player;
         // TEST 2026-10-30 (the owner: it stopped at the usual time): the replay 6 s in was refused (the bite was still finishing) and the next try was 6 s later, so
         // the vampire stood up. A refusal is now tried again after FEED_RETRY_MS, and after FEED_RESET_AFTER refusals the biter is reset to the default pose first.
-        if ((h.refused || 0) >= FEED_RESET_AFTER) { try { sp.Debug.sendAnimationEvent(biter, "IdleForceDefaultState"); } catch (rErr) { /* tried anyway */ } }
+        if ((h.refused || 0) >= FEED_RESET_AFTER) { try { sp.Debug.sendAnimationEvent(biter, "IdleForceDefaultState"); sp.Debug.sendAnimationEvent(bitten, "IdleForceDefaultState"); } catch (rErr) { /* tried anyway */ } }
         var played = false;
         try { var idle = sp.Idle.from(sp.Game.getFormEx(this.greymarchVampForm("feedIdle"))); played = !!idle && !!biter.playIdleWithTarget(idle, bitten); } catch (pErr) { played = false; }
         if (played) {
@@ -1490,16 +1506,49 @@ export class GreymarchBridge {
             h.playedAt = now - FEED_REPLAY_MS + FEED_RETRY_MS; // soon again
         }
     }
+    // LOCKED IN THE FEEDING (2026-11-03, the owner: "both players get locked in feed animation ... until the vampire cancels feed"): neither walks, fights, sneaks
+    // or uses things while it lasts; the camera and the menus stay. The vampire still ends it with a movement key (read from the keyboard, not the controls).
+    greymarchVampFeedLock(on: boolean): any {
+        var sp = this.sp;
+        if (on === !!this.greymarchVampFeedLocked) return;
+        try {
+            if (on) sp.Game.disablePlayerControls(true, true, false, false, true, false, true, false, 0);
+            else sp.Game.enablePlayerControls(true, true, false, false, true, false, true, false, 0);
+            this.greymarchVampFeedLocked = on;
+            this.greymarchLog("vampire: feeding " + (on ? "locks" : "unlocks") + " the controls");
+        } catch (e) { this.greymarchLog("vampire: the controls could not be " + (on ? "locked" : "unlocked") + ": " + String(e).slice(0, 120)); }
+    }
+    greymarchDrunkTick(player: any, now: number): any {
+        var sp = this.sp, d = this.greymarchDrunkWant; if (!d) return;
+        var off = d.off || now >= d.until;
+        var imod: any = null; try { imod = sp.ImageSpaceModifier.from(sp.Game.getFormFromFile(DRUNK_IMOD, "BSHeartland.esm")); } catch (iErr) { imod = null; }
+        if (off) {
+            this.greymarchDrunkWant = null;
+            if (!this.greymarchDrunkOn) return;
+            this.greymarchDrunkOn = false;
+            try { var stop = sp.Idle.from(sp.Game.getFormEx(DRUNK_IDLE_STOP)); if (stop) player.playIdle(stop); } catch (sErr) { /* the walk ends with the next idle */ }
+            try { if (imod) sp.ImageSpaceModifier.removeCrossFade(1.0); } catch (rErr) { /* it fades by itself */ }
+            this.greymarchLog("drunk: over");
+            return;
+        }
+        if (now - d.at < DRUNK_AGAIN_MS) return;
+        d.at = now;
+        if (this.greymarchWolfOn || this.greymarchShapeOn || this.greymarchVampFeedHold) return; // a beast's body or the feeding: the walk waits
+        var played = false;
+        try { var start = sp.Idle.from(sp.Game.getFormEx(DRUNK_IDLE_START)); if (start) played = !!player.playIdle(start); } catch (pErr) { played = false; }
+        try { if (imod) imod.applyCrossFade(1.0); } catch (aErr) { /* the walk alone */ }
+        if (!this.greymarchDrunkOn) { this.greymarchDrunkOn = true; this.greymarchLog("drunk: on for " + Math.round((d.until - now) / 1000) + " s (walk " + (played ? "played" : "refused") + ", screen " + (imod ? "on" : "missing") + ")"); }
+    }
     greymarchVampFeedHeld(player: any, now: number): any {
         var sp = this.sp, h = this.greymarchVampFeedHold; if (!h) return;
         var other: any = this.greymarchVampFeedOther;
         if (!other) { // not loaded when it began: try again
             try { var lid = misc.remoteIdToLocalId(h.partner); other = lid ? sp.Actor.from(sp.Game.getFormEx(lid)) : null; } catch (oErr) { other = null; }
             if (other) { this.greymarchVampFeedOther = other; this.greymarchVampFeedPlay(player, other, now, true); }
-        } else if (now - h.playedAt >= FEED_REPLAY_MS) {
+        } else if (h.refused ? now - h.playedAt >= FEED_REPLAY_MS : now - h.playedAt >= FEED_MIN_MS) { // a refusal sets playedAt so the retry comes FEED_RETRY_MS later
             var biter = h.role === "vampire" ? player : other, synced = false;
             try { synced = !!biter.getAnimationVariableBool("bIsSynced"); } catch (sErr) { synced = false; }
-            if (!synced || h.refused) this.greymarchVampFeedPlay(player, other, now, false); // after a refusal the flag is no reason to wait
+            if (!synced || h.refused || now - h.playedAt >= FEED_REPLAY_MS) this.greymarchVampFeedPlay(player, other, now, false); // ended: at once; after a refusal the flag is no reason to wait
         }
         if (h.role !== "vampire" || h.asked) return;
         var input = sp.Input; if (!input || typeof input.isKeyPressed !== "function") return;
@@ -3502,7 +3551,8 @@ export class GreymarchBridge {
         // the forge, the pot, the chopping block, the vein)
         // the server names it (msg.emote: examine for mining, searchbody for skinning); an older server: skinning kneels
         var mEm = emoteMod.emoteById(typeof msg.emote === "string" ? msg.emote : msg.kind === "skin" ? "searchbody" : "");
-        if (mEm && mEm.kind !== "face") { this.greymarchEmotePlayWanted = { id: mEm.id, at: Date.now() }; this.greymarchMiniActing = true; }
+        if (mEm && mEm.kind !== "face") { this.greymarchEmotePlayWanted = { id: mEm.id, at: Date.now(), work: true }; this.greymarchMiniActing = true; }
+        this.greymarchWorkStartWanted = Date.now(); // the weapon away, third person (greymarchEmoteTick: PROFESSION WORK)
     }
     greymarchMiniHide(): any {
         if (this.greymarchMiniActing && !this.greymarchMiniOn) { this.greymarchMiniActing = false; this.greymarchEmoteStopWanted = Date.now(); }
@@ -3606,7 +3656,7 @@ export class GreymarchBridge {
     // animation events on, so the others see the smith at work. The window holds the keyboard, so the smith cannot walk off mid-swing.
     // The game's functions cannot be called from a packet or a browser message (SkyrimPlatform: "can't be called in this context"), so open and close
     // only ask; the turn and the animation happen on the next frame (greymarchForgeTick, from the update loop).
-    greymarchForgeAnimStart(forgeId: any): any { this.greymarchForgeAnimWant = { on: true, forge: Number(forgeId) >>> 0 }; }
+    greymarchForgeAnimStart(forgeId: any): any { this.greymarchForgeAnimWant = { on: true, forge: Number(forgeId) >>> 0 }; this.greymarchWorkStartWanted = Date.now(); }
     greymarchForgeAnimEnd(): any { this.greymarchForgeAnimWant = { on: false }; }
     // a station (not the forge): the player is put where the game puts a worker (the furniture's own marker, read by GreymarchCamera.dll 1.4: GetFurnitureMarker), facing
     // its way, and its own animation plays a moment later. A station without a marker or an animation (the kiln, a loom, a mill) only opens the window.
@@ -4089,11 +4139,26 @@ export class GreymarchBridge {
                 else this.greymarchEmoteShow(tapped ? "open" : "hold"); // let go before this frame: a tap, so the wheel stays open for clicks
             }
         }
+        // PROFESSION WORK IN THIRD PERSON (2026-11-02, the owner: "if I go to skin an animal I can stay in first person with my bow out"): as a mini game or a
+        // station's animation starts, the weapon is put away and the camera goes to third person; first person stays off while the work lasts (greymarchEmotePovLock:
+        // the mini game window open, the station animation on) and comes back after if they were in it. The work's kneel (skinning) waits for the weapon to be away.
+        if (this.greymarchWorkStartWanted) {
+            this.greymarchWorkStartWanted = 0; this.greymarchWorkStartAt = now; // locked from now (the station animation starts a moment later)
+            if (!this.greymarchWolfOn && !this.greymarchShapeOn) {
+                this.greymarchEmotePovNote();
+                try { var wp = this.sp.Game.getPlayer(); if (wp && wp.isWeaponDrawn()) { wp.sheatheWeapon(); this.greymarchWorkSheathedAt = now; this.greymarchCrumb("work: weapon put away"); } } catch (shErr) { /* the kneel waits or is skipped */ }
+                try { this.sp.Game.forceThirdPerson(); } catch (tpErr) { /* the lock still holds */ }
+            }
+        }
         var play = this.greymarchEmotePlayWanted;
+        var playDrawn = false; if (play && play.work) { try { playDrawn = !!this.sp.Game.getPlayer().isWeaponDrawn(); } catch (pdErr) { playDrawn = false; } }
+        // the weapon is still being put away: the kneel waits (up to 4 s). The game says "not drawn" as the put-away animation STARTS, and a kneel played then is
+        // swallowed by it (2026-11-02, the owner: the bow went away but no kneel; the log had the kneel 0.7 s after), so it also waits WORK_SHEATHE_MS after it
+        if (play && play.work && (playDrawn || now < (this.greymarchWorkSheathedAt || 0) + WORK_SHEATHE_MS) && now - play.at <= 4000) play = null;
         if (play) {
             this.greymarchEmotePlayWanted = null;
             var em = emoteMod.emoteById(play.id);
-            if (em && now - play.at <= 2000) { if (em.kind === "face") this.greymarchFaceSet(em); else this.greymarchEmotePlay(em); }
+            if (em && now - play.at <= (play.work ? 4000 : 2000)) { if (em.kind === "face") this.greymarchFaceSet(em); else this.greymarchEmotePlay(em); }
         }
         if (this.greymarchFaceClearWanted) { this.greymarchFaceClearWanted = 0; if (this.greymarchFaceMine) this.greymarchFaceSet(null); }
         this.greymarchServerEmoteTick(now);
@@ -4109,6 +4174,8 @@ export class GreymarchBridge {
                 if (cq.length && (!this.greymarchEmoteNow || emoteMod.SEAT_EMOTES.indexOf(this.greymarchEmoteNow.id) >= 0) && !this.greymarchWolfOn && !this.greymarchShapeOn && !this.greymarchInMenu()) { var next = cq.shift(); this.greymarchConsumePlay(next.id, now); }
             }
         }
+        this.greymarchSitResetTick(now);
+        this.greymarchEmotePovLock(!!this.greymarchEmoteNow || now < (this.greymarchEmotePovUntil || 0) || !!this.greymarchMiniOn || !!this.greymarchForgeAnim || !!this.greymarchForgeOn || now - (this.greymarchWorkStartAt || -1e12) < 1500 || !!this.greymarchSitResetAt, now); // standing up from sitting: third person until the body is back to normal, THEN first person (2026-11-02, the owner: going back to first person mid stand-up made them fall and float) // a meal too, and profession work (2026-11-02, the owner)
         if (this.greymarchMealLocked && !(this.greymarchEmoteNow && this.greymarchEmoteNow.meal)) this.greymarchMealLock(false, "the meal ended another way"); // never left frozen (a beast form, an emote dropped elsewhere)
         var cur = this.greymarchEmoteNow;
         if (!cur) { this.greymarchEmoteStopWanted = 0; return; }
@@ -4220,7 +4287,7 @@ export class GreymarchBridge {
             this.greymarchCrumb("eat: closed the menu (key " + key + ")");
         } catch (err) { /* the player closes it */ }
     }
-    // play it like an emote, quietly (no notices, the camera is left alone): a weapon drawn or a game that refuses means no animation, nothing else
+    // play it like an emote, quietly (no notices; food and drinks in third person since 2026-11-02, a potion leaves the camera alone): a weapon drawn or a game that refuses means no animation, nothing else
     greymarchConsumePlay(id: string, now: number): any {
         var em = emoteMod.emoteById(id);
         if (!em) return;
@@ -4230,6 +4297,7 @@ export class GreymarchBridge {
             if (player.isWeaponDrawn()) return;
             var seat = emoteMod.SEAT_MEAL[id];
             var inSeat = false; try { inSeat = player.getSitState() === 3; } catch (sErr) { inSeat = false; }
+            if (em.kind === "loop") { this.greymarchEmotePovNote(); try { this.sp.Game.forceThirdPerson(); } catch (tpErr) { /* the meal still plays */ } } // food or a drink: seen from outside, and first person stays off while it lasts (greymarchEmotePovLock)
             if (seat && (inSeat || sitEmote)) { // EATING SITTING DOWN (emotes.ts): the seated idle, or its event when the game wants a real seat (an edge)
                 seated = true;
                 var sidle = this.sp.Idle.from(this.sp.Game.getFormEx(seat.idle));
@@ -4264,6 +4332,57 @@ export class GreymarchBridge {
         try { sp.Game.enablePlayerControls(true, true, false, false, true, false, true, false, 0); } catch (e) { /* nothing else to try */ }
         this.greymarchCrumb("eat: controls back (" + why + ")");
     }
+    // NO FIRST PERSON DURING AN EMOTE (2026-11-02, the owner: "when someone emotes can you force them into 3rd person", then "make it so they cant even attempt
+    // to go into first person, instead of forcing them back out"): an emote starts in third person (greymarchEmotePlay), and while it lasts the game's own
+    // camera switch is turned off (F and the mouse wheel do nothing), as Beast Form does; a one-off emote for EMOTE_ONCE_POV_MS. Asked again every second (staff
+    // unfreezing turns every control back on). On again when it ends, unless a beast or creature form (which turn it off themselves) or a staff freeze holds it.
+    // Eating and drinking too (2026-11-02, the owner: "if people eat or drink they also go in third person"); a potion's quick swig leaves the camera alone (drunk mid-fight).
+    // BACK TO FIRST PERSON AFTER (2026-11-02, the owner: "once the emote is over can it auto put them back into first person"): whether they were in first person
+    // is noted as the emote or meal starts (before the switch to third person); one that starts while another holds the lock keeps the first answer.
+    greymarchEmotePovNote(): any {
+        if (this.greymarchEmotePovLocked || this.greymarchEmotePovBack !== null && this.greymarchEmotePovBack !== undefined) return;
+        var st = -1; try { st = Number(this.sp.Game.getCameraState()); } catch (e) { st = -1; }
+        this.greymarchEmotePovBack = st === 0; // 0: first person
+    }
+    greymarchEmotePovLock(on: boolean, now: number): any {
+        var sp = this.sp;
+        if (on) {
+            // THE MOUSE WHEEL (2026-11-02, the owner: still able to go into first person): turning the camera switch off stops F, but zooming in with the wheel still
+            // drops the camera into first person (the game has no switch for that). Every frame while locked, first person is put back to third at once, so it
+            // never shows.
+            if (this.greymarchEmotePovLocked) { var cs = -1; try { cs = Number(sp.Game.getCameraState()); } catch (csErr) { cs = -1; } if (cs === 0) { try { sp.Game.forceThirdPerson(); } catch (tpErr) { /* next frame */ } if ((this.greymarchEmotePovWheelSaid = (this.greymarchEmotePovWheelSaid || 0) + 1) <= 3) this.greymarchCrumb("emote: zoomed into first person, back to third"); } }
+            if (this.greymarchEmotePovLocked && now < (this.greymarchEmotePovAgainAt || 0)) return;
+            try { sp.Game.disablePlayerControls(false, false, true, false, false, false, false, false, 0); } catch (e) { return; }
+            if (!this.greymarchEmotePovLocked) this.greymarchCrumb("emote: first person off");
+            this.greymarchEmotePovLocked = true; this.greymarchEmotePovAgainAt = now + 1000;
+            return;
+        }
+        if (!this.greymarchEmotePovLocked) { this.greymarchEmotePovBack = null; return; } // an emote the game refused: nothing to go back to
+        this.greymarchEmotePovLocked = false;
+        var back = this.greymarchEmotePovBack === true; this.greymarchEmotePovBack = null;
+        var fx = this.greymarchFxHave;
+        if (this.greymarchWolfOn || this.greymarchShapeOn || (fx && fx.frozen)) return; // those hold the camera switch themselves
+        try { sp.Game.enablePlayerControls(false, false, true, false, false, false, false, false, 0); } catch (e) { /* nothing else to try */ }
+        if (back) { try { sp.Game.forceFirstPerson(); } catch (e) { /* they press F */ } } // they were in first person before it: back to it (2026-11-02, the owner)
+        this.greymarchCrumb("emote: first person back");
+    }
+    // STANDING UP CLEANLY (2026-11-02, the owner: standing up from sitting looked like falling, then they could float around): the wheel's sitting is the game's
+    // chair animation without a chair (emotes.ts, SITTING DOWN), and its stand-up (IdleChairExitStart) leaves the body half in the chair's state with no chair to
+    // let go of. Once the stand-up has played (SIT_RESET_MS) the body is put back in its normal state (IdleForceDefaultState; SkyMP passes it to the other
+    // games, so they see it stand too). Not when another emote or a meal has started meanwhile, or they sat in a real seat.
+    greymarchSitResetTick(now: number): any {
+        var at = this.greymarchSitResetAt;
+        if (!at || now < at) return;
+        this.greymarchSitResetAt = 0;
+        if (this.greymarchEmoteNow || this.greymarchWolfOn || this.greymarchShapeOn) return;
+        try {
+            var player = this.sp.Game.getPlayer();
+            var seat = 0; try { seat = Number(player.getSitState()); } catch (sErr) { seat = 0; }
+            if (seat === 3 || player.isDead()) return;
+            this.sp.Debug.sendAnimationEvent(player, "IdleForceDefaultState");
+            this.greymarchCrumb("sit: stood up, body back to normal");
+        } catch (err) { /* nothing else to try */ }
+    }
     greymarchEmotePlay(em: any): any {
         var sp = this.sp;
         if (this.greymarchWolfOn || this.greymarchShapeOn) { this.greymarchEmoteSay("A beast has no emotes"); return; }
@@ -4273,7 +4392,7 @@ export class GreymarchBridge {
             player = sp.Game.getPlayer();
             if (player.isWeaponDrawn()) { this.greymarchEmoteSay("Sheathe your weapon first"); return; }
             if (this.greymarchEmoteNow && this.greymarchEmoteNow.kind === "walk" && em.kind !== "once") this.greymarchEmoteEnd("another emote"); // a carry ends before a new pose starts (a serve or a throw keeps it)
-            try { sp.Game.forceThirdPerson(); } catch (tpErr) { /* the emote still plays */ }
+            this.greymarchEmotePovNote(); try { sp.Game.forceThirdPerson(); } catch (tpErr) { /* the emote still plays */ }
             var idle = sp.Idle.from(sp.Game.getFormEx(em.idle));
             this.greymarchCrumb("emote " + em.id + " idle " + (Number(em.idle) >>> 0).toString(16));
             ok = !!idle && !!player.playIdle(idle);
@@ -4283,6 +4402,7 @@ export class GreymarchBridge {
         if (n <= 20) this.greymarchLog("emote: " + em.id + " (idle " + em.idle.toString(16) + ", " + em.kind + ") " + (ok ? "played" : "refused by the game"));
         if (!ok) { this.greymarchEmoteSay("You cannot do that right now"); return; }
         this.greymarchEmoteNow = em.kind === "once" ? null : { id: em.id, kind: em.kind, stop: em.stop || emoteMod.IDLE_STOP, stopEvent: em.stopEvent, at: Date.now() };
+        if (em.kind === "once") this.greymarchEmotePovUntil = Date.now() + EMOTE_ONCE_POV_MS; // a one-off emote plays for a few seconds: first person stays off meanwhile
     }
     // ---- FACES (the wheel's Face group). The face is put on the player's own body here and reported to the server, which passes it to everyone else (gamemode faces.js);
     // the faces of other players come back as { customPacketType: "greymarchFaceOf", actor, face } and are put on the characters this game draws. The game can drop a face
@@ -4481,6 +4601,7 @@ export class GreymarchBridge {
             if (!ok) sp.Debug.sendAnimationEvent(player, cur.stopEvent ? cur.stopEvent : cur.stop === emoteMod.OFFSET_STOP ? "OffsetStop" : cur.stop === emoteMod.DRUNK_STOP ? "DrunkStop" : "IdleStop"); // the stop event itself
         } catch (err) { /* the next movement ends it anyway */ }
         if ((this.greymarchEmoteLogged || 0) <= 20) this.greymarchLog("emote: " + cur.id + " ended (" + why + ")");
+        if (cur.stopEvent === "IdleChairExitStart") this.greymarchSitResetAt = Date.now() + SIT_RESET_MS; // STANDING UP CLEANLY (greymarchSitResetTick)
         if (cur.resume && why === "done eating") this.greymarchEmoteNow = { id: cur.resume.id, kind: cur.resume.kind, stop: cur.resume.stop, stopEvent: cur.resume.stopEvent, at: Date.now() }; // a meal on an edge: still sitting there
     }
     // THE CONSOLE (~). SkyrimPlatform's findConsoleCommand swaps a command's code for ours, and ours answering false means the game's own never runs:
