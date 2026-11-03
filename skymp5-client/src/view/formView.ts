@@ -1354,6 +1354,16 @@ export class FormView {
       m = model.movement;
     } else {
       if (f.at === this.gmPuppetAt && now - this.movState.lastApply < 1000) return "";
+      // STANDS STILL (2026-11-03, the owner: "Milk cows spin when placed because they are trying to move"): a milk cow's frames say "still". Its own AI kept
+      // walking it off while every frame put it back, so it turned on the spot. It is held where it stands (restrained: no walking, no turning, its idle
+      // still plays) and put back only when it is really off its spot or facing elsewhere.
+      if (f.anim === "still") {
+        if (!this.gmPuppetStill) { this.gmPuppetStill = true; try { ac.setRestrained(true); ac.setDontMove(true); } catch (e) { /* the frames still hold it */ } }
+        this.gmPuppetAt = f.at;
+        const dx = refr.getPositionX() - f.pos[0], dy = refr.getPositionY() - f.pos[1], dz = refr.getPositionZ() - f.pos[2];
+        const off = dx * dx + dy * dy > 32 * 32 || Math.abs(dz) > 64 || Math.abs(((refr.getAngleZ() - f.heading + 540) % 360) - 180) > 10;
+        if (this.movState.everApplied && !off) return "";
+      } else if (this.gmPuppetStill) { this.gmPuppetStill = false; try { ac.setRestrained(false); ac.setDontMove(false); } catch (e) { /* as it is */ } }
       this.gmPuppetAt = f.at;
       m = { ...model.movement, pos: [f.pos[0], f.pos[1], f.pos[2]], rot: [0, 0, f.heading], runMode: f.anim === "run" ? "Running" : f.anim === "walk" ? "Walking" : "Standing", direction: 0, speed: f.hunt === 1 ? 0 : f.speed, isInJumpState: false, isSneaking: false, isBlocking: false, isWeapDrawn: f.hunt === 1 || f.anim === "attack", ...(typeof f.hp === "number" ? { healthPercentage: Math.max(0.02, f.hp) } : {}) };
       // speed 0 while hunting (2026-10-28, the owner's clip: wolves teleported on the player): SkyMP places a moving one a fifth of a second AHEAD of its frame
@@ -1689,6 +1699,7 @@ export class FormView {
   private gmUnloadedSince = 0; // GREYMARCH: since when this game hosts this NPC without having it loaded (0: loaded)
   private gmBodyKillAt = 0;
   private gmPuppetReady = false;
+  private gmPuppetStill = false; // GREYMARCH: held on its spot (a milk cow, frames "still"; gmPuppetMove)
   private gmPuppetAt = 0;
   private gmPuppetAttackAt = 0;
   private gmPuppetAttackCrumbed = false; // breadcrumbs: the first attack played
