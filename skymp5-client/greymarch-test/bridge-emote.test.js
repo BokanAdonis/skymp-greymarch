@@ -32,7 +32,7 @@ function make(opts = {}) {
   const actors = {}; for (const local of Object.values(opts.others || {})) actors[local] = faceLog(local.toString(16));
   const sp = {
     printConsole() {}, writeLogs: (n, l) => log.lines.push(l),
-    Game: { getPlayer: () => player, getFormEx: (id) => (log.world && log.world[id] ? (log.world[id].gone ? null : log.world[id]) : { id }), getFormFromFile: (id, file) => (file === "Missing.esp" ? null : { id, file, getFormID: () => id }), forceThirdPerson: () => { log.thirdPerson++; }, disablePlayerControls: (...a) => (log.controls = log.controls || []).push(["off", ...a]), enablePlayerControls: (...a) => (log.controls = log.controls || []).push(["on", ...a]) },
+    Game: { getPlayer: () => player, getFormEx: (id) => (log.world && log.world[id] ? (log.world[id].gone ? null : log.world[id]) : { id }), getFormFromFile: (id, file) => (file === "Missing.esp" ? null : { id, file, getFormID: () => id }), forceThirdPerson: () => { log.thirdPerson++; state.cam = 9; }, forceFirstPerson: () => { log.firstPerson = (log.firstPerson || 0) + 1; state.cam = 0; }, getCameraState: () => (state.cam === undefined ? 9 : state.cam), disablePlayerControls: (...a) => (a[2] === true && !a[0] && !a[1] ? (log.pov = log.pov || []) : (log.controls = log.controls || [])).push(["off", ...a]), enablePlayerControls: (...a) => (a[2] === true && !a[0] && !a[1] ? (log.pov = log.pov || []) : (log.controls = log.controls || [])).push(["on", ...a]) },
     callNative: (cls, fn, self, a, b) => { (log.natives = log.natives || []).push([cls, fn, a]); if (cls !== "GreymarchCam" || state.noDll) throw new Error("Native function not found"); if (fn === "GetFurnitureMarker") return state.marker ? state.marker[b] : -99999; if (fn === "SetFreeCamera") { state.free = !!a; return true; } if (fn === "IsFreeCamera") return !!state.free; if (fn === "GetCamera") return (state.cam || [0, 0, 0, 0, 1, 0])[a]; return undefined; },
     Idle: { from: (f) => f || null }, ObjectReference: { from: (f) => (f && f.setPosition ? f : f && f.id ? { id: f.id, getPositionX: () => 500, getPositionY: () => 600, getPositionZ: () => 10, getAngleZ: () => 90 } : null) }, Actor: { from: (f) => (f && actors[f.id]) || null }, Potion: { from: (f) => (f && f.potion) || null },
     Debug: { sendAnimationEvent: (ref, name) => log.events.push(name), notification: (t) => log.notes.push(t) },
@@ -324,7 +324,7 @@ test("eating, drinking and potions: the matching idle once the menu is closed; e
   assert.deepStrictEqual(s.log.idles, [], "not while a menu is open (one it does not close itself)");
   s.state.menu = null; s.tick();
   assert.deepStrictEqual(s.log.idles, [idleOf("bread")], "the standing eating idle");
-  assert.strictEqual(s.log.thirdPerson, 0, "the camera is left alone"); assert.deepStrictEqual(s.log.notes, [], "no notice");
+  assert.strictEqual(s.log.thirdPerson, 1, "seen in third person (2026-11-02)"); assert.deepStrictEqual(s.log.notes, [], "no notice");
   for (let i = 0; i < 90; i++) s.tick(50); // 4.5 s
   assert.ok(s.gm.greymarchEmoteNow, "still eating");
   for (let i = 0; i < 12; i++) s.tick(50);
@@ -564,24 +564,48 @@ test("a meal while sitting: the seated eating or drinking idle in a chair or on 
   assert.strictEqual(g.gm.greymarchEmoteNow.id, "sit");
 });
 
-test("no first person during an emote (2026-11-02, the owner: they cannot even try): the game's camera switch is off while it lasts, a one-off emote for 5 seconds; on again after; a meal leaves it alone", () => {
-  const POV = (c) => c[3] === true && c.slice(1, 3).every((x) => x === false); // [on/off, movement, fighting, camSwitch ...]: only the camera switch
+test("no first person during an emote or a meal (2026-11-02, the owner: they cannot even try; eating and drinking too): the game's camera switch is off while it lasts, a one-off emote for 5 seconds; on again after; a potion leaves it alone", () => {
   const s = make();
   s.page({ type: "emote", id: "hey" }); s.tick();
   assert.strictEqual(s.log.thirdPerson, 1, "the emote starts in third person");
-  assert.ok((s.log.controls || []).some((c) => c[0] === "off" && POV(c)), "the camera switch is turned off");
+  assert.deepStrictEqual((s.log.pov || []).map((c) => c[0]), ["off"], "the camera switch is turned off");
   s.state.speed = 100; for (let i = 0; i < 20; i++) s.tick(50);
   assert.strictEqual(s.gm.greymarchEmoteNow, null, "moving ends it");
-  assert.ok(s.log.controls.some((c) => c[0] === "on" && POV(c)), "and the camera switch is on again");
+  assert.strictEqual(s.log.pov.at(-1)[0], "on", "and the camera switch is on again");
   const o = make();
   o.page({ type: "emote", id: "wave" }); o.tick();
-  assert.ok(o.log.controls.some((c) => c[0] === "off" && POV(c)), "a wave too");
-  o.tick(4000); assert.ok(!o.log.controls.some((c) => c[0] === "on"), "still off 4 seconds in");
-  o.tick(1500); assert.ok(o.log.controls.some((c) => c[0] === "on" && POV(c)), "on again after 5 seconds");
+  assert.strictEqual(o.log.pov.at(-1)[0], "off", "a wave too");
+  o.tick(4000); assert.strictEqual(o.log.pov.at(-1)[0], "off", "still off 4 seconds in");
+  o.tick(1500); assert.strictEqual(o.log.pov.at(-1)[0], "on", "on again after 5 seconds");
   const m = make();
   m.eat("Venison Stew"); m.tick();
-  for (let i = 0; i < 20; i++) m.tick(50);
-  assert.ok(!m.log.controls.some((c) => c[0] === "off" && POV(c)), "eating leaves the camera switch alone");
+  assert.strictEqual(m.log.thirdPerson, 1, "eating: third person");
+  assert.strictEqual(m.log.pov.at(-1)[0], "off", "and no first person while eating");
+  for (let i = 0; i < 102; i++) m.tick(50);
+  assert.strictEqual(m.gm.greymarchEmoteNow, null); assert.strictEqual(m.log.pov.at(-1)[0], "on", "back after the meal");
+  const p = make();
+  p.eat("Potion of Healing", false); for (let i = 0; i < 20; i++) p.tick(50);
+  assert.strictEqual(p.log.thirdPerson, 0, "a potion: the camera is left alone"); assert.strictEqual(p.log.pov, undefined);
+});
+
+test("back to first person after an emote or a meal, only if they were in first person before it (2026-11-02, the owner)", () => {
+  const s = make(); s.state.cam = 0;
+  s.page({ type: "emote", id: "hey" }); s.tick();
+  assert.strictEqual(s.state.cam, 9, "third person while it lasts");
+  s.state.speed = 100; for (let i = 0; i < 20; i++) s.tick(50);
+  assert.strictEqual(s.gm.greymarchEmoteNow, null);
+  assert.strictEqual(s.state.cam, 0, "first person again"); assert.strictEqual(s.log.firstPerson, 1);
+  const t = make(); // in third person already: left there
+  t.page({ type: "emote", id: "hey" }); t.tick(); t.state.speed = 100; for (let i = 0; i < 20; i++) t.tick(50);
+  assert.strictEqual(t.log.firstPerson, undefined);
+  const m = make(); m.state.cam = 0;
+  m.eat("Nord Mead"); m.tick(); assert.strictEqual(m.state.cam, 9);
+  for (let i = 0; i < 102; i++) m.tick(50);
+  assert.strictEqual(m.state.cam, 0, "after a drink too");
+  const r = make(); r.state.cam = 0; r.state.drawn = true;
+  r.page({ type: "emote", id: "hey" }); r.tick(); r.state.drawn = false; r.state.cam = 9; r.tick();
+  r.page({ type: "emote", id: "hey" }); r.tick(); r.state.speed = 100; for (let i = 0; i < 20; i++) r.tick(50);
+  assert.strictEqual(r.log.firstPerson, undefined, "a refused emote is forgotten: the next one asks afresh (they were in third person by then)");
 });
 
 test("a meal cannot be skipped: the controls are locked for its five seconds (not looking, the camera or the menus); moving, a weapon, W or Stop do not end it", () => {

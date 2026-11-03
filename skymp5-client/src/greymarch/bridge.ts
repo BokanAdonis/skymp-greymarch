@@ -4059,7 +4059,7 @@ export class GreymarchBridge {
                 if (cq.length && (!this.greymarchEmoteNow || emoteMod.SEAT_EMOTES.indexOf(this.greymarchEmoteNow.id) >= 0) && !this.greymarchWolfOn && !this.greymarchShapeOn && !this.greymarchInMenu()) { var next = cq.shift(); this.greymarchConsumePlay(next.id, now); }
             }
         }
-        this.greymarchEmotePovLock(!!(this.greymarchEmoteNow && !this.greymarchEmoteNow.meal) || now < (this.greymarchEmotePovUntil || 0), now);
+        this.greymarchEmotePovLock(!!this.greymarchEmoteNow || now < (this.greymarchEmotePovUntil || 0), now); // a meal too (2026-11-02, the owner)
         if (this.greymarchMealLocked && !(this.greymarchEmoteNow && this.greymarchEmoteNow.meal)) this.greymarchMealLock(false, "the meal ended another way"); // never left frozen (a beast form, an emote dropped elsewhere)
         var cur = this.greymarchEmoteNow;
         if (!cur) { this.greymarchEmoteStopWanted = 0; return; }
@@ -4171,7 +4171,7 @@ export class GreymarchBridge {
             this.greymarchCrumb("eat: closed the menu (key " + key + ")");
         } catch (err) { /* the player closes it */ }
     }
-    // play it like an emote, quietly (no notices, the camera is left alone): a weapon drawn or a game that refuses means no animation, nothing else
+    // play it like an emote, quietly (no notices; food and drinks in third person since 2026-11-02, a potion leaves the camera alone): a weapon drawn or a game that refuses means no animation, nothing else
     greymarchConsumePlay(id: string, now: number): any {
         var em = emoteMod.emoteById(id);
         if (!em) return;
@@ -4181,6 +4181,7 @@ export class GreymarchBridge {
             if (player.isWeaponDrawn()) return;
             var seat = emoteMod.SEAT_MEAL[id];
             var inSeat = false; try { inSeat = player.getSitState() === 3; } catch (sErr) { inSeat = false; }
+            if (em.kind === "loop") { this.greymarchEmotePovNote(); try { this.sp.Game.forceThirdPerson(); } catch (tpErr) { /* the meal still plays */ } } // food or a drink: seen from outside, and first person stays off while it lasts (greymarchEmotePovLock)
             if (seat && (inSeat || sitEmote)) { // EATING SITTING DOWN (emotes.ts): the seated idle, or its event when the game wants a real seat (an edge)
                 seated = true;
                 var sidle = this.sp.Idle.from(this.sp.Game.getFormEx(seat.idle));
@@ -4219,7 +4220,14 @@ export class GreymarchBridge {
     // to go into first person, instead of forcing them back out"): an emote starts in third person (greymarchEmotePlay), and while it lasts the game's own
     // camera switch is turned off (F and the mouse wheel do nothing), as Beast Form does; a one-off emote for EMOTE_ONCE_POV_MS. Asked again every second (staff
     // unfreezing turns every control back on). On again when it ends, unless a beast or creature form (which turn it off themselves) or a staff freeze holds it.
-    // A meal leaves the camera alone.
+    // Eating and drinking too (2026-11-02, the owner: "if people eat or drink they also go in third person"); a potion's quick swig leaves the camera alone (drunk mid-fight).
+    // BACK TO FIRST PERSON AFTER (2026-11-02, the owner: "once the emote is over can it auto put them back into first person"): whether they were in first person
+    // is noted as the emote or meal starts (before the switch to third person); one that starts while another holds the lock keeps the first answer.
+    greymarchEmotePovNote(): any {
+        if (this.greymarchEmotePovLocked || this.greymarchEmotePovBack !== null && this.greymarchEmotePovBack !== undefined) return;
+        var st = -1; try { st = Number(this.sp.Game.getCameraState()); } catch (e) { st = -1; }
+        this.greymarchEmotePovBack = st === 0; // 0: first person
+    }
     greymarchEmotePovLock(on: boolean, now: number): any {
         var sp = this.sp;
         if (on) {
@@ -4229,11 +4237,13 @@ export class GreymarchBridge {
             this.greymarchEmotePovLocked = true; this.greymarchEmotePovAgainAt = now + 1000;
             return;
         }
-        if (!this.greymarchEmotePovLocked) return;
+        if (!this.greymarchEmotePovLocked) { this.greymarchEmotePovBack = null; return; } // an emote the game refused: nothing to go back to
         this.greymarchEmotePovLocked = false;
+        var back = this.greymarchEmotePovBack === true; this.greymarchEmotePovBack = null;
         var fx = this.greymarchFxHave;
         if (this.greymarchWolfOn || this.greymarchShapeOn || (fx && fx.frozen)) return; // those hold the camera switch themselves
         try { sp.Game.enablePlayerControls(false, false, true, false, false, false, false, false, 0); } catch (e) { /* nothing else to try */ }
+        if (back) { try { sp.Game.forceFirstPerson(); } catch (e) { /* they press F */ } } // they were in first person before it: back to it (2026-11-02, the owner)
         this.greymarchCrumb("emote: first person back");
     }
     greymarchEmotePlay(em: any): any {
@@ -4245,7 +4255,7 @@ export class GreymarchBridge {
             player = sp.Game.getPlayer();
             if (player.isWeaponDrawn()) { this.greymarchEmoteSay("Sheathe your weapon first"); return; }
             if (this.greymarchEmoteNow && this.greymarchEmoteNow.kind === "walk" && em.kind !== "once") this.greymarchEmoteEnd("another emote"); // a carry ends before a new pose starts (a serve or a throw keeps it)
-            try { sp.Game.forceThirdPerson(); } catch (tpErr) { /* the emote still plays */ }
+            this.greymarchEmotePovNote(); try { sp.Game.forceThirdPerson(); } catch (tpErr) { /* the emote still plays */ }
             var idle = sp.Idle.from(sp.Game.getFormEx(em.idle));
             this.greymarchCrumb("emote " + em.id + " idle " + (Number(em.idle) >>> 0).toString(16));
             ok = !!idle && !!player.playIdle(idle);
