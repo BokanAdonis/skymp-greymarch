@@ -35,6 +35,7 @@ const SHAPE_REST_MS = 800, SHAPE_POWER_REST_MS = 1600; // a creature's attacks: 
 const SHAPE_LAND_MS = 450; // a creature's swing is reported this long after it starts (about when it lands)
 const SHAPE_NPC_READY_MS = 8000; // a creature NPC that is not ready this long after it was placed is placed again
 const SHAPE_SILENCE_MS = 20000; // a creature form: with no word from the server for this long the player changes back by themselves (the server repeats "on" every 5 seconds)
+const EMOTE_ONCE_POV_MS = 5000; // a one-off emote (a wave, a bow): first person stays off this long (greymarchEmotePovLock)
 const WOLF_BACK_GRACE_MS = 2000; // Z changes back, but not in the first 2 seconds after the body changed
 const STANDUP_FALLBACK_MS = 1500; // greymarchStandUp: still in the furniture this long after the get-up animation was asked for, the player is snapped to standing
 const LIP_STEP_MS = 110; // a talking mouth changes shape this often
@@ -4058,6 +4059,7 @@ export class GreymarchBridge {
                 if (cq.length && (!this.greymarchEmoteNow || emoteMod.SEAT_EMOTES.indexOf(this.greymarchEmoteNow.id) >= 0) && !this.greymarchWolfOn && !this.greymarchShapeOn && !this.greymarchInMenu()) { var next = cq.shift(); this.greymarchConsumePlay(next.id, now); }
             }
         }
+        this.greymarchEmotePovLock(!!(this.greymarchEmoteNow && !this.greymarchEmoteNow.meal) || now < (this.greymarchEmotePovUntil || 0), now);
         if (this.greymarchMealLocked && !(this.greymarchEmoteNow && this.greymarchEmoteNow.meal)) this.greymarchMealLock(false, "the meal ended another way"); // never left frozen (a beast form, an emote dropped elsewhere)
         var cur = this.greymarchEmoteNow;
         if (!cur) { this.greymarchEmoteStopWanted = 0; return; }
@@ -4069,9 +4071,6 @@ export class GreymarchBridge {
             this.greymarchEmoteCheckAt = now + 250;
             try {
                 var player = sp.Game.getPlayer();
-                // THIRD PERSON FOR THE WHOLE EMOTE (2026-11-02, the owner: "when someone emotes can you force them into 3rd person"): an emote already starts in third
-                // person (greymarchEmotePlay); switching to first person while it lasts (F, the mouse wheel) is put back. A meal leaves the camera alone, as before.
-                if (!cur.meal) { var camState = -1; try { camState = Number(sp.Game.getCameraState()); } catch (csErr) { camState = -1; } if (camState === 0) { try { sp.Game.forceThirdPerson(); } catch (tpErr) { /* the next check */ } } }
                 if (cur.meal) { this.greymarchEmoteStopWanted = 0; if (player.isDead()) stopWhy = "died"; } // a meal lasts its full time: moving, a weapon or Stop do not end it (the controls are locked)
                 else if (player.isWeaponDrawn()) stopWhy = "weapon drawn";
                 else if (cur.kind === "loop" && now - cur.at > 700 && player.getAnimationVariableFloat("Speed") > 30) stopWhy = "moved";
@@ -4216,6 +4215,27 @@ export class GreymarchBridge {
         try { sp.Game.enablePlayerControls(true, true, false, false, true, false, true, false, 0); } catch (e) { /* nothing else to try */ }
         this.greymarchCrumb("eat: controls back (" + why + ")");
     }
+    // NO FIRST PERSON DURING AN EMOTE (2026-11-02, the owner: "when someone emotes can you force them into 3rd person", then "make it so they cant even attempt
+    // to go into first person, instead of forcing them back out"): an emote starts in third person (greymarchEmotePlay), and while it lasts the game's own
+    // camera switch is turned off (F and the mouse wheel do nothing), as Beast Form does; a one-off emote for EMOTE_ONCE_POV_MS. Asked again every second (staff
+    // unfreezing turns every control back on). On again when it ends, unless a beast or creature form (which turn it off themselves) or a staff freeze holds it.
+    // A meal leaves the camera alone.
+    greymarchEmotePovLock(on: boolean, now: number): any {
+        var sp = this.sp;
+        if (on) {
+            if (this.greymarchEmotePovLocked && now < (this.greymarchEmotePovAgainAt || 0)) return;
+            try { sp.Game.disablePlayerControls(false, false, true, false, false, false, false, false, 0); } catch (e) { return; }
+            if (!this.greymarchEmotePovLocked) this.greymarchCrumb("emote: first person off");
+            this.greymarchEmotePovLocked = true; this.greymarchEmotePovAgainAt = now + 1000;
+            return;
+        }
+        if (!this.greymarchEmotePovLocked) return;
+        this.greymarchEmotePovLocked = false;
+        var fx = this.greymarchFxHave;
+        if (this.greymarchWolfOn || this.greymarchShapeOn || (fx && fx.frozen)) return; // those hold the camera switch themselves
+        try { sp.Game.enablePlayerControls(false, false, true, false, false, false, false, false, 0); } catch (e) { /* nothing else to try */ }
+        this.greymarchCrumb("emote: first person back");
+    }
     greymarchEmotePlay(em: any): any {
         var sp = this.sp;
         if (this.greymarchWolfOn || this.greymarchShapeOn) { this.greymarchEmoteSay("A beast has no emotes"); return; }
@@ -4235,6 +4255,7 @@ export class GreymarchBridge {
         if (n <= 20) this.greymarchLog("emote: " + em.id + " (idle " + em.idle.toString(16) + ", " + em.kind + ") " + (ok ? "played" : "refused by the game"));
         if (!ok) { this.greymarchEmoteSay("You cannot do that right now"); return; }
         this.greymarchEmoteNow = em.kind === "once" ? null : { id: em.id, kind: em.kind, stop: em.stop || emoteMod.IDLE_STOP, stopEvent: em.stopEvent, at: Date.now() };
+        if (em.kind === "once") this.greymarchEmotePovUntil = Date.now() + EMOTE_ONCE_POV_MS; // a one-off emote plays for a few seconds: first person stays off meanwhile
     }
     // ---- FACES (the wheel's Face group). The face is put on the player's own body here and reported to the server, which passes it to everyone else (gamemode faces.js);
     // the faces of other players come back as { customPacketType: "greymarchFaceOf", actor, face } and are put on the characters this game draws. The game can drop a face
