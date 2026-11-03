@@ -282,7 +282,7 @@ export class GreymarchBridge {
         if (type === "greymarchScribeReply") { this.greymarchScribeToPage("reply", msg); return; } // the scribe's desk (/scribe)
         if (type === "greymarchScribeOpen") { this.greymarchScribeShow(); return; }
         if (type === "greymarchProfReply") { this.greymarchLog("prof: the server's answer arrived (rid " + msg.rid + ", ok " + msg.ok + ")"); this.greymarchProfToPage("reply", msg); return; } // the professions window (K)
-        if (type === "greymarchCombatMod") { var cm = Number(msg.mult); this.greymarchCombatWant = cm >= 0.1 && cm <= 3 ? cm : 1; return; } // the damage multiplier for what is in hand (professions: a weapon above your rank hits weaker, a Brawler's fists hit harder)
+        if (type === "greymarchCombatMod") { var cm = Number(msg.mult); this.greymarchCombatWant = cm >= 0.1 && cm <= 3 ? cm : 1; var fm = Number(msg.fist); this.greymarchFistWant = fm >= 0.1 && fm <= 5 ? fm : 1; return; } // the damage multiplier for what is in hand (professions: a weapon above your rank hits weaker, a Brawler's fists hit harder)
         if (type === "greymarchCombatPerks") { this.greymarchPerksWant = { blockSpeed: msg.blockSpeed === true, bowSpeed: msg.bowSpeed === true, fastDraw: msg.fastDraw === true, sprintPower: msg.sprintPower === true }; this.greymarchPerksDirty = true; return; } // combat skill perks (gamemode, COMBAT-OVERHAUL.md): rank 4 full speed while blocking / with a bow drawn, rank 5 Bowman fast draw
         if (type === "greymarchMenuEvent" && msg.type === "body" && Number(msg.looking) > 0 && !this.greymarchMenuOn) { this.greymarchMenuShow({ mode: "open", looking: Number(msg.looking) }); return; } // E on the body of a dead wild animal (gamemode wildlifesystem.js): the menu opens on it to take what is on it
         if (type === "greymarchMenuEvent") { if ((msg.type === "trade_invite" || msg.type === "trade" || msg.type === "feed_invite" || msg.type === "frisk_invite" || msg.type === "guard_view") && !this.greymarchMenuOn) this.greymarchMenuShow({ mode: "invite", looking: 0 }); /* a trade, a vampire's request to feed, a guard's request to frisk or what the frisk found opens the menu by itself */ this.greymarchMenuToPage("event", msg); return; }
@@ -2896,7 +2896,7 @@ export class GreymarchBridge {
         this.greymarchFxNext = now + 400;
         var want = this.greymarchFxWant;
         var ghosts = this.greymarchGhostList;
-        if (!want && !(ghosts && ghosts.length) && !this.greymarchGhostApplied && !(this.greymarchInvisList && this.greymarchInvisList.length) && !this.greymarchInvApplied && !(this.greymarchOthers && this.greymarchOthers.length) && !this.greymarchStatsWant && !(this.greymarchCombatWant !== undefined && this.greymarchCombatWant !== this.greymarchCombatHave) && !this.greymarchPerksDue(now) && (this.greymarchSelfCleared || !this.greymarchMeActor)) return;
+        if (!want && !(ghosts && ghosts.length) && !this.greymarchGhostApplied && !(this.greymarchInvisList && this.greymarchInvisList.length) && !this.greymarchInvApplied && !(this.greymarchOthers && this.greymarchOthers.length) && !this.greymarchStatsWant && !(this.greymarchCombatWant !== undefined && this.greymarchCombatWant !== this.greymarchCombatHave) && !(this.greymarchFistWant !== undefined && this.greymarchFistWant !== this.greymarchFistHave) && !this.greymarchPerksDue(now) && (this.greymarchSelfCleared || !this.greymarchMeActor)) return;
         try {
             var sp = this.sp;
             var player = sp.Game.getPlayer();
@@ -2989,7 +2989,17 @@ export class GreymarchBridge {
     }
     // WEAPON PENALTY. The server watches what this player wields and sends a damage multiplier (1 = normal, less = weaker hits); it is set as the game's attack damage multiplier,
     // once per change, so the game is never fought with.
+    // BRASS KNUCKLES (2026-11-03): the fists' own multiplier (msg.fist) goes on the game's unarmed damage (the race's base x fist), so a weapon in the
+    // left hand keeps only the attack multiplier, as on the server (fistMult).
     greymarchCombatApply(player: any): any {
+        var fist = this.greymarchFistWant === undefined ? 1 : this.greymarchFistWant;
+        if (fist !== this.greymarchFistHave) {
+            try {
+                if (this.greymarchFistBase === undefined) this.greymarchFistBase = Number(player.getBaseActorValue("UnarmedDamage")) || 0;
+                if (this.greymarchFistBase > 0) { player.setActorValue("UnarmedDamage", this.greymarchFistBase * fist); this.greymarchLog("combat: my fists x" + fist + " (unarmed " + this.greymarchFistBase * fist + ")"); }
+            } catch (e) { this.greymarchLog("combat: the fist damage could not be set (" + e + ")"); }
+            this.greymarchFistHave = fist;
+        }
         var want = this.greymarchCombatWant;
         if (want === undefined || want === this.greymarchCombatHave) return;
         try { player.setActorValue("AttackDamageMult", want); this.greymarchCombatHave = want; this.greymarchLog("combat: my damage multiplier is now " + want); } catch (e) { this.greymarchCombatHave = want; this.greymarchLog("combat: the damage multiplier could not be set (" + e + ")"); }
