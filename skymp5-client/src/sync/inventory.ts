@@ -389,6 +389,29 @@ const greymarchIsBoundItem = (baseId: number): boolean => {
   }
 };
 
+// GREYMARCH (2026-11-03, poisons on weapons: gamemode weaponpoison.js): the hit used the poison, so it comes off the weapon in hand. Skyrim has no call to take a
+// poison off; the poisoned weapon is taken out and the same weapon (same condition, enchantment, name ...) put back without it, worn as it was, the way
+// applyInventory below moves items. Returns how many weapons it took a poison off.
+export const greymarchStripPoison = (refr: ObjectReference): number => {
+  let n = 0;
+  getInventory(refr).entries.forEach((e) => {
+    if (!e.poisonId || !(e.worn || e.wornLeft)) return;
+    const f = Game.getFormEx(e.baseId);
+    if (!f) return;
+    const args = (count: number, poisoned: boolean): [ObjectReference, Form, number, number, Enchantment | null, number, boolean, number, string, number, Potion | null, number] => [
+      refr, f, count, e.health ? e.health : 1, e.enchantmentId ? Enchantment.from(Game.getFormEx(e.enchantmentId)) : null, e.maxCharge ? e.maxCharge : 0,
+      !!e.removeEnchantmentOnUnequip, e.chargePercent ? e.chargePercent : 0, e.name ? cropName(e.name) : f.getName(), e.soul ? e.soul : 0,
+      poisoned ? Potion.from(Game.getFormEx(e.poisonId as number)) : null, poisoned ? (e.poisonCount ? e.poisonCount : 0) : 0];
+    TESModPlatform.pushWornState(!!e.worn, !!e.wornLeft);
+    TESModPlatform.addItemEx(...args(-1, true));
+    TESModPlatform.pushWornState(!!e.worn, !!e.wornLeft);
+    TESModPlatform.addItemEx(...args(1, false));
+    n++;
+  });
+  if (n) { const ac = Actor.from(refr); if (ac) ac.queueNiNodeUpdate(); }
+  return n;
+};
+
 export const applyInventory = (
   refr: ObjectReference,
   newInventory: Inventory,

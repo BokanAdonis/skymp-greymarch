@@ -255,6 +255,8 @@ export class AuthService extends ClientListener {
       case 'greymarchVampMenuReply':
       case 'greymarchVampMenuOpen':
       case 'greymarchEmote': // the server asks for an emote (gamemode: a salt deposit)
+      case 'greymarchPoisonUsed': // a weapon hit used the poison: off the blade (gamemode weaponpoison.js)
+      case 'greymarchPoisonFx': // a poisoned hit paralyses this player (gamemode weaponpoison.js)
       case 'greymarchMinigame': // a profession mini game before the work (gamemode minigames.js)
       case 'greymarchMinigameDone':
       case 'greymarchLedgerReply': // the guard ledger (/reports, gamemode reports.js)

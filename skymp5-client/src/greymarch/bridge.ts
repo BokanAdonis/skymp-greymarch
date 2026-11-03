@@ -14,6 +14,7 @@ import { SinglePlayerService } from "../services/services/singlePlayerService";
 import { LoadGameService } from "../services/services/loadGameService";
 import * as holdMod from "./bodyHold";
 import * as emoteMod from "./emotes";
+import * as invMod from "../sync/inventory";
 import * as templateFixMod from "./templateFix";
 import * as rmMod from "./racemenuLook";
 import * as rideMod from "./riding";
@@ -269,6 +270,8 @@ export class GreymarchBridge {
         if (type === "greymarchEmote") { if (typeof msg.emote === "string" && msg.emote.length < 40) this.greymarchServerEmote = { id: msg.emote, ms: Math.max(500, Math.min(30000, Number(msg.ms) || 4000)), at: Date.now() }; return; } // the server asks for an emote (a Harvester or Chef kneeling at a salt deposit): played in greymarchEmoteTick
         if (type === "greymarchMinigame") { this.greymarchMiniShow(msg); return; } // a profession mini game before the work (gamemode minigames.js)
         if (type === "greymarchMinigameDone") { this.greymarchMiniDone(msg); return; }
+        if (type === "greymarchPoisonUsed") { this.greymarchPoisonStripWanted = Date.now(); return; } // POISONS ON WEAPONS (greymarchPoisonTick)
+        if (type === "greymarchPoisonFx") { var pz = Number(msg.paralyze); if (pz > 0 && pz <= 60) this.greymarchPoisonParalyzeWanted = pz; return; }
         if (type === "greymarchOwnLook") { if (msg.look && typeof msg.look === "object" && Array.isArray(msg.look.headpartIds) && msg.look.headpartIds.length) { this.greymarchOwnLookWant = msg.look; this.greymarchOwnLookRebuild = msg.rebuild === true; } return; } // the barber refused a race or sex change (gamemode barber.js): the old look back on this body (greymarchOwnLookTick)
         if (type === "greymarchChestGlow") { this.greymarchChestGlowWant = msg.on && typeof msg.ref === "string" ? msg.ref.slice(0, 80) : ""; this.greymarchChestGlowAt = 0; return; } // a dungeon's boss chest with its loot waiting (gamemode dungeons.js): it shines (greymarchChestGlowTick)
         if (type === "greymarchForgeOpen") { this.greymarchForgeShow(msg); return; } // a forge was used (gamemode forgemenu.js): the Greymarch forge window instead of the game's menu
@@ -4257,6 +4260,7 @@ export class GreymarchBridge {
             }
         }
         this.greymarchSitResetTick(now);
+        this.greymarchPoisonTick(now);
         this.greymarchEmotePovLock(!!this.greymarchEmoteNow || now < (this.greymarchEmotePovUntil || 0) || !!this.greymarchMiniOn || !!this.greymarchForgeAnim || !!this.greymarchForgeOn || now - (this.greymarchWorkStartAt || -1e12) < 1500 || !!this.greymarchSitResetAt, now); // standing up from sitting: third person until the body is back to normal, THEN first person (2026-11-02, the owner: going back to first person mid stand-up made them fall and float) // a meal too, and profession work (2026-11-02, the owner)
         if (this.greymarchMealLocked && !(this.greymarchEmoteNow && this.greymarchEmoteNow.meal)) this.greymarchMealLock(false, "the meal ended another way"); // never left frozen (a beast form, an emote dropped elsewhere)
         var cur = this.greymarchEmoteNow;
@@ -4452,6 +4456,26 @@ export class GreymarchBridge {
     // chair animation without a chair (emotes.ts, SITTING DOWN), and its stand-up (IdleChairExitStart) leaves the body half in the chair's state with no chair to
     // let go of. Once the stand-up has played (SIT_RESET_MS) the body is put back in its normal state (IdleForceDefaultState; SkyMP passes it to the other
     // games, so they see it stand too). Not when another emote or a meal has started meanwhile, or they sat in a real seat.
+    // POISONS ON WEAPONS (2026-11-03, the owner: the poison stayed on the blade; gamemode weaponpoison.js does what it does to whoever is hit). The server says
+    // when a hit has used it: it comes off the weapon in hand (sync/inventory.ts greymarchStripPoison). A paralysing poison that hit THIS player: paralysed
+    // (the Paralysis actor value) for its seconds, and let go after; let go too if they die meanwhile.
+    greymarchPoisonTick(now: number): any {
+        var sp = this.sp;
+        if (this.greymarchPoisonStripWanted) {
+            this.greymarchPoisonStripWanted = 0;
+            try { var n = invMod.greymarchStripPoison(sp.Game.getPlayer()); this.greymarchLog("poison: the hit used it, " + (n ? "off the blade" : "none was on the weapon in hand")); } catch (e) { this.greymarchLog("poison: could not take it off the blade: " + e); }
+        }
+        var pz = this.greymarchPoisonParalyzeWanted;
+        if (pz) {
+            this.greymarchPoisonParalyzeWanted = 0;
+            try { sp.Game.getPlayer().setActorValue("Paralysis", 1); this.greymarchPoisonParalyzedUntil = now + pz * 1000; this.greymarchLog("poison: paralysed for " + pz + " s"); } catch (e) { this.greymarchLog("poison: could not paralyse: " + e); }
+        }
+        var until = this.greymarchPoisonParalyzedUntil;
+        if (until) {
+            var dead = false; try { dead = !!sp.Game.getPlayer().isDead(); } catch (dErr) { dead = false; }
+            if (now >= until || dead) { this.greymarchPoisonParalyzedUntil = 0; try { sp.Game.getPlayer().setActorValue("Paralysis", 0); this.greymarchLog("poison: the paralysis is over"); } catch (e) { /* the game lets go by itself */ } }
+        }
+    }
     greymarchSitResetTick(now: number): any {
         var at = this.greymarchSitResetAt;
         if (!at || now < at) return;

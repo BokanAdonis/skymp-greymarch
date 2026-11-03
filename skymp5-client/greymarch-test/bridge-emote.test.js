@@ -15,13 +15,13 @@ const bridgeJs = tr("bridge.ts");
 function make(opts = {}) {
   const log = { idles: [], events: [], notes: [], pages: [], lines: [], thirdPerson: 0, focused: [], sent: [], faces: {} };
   const faceLog = (who) => ({ clearExpressionOverride: () => (log.faces[who] = []), resetExpressionOverrides: () => (log.faces[who] = []), setExpressionOverride: (m, s) => (log.faces[who] = log.faces[who] || []).push(["mood", m, s]), setExpressionPhoneme: (i, v) => (log.faces[who] = log.faces[who] || []).push(["ph", i, v]) });
-  const mods = { "../messages": { MsgType: { CustomPacket: 77 } }, "./emotes": emotes, "../view/worldViewMisc": { remoteIdToLocalId: (id) => (opts.others || {})[id] || 0, localIdToRemoteId: (id) => (id >= 0xff000000 ? 0 : id) }, "../services/services/remoteServer": { RemoteServer: {} }, "../services/services/singlePlayerService": { SinglePlayerService: {} } };
+  const mods = { "../sync/inventory": { greymarchStripPoison: (ref) => { log.stripped = (log.stripped || 0) + 1; return 1; } }, "../messages": { MsgType: { CustomPacket: 77 } }, "./emotes": emotes, "../view/worldViewMisc": { remoteIdToLocalId: (id) => (opts.others || {})[id] || 0, localIdToRemoteId: (id) => (id >= 0xff000000 ? 0 : id) }, "../services/services/remoteServer": { RemoteServer: {} }, "../services/services/singlePlayerService": { SinglePlayerService: {} } };
   const bridge = load(bridgeJs, mods);
   const state = { drawn: false, speed: 0, menu: null, refuse: false };
   const player = {
     playIdle: (idle) => { log.idles.push(idle.id); return !state.refuse; },
     placeAtMe: (base) => { const n = (log.ghosts || []).length; const g = { base, at: null, rot: null, gone: false, id: 0xff000100 + n, getFormID: () => g.id, getBaseObject: () => ({ getFormID: () => base.id }), blockActivation: (v) => { g.blocked = v; }, setMotionType: (t) => { g.motion = t; g.motions = (g.motions || 0) + 1; }, setPosition: (x, y, z) => { g.at = [x, y, z]; g.moves = (g.moves || 0) + 1; }, setAngle: (a, b, c) => { g.rot = [a, b, c]; }, getAngleZ: () => (g.rot ? g.rot[2] : 0), getAngleX: () => (g.rot ? g.rot[0] : 0), getPositionX: () => (g.at ? g.at[0] + (g.fell || 0) : 0), getPositionY: () => (g.at ? g.at[1] : 0), getPositionZ: () => (g.at ? g.at[2] - (g.fell || 0) : 0), is3DLoaded: () => !state.no3d, translateTo: (...a) => { (g.turns = g.turns || []).push(a); }, disable() { g.gone = true; }, delete() { g.gone = true; } }; if (base.id === 0x5eae2) { g.id = 0xff100000 + (log.lights || []).length; (log.lights = log.lights || []).push(g); } else (log.ghosts = log.ghosts || []).push(g); (log.world = log.world || {})[g.id] = g; return g; },
-    getActorValue: (n) => (state.av || {})[n] || 0, damageActorValue: (n, v) => { log.damage = (log.damage || []).concat([[n, Math.round(v)]]); state.av[n] -= v; },
+    setActorValue: (n, v) => { (log.avSet = log.avSet || []).push([n, v]); }, getActorValue: (n) => (state.av || {})[n] || 0, damageActorValue: (n, v) => { log.damage = (log.damage || []).concat([[n, Math.round(v)]]); state.av[n] -= v; },
     isWeaponDrawn: () => state.drawn, sheatheWeapon: () => { log.sheathed = (log.sheathed || 0) + 1; state.sheathing = true; }, isDead: () => !!state.dead, isOnMount: () => !!state.mounted,
     getHeadingAngle: () => 30, getAngleZ: () => 100, setAngle: (a, b, c) => { log.turned = c; }, setPosition: (x, y, z) => { log.stood = [x, y, z]; }, moveTo: (ref, dx, dy, dz, match) => { log.movedTo = [ref.id, dx, dy, dz, match]; }, getPositionX: () => (log.stood ? log.stood[0] : 480), getPositionY: () => (log.stood ? log.stood[1] : 560), getPositionZ: () => (log.stood ? log.stood[2] : 44),
     getFurnitureReference: () => (state.furn ? { getFormID: () => state.furn } : null),
@@ -916,4 +916,20 @@ test("sitting in first person: back to first person only after the stand-up is o
   s.tick(600);
   assert.strictEqual(s.log.events.at(-1), "IdleForceDefaultState");
   assert.strictEqual(s.state.cam, 0, "then first person");
+});
+
+test("poisons on weapons (2026-11-03): the server says the hit used it, it comes off the blade; a paralysing poison paralyses this player for its seconds, let go after or at death", () => {
+  const s = make();
+  s.say({ customPacketType: "greymarchPoisonUsed" }); s.tick();
+  assert.strictEqual(s.log.stripped, 1, "off the blade, on the next frame");
+  s.tick(); assert.strictEqual(s.log.stripped, 1, "once");
+  s.say({ customPacketType: "greymarchPoisonFx", paralyze: 5 }); s.tick();
+  assert.deepStrictEqual(s.log.avSet, [["Paralysis", 1]]);
+  s.tick(4000); assert.strictEqual(s.log.avSet.length, 1, "still paralysed");
+  s.tick(1100); assert.deepStrictEqual(s.log.avSet.at(-1), ["Paralysis", 0], "let go after 5 seconds");
+  const d = make();
+  d.say({ customPacketType: "greymarchPoisonFx", paralyze: 30 }); d.tick(); d.state.dead = true; d.tick();
+  assert.deepStrictEqual(d.log.avSet.at(-1), ["Paralysis", 0], "let go at death");
+  const x = make(); x.say({ customPacketType: "greymarchPoisonFx", paralyze: 999 }); x.tick();
+  assert.strictEqual(x.log.avSet, undefined, "nonsense is ignored");
 });
