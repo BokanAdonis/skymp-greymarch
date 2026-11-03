@@ -411,6 +411,38 @@ test("another player's eyes are not swapped on their character but built into it
   } finally { Date.now = realNow; delete globalThis.__gmVampEyes; }
 });
 
+test("another vampire on water (2026-11-03, the owner: they swam in the air and, standing still, sank and popped back up): their character in this game walks on water too, beast races included, and stops when the server says so", () => {
+  const s = make({ others: { 0xff000002: 0x5000 } });
+  const sp = s.gm.sp;
+  const av = { WaterWalking: 0 }, mine = [];
+  const them = { name: "them", getRace: () => ({ getFormID: () => 0x13745 }), getActorValue: (n) => av[n], setActorValue: (n, v) => { av[n] = v; } }; // a Khajiit: no vampire eyes, still water
+  Object.assign(sp.Game.getPlayer(), { getRace: () => ({ getFormID: () => 0x13745 }), getActorValue: () => 0, setActorValue: (n, v) => mine.push([n, v]) });
+  sp.Game.getFormEx = (id) => (id === 0x5000 ? them : { id });
+  sp.Actor.from = (f) => f;
+  sp.Game.getFormFromFile = (id, file) => (file === "GreymarchCore.esp" ? { id: 0x0a000000 + id } : null);
+  sp.HeadPart = { from: (f) => (f ? { getFormID: () => f.id } : null) };
+  let t = 9_000_000; const realNow = Date.now; Date.now = () => t;
+  const look = (list) => { s.say({ customPacketType: "greymarchVampLooks", vampires: list }); s.tick(); t += 2500; };
+  try {
+    s.say({ customPacketType: "greymarchGhosts", ghosts: [], me: 0xff000001 });
+    look([{ actor: 0xff000001, glow: 1, fangs: false, water: true }, { actor: 0xff000002, glow: 1, fangs: false, water: true }]);
+    assert.strictEqual(av.WaterWalking, 1, "their character walks on water here");
+    assert.ok(s.log.lines.some((l) => /5000 walks on water here/.test(l)));
+    assert.deepStrictEqual(mine, [], "this player's own water walking is left to greymarchVampire");
+    av.WaterWalking = 0; // SkyMP built their character again
+    look([{ actor: 0xff000001, glow: 1, fangs: false, water: true }, { actor: 0xff000002, glow: 1, fangs: false, water: true }]);
+    assert.strictEqual(av.WaterWalking, 1, "given again on the next pass");
+    look([{ actor: 0xff000002, glow: 1, fangs: false, water: false }]);
+    assert.strictEqual(av.WaterWalking, 0, "the server says no (a Fledgling): off");
+    look([{ actor: 0xff000002, glow: 1, fangs: false, water: true }]);
+    assert.strictEqual(av.WaterWalking, 1);
+    look([]);
+    assert.strictEqual(av.WaterWalking, 0, "no longer a vampire: off again");
+    av.WaterWalking = 1; look([]);
+    assert.strictEqual(av.WaterWalking, 1, "once off, never touched again (water walking from anything else stays)");
+  } finally { Date.now = realNow; delete globalThis.__gmVampEyes; }
+});
+
 test("/disguise (2026-10-30, the owner): the server's disguised list names whose floating name every game hides; not your own", () => {
   const s = make();
   const g = Function("return this")();

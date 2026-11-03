@@ -1460,12 +1460,14 @@ export class GreymarchBridge {
         var sp = this.sp, list = this.greymarchVampLookList || [];
         var done = this.greymarchVampEyesDone || (this.greymarchVampEyesDone = {}); // localId -> { orig: eye head part id, glow, mouth: teeth head part id, fangs }
         var seen: any = {};
-        if (!list.length && !Object.keys(done).length) return;
+        if (!list.length && !Object.keys(done).length && !Object.keys(this.greymarchVampWaterOn || {}).length) return;
         var gmOff = -1; // GreymarchCore.esp's place in this game's load order
         try { var gmBlue = sp.HeadPart.from(sp.Game.getFormFromFile(VAMP_EYES.blue.male, "GreymarchCore.esp")); if (gmBlue) gmOff = gmBlue.getFormID() - VAMP_EYES.blue.male; } catch (gErr) { gmOff = -1; }
         var ours = function (id: number) { return gmOff >= 0 && id - gmOff >= 0x80d && id - gmOff <= 0x859; }; // one of Greymarch's vampire eye parts
         var skipped = this.greymarchVampEyesSkipped || (this.greymarchVampEyesSkipped = {});
         var others: any = {}; // server actor id -> the eye part their character is built with (formView.ts, __gmVampEyes)
+        var waterOn = this.greymarchVampWaterOn || (this.greymarchVampWaterOn = {}); // localId -> true: another vampire's character given water walking here
+        var water: any = {}; // given it this pass
         for (var i = 0; i < list.length; i++) {
             var v = list[i];
             var localId = this.greymarchMeActor && v.actor === this.greymarchMeActor ? 0x14 : misc.remoteIdToLocalId(v.actor);
@@ -1474,6 +1476,15 @@ export class GreymarchBridge {
             try {
                 var actor = localId === 0x14 ? sp.Game.getPlayer() : sp.Actor.from(sp.Game.getFormEx(localId));
                 if (!actor) continue;
+                // ANOTHER VAMPIRE ON WATER (2026-11-03, the owner: they swam in the air and, standing still, sank and popped back up over and over). Water walking was
+                // on only in the vampire's own game (greymarchVampire above), so here their character was an ordinary swimmer held at their height on the surface.
+                // The server says who walks on water (v.water); their character here gets it too, checked every pass (a rebuilt character starts without it).
+                if (localId !== 0x14) {
+                    var walk = v.water ? 1 : 0;
+                    if (walk) water[localId] = true;
+                    if ((walk || waterOn[localId]) && actor.getActorValue("WaterWalking") !== walk) { actor.setActorValue("WaterWalking", walk); this.greymarchLog("vampire: " + localId.toString(16) + (walk ? " walks on water here" : " no longer walks on water here")); }
+                    if (walk) waterOn[localId] = true; else delete waterOn[localId];
+                }
                 var race = actor.getRace();
                 if (!race || VAMP_EYE_RACES.indexOf(race.getFormID()) < 0) { // a beast race (khajiit and argonian eyes are not made yet), or in a creature's or the Lord's shape
                     var rid = race ? race.getFormID() : 0;
@@ -1517,6 +1528,11 @@ export class GreymarchBridge {
             } catch (eErr) { this.greymarchVampFangReport(v.actor, localId, "error: " + String(eErr).slice(0, 200)); /* not loaded here: the next look */ }
         }
         try { (Function("return this")() as any).__gmVampEyes = others; } catch (gErr) { /* their own eyes */ }
+        for (var w in waterOn) { // no longer a vampire (or not near): water walking off again
+            if (water[w]) continue;
+            delete waterOn[w];
+            try { var aw = sp.Actor.from(sp.Game.getFormEx(Number(w))); if (aw) { aw.setActorValue("WaterWalking", 0); this.greymarchLog("vampire: " + Number(w).toString(16) + " no longer walks on water here"); } } catch (wErr) { /* gone */ }
+        }
         for (var k in done) {
             if (seen[k]) continue;
             var back = done[k]; delete done[k];
