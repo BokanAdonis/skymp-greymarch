@@ -537,20 +537,22 @@ test("a meal while sitting: the seated eating or drinking idle in a chair or on 
   s.state.sitState = 3; // in a chair
   s.eat("Venison Stew"); s.tick();
   assert.deepStrictEqual(s.log.idles, [0x65d06], "ChairEatingStart, not the standing idle");
-  assert.ok(s.gm.greymarchEmoteNow && s.gm.greymarchEmoteNow.meal, "a meal: five seconds, the controls locked");
+  assert.ok(s.gm.greymarchEmoteNow && s.gm.greymarchEmoteNow.meal, "a meal, the controls locked");
   for (let i = 0; i < 102; i++) s.tick(50);
-  assert.strictEqual(s.gm.greymarchEmoteNow, null, "over after five seconds");
+  assert.ok(s.gm.greymarchEmoteNow && s.gm.greymarchEmoteNow.meal, "still eating after five seconds: a seated meal is longer");
+  for (let i = 0; i < 60; i++) s.tick(50);
+  assert.strictEqual(s.gm.greymarchEmoteNow, null, "over after SEAT_EAT_SECONDS (8)");
   assert.deepStrictEqual(s.log.events, ["IdleStop"], "back to sitting: the event the chair graph listens to");
   assert.ok(!s.log.idles.includes(emotes.IDLE_STOP), "not the IdleStop_Loose idle");
   s.log.idles.length = 0; s.log.events.length = 0;
   s.eat("Nord Mead"); s.tick(); assert.deepStrictEqual(s.log.idles, [0x65d07], "a drink: ChairDrinkingStart");
-  for (let i = 0; i < 102; i++) s.tick(50); assert.deepStrictEqual(s.log.events, ["IdleStop"]);
+  for (let i = 0; i < 162; i++) s.tick(50); assert.deepStrictEqual(s.log.events, ["IdleStop"]);
 
   const e = make(); // on an edge (the wheel): the game wants a real seat, so the event itself; still sitting on the edge after
   e.page({ type: "emote", id: "sitledge" }); e.tick(); e.state.refuse = true; e.log.events.length = 0;
   e.eat("Apple Pie"); e.tick();
   assert.deepStrictEqual(e.log.events, ["ChairEatingStart"]);
-  for (let i = 0; i < 102; i++) e.tick(50);
+  for (let i = 0; i < 162; i++) e.tick(50);
   assert.deepStrictEqual(e.log.events, ["ChairEatingStart", "IdleStop"]);
   assert.ok(e.gm.greymarchEmoteNow && e.gm.greymarchEmoteNow.id === "sitledge", "still sitting on the edge: moving stands up as before");
   e.state.speed = 100; for (let i = 0; i < 20; i++) e.tick(50);

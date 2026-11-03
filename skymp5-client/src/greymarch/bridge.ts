@@ -4162,7 +4162,7 @@ export class GreymarchBridge {
         var n = this.greymarchEmoteLogged = (this.greymarchEmoteLogged || 0) + 1;
         if (n <= 20) this.greymarchLog("eat: " + id + (seated ? " (sitting)" : "") + " " + (ok ? "played" : "refused by the game"));
         if (ok && em.kind === "loop") {
-            this.greymarchEmoteNow = seated ? { id: em.id, kind: "loop", stop: 0, stopEvent: emoteMod.SEAT_MEAL_STOP, at: now, until: now + emoteMod.EAT_SECONDS * 1000, meal: true, resume: sitEmote || null }
+            this.greymarchEmoteNow = seated ? { id: em.id, kind: "loop", stop: 0, stopEvent: emoteMod.SEAT_MEAL_STOP, at: now, until: now + emoteMod.SEAT_EAT_SECONDS * 1000, meal: true, resume: sitEmote || null }
                 : { id: em.id, kind: "loop", stop: emoteMod.IDLE_STOP, at: now, until: now + emoteMod.EAT_SECONDS * 1000, meal: true };
             this.greymarchMealLock(true, id);
         }

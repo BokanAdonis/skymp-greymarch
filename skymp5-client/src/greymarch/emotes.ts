@@ -96,6 +96,7 @@ export const EAT_SECONDS = 5;
 // Sitting cross-legged on the ground has no seated meal (those idles are made for a seat: the legs would hang in the air), so nothing plays there, as before.
 export const SEAT_MEAL: { [id: string]: { idle: number; event: string } } = { bread: { idle: 0x65d06, event: "ChairEatingStart" }, mug: { idle: 0x65d07, event: "ChairDrinkingStart" } };
 export const SEAT_MEAL_STOP = "IdleStop";
+export const SEAT_EAT_SECONDS = 8; // a seated meal lasts a little longer than a standing one (the owner, 2026-11-02: "it just goes away too fast")
 export const SEAT_EMOTES = ["sitledge"]; // the wheel's sitting emotes a seated meal plays on
 // a potion: the server applies it once the swig is over (gamemode potions.js, 1.5 s) and has the game drink it again; a first drink is undone for this long,
 // and the server's drink of the same potion is expected within POTION_WAIT_MS
