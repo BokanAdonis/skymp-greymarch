@@ -25,6 +25,7 @@ function make(opts = {}) {
     isWeaponDrawn: () => state.drawn, isDead: () => !!state.dead, isOnMount: () => !!state.mounted,
     getHeadingAngle: () => 30, getAngleZ: () => 100, setAngle: (a, b, c) => { log.turned = c; }, setPosition: (x, y, z) => { log.stood = [x, y, z]; }, moveTo: (ref, dx, dy, dz, match) => { log.movedTo = [ref.id, dx, dy, dz, match]; }, getPositionX: () => (log.stood ? log.stood[0] : 480), getPositionY: () => (log.stood ? log.stood[1] : 560), getPositionZ: () => (log.stood ? log.stood[2] : 44),
     getFurnitureReference: () => (state.furn ? { getFormID: () => state.furn } : null),
+    getSitState: () => state.sitState || 0,
     getAnimationVariableFloat: (n) => (n === "Speed" ? state.speed : 0),
     ...faceLog("me"),
   };
@@ -529,6 +530,36 @@ test("the pointer: while a window holds the mouse and has the focus but the game
   s.state.focused = true; s.page({ type: "forge-close" }); const m = s.log.focused.length;
   s.at(() => s.gm.greymarchPointerGuard(Date.now() + 4000));
   assert.strictEqual(s.log.focused.length, m, "no window open: nothing");
+});
+
+test("a meal while sitting: the seated eating or drinking idle in a chair or on an edge, ended with ChairEatingStop (still sitting); cross-legged on the ground: nothing", () => {
+  const s = make();
+  s.state.sitState = 3; // in a chair
+  s.eat("Venison Stew"); s.tick();
+  assert.deepStrictEqual(s.log.idles, [0x65d06], "ChairEatingStart, not the standing idle");
+  assert.ok(s.gm.greymarchEmoteNow && s.gm.greymarchEmoteNow.meal, "a meal: five seconds, the controls locked");
+  for (let i = 0; i < 102; i++) s.tick(50);
+  assert.strictEqual(s.gm.greymarchEmoteNow, null, "over after five seconds");
+  assert.deepStrictEqual(s.log.events, ["ChairEatingStop"], "back to sitting: no IdleStop");
+  assert.ok(!s.log.idles.includes(emotes.IDLE_STOP));
+  s.log.idles.length = 0; s.log.events.length = 0;
+  s.eat("Nord Mead"); s.tick(); assert.deepStrictEqual(s.log.idles, [0x65d07], "a drink: ChairDrinkingStart");
+  for (let i = 0; i < 102; i++) s.tick(50); assert.deepStrictEqual(s.log.events, ["ChairEatingStop"]);
+
+  const e = make(); // on an edge (the wheel): the game wants a real seat, so the event itself; still sitting on the edge after
+  e.page({ type: "emote", id: "sitledge" }); e.tick(); e.state.refuse = true; e.log.events.length = 0;
+  e.eat("Apple Pie"); e.tick();
+  assert.deepStrictEqual(e.log.events, ["ChairEatingStart"]);
+  for (let i = 0; i < 102; i++) e.tick(50);
+  assert.deepStrictEqual(e.log.events, ["ChairEatingStart", "ChairEatingStop"]);
+  assert.ok(e.gm.greymarchEmoteNow && e.gm.greymarchEmoteNow.id === "sitledge", "still sitting on the edge: moving stands up as before");
+  e.state.speed = 100; for (let i = 0; i < 20; i++) e.tick(50);
+  assert.strictEqual(e.gm.greymarchEmoteNow, null); assert.strictEqual(e.log.events.at(-1), "IdleChairExitStart");
+
+  const g = make(); // cross-legged on the ground: no seated meal fits, so nothing plays (as before)
+  g.page({ type: "emote", id: "sit" }); g.tick(); g.log.idles.length = 0; g.log.events.length = 0;
+  g.eat("Apple Pie"); g.tick(); assert.deepStrictEqual([g.log.idles, g.log.events], [[], []]);
+  assert.strictEqual(g.gm.greymarchEmoteNow.id, "sit");
 });
 
 test("a meal cannot be skipped: the controls are locked for its five seconds (not looking, the camera or the menus); moving, a weapon, W or Stop do not end it", () => {

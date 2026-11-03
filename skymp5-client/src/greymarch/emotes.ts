@@ -89,6 +89,13 @@ export const EMOTE_GROUPS: EmoteGroup[] = [
 // (bridge.ts greymarchConsumeNote / greymarchConsumePlay), and SkyMP shows it to everyone like any emote: food "bread" (the standing eating idle) and a drink "mug" (the standing drinking idle), both ended after
 // EAT_SECONDS, a potion "potion" (a quick swig); a poison (put on a weapon) nothing. Cosmetic only: the server decides what eating does (gamemode hunger.js).
 export const EAT_SECONDS = 5;
+// EATING SITTING DOWN (2026-11-02, the owner: "if you are sitting down and you eat or drink you still do an animation sitting down"). Seated in a chair or on a bench
+// (the game's GetSitting 3) or on an edge (the wheel's "sitledge"), food and drinks play the game's own seated idles instead of the standing ones: ChairEatingStart
+// (065D06) and ChairDrinkingStart (065D07), the ones the NPCs at an inn table use. Both end with the event ChairEatingStop, which leaves the player sitting.
+// Sitting cross-legged on the ground has no seated meal (those idles are made for a seat: the legs would hang in the air), so nothing plays there, as before.
+export const SEAT_MEAL: { [id: string]: { idle: number; event: string } } = { bread: { idle: 0x65d06, event: "ChairEatingStart" }, mug: { idle: 0x65d07, event: "ChairDrinkingStart" } };
+export const SEAT_MEAL_STOP = "ChairEatingStop";
+export const SEAT_EMOTES = ["sitledge"]; // the wheel's sitting emotes a seated meal plays on
 // a potion: the server applies it once the swig is over (gamemode potions.js, 1.5 s) and has the game drink it again; a first drink is undone for this long,
 // and the server's drink of the same potion is expected within POTION_WAIT_MS
 export const POTION_UNDO_MS = 500;

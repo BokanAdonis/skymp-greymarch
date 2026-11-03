@@ -4025,7 +4025,7 @@ export class GreymarchBridge {
             if (eating) for (var qi = 0; qi < cq.length; qi++) cq[qi].at = now;
             else {
                 while (cq.length && now - cq[0].at > 15000) cq.shift();
-                if (cq.length && !this.greymarchEmoteNow && !this.greymarchWolfOn && !this.greymarchShapeOn && !this.greymarchInMenu()) { var next = cq.shift(); this.greymarchConsumePlay(next.id, now); }
+                if (cq.length && (!this.greymarchEmoteNow || emoteMod.SEAT_EMOTES.indexOf(this.greymarchEmoteNow.id) >= 0) && !this.greymarchWolfOn && !this.greymarchShapeOn && !this.greymarchInMenu()) { var next = cq.shift(); this.greymarchConsumePlay(next.id, now); }
             }
         }
         if (this.greymarchMealLocked && !(this.greymarchEmoteNow && this.greymarchEmoteNow.meal)) this.greymarchMealLock(false, "the meal ended another way"); // never left frozen (a beast form, an emote dropped elsewhere)
@@ -4143,16 +4143,29 @@ export class GreymarchBridge {
     greymarchConsumePlay(id: string, now: number): any {
         var em = emoteMod.emoteById(id);
         if (!em) return;
-        var ok = false;
+        var ok = false, seated = false, sitEmote = this.greymarchEmoteNow; // sitEmote: the wheel's edge sit the meal plays on (the queue lets only that one through)
         try {
             var player = this.sp.Game.getPlayer();
             if (player.isWeaponDrawn()) return;
-            var idle = this.sp.Idle.from(this.sp.Game.getFormEx(em.idle));
-            ok = !!idle && !!player.playIdle(idle);
+            var seat = emoteMod.SEAT_MEAL[id];
+            var inSeat = false; try { inSeat = player.getSitState() === 3; } catch (sErr) { inSeat = false; }
+            if (seat && (inSeat || sitEmote)) { // EATING SITTING DOWN (emotes.ts): the seated idle, or its event when the game wants a real seat (an edge)
+                seated = true;
+                var sidle = this.sp.Idle.from(this.sp.Game.getFormEx(seat.idle));
+                ok = !!sidle && !!player.playIdle(sidle);
+                if (!ok) { this.sp.Debug.sendAnimationEvent(player, seat.event); ok = true; }
+            } else if (!sitEmote) {
+                var idle = this.sp.Idle.from(this.sp.Game.getFormEx(em.idle));
+                ok = !!idle && !!player.playIdle(idle);
+            }
         } catch (err) { ok = false; }
         var n = this.greymarchEmoteLogged = (this.greymarchEmoteLogged || 0) + 1;
-        if (n <= 20) this.greymarchLog("eat: " + id + " " + (ok ? "played" : "refused by the game"));
-        if (ok && em.kind === "loop") { this.greymarchEmoteNow = { id: em.id, kind: "loop", stop: emoteMod.IDLE_STOP, at: now, until: now + emoteMod.EAT_SECONDS * 1000, meal: true }; this.greymarchMealLock(true, id); }
+        if (n <= 20) this.greymarchLog("eat: " + id + (seated ? " (sitting)" : "") + " " + (ok ? "played" : "refused by the game"));
+        if (ok && em.kind === "loop") {
+            this.greymarchEmoteNow = seated ? { id: em.id, kind: "loop", stop: 0, stopEvent: emoteMod.SEAT_MEAL_STOP, at: now, until: now + emoteMod.EAT_SECONDS * 1000, meal: true, resume: sitEmote || null }
+                : { id: em.id, kind: "loop", stop: emoteMod.IDLE_STOP, at: now, until: now + emoteMod.EAT_SECONDS * 1000, meal: true };
+            this.greymarchMealLock(true, id);
+        }
     }
     // A MEAL CANNOT BE SKIPPED (the server fills the hunger the moment the food leaves the inventory): while eating or drinking (EAT_SECONDS) the player cannot walk,
     // jump, fight, sneak or activate; looking around, the camera and the menus stay. The controls come back when the meal is over or ends any other way (death, a beast
@@ -4382,11 +4395,12 @@ export class GreymarchBridge {
         this.greymarchCrumb("emote end " + cur.id + " (" + why + ")");
         try {
             var player = sp.Game.getPlayer();
-            var idle = sp.Idle.from(sp.Game.getFormEx(cur.stop));
+            var idle = cur.stop ? sp.Idle.from(sp.Game.getFormEx(cur.stop)) : null; // stop 0: the stop event only (a seated meal)
             var ok = !!idle && !!player.playIdle(idle);
             if (!ok) sp.Debug.sendAnimationEvent(player, cur.stopEvent ? cur.stopEvent : cur.stop === emoteMod.OFFSET_STOP ? "OffsetStop" : cur.stop === emoteMod.DRUNK_STOP ? "DrunkStop" : "IdleStop"); // the stop event itself
         } catch (err) { /* the next movement ends it anyway */ }
         if ((this.greymarchEmoteLogged || 0) <= 20) this.greymarchLog("emote: " + cur.id + " ended (" + why + ")");
+        if (cur.resume && why === "done eating") this.greymarchEmoteNow = { id: cur.resume.id, kind: cur.resume.kind, stop: cur.resume.stop, stopEvent: cur.resume.stopEvent, at: Date.now() }; // a meal on an edge: still sitting there
     }
     // THE CONSOLE (~). SkyrimPlatform's findConsoleCommand swaps a command's code for ours, and ours answering false means the game's own never runs:
     // so each command in CONSOLE_BLOCKED only says it is disabled, and the attempt goes to the server (gamemode consoleguard.js, the staff Log tab).
