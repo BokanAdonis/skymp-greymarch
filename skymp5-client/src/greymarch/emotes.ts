@@ -60,7 +60,7 @@ export const EMOTE_GROUPS: EmoteGroup[] = [
     ] },
     { id: "sit", name: "Sit & lie", items: [
         sit("sit", "Sit on the ground", 0xc4ef9, "IdleSitCrossLeggedEnter", 0xc4efa), sit("sitledge", "Sit on an edge", 0xc482b, "IdleSitLedgeEnter", 0xc482d),
-        e("lie", "Lie down", 0xec25a, "loop"), e("wounded2", "Wounded, sitting", 0xb8f1a, "loop"), e("wounded3", "Wounded, lying", 0xb8f1b, "loop"),
+        e("lie", "Lie down", 0xec25a, "loop"), e("wounded2", "Wounded, lying", 0xb8f1a, "loop"), e("wounded3", "Wounded, sitting", 0xb8f1b, "loop"), // names swapped 2026-11-03 (the owner: each showed the other pose)
     ] },
     { id: "work", name: "Work", items: [
         e("sweep", "Sweep", 0x640fe, "loop"), e("hoe", "Hoe the ground", 0x75cb4, "loop"), e("searchbody", "Search a body", 0xefc64, "loop"), e("searchchest", "Search a chest", 0x6ff14, "loop"),
