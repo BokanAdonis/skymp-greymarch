@@ -339,6 +339,10 @@ float TES5DamageFormulaImpl::CalculateDamage() const
       } else {
         through = balance.shieldBlock.value_or(0.1f);
       }
+      // the defender's shield perk (shieldStops): at least that much stopped
+      if (targetPerks.isSet && targetPerks.shieldStops.has_value()) {
+        through = std::min(through, 1.f - *targetPerks.shieldStops / 100.f);
+      }
     } else if (targetPerks.isSet && targetPerks.blockStops.has_value()) {
       through = 1.f - *targetPerks.blockStops / 100.f;
     } else {

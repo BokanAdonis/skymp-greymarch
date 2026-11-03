@@ -1,7 +1,7 @@
 #pragma once
 #include "PropertyBinding.h"
 
-// GREYMARCH: mp.set(actorId, "combatPerks", { sneak: true, jumpPower: false, blockStops: 40 }) sets the combat skill perks the gamemode
+// GREYMARCH: mp.set(actorId, "combatPerks", { sneak: true, jumpPower: false, blockStops: 40, shieldStops: 70 }) sets the combat skill perks the gamemode
 // grants this actor (COMBAT-OVERHAUL.md, Combat skills). beast (2026-10-31): in a beast form, its hits on players skip the PvP rules. sneak: the sneak attack bonus counts for their hits (rank 3). jumpPower: their
 // power attack in a jump does x2 instead of the table's powerAttack (rank 5). blockStops: percent of a hit their WEAPON block stops,
 // 0..100, instead of the table's weaponBlock (a shield block uses shieldStops / shieldBlock). A field left out: sneak true, jumpPower

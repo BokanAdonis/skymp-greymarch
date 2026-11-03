@@ -236,6 +236,10 @@ public:
     bool jumpPower = false;
     // percent a weapon block stops, 0..100
     std::optional<float> blockStops;
+    // GREYMARCH (2026-11-03, the owner: One Handed rank 5): at least this
+    // percent of a hit a SHIELD block stops, 0..100 (a better shield keeps
+    // its own)
+    std::optional<float> shieldStops;
     // GREYMARCH (2026-10-31, the owner): in a beast form (werewolf, werebear, a
     // staff creature form); its hits on players skip the PvP rules, its claws
     // are tuned on their own (gamemode werewolf.js)
