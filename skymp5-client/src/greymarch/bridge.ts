@@ -81,7 +81,7 @@ const FEED_REPLAY_MS = 6000; // the held feeding: played again by this time even
 const FEED_RETRY_MS = 300; // ... and when the game refused it (still finishing the last one), tried again this soon
 const FEED_RESET_AFTER = 2; // refused this many times in a row: both bodies are put back to the default pose first (the game will not start a paired idle over a stuck one)
 const FEED_STOP_KEYS = [0x11, 0x1e, 0x1f, 0x20]; // W A S D (DirectInput scan codes): the vampire's movement keys end a feeding
-const VAMP_FORMS = { mist: 0x38ba, lord: 0x283b, potionFx: 0x18ef4, potion: 0x18ef3, feedIdle: 0xe6a8 }; // DLC1VampireMistform, DLC1VampireChange, DLC1BloodPotionEffect, DLC1BloodPotion, IdleVampireStandingFeedFront_Loose
+const VAMP_FORMS = { mist: 0x38ba, lord: 0x283b, lordFx: 0x283c, potionFx: 0x18ef4, potion: 0x18ef3, feedIdle: 0xe6a8 }; // DLC1VampireMistform, DLC1VampireChange, DLC1BloodPotionEffect, DLC1BloodPotion, IdleVampireStandingFeedFront_Loose
 // a vampire's eyes, one colour per bloodline (GreymarchCore.esp, made by tools/vampire-eyes.js in the launcher repo): GM_VampEyes{Male,Female}{Colour}0..6, glow 0 (none) to 6 (a Lord)
 const VAMP_EYES: any = { blue: { male: 0x80e, female: 0x815 }, red: { male: 0x81f, female: 0x826 }, yellow: { male: 0x82e, female: 0x835 }, green: { male: 0x83d, female: 0x844 }, purple: { male: 0x84c, female: 0x853 } };
 const VAMP_EYE_RACES = [0x13746, 0x13744, 0x13741, 0x13748, 0x13743, 0x13749, 0x13742, 0x13747]; // Nord, Imperial, Breton, Redguard, High Elf, Wood Elf, Dark Elf, Orc (the human eye shape; khajiit and argonian eyes are not made yet)
@@ -164,7 +164,7 @@ export class GreymarchBridge {
         try { this.controller.on("magicEffectApply", (e: any) => { try { var pu = this.greymarchPotionUndo; if (pu && e && e.effect && e.activeEffect && e.target && e.target.getFormID() === 0x14 && Date.now() < pu.until && pu.mgefs[e.effect.getFormID() >>> 0]) pu.effects.push(e.activeEffect); } catch (x) { /* not ours */ } }); } catch (puErr) { /* the bar shows the first drink for a moment */ } // the first drink of a potion: its effects are ended (greymarchPotionUndoTick)
         try { this.controller.on("magicEffectApply", (e: any) => { try { if (e && e.effect && e.activeEffect && this.greymarchMagicBlock && this.greymarchMagicBlock[e.effect.getFormID() >>> 0]) (this.greymarchMagicBlockQueue || (this.greymarchMagicBlockQueue = [])).push({ active: e.activeEffect, effect: e.effect.getFormID() >>> 0, caster: e.caster ? e.caster.getFormID() >>> 0 : 0 }); } catch (x) { /* not ours */ } }); } catch (mbErr) { /* no effect events: NPC raise-the-dead and summons are not stopped */ } // an NPC raising the dead or summoning (gamemode magicblock.js): ended in greymarchMagicBlockDrive
         try { this.controller.on("magicEffectApply", (e: any) => { try { if (e && e.effect && e.effect.getFormID() === 0x92c45 && e.target && e.target.getFormID() === 0x14) this.greymarchWolfSignal("magicEffectApply"); } catch (x) { /* not ours */ } }); } catch (maErr) { /* the other signals still see it */ }
-        try { this.controller.on("spellCast", (e: any) => { try { if (e && e.spell && e.caster && e.caster.getFormID() === 0x14) this.greymarchVampSignal("cast", e.spell.getFormID()); } catch (x) { /* not ours */ } }); } catch (vcErr) { /* no cast events: the powers are not reported */ } // a vampire's Mist Form or Vampire Lord (greymarchVampTick)
+        try { this.controller.on("spellCast", (e: any) => { try { if (e && e.spell && e.caster && e.caster.getFormID() === 0x14) { var castId = e.spell.getFormID(); if (castId === this.greymarchVampForm("lord") || castId === this.greymarchVampForm("mist")) { var vq = this.greymarchVampSignals || (this.greymarchVampSignals = []); vq.unshift({ kind: "cast", id: castId }); if (vq.length > 16) vq.length = 16; } else this.greymarchVampSignal("cast", castId); } } catch (x) { /* not ours */ } }); } catch (vcErr) { /* no cast events: the powers are not reported */ } // a vampire's Mist Form or Vampire Lord (greymarchVampTick)
         try { this.controller.on("spellCast", (e: any) => { try { if (e && e.spell && e.caster && e.caster.getFormID() === 0x14) this.greymarchCastSend(e.spell.getFormID()); } catch (x) { /* not ours */ } }); } catch (hcErr) { /* no cast events: healing spells are not reported */ } // every cast of the player's own spells goes to the server, which applies the healing ones (healing.js); it never applies spell effects itself
         try { this.controller.on("magicEffectApply", (e: any) => { try { if (e && e.effect && e.target && e.target.getFormID() === 0x14) this.greymarchVampSignal("effect", e.effect.getFormID()); } catch (x) { /* not ours */ } }); } catch (veErr) { /* no effect events: a Potion of Blood is not reported */ } // a Potion of Blood drunk
         try { this.controller.on("equip", (e: any) => { try { if (e && e.baseObj && e.actor && e.actor.getFormID() === 0x14) { this.greymarchVampSignal("equip", e.baseObj.getFormID()); this.greymarchConsumeNote(e.baseObj); } } catch (x) { /* not ours */ } }); } catch (vqErr) { /* the effect event still sees it */ } // a potion is "equipped" when it is drunk
@@ -869,7 +869,7 @@ export class GreymarchBridge {
         if (this.greymarchBuildCam && this.greymarchBuildCamKey(e)) return; // the build system's free camera has the keys it uses
         if (this.greymarchEmoteNow && this.greymarchEmoteNow.kind === "loop" && !this.greymarchEmoteNow.meal && (e.code === 17 || e.code === 30 || e.code === 31 || e.code === 32 || e.code === 57)) { var mvDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (mvDown && e.isUp !== true) this.greymarchEmoteStopWanted = Date.now(); } // W A S D or Space ends an emote that lasts (greymarchEmoteTick)
         if (e.code === 19) { var rDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (e.isUp === true) rDown = false; if (rDown && !this.greymarchKey19 && this.greymarchWolfOn && !this.greymarchChatTyping) this.greymarchWolfRoarAt = Date.now(); this.greymarchKey19 = rDown; return; } // R: the werewolf roars (greymarchWolfTick; only while changed)
-        if (e.code === 44) { var zDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (e.isUp === true) zDown = false; if (zDown && !this.greymarchKey44 && !this.greymarchChatTyping) { if (this.greymarchWolfOn) this.greymarchWolfBackAt = Date.now(); else this.greymarchWolfKeyAt = Date.now(); } this.greymarchKey44 = zDown; return; } // Z while changed: ask the server to change back (greymarchWolfTick)
+        if (e.code === 44) { var zDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (e.isUp === true) zDown = false; if (zDown && !this.greymarchKey44 && !this.greymarchChatTyping) { if (this.greymarchWolfOn) this.greymarchWolfBackAt = Date.now(); else { this.greymarchWolfKeyAt = Date.now(); this.greymarchVampKeyAt = Date.now(); } } this.greymarchKey44 = zDown; return; } // Z while changed: ask the server to change back (greymarchWolfTick)
         if (e.code === 256 || e.code === 257) { var mDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (e.isUp === true) mDown = false; if (mDown && !this["greymarchKey" + e.code]) { this.greymarchShapeButton(e.code === 257); if (this.greymarchWolfOn) this.greymarchWolfLungeClick = { at: Date.now(), left: e.code === 257 }; } this["greymarchKey" + e.code] = mDown; return; } // mouse buttons: a creature's attacks (greymarchShapeTick)
         if (e.code !== 65 && e.code !== 66 && e.code !== 64 && e.code !== 35 && e.code !== 48 && e.code !== 1 && e.code !== 45 && e.code !== 28 && e.code !== 37 && e.code !== 34 && e.code !== 59) return;
         var down = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true);
@@ -1372,13 +1372,31 @@ export class GreymarchBridge {
             for (var i = 0; i < q.length; i++) {
                 var s = q[i];
                 if (s.kind === "cast" && s.id && s.id === this.greymarchVampForm("mist")) { this.greymarchLog("vampire: Mist Form used"); this.greymarchVampSend({ op: "game", power: "mist", on: true }); }
-                else if (s.kind === "cast" && s.id && s.id === this.greymarchVampForm("lord")) { this.greymarchLog("vampire: the Vampire Lord power used"); this.greymarchVampSend({ op: "game", power: "lord", on: true }); }
+                else if (s.kind === "cast" && s.id && s.id === this.greymarchVampForm("lord")) { this.greymarchVampLordSentAt = now; this.greymarchLog("vampire: the Vampire Lord power used"); this.greymarchVampSend({ op: "game", power: "lord", on: true }); }
                 else if (((s.kind === "effect" && s.id === this.greymarchVampForm("potionFx")) || (s.kind === "equip" && s.id === this.greymarchVampForm("potion"))) && s.id && now - (this.greymarchVampDrankAt || 0) > 1000) { this.greymarchVampDrankAt = now; this.greymarchLog("vampire: a Potion of Blood was drunk (" + s.kind + ")"); this.greymarchVampSend({ op: "drank" }); }
             }
         }
         var player: any = null;
         try { player = sp.Game.getPlayer(); } catch (e) { player = null; }
         if (!player) return;
+        // THE VAMPIRE LORD, TWO MORE WAYS (2026-11-03, the owner: the power was used and nothing changed): the cast event alone could be missed (the queue above
+        // holds 8, shared with every effect put on the player), as Beast Form's was. As for the werewolf: the power's own effect (DLC1VampireChangeEffect) seen
+        // on the player, and Z with the power in the slot and no cast seen within WOLF_KEY_WAIT_MS. The server decides as for a cast and says yes or no.
+        var lordOn = !!this.greymarchVampLordWas;
+        try {
+            var lfx = this.greymarchVampForm("lordFx") ? sp.MagicEffect.from(sp.Game.getFormEx(this.greymarchVampForm("lordFx"))) : null;
+            var lfxOn = !!lfx && player.hasMagicEffect(lfx);
+            if (lfxOn && !this.greymarchVampLordFxWas && !lordOn && now - (this.greymarchVampLordSentAt || 0) > 3000) { this.greymarchVampLordSentAt = now; this.greymarchLog("vampire: the Vampire Lord power used (its effect seen on the player)"); this.greymarchVampSend({ op: "game", power: "lord", on: true }); }
+            this.greymarchVampLordFxWas = lfxOn;
+        } catch (lfErr) { /* the cast event still works */ }
+        var vk = this.greymarchVampKeyAt;
+        if (vk && (lordOn || now - vk > 3000)) this.greymarchVampKeyAt = 0;
+        else if (vk && now - vk >= WOLF_KEY_WAIT_MS) {
+            this.greymarchVampKeyAt = 0;
+            var vInMenu = false; try { vInMenu = !!sp.Utility.isInMenuMode(); } catch (vmErr) { vInMenu = false; }
+            var vSlot = 0; try { var veq = player.getEquippedSpell(2); vSlot = veq ? veq.getFormID() : 0; } catch (veqErr) { vSlot = 0; }
+            if (!vInMenu && vSlot && vSlot === this.greymarchVampForm("lord") && now - (this.greymarchVampLordSentAt || 0) > 3000) { this.greymarchVampLordSentAt = now; this.greymarchLog("vampire: Z with the Vampire Lord in the power slot and no cast seen: the use is reported to the server"); this.greymarchVampSend({ op: "game", power: "lord", on: true }); }
+        }
         // the abilities the server names (water walking, poison and disease resistance, magicka regeneration): set when they change, put back when vampirism goes
         var key = want ? [want.waterWalk ? 1 : 0, want.poisonResist || 0, want.diseaseResist || 0, want.magickaRegen || 0].join(",") : "";
         if (key !== (this.greymarchVampAvKey || "")) {
