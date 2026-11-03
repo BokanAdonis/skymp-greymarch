@@ -931,6 +931,14 @@ export class GreymarchBridge {
                 }
             } else {
                 if (this.greymarchWolfOn) this.greymarchWolfUnbecome(player);
+                // A BEAST BODY WITHOUT THE FORM (2026-11-02, the owner: after a werewolf death the respawn left them half changed, the camera stuck; changing into the
+                // beast fixed it): a dead werewolf keeps the beast's look on the server, and the respawn puts that look back on, after the change back had already
+                // run. A werewolf race while the server does not say changed is changed back again (at most every 3 s).
+                else if (raceId && this.greymarchWolfIsBeast(raceId) && !this.greymarchShapeOn && now - (this.greymarchWolfStrayFixAt || 0) > 3000) {
+                    this.greymarchWolfStrayFixAt = now;
+                    this.greymarchLog("wolf: a werewolf body (race " + raceId.toString(16) + ") while not changed (the respawn put the beast's look back?): changing back again");
+                    this.greymarchWolfUnbecome(player);
+                }
                 if (want === false) this.greymarchWolfWant = undefined; // handled: the next use of the power is reported afresh
             }
             this.greymarchWolfAlphaOthers(now);

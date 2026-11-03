@@ -47,7 +47,7 @@ function make(opts = {}) {
   const at = (fn) => { Date.now = () => t; try { return fn(); } finally { Date.now = realNow; } };
   const say = (msg) => at(() => gm.greymarchPacket(msg));
   const key = (code, down) => at(() => gm.greymarchKey({ code, isDown: down }));
-  return { gm, log, sp, tick, say, key, race: () => current, setMenu: (v) => { menu = v; } };
+  return { gm, log, sp, tick, say, key, race: () => current, putRace: (id) => { current = id; }, setMenu: (v) => { menu = v; } };
 }
 const flush = () => new Promise((r) => setImmediate(r));
 
@@ -555,4 +555,23 @@ test("changing back puts the camera behind them (2026-11-02: after a werewolf de
   assert.strictEqual(s.log.third, before + 1, "the change back forces the third-person camera");
   for (let i = 0; i < 5; i++) s.tick(300);
   assert.strictEqual(s.log.third, before + 2, "and once more when their look goes back on");
+});
+
+test("a werewolf body while not changed (the respawn put the beast's look back after the change back, 2026-11-02) is changed back again, at most every 3 seconds", () => {
+  const s = make();
+  s.say({ customPacketType: "greymarchWolfForm", on: true });
+  for (let i = 0; i < 16; i++) s.tick(300);
+  s.say({ customPacketType: "greymarchWolfForm", on: false });
+  s.tick();
+  assert.strictEqual(s.race(), NORD);
+  s.putRace(BEAST); // the respawn applies the look the server kept for the body
+  s.tick(3100);
+  assert.strictEqual(s.race(), NORD, "changed back again");
+  assert.ok(s.log.lines.some((l) => /a werewolf body .* while not changed/.test(l)));
+  s.putRace(BEAST); s.tick(300);
+  assert.strictEqual(s.race(), BEAST, "not again within 3 seconds");
+  s.tick(3000);
+  assert.strictEqual(s.race(), NORD);
+  const h = make(); h.tick(); h.tick(3100);
+  assert.strictEqual(h.race(), NORD, "a human is left alone");
 });
