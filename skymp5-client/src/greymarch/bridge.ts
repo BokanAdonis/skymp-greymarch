@@ -4461,6 +4461,23 @@ export class GreymarchBridge {
     // (the Paralysis actor value) for its seconds, and let go after; let go too if they die meanwhile.
     greymarchPoisonTick(now: number): any {
         var sp = this.sp;
+        // A POISON PUT ON (2026-11-03, the owner's test: the poison came back to the pack and did nothing): the game sends no equip event when a poison goes on a
+        // weapon, so twice a second the weapons in hand are looked at; a poison that was not on them before is reported to the server, which takes it from its
+        // copy of the pack and keeps it for the next hit. The first look after entering the world only notes what is there.
+        if (now >= (this.greymarchPoisonLookAt || 0)) {
+            this.greymarchPoisonLookAt = now + 500;
+            try {
+                var on: any = {}, entries = invMod.getInventory(sp.Game.getPlayer()).entries;
+                for (var pi = 0; pi < entries.length; pi++) { var pe = entries[pi]; if (pe.poisonId && (pe.worn || pe.wornLeft)) on[pe.baseId + ":" + pe.poisonId + ":" + (pe.wornLeft ? "L" : "R")] = pe.poisonId >>> 0; }
+                var before = this.greymarchPoisonOn;
+                if (before) for (var pk in on) if (!before[pk]) {
+                    this.greymarchLog("poison: " + (on[pk] >>> 0).toString(16) + " put on the weapon, told the server");
+                    var pmsg = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchPoisonApplied", poison: on[pk] >>> 0 }) };
+                    this.controller.emitter.emit("sendMessage", { message: pmsg, reliability: "reliable" });
+                }
+                this.greymarchPoisonOn = on;
+            } catch (lErr) { /* looked at again in half a second */ }
+        }
         if (this.greymarchPoisonStripWanted) {
             this.greymarchPoisonStripWanted = 0;
             try { var n = invMod.greymarchStripPoison(sp.Game.getPlayer()); this.greymarchLog("poison: the hit used it, " + (n ? "off the blade" : "none was on the weapon in hand")); } catch (e) { this.greymarchLog("poison: could not take it off the blade: " + e); }

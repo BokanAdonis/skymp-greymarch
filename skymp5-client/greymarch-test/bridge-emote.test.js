@@ -15,7 +15,7 @@ const bridgeJs = tr("bridge.ts");
 function make(opts = {}) {
   const log = { idles: [], events: [], notes: [], pages: [], lines: [], thirdPerson: 0, focused: [], sent: [], faces: {} };
   const faceLog = (who) => ({ clearExpressionOverride: () => (log.faces[who] = []), resetExpressionOverrides: () => (log.faces[who] = []), setExpressionOverride: (m, s) => (log.faces[who] = log.faces[who] || []).push(["mood", m, s]), setExpressionPhoneme: (i, v) => (log.faces[who] = log.faces[who] || []).push(["ph", i, v]) });
-  const mods = { "../sync/inventory": { greymarchStripPoison: (ref) => { log.stripped = (log.stripped || 0) + 1; return 1; } }, "../messages": { MsgType: { CustomPacket: 77 } }, "./emotes": emotes, "../view/worldViewMisc": { remoteIdToLocalId: (id) => (opts.others || {})[id] || 0, localIdToRemoteId: (id) => (id >= 0xff000000 ? 0 : id) }, "../services/services/remoteServer": { RemoteServer: {} }, "../services/services/singlePlayerService": { SinglePlayerService: {} } };
+  const mods = { "../sync/inventory": { greymarchStripPoison: (ref) => { log.stripped = (log.stripped || 0) + 1; return 1; }, getInventory: () => ({ entries: state.inv || [] }) }, "../messages": { MsgType: { CustomPacket: 77 } }, "./emotes": emotes, "../view/worldViewMisc": { remoteIdToLocalId: (id) => (opts.others || {})[id] || 0, localIdToRemoteId: (id) => (id >= 0xff000000 ? 0 : id) }, "../services/services/remoteServer": { RemoteServer: {} }, "../services/services/singlePlayerService": { SinglePlayerService: {} } };
   const bridge = load(bridgeJs, mods);
   const state = { drawn: false, speed: 0, menu: null, refuse: false };
   const player = {
@@ -932,4 +932,18 @@ test("poisons on weapons (2026-11-03): the server says the hit used it, it comes
   assert.deepStrictEqual(d.log.avSet.at(-1), ["Paralysis", 0], "let go at death");
   const x = make(); x.say({ customPacketType: "greymarchPoisonFx", paralyze: 999 }); x.tick();
   assert.strictEqual(x.log.avSet, undefined, "nonsense is ignored");
+});
+
+test("a poison put on the weapon in hand is reported to the server (2026-11-03: the game sends no equip event for it); once; not what was already on at entering", () => {
+  const s = make();
+  s.state.inv = [{ baseId: 0x557f5, count: 1, worn: true, poisonId: 0x73f30 }];
+  s.tick(600); // the first look: already on, only noted
+  assert.strictEqual(s.log.sent.filter((m) => m.customPacketType === "greymarchPoisonApplied").length, 0);
+  s.state.inv = [{ baseId: 0x557f5, count: 1, worn: true }]; s.tick(600);
+  s.state.inv = [{ baseId: 0x557f5, count: 1, worn: true, poisonId: 0x73f31 }]; s.tick(600);
+  assert.deepStrictEqual(s.log.sent.filter((m) => m.customPacketType === "greymarchPoisonApplied"), [{ customPacketType: "greymarchPoisonApplied", poison: 0x73f31 }]);
+  s.tick(600); s.tick(600);
+  assert.strictEqual(s.log.sent.filter((m) => m.customPacketType === "greymarchPoisonApplied").length, 1, "once");
+  s.state.inv = [{ baseId: 0x557f5, count: 1, worn: false, poisonId: 0x73f31 }, { baseId: 0x12eb7, count: 1, worn: true }]; s.tick(600);
+  assert.strictEqual(s.log.sent.filter((m) => m.customPacketType === "greymarchPoisonApplied").length, 1, "a poisoned weapon in the pack is not in hand");
 });
