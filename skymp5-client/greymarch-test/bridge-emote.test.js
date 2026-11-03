@@ -889,3 +889,19 @@ test("sitting down (2026-10-30): the game refuses the sitting idle away from a s
   const g = emotes.EMOTE_GROUPS.find((x) => x.id === "sit");
   assert.deepStrictEqual(g.items.map((x) => x.id), ["sit", "sitledge", "lie", "wounded2", "wounded3"]);
 });
+
+test("standing up from sitting puts the body back to normal 2 seconds later (2026-11-02, the owner: it looked like falling, then they floated); not if another emote started or they sit in a real seat", () => {
+  const s = make(); s.state.refuse = true;
+  s.page({ type: "emote", id: "sit" }); s.tick();
+  s.key(17, true); s.tick();
+  assert.deepStrictEqual(s.log.events.slice(-1), ["IdleChairExitStart"]);
+  s.tick(1500); assert.ok(!s.log.events.includes("IdleForceDefaultState"), "the stand-up plays first");
+  s.tick(600); assert.strictEqual(s.log.events.at(-1), "IdleForceDefaultState", "then the body is back to normal");
+  const e = make(); e.state.refuse = true;
+  e.page({ type: "emote", id: "sit" }); e.tick(); e.key(17, true); e.tick(); e.key(17, false);
+  e.state.refuse = false; e.page({ type: "emote", id: "hey" }); e.tick();
+  e.tick(2500); assert.ok(!e.log.events.includes("IdleForceDefaultState"), "another emote meanwhile: left alone");
+  const c = make(); c.state.refuse = true;
+  c.page({ type: "emote", id: "sit" }); c.tick(); c.key(17, true); c.tick(); c.state.sitState = 3;
+  c.tick(2500); assert.ok(!c.log.events.includes("IdleForceDefaultState"), "in a real seat: left alone");
+});

@@ -35,6 +35,7 @@ const SHAPE_REST_MS = 800, SHAPE_POWER_REST_MS = 1600; // a creature's attacks: 
 const SHAPE_LAND_MS = 450; // a creature's swing is reported this long after it starts (about when it lands)
 const SHAPE_NPC_READY_MS = 8000; // a creature NPC that is not ready this long after it was placed is placed again
 const SHAPE_SILENCE_MS = 20000; // a creature form: with no word from the server for this long the player changes back by themselves (the server repeats "on" every 5 seconds)
+const SIT_RESET_MS = 2000; // standing up from the wheel's sitting: the body is put back to normal this long after the stand-up starts (greymarchSitResetTick)
 const WORK_SHEATHE_MS = 1500; // profession work: the kneel waits this long after the weapon is put away (the put-away animation ends first)
 const EMOTE_ONCE_POV_MS = 5000; // a one-off emote (a wave, a bow): first person stays off this long (greymarchEmotePovLock)
 const WOLF_BACK_GRACE_MS = 2000; // Z changes back, but not in the first 2 seconds after the body changed
@@ -4076,6 +4077,7 @@ export class GreymarchBridge {
                 if (cq.length && (!this.greymarchEmoteNow || emoteMod.SEAT_EMOTES.indexOf(this.greymarchEmoteNow.id) >= 0) && !this.greymarchWolfOn && !this.greymarchShapeOn && !this.greymarchInMenu()) { var next = cq.shift(); this.greymarchConsumePlay(next.id, now); }
             }
         }
+        this.greymarchSitResetTick(now);
         this.greymarchEmotePovLock(!!this.greymarchEmoteNow || now < (this.greymarchEmotePovUntil || 0) || !!this.greymarchMiniOn || !!this.greymarchForgeAnim || !!this.greymarchForgeOn || now - (this.greymarchWorkStartAt || -1e12) < 1500, now); // a meal too, and profession work (2026-11-02, the owner)
         if (this.greymarchMealLocked && !(this.greymarchEmoteNow && this.greymarchEmoteNow.meal)) this.greymarchMealLock(false, "the meal ended another way"); // never left frozen (a beast form, an emote dropped elsewhere)
         var cur = this.greymarchEmoteNow;
@@ -4266,6 +4268,23 @@ export class GreymarchBridge {
         try { sp.Game.enablePlayerControls(false, false, true, false, false, false, false, false, 0); } catch (e) { /* nothing else to try */ }
         if (back) { try { sp.Game.forceFirstPerson(); } catch (e) { /* they press F */ } } // they were in first person before it: back to it (2026-11-02, the owner)
         this.greymarchCrumb("emote: first person back");
+    }
+    // STANDING UP CLEANLY (2026-11-02, the owner: standing up from sitting looked like falling, then they could float around): the wheel's sitting is the game's
+    // chair animation without a chair (emotes.ts, SITTING DOWN), and its stand-up (IdleChairExitStart) leaves the body half in the chair's state with no chair to
+    // let go of. Once the stand-up has played (SIT_RESET_MS) the body is put back in its normal state (IdleForceDefaultState; SkyMP passes it to the other
+    // games, so they see it stand too). Not when another emote or a meal has started meanwhile, or they sat in a real seat.
+    greymarchSitResetTick(now: number): any {
+        var at = this.greymarchSitResetAt;
+        if (!at || now < at) return;
+        this.greymarchSitResetAt = 0;
+        if (this.greymarchEmoteNow || this.greymarchWolfOn || this.greymarchShapeOn) return;
+        try {
+            var player = this.sp.Game.getPlayer();
+            var seat = 0; try { seat = Number(player.getSitState()); } catch (sErr) { seat = 0; }
+            if (seat === 3 || player.isDead()) return;
+            this.sp.Debug.sendAnimationEvent(player, "IdleForceDefaultState");
+            this.greymarchCrumb("sit: stood up, body back to normal");
+        } catch (err) { /* nothing else to try */ }
     }
     greymarchEmotePlay(em: any): any {
         var sp = this.sp;
@@ -4485,6 +4504,7 @@ export class GreymarchBridge {
             if (!ok) sp.Debug.sendAnimationEvent(player, cur.stopEvent ? cur.stopEvent : cur.stop === emoteMod.OFFSET_STOP ? "OffsetStop" : cur.stop === emoteMod.DRUNK_STOP ? "DrunkStop" : "IdleStop"); // the stop event itself
         } catch (err) { /* the next movement ends it anyway */ }
         if ((this.greymarchEmoteLogged || 0) <= 20) this.greymarchLog("emote: " + cur.id + " ended (" + why + ")");
+        if (cur.stopEvent === "IdleChairExitStart") this.greymarchSitResetAt = Date.now() + SIT_RESET_MS; // STANDING UP CLEANLY (greymarchSitResetTick)
         if (cur.resume && why === "done eating") this.greymarchEmoteNow = { id: cur.resume.id, kind: cur.resume.kind, stop: cur.resume.stop, stopEvent: cur.resume.stopEvent, at: Date.now() }; // a meal on an edge: still sitting there
     }
     // THE CONSOLE (~). SkyrimPlatform's findConsoleCommand swaps a command's code for ours, and ours answering false means the game's own never runs:
