@@ -49,6 +49,13 @@ const GM_WOLF_FORMS: { [kind: string]: [number, string] } = {
 };
 // the lists in the server's greymarchWolfAlphas packet, by kind
 const GM_WOLF_LISTS: { [kind: string]: string } = { alpha: "actors", pup: "pups", black: "blackbears", polar: "polarbears", frost: "frosts", rabid: "rabids", moonborn: "moonborns", elder: "elders" };
+// THE WEREWOLF'S LUNGE (2026-11-03, the owner: "Lunge attack on werewolves didnt work ... don't knock down the character you hit because we can't sync that"): an attack
+// while sprinting is the race's sprint attack (AttackStartRightSprinting / AttackStartLeftSprinting, a leap, x2 in the race data), which the player's game never played.
+// It is played here: an attack event the game sends while the werewolf sprints is swapped for it, and when the game sends none the bridge plays it itself. GreymarchCore.esp
+// sets those attacks' Knockdown to 0 on every werewolf race: a knockdown happens in one game only (the attacker's copy of the victim) and cannot be synced.
+const WOLF_LUNGE_SPRINT_MS = 300; // still counted as sprinting this long after the last frame that was (the click itself can stop the sprint)
+const WOLF_LUNGE_WAIT_MS = 80; // after a click, how long the game has to send its own attack before the bridge plays the leap itself
+const WOLF_LUNGE_GAP_MS = 1500; // one leap per this long
 const WOLF_ROAR_MS = 0; // R: no wait between roars (2026-10-21, the owner's call; the server has none either: werewolf.js TUNE.howlCooldownMs). One roar per press of R.
 // GREYMARCH: THE HOWL SHOUT (2026-10-23). The vanilla howl is the werewolf's voice: PlayerWerewolfChangeScript puts a howl shout in the voice slot, and the graph's
 // howl (HowlStart) casts it (BeginCastVoice). With none there the howl state had nothing to cast and stalled: the roar played once, then only its sound. A
@@ -135,6 +142,7 @@ export class GreymarchBridge {
         this.controller.on("buttonEvent", (e: any) => this.greymarchKey(e)); // F7 opens the staff panel
         try { this.sp.on("hit", (e: any) => this.greymarchHit(e)); } catch (hitErr) { /* no hit events: the combat history stays empty */ }
         this.controller.on("update", () => this.greymarchTick()); // Skyrim functions only work in the update phase, never in tick
+        this.greymarchWolfLungeHook();
         try { this.controller.on("loadGame", () => { if (this.greymarchMapState) { this.greymarchMapState.restore = true; this.greymarchMapState.refs = {}; } }); } catch (e) { /* shown once per login */ } // a world load forgets the map: shown again
         this.controller.on("tick", () => this.greymarchConnectCover(Date.now()));
         this.controller.on("tick", () => this.greymarchChoiceTick(Date.now()));
@@ -510,6 +518,7 @@ export class GreymarchBridge {
         this.greymarchRaceMenuTick(Date.now()); // RaceMenu's extra sliders: sent when the race menu closes, put back after a relog (racemenuLook.ts)
         this.greymarchRaceMenuCopiesTick(Date.now()); // and put on the other players' copies (OTHERS SEE THEM)
         this.greymarchWolfTick(); // the werewolf form: the game's Beast Form power is the trigger, the server decides, the change is done here
+        if (this.greymarchWolfOn || this.greymarchWolfLungeClick) { try { var gmLungeP = this.sp.Game.getPlayer(); if (gmLungeP) this.greymarchWolfLungeTick(gmLungeP, Date.now()); } catch (lgErr) { /* next frame */ } } // the lunge, every frame (the wolf tick runs every 250 ms)
         this.greymarchSpellCostTick(); // the Spells balance tab's costs on the spell records (GreymarchCamera.dll 1.5)
         this.greymarchSpellEditTick(); // the Magic balance tab's durations and strengths on the spell records
         this.greymarchVampTick(); // a vampire: powers and potions reported, the abilities the server names, no Restoration, the feeding scene
@@ -800,13 +809,55 @@ export class GreymarchBridge {
         }
         return false;
     }
+    // THE WEREWOLF'S LUNGE (see WOLF_LUNGE_SPRINT_MS): the game's own attack event while sprinting is swapped for the sprint attack (a leap). The hook runs in the
+    // game's own thread: it only reads what greymarchWolfLungeTick noted in the update phase.
+    greymarchWolfLungeHook(): any {
+        var self = this;
+        var hook = {
+            enter: function (ctx: any) {
+                try {
+                    var ev = String(ctx.animEventName || "");
+                    if (!self.greymarchWolfOn || self.greymarchWolfMorph || self.greymarchWolfBearRace || !ev || /sprinting/i.test(ev) || !/^attackstart/i.test(ev)) return;
+                    var now = Date.now();
+                    if (now - (self.greymarchWolfSprintAt || 0) > WOLF_LUNGE_SPRINT_MS) return;
+                    if (now - (self.greymarchWolfLungeAt || 0) < WOLF_LUNGE_GAP_MS) return;
+                    var lunge = /left/i.test(ev) ? "AttackStartLeftSprinting" : "AttackStartRightSprinting";
+                    ctx.animEventName = lunge;
+                    self.greymarchWolfLungeAt = now;
+                    self.greymarchWolfLungeNote = ev + " -> " + lunge;
+                } catch (hErr) { /* the game's own attack */ }
+            },
+            leave: function () { },
+        };
+        var add = this.sp.hooks && this.sp.hooks.sendAnimationEvent; // none: the bridge plays the leap itself (greymarchWolfLungeTick)
+        if (!add) return;
+        try { add.add(hook, 0x14, 0x14, "attackStart*"); add.add(hook, 0x14, 0x14, "AttackStart*"); } catch (e) { /* the bridge plays the leap itself */ }
+    }
+    greymarchWolfLungeTick(player: any, now: number): any {
+        var sp = this.sp;
+        if (!this.greymarchWolfOn || this.greymarchWolfMorph || this.greymarchWolfBearRace) { this.greymarchWolfLungeClick = null; return; } // a werewolf's leap (a werebear's graph has none)
+        try { if (player.isSprinting()) this.greymarchWolfSprintAt = now; } catch (sErr) { /* not known: no leap */ }
+        if (this.greymarchWolfLungeNote) { this.greymarchLog("wolf lunge: the game's " + this.greymarchWolfLungeNote); this.greymarchWolfLungeNote = ""; }
+        var click = this.greymarchWolfLungeClick;
+        if (!click || now - click.at < WOLF_LUNGE_WAIT_MS) return;
+        this.greymarchWolfLungeClick = null;
+        if ((this.greymarchWolfLungeAt || 0) >= click.at) return; // the game sent its own attack: already swapped
+        if (click.at - (this.greymarchWolfSprintAt || 0) > WOLF_LUNGE_SPRINT_MS) return; // not sprinting: a normal swipe
+        if (now - (this.greymarchWolfLungeAt || 0) < WOLF_LUNGE_GAP_MS) return;
+        var inMenu = false; try { inMenu = !!sp.Utility.isInMenuMode(); } catch (mErr) { inMenu = false; }
+        if (inMenu || this.greymarchChatTyping) return;
+        var lunge = click.left ? "AttackStartLeftSprinting" : "AttackStartRightSprinting";
+        this.greymarchWolfLungeAt = now;
+        try { sp.Debug.sendAnimationEvent(player, lunge); this.greymarchLog("wolf lunge: no attack from the game while sprinting, played " + lunge); }
+        catch (aErr) { this.greymarchLog("wolf lunge: " + lunge + " failed: " + String(aErr).slice(0, 120)); }
+    }
     // F7 opens the panel (the page itself closes it with F7 or Escape). Escape also closes it from here, because the game un-focuses the browser on Escape.
     greymarchKey(e: any): any {
         if (this.greymarchBuildCam && this.greymarchBuildCamKey(e)) return; // the build system's free camera has the keys it uses
         if (this.greymarchEmoteNow && this.greymarchEmoteNow.kind === "loop" && !this.greymarchEmoteNow.meal && (e.code === 17 || e.code === 30 || e.code === 31 || e.code === 32 || e.code === 57)) { var mvDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (mvDown && e.isUp !== true) this.greymarchEmoteStopWanted = Date.now(); } // W A S D or Space ends an emote that lasts (greymarchEmoteTick)
         if (e.code === 19) { var rDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (e.isUp === true) rDown = false; if (rDown && !this.greymarchKey19 && this.greymarchWolfOn && !this.greymarchChatTyping) this.greymarchWolfRoarAt = Date.now(); this.greymarchKey19 = rDown; return; } // R: the werewolf roars (greymarchWolfTick; only while changed)
         if (e.code === 44) { var zDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (e.isUp === true) zDown = false; if (zDown && !this.greymarchKey44 && !this.greymarchChatTyping) { if (this.greymarchWolfOn) this.greymarchWolfBackAt = Date.now(); else this.greymarchWolfKeyAt = Date.now(); } this.greymarchKey44 = zDown; return; } // Z while changed: ask the server to change back (greymarchWolfTick)
-        if (e.code === 256 || e.code === 257) { var mDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (e.isUp === true) mDown = false; if (mDown && !this["greymarchKey" + e.code]) this.greymarchShapeButton(e.code === 257); this["greymarchKey" + e.code] = mDown; return; } // mouse buttons: a creature's attacks (greymarchShapeTick)
+        if (e.code === 256 || e.code === 257) { var mDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (e.isUp === true) mDown = false; if (mDown && !this["greymarchKey" + e.code]) { this.greymarchShapeButton(e.code === 257); if (this.greymarchWolfOn) this.greymarchWolfLungeClick = { at: Date.now(), left: e.code === 257 }; } this["greymarchKey" + e.code] = mDown; return; } // mouse buttons: a creature's attacks (greymarchShapeTick)
         if (e.code !== 65 && e.code !== 66 && e.code !== 64 && e.code !== 35 && e.code !== 48 && e.code !== 1 && e.code !== 45 && e.code !== 28 && e.code !== 37 && e.code !== 34 && e.code !== 59) return;
         var down = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true);
         if (e.isUp === true) down = false;
