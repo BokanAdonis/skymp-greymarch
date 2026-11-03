@@ -34,6 +34,8 @@ const GM_RUN_NEAR = 250;
 const GM_RUN_NUDGE_MS = 8000;
 // Skyrim's own reset of an actor's animation state (its graph goes back to standing, so the AI's next move starts a real run). It moves nothing and changes no gear
 const GM_GRAPH_RESET = "IdleForceDefaultState";
+const GM_SIT_WAKE_MS = 2000; // an NPC in furniture that is hurt or fighting is pulled out at most this often (OUT OF THE FURNITURE TO FIGHT)
+const GM_SIT_WAKE_RANGE = 3000; // ... and sent at this game's player when they are this close
 // in a fight (DRESSED ONCE BY ITS HOST: an empty-handed NPC takes the server's gear, but not mid-fight)
 function gmInCombat(ac: Actor): boolean { try { return ac.isInCombat(); } catch (e) { return true; } }
 // A QUIVER (2026-10-28, the owner: the Skeleton archer had its bow on its back and never used it). The server sends an NPC's games only what it wears, and
@@ -1461,6 +1463,7 @@ export class FormView {
       npc.evaluatePackage();
     } catch (e) { /* the next check tries again */ }
   }
+  private gmSitWakeAt = 0; // GREYMARCH: when it was last pulled out of furniture to fight
   private gmGroundRefight(npc: Actor): void {
     if (!this.gmGroundTargetId) return;
     try {
@@ -1595,6 +1598,29 @@ export class FormView {
           // rebuilt mid-fight after standing 70-100 units from their target for a few seconds, which a sword fight does): its body is left as it is; its
           // animation state is reset, it is sent at its target again with its weapon drawn, and its AI looks at its package again
           this.gmFrozenNudge(npc, gmFTarget);
+        }
+      }
+      // GREYMARCH: OUT OF THE FURNITURE TO FIGHT (2026-11-03, the owner: "bandits using cooking pots in dungeons don't fight back"): an NPC using furniture (a
+      // cooking pot, a forge, a chair it walked to) and hurt or in a fight is pulled out of it by its host and sent at the nearest player (the frozen nudge:
+      // its animation reset, startCombat, weapon drawn, its package looked at again), at most every GM_SIT_WAKE_MS. Breadcrumbs: "furniture"
+      {
+        const gmSitNow = Date.now();
+        if (gmSitNow - this.gmSitWakeAt >= GM_SIT_WAKE_MS) {
+          let gmSitting = 0; try { gmSitting = npc.getSitState(); } catch (e) { gmSitting = 0; }
+          let gmMounted = false; try { gmMounted = npc.isOnMount(); } catch (e) { gmMounted = false; } // a rider is not in furniture
+          if (gmSitting !== 0 && !gmMounted && !npc.isDead()) {
+            let gmHurt = false; try { gmHurt = npc.getActorValuePercentage("Health") < 0.99 || npc.isInCombat(); } catch (e) { gmHurt = false; }
+            const gmMe = Game.getPlayer();
+            let gmClose = false; try { gmClose = !!gmMe && !gmMe.isDead() && npc.getDistance(gmMe) <= GM_SIT_WAKE_RANGE; } catch (e) { gmClose = false; }
+            if (gmHurt && gmMe) {
+              this.gmSitWakeAt = gmSitNow;
+              let gmTarget: Actor | null = null; try { gmTarget = npc.getCombatTarget(); } catch (e) { gmTarget = null; }
+              if (!gmTarget || gmTarget.isDead()) gmTarget = gmClose ? gmMe : null;
+              gmCrumb("furniture " + gmHex(this.remoteRefrId as number) + ": out of its furniture (sit state " + gmSitting + ") to fight " + (gmTarget ? gmHex(gmTarget.getFormID()) : "(no one near)"));
+              if (gmTarget) this.gmFrozenNudge(npc, gmTarget);
+              else { try { Debug.sendAnimationEvent(npc, GM_GRAPH_RESET); npc.evaluatePackage(); } catch (e) { /* the next check */ } }
+            }
+          }
         }
       }
       // GREYMARCH: PUT DOWN BY ITS HOST (2026-10-28, the owner: bandits still walked on air and sank into the ground chasing people). The server saw this NPC
