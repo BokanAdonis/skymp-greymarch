@@ -65,9 +65,14 @@ const WOLF_ROAR_SOUND = 0x101008, BEAR_ROAR_SOUND = 0x0f95bb; // NPCWerewolfShou
 // the game's own drunk walk (IdleDrunkStart, Skyrim.esm 0CEFD0; IdleDrunkStop 0CEFD1 ends it) and a swimming screen (BSHeartland's CYRWE14RevelerDrunkImod 0C9CC5),
 // both put on again every DRUNK_AGAIN_MS (a jump, a fight or a load ends the walk)
 const DRUNK_IDLE_START = 0x0cefd0, DRUNK_IDLE_STOP = 0x0cefd1, DRUNK_IMOD = 0x0c9cc5, DRUNK_AGAIN_MS = 10000;
-const FEED_REPLAY_MS = 6000; // the held feeding: the standing feed is played again at most this often (greymarchVampFeedHeld)
+// THE HELD FEEDING LOOP (2026-11-03, the owner: "It's still not locking into the animation"; the game log showed the bite play once, then the replay 6 s later
+// refused 4 times while both stood): the standing feed is one paired bite of about 5 s. It is now played again the moment it ends (bIsSynced off, checked every
+// frame once FEED_MIN_MS have passed; at FEED_REPLAY_MS at the latest), and a refusal puts BOTH bodies back to the default pose (the bitten one was left in the
+// paired pose, so the game kept refusing) before the next try.
+const FEED_MIN_MS = 2000; // the bite is never restarted before this
+const FEED_REPLAY_MS = 6000; // the held feeding: played again by this time even if the game never says the bite ended (greymarchVampFeedHeld)
 const FEED_RETRY_MS = 300; // ... and when the game refused it (still finishing the last one), tried again this soon
-const FEED_RESET_AFTER = 4; // refused this many times in a row: the biter is put back to the default pose first (the game will not start a paired idle over a stuck one)
+const FEED_RESET_AFTER = 2; // refused this many times in a row: both bodies are put back to the default pose first (the game will not start a paired idle over a stuck one)
 const FEED_STOP_KEYS = [0x11, 0x1e, 0x1f, 0x20]; // W A S D (DirectInput scan codes): the vampire's movement keys end a feeding
 const VAMP_FORMS = { mist: 0x38ba, lord: 0x283b, potionFx: 0x18ef4, potion: 0x18ef3, feedIdle: 0xe6a8 }; // DLC1VampireMistform, DLC1VampireChange, DLC1BloodPotionEffect, DLC1BloodPotion, IdleVampireStandingFeedFront_Loose
 // a vampire's eyes, one colour per bloodline (GreymarchCore.esp, made by tools/vampire-eyes.js in the launcher repo): GM_VampEyes{Male,Female}{Colour}0..6, glow 0 (none) to 6 (a Lord)
@@ -1438,7 +1443,7 @@ export class GreymarchBridge {
         var biter = h.role === "vampire" ? player : other, bitten = h.role === "vampire" ? other : player;
         // TEST 2026-10-30 (the owner: it stopped at the usual time): the replay 6 s in was refused (the bite was still finishing) and the next try was 6 s later, so
         // the vampire stood up. A refusal is now tried again after FEED_RETRY_MS, and after FEED_RESET_AFTER refusals the biter is reset to the default pose first.
-        if ((h.refused || 0) >= FEED_RESET_AFTER) { try { sp.Debug.sendAnimationEvent(biter, "IdleForceDefaultState"); } catch (rErr) { /* tried anyway */ } }
+        if ((h.refused || 0) >= FEED_RESET_AFTER) { try { sp.Debug.sendAnimationEvent(biter, "IdleForceDefaultState"); sp.Debug.sendAnimationEvent(bitten, "IdleForceDefaultState"); } catch (rErr) { /* tried anyway */ } }
         var played = false;
         try { var idle = sp.Idle.from(sp.Game.getFormEx(this.greymarchVampForm("feedIdle"))); played = !!idle && !!biter.playIdleWithTarget(idle, bitten); } catch (pErr) { played = false; }
         if (played) {
@@ -1489,10 +1494,10 @@ export class GreymarchBridge {
         if (!other) { // not loaded when it began: try again
             try { var lid = misc.remoteIdToLocalId(h.partner); other = lid ? sp.Actor.from(sp.Game.getFormEx(lid)) : null; } catch (oErr) { other = null; }
             if (other) { this.greymarchVampFeedOther = other; this.greymarchVampFeedPlay(player, other, now, true); }
-        } else if (now - h.playedAt >= FEED_REPLAY_MS) {
+        } else if (h.refused ? now - h.playedAt >= FEED_REPLAY_MS : now - h.playedAt >= FEED_MIN_MS) { // a refusal sets playedAt so the retry comes FEED_RETRY_MS later
             var biter = h.role === "vampire" ? player : other, synced = false;
             try { synced = !!biter.getAnimationVariableBool("bIsSynced"); } catch (sErr) { synced = false; }
-            if (!synced || h.refused) this.greymarchVampFeedPlay(player, other, now, false); // after a refusal the flag is no reason to wait
+            if (!synced || h.refused || now - h.playedAt >= FEED_REPLAY_MS) this.greymarchVampFeedPlay(player, other, now, false); // ended: at once; after a refusal the flag is no reason to wait
         }
         if (h.role !== "vampire" || h.asked) return;
         var input = sp.Input; if (!input || typeof input.isKeyPressed !== "function") return;
