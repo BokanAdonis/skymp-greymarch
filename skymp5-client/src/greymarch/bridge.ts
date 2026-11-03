@@ -4248,6 +4248,10 @@ export class GreymarchBridge {
     greymarchEmotePovLock(on: boolean, now: number): any {
         var sp = this.sp;
         if (on) {
+            // THE MOUSE WHEEL (2026-11-02, the owner: still able to go into first person): turning the camera switch off stops F, but zooming in with the wheel still
+            // drops the camera into first person (the game has no switch for that). Every frame while locked, first person is put back to third at once, so it
+            // never shows.
+            if (this.greymarchEmotePovLocked) { var cs = -1; try { cs = Number(sp.Game.getCameraState()); } catch (csErr) { cs = -1; } if (cs === 0) { try { sp.Game.forceThirdPerson(); } catch (tpErr) { /* next frame */ } if ((this.greymarchEmotePovWheelSaid = (this.greymarchEmotePovWheelSaid || 0) + 1) <= 3) this.greymarchCrumb("emote: zoomed into first person, back to third"); } }
             if (this.greymarchEmotePovLocked && now < (this.greymarchEmotePovAgainAt || 0)) return;
             try { sp.Game.disablePlayerControls(false, false, true, false, false, false, false, false, 0); } catch (e) { return; }
             if (!this.greymarchEmotePovLocked) this.greymarchCrumb("emote: first person off");

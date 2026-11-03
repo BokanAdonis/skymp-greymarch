@@ -627,6 +627,16 @@ test("profession work in third person (2026-11-02, the owner: skinning with the 
   assert.strictEqual(s.state.cam, 0, "and back in it");
 });
 
+test("the mouse wheel cannot zoom into first person during an emote (2026-11-02): first person is put back to third the next frame", () => {
+  const s = make();
+  s.page({ type: "emote", id: "hey" }); s.tick();
+  const n = s.log.thirdPerson;
+  s.state.cam = 0; s.tick(16);
+  assert.strictEqual(s.state.cam, 9); assert.strictEqual(s.log.thirdPerson, n + 1);
+  const q = make(); q.state.cam = 0; q.tick(16); q.tick(16);
+  assert.strictEqual(q.state.cam, 0, "no emote: first person is theirs");
+});
+
 test("a meal cannot be skipped: the controls are locked for its five seconds (not looking, the camera or the menus); moving, a weapon, W or Stop do not end it", () => {
   const LOCK = [true, true, false, false, true, false, true, false, 0];
   const s = make();
