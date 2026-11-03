@@ -4069,6 +4069,9 @@ export class GreymarchBridge {
             this.greymarchEmoteCheckAt = now + 250;
             try {
                 var player = sp.Game.getPlayer();
+                // THIRD PERSON FOR THE WHOLE EMOTE (2026-11-02, the owner: "when someone emotes can you force them into 3rd person"): an emote already starts in third
+                // person (greymarchEmotePlay); switching to first person while it lasts (F, the mouse wheel) is put back. A meal leaves the camera alone, as before.
+                if (!cur.meal) { var camState = -1; try { camState = Number(sp.Game.getCameraState()); } catch (csErr) { camState = -1; } if (camState === 0) { try { sp.Game.forceThirdPerson(); } catch (tpErr) { /* the next check */ } } }
                 if (cur.meal) { this.greymarchEmoteStopWanted = 0; if (player.isDead()) stopWhy = "died"; } // a meal lasts its full time: moving, a weapon or Stop do not end it (the controls are locked)
                 else if (player.isWeaponDrawn()) stopWhy = "weapon drawn";
                 else if (cur.kind === "loop" && now - cur.at > 700 && player.getAnimationVariableFloat("Speed") > 30) stopWhy = "moved";

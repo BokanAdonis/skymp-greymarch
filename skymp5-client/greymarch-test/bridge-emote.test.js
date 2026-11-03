@@ -32,7 +32,7 @@ function make(opts = {}) {
   const actors = {}; for (const local of Object.values(opts.others || {})) actors[local] = faceLog(local.toString(16));
   const sp = {
     printConsole() {}, writeLogs: (n, l) => log.lines.push(l),
-    Game: { getPlayer: () => player, getFormEx: (id) => (log.world && log.world[id] ? (log.world[id].gone ? null : log.world[id]) : { id }), getFormFromFile: (id, file) => (file === "Missing.esp" ? null : { id, file, getFormID: () => id }), forceThirdPerson: () => { log.thirdPerson++; }, disablePlayerControls: (...a) => (log.controls = log.controls || []).push(["off", ...a]), enablePlayerControls: (...a) => (log.controls = log.controls || []).push(["on", ...a]) },
+    Game: { getPlayer: () => player, getFormEx: (id) => (log.world && log.world[id] ? (log.world[id].gone ? null : log.world[id]) : { id }), getFormFromFile: (id, file) => (file === "Missing.esp" ? null : { id, file, getFormID: () => id }), forceThirdPerson: () => { log.thirdPerson++; if (state.cam === 0) state.cam = 9; }, getCameraState: () => (state.cam === undefined ? 9 : state.cam), disablePlayerControls: (...a) => (log.controls = log.controls || []).push(["off", ...a]), enablePlayerControls: (...a) => (log.controls = log.controls || []).push(["on", ...a]) },
     callNative: (cls, fn, self, a, b) => { (log.natives = log.natives || []).push([cls, fn, a]); if (cls !== "GreymarchCam" || state.noDll) throw new Error("Native function not found"); if (fn === "GetFurnitureMarker") return state.marker ? state.marker[b] : -99999; if (fn === "SetFreeCamera") { state.free = !!a; return true; } if (fn === "IsFreeCamera") return !!state.free; if (fn === "GetCamera") return (state.cam || [0, 0, 0, 0, 1, 0])[a]; return undefined; },
     Idle: { from: (f) => f || null }, ObjectReference: { from: (f) => (f && f.setPosition ? f : f && f.id ? { id: f.id, getPositionX: () => 500, getPositionY: () => 600, getPositionZ: () => 10, getAngleZ: () => 90 } : null) }, Actor: { from: (f) => (f && actors[f.id]) || null }, Potion: { from: (f) => (f && f.potion) || null },
     Debug: { sendAnimationEvent: (ref, name) => log.events.push(name), notification: (t) => log.notes.push(t) },
@@ -562,6 +562,23 @@ test("a meal while sitting: the seated eating or drinking idle in a chair or on 
   g.page({ type: "emote", id: "sit" }); g.tick(); g.log.idles.length = 0; g.log.events.length = 0;
   g.eat("Apple Pie"); g.tick(); assert.deepStrictEqual([g.log.idles, g.log.events], [[], []]);
   assert.strictEqual(g.gm.greymarchEmoteNow.id, "sit");
+});
+
+test("third person for the whole emote (2026-11-02, the owner): switching to first person while an emote lasts is put back; a meal leaves the camera alone", () => {
+  const s = make();
+  s.page({ type: "emote", id: "hey" }); s.tick();
+  assert.strictEqual(s.log.thirdPerson, 1, "the emote starts in third person");
+  s.state.cam = 0; // F: first person
+  s.tick(300);
+  assert.strictEqual(s.log.thirdPerson, 2, "put back to third person");
+  assert.strictEqual(s.state.cam, 9);
+  assert.ok(s.gm.greymarchEmoteNow, "the emote goes on");
+  const m = make();
+  m.state.cam = 0; m.eat("Venison Stew"); m.tick();
+  for (let i = 0; i < 20; i++) m.tick(50);
+  assert.strictEqual(m.log.thirdPerson, 0, "eating in first person stays in first person");
+  const n = make(); n.state.cam = 0; for (let i = 0; i < 10; i++) n.tick(300);
+  assert.strictEqual(n.log.thirdPerson, 0, "no emote: the camera is the player's");
 });
 
 test("a meal cannot be skipped: the controls are locked for its five seconds (not looking, the camera or the menus); moving, a weapon, W or Stop do not end it", () => {
