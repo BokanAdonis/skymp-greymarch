@@ -243,6 +243,7 @@ export class GreymarchBridge {
         if (type === "greymarchWolfRoar") { if (Number(msg.actor) > 0) (this.greymarchWolfRoarQueue || (this.greymarchWolfRoarQueue = [])).push({ actor: Number(msg.actor), bear: !!msg.bear }); return; } // another player roared nearby: the sound on their NPC (greymarchWolfTick)
         if (type === "greymarchWolfAlphas") { var lists: any = {}; for (var lk in GM_WOLF_LISTS) lists[lk] = Array.isArray(msg[GM_WOLF_LISTS[lk]]) ? msg[GM_WOLF_LISTS[lk]] : []; this.greymarchWolfLists = lists; return; } // the other players in the Alpha form: drawn white (greymarchWolfAlphaOthers)
         if (type === "greymarchSpellCosts") { this.greymarchSpellCostWant = msg.costs && typeof msg.costs === "object" ? msg.costs : {}; this.greymarchSpellCostTold = {}; return; } // the Spells balance tab's costs (greymarchSpellCostTick)
+        if (type === "greymarchCircle") { if (typeof msg.key === "string" && msg.key.length < 64) (this.greymarchCircleQueue || (this.greymarchCircleQueue = [])).push(msg); return; } // a Circle spell someone cast near (gamemode circles.js): its ring here too (greymarchCircleTick)
         if (type === "greymarchSpellEdits") { this.greymarchSpellEditWant = msg.edits && typeof msg.edits === "object" ? msg.edits : {}; this.greymarchSpellEditTold = {}; return; } // the Magic balance tab's durations and strengths (greymarchSpellEditTick)
         if (type === "greymarchFavorites") { var favList = Array.isArray(msg.fav) ? msg.fav.filter((x: any) => x && Number(x.f) > 0).slice(0, 300) : []; var favWant: any = {}; favList.forEach((x: any) => { favWant[Number(x.f) >>> 0] = Number(x.k) >= 0 && Number(x.k) <= 7 ? Number(x.k) : -1; }); this.greymarchFavState = { pending: favList.map((x: any) => ({ f: Number(x.f) >>> 0, k: favWant[Number(x.f) >>> 0] })), want: favWant, restoreUntil: Date.now() + 60000, restoreAt: 0, loginAt: Date.now(), nextAt: Date.now() + 2000, lastSent: JSON.stringify(Object.keys(favWant).map((k) => ({ f: Number(k), k: favWant[k] })).sort((p: any, q: any) => p.f - q.f)), put: 0, menuSeen: false }; return; } // favorites remembered (greymarchFavTick)
         if (type === "greymarchMapMarkers") { this.greymarchMapState = { all: Array.isArray(msg.all) ? msg.all.filter((x: any) => typeof x === "string").slice(0, 5000) : [], found: new Set(Array.isArray(msg.found) ? msg.found.filter((x: any) => typeof x === "string") : []), restore: true, checkAt: 0, refs: {} }; return; } // the map remembered (greymarchMapTick)
@@ -534,6 +535,7 @@ export class GreymarchBridge {
         if (this.greymarchWolfOn || this.greymarchWolfLungeClick) { try { var gmLungeP = this.sp.Game.getPlayer(); if (gmLungeP) this.greymarchWolfLungeTick(gmLungeP, Date.now()); } catch (lgErr) { /* next frame */ } } // the lunge, every frame (the wolf tick runs every 250 ms)
         this.greymarchSpellCostTick(); // the Spells balance tab's costs on the spell records (GreymarchCamera.dll 1.5)
         this.greymarchSpellEditTick(); // the Magic balance tab's durations and strengths on the spell records
+        this.greymarchCircleTick(); // the rings of the Circle spells other players cast near (gamemode circles.js)
         this.greymarchVampTick(); // a vampire: powers and potions reported, the abilities the server names, no Restoration, the feeding scene
         this.greymarchCuffsTick(Date.now()); // in cuffs: the cuffs worn, the bound pose (others' too), the chain drawn to whoever holds it
         this.greymarchEarsTick(Date.now()); // where each voice comes from, for the launcher (only while it is in voice)
@@ -1311,6 +1313,36 @@ export class GreymarchBridge {
     // packet (sent when the player joins and when one changes). Looked at every half second. Only for this game: everyone's game gets the same packet.
     // zero (2026-11-03): the listed effects' magnitude is 0 here (each spell's health damage), so another player's or an NPC's copy casting it hurts
     // nobody in this game: the server's damage is the only one.
+    // THE CIRCLE SPELLS (2026-11-03, the owner: "Circle appears only for the caster, watcher sees nothing"): the server runs every circle (gamemode
+    // circles.js) and tells the games near where one stands (greymarchCircle { key, pos, desc, hazard: "<hex>:<plugin>", ms }); this game puts the same ring
+    // (the spell's own hazard) on the ground there and takes it away when the time is up or the server says off. What the circle does is the server's.
+    greymarchCircleTick(): any {
+        var sp = this.sp, now = Date.now();
+        var rings = this.greymarchCircleRings || (this.greymarchCircleRings = {});
+        var q = this.greymarchCircleQueue;
+        if (q && q.length) {
+            this.greymarchCircleQueue = [];
+            for (var i = 0; i < q.length && i < 16; i++) {
+                var m = q[i], had = rings[m.key];
+                if (m.off) { if (had) { this.greymarchCircleRemove(had.id); delete rings[m.key]; } continue; }
+                if (had || !Array.isArray(m.pos) || m.pos.length !== 3 || !(Number(m.ms) > 0) || typeof m.hazard !== "string") continue;
+                try {
+                    var player = sp.Game.getPlayer(); if (!player) continue;
+                    var at = m.hazard.indexOf(":"), hid = parseInt(m.hazard.slice(0, at), 16), file = m.hazard.slice(at + 1);
+                    var hz = at > 0 && hid > 0 ? sp.Game.getFormFromFile(hid, file) : null;
+                    if (!hz) { this.greymarchLog("circle: no hazard " + m.hazard + " in this game"); continue; }
+                    var ref = player.placeAtMe(hz, 1, false, false);
+                    if (!ref) continue;
+                    ref.setPosition(Number(m.pos[0]), Number(m.pos[1]), Number(m.pos[2]));
+                    rings[m.key] = { id: ref.getFormID(), until: now + Math.min(10 * 60 * 1000, Number(m.ms)) };
+                } catch (e) { this.greymarchLog("circle: the ring could not be placed: " + e); }
+            }
+        }
+        for (var k in rings) if (now >= rings[k].until) { this.greymarchCircleRemove(rings[k].id); delete rings[k]; }
+    }
+    greymarchCircleRemove(id: number): any {
+        try { var r = this.sp.ObjectReference.from(this.sp.Game.getFormEx(id)); if (r) { r.disable(false); r.delete(); } } catch (e) { /* gone already */ }
+    }
     greymarchSpellEditTick(): any {
         var now = Date.now();
         if (now < (this.greymarchSpellEditNext || 0)) return;
