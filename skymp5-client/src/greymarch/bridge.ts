@@ -1313,8 +1313,15 @@ export class GreymarchBridge {
     // nobody in this game: the server's damage is the only one.
     greymarchSpellEditTick(): any {
         var now = Date.now();
-        if (now < (this.greymarchSpellEditNext || 0)) return;
-        this.greymarchSpellEditNext = now + 500;
+        // THE MAGIC MENU SHOWS THE SERVER'S DAMAGE (2026-11-03, the owner: "spells in menu update damage from balance tab like with cost"): the health damage
+        // effects are 0 here (the server deals spell damage alone), so the menu said 0. While the Magic menu (or the Tab menu that leads to it, or Favorites)
+        // is open they carry the server's number (show: its share of the record's own); closed, they are 0 again. Every spell at once when that changes.
+        var menu = false;
+        try { menu = this.sp.Ui.isMenuOpen("MagicMenu") || this.sp.Ui.isMenuOpen("TweenMenu") || this.sp.Ui.isMenuOpen("FavoritesMenu"); } catch (mErr) { menu = false; }
+        var flipped = menu !== !!this.greymarchSpellEditMenu;
+        if (!flipped && now < (this.greymarchSpellEditNext || 0)) return;
+        this.greymarchSpellEditMenu = menu;
+        this.greymarchSpellEditNext = now + (menu ? 100 : 500);
         var want: any = this.greymarchSpellEditWant || {};
         var orig = this.greymarchSpellEditOrig || (this.greymarchSpellEditOrig = {});
         var told = this.greymarchSpellEditTold || (this.greymarchSpellEditTold = {});
@@ -1329,9 +1336,10 @@ export class GreymarchBridge {
             // zero: the spell's health damage effects (indices), made 0 here: the server deals spell damage alone (2026-11-03)
             var zero: any = {}, hasZero = false;
             if (Array.isArray(w.zero)) for (var z = 0; z < w.zero.length; z++) { var zi = Number(w.zero[z]); if (zi >= 0 && zi < 64) { zero[zi] = true; hasZero = true; } }
-            var sig = (hasDur ? wd : "-") + "|" + (hasMag ? wp : "-") + "|" + (hasZero ? w.zero.join(",") : "-");
+            var show = menu && hasZero && Number(w.show) >= 0 ? Number(w.show) : -1; // the server's damage, as a share of the record's (only while the menu is open)
+            var sig = (hasDur ? wd : "-") + "|" + (hasMag ? wp : "-") + "|" + (hasZero ? w.zero.join(",") : "-") + "|" + (show >= 0 ? show : "-");
             if (told[d] === sig) continue;
-            if (budget-- <= 0) break; // at most 80 spells a tick: the 700 damage spells on joining spread over a few seconds
+            if (!flipped && budget-- <= 0) break; // at most 80 spells a tick: the 700 damage spells on joining spread over a few seconds (all at once when the menu opens or closes)
             told[d] = sig;
             var spell = this.greymarchVampSpellOf(d);
             if (!spell) continue;
@@ -1348,7 +1356,7 @@ export class GreymarchBridge {
                 for (var j = 0; j < o.dur.length; j++) maxDur = Math.max(maxDur, o.dur[j]);
                 for (var e = 0; e < o.dur.length; e++) {
                     var dd = hasDur && maxDur > 0 && o.dur[e] > 0 ? Math.max(1, Math.round(o.dur[e] * wd / maxDur)) : o.dur[e];
-                    var mm = zero[e] ? 0 : hasMag ? Math.round(o.mag[e] * wp) / 100 : o.mag[e];
+                    var mm = zero[e] ? (show >= 0 ? Math.round(o.mag[e] * show * 100) / 100 : 0) : hasMag ? Math.round(o.mag[e] * wp) / 100 : o.mag[e];
                     spell.setNthEffectDuration(e, dd);
                     spell.setNthEffectMagnitude(e, mm);
                 }
