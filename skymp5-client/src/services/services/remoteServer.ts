@@ -1186,7 +1186,7 @@ export class RemoteServer extends ClientListener {
         return;
       }
 
-      this.greymarchMagicDiag(`magic: saw ${msg.data.caster.toString(16)} cast ${msg.data.spell.toString(16)} hand ${msg.data.castingSource} (their copy holds ${held ? held.getFormID().toString(16) : "nothing"}, casting ${spell ? spell.getFormID().toString(16) : "nothing"})`);
+      this.greymarchMagicDiag(`magic: saw ${msg.data.caster.toString(16)} cast ${msg.data.spell.toString(16)} hand ${msg.data.castingSource} (their copy holds ${held ? held.getFormID().toString(16) : "nothing"}, casting ${spell ? spell.getFormID().toString(16) : "nothing"}; aim ${Number(msg.data.aimAngle).toFixed(2)}/${Number(msg.data.aimHeading).toFixed(2)}, copy angle ${Math.round(ac.getAngleX())}/${Math.round(ac.getAngleZ())})`);
       // GREYMARCH (2026-11-01, the owner: a fire or frost cloak was never seen by others): a spell cast on oneself has no projectile, so the launch below
       // showed nothing; its look (each effect's shader on the caster) is played instead, and nothing else is run here (greymarch/selfShaders.ts)
       if (spell && showSelfBuff(ac, spell.getFormID())) {
@@ -1330,7 +1330,23 @@ export class RemoteServer extends ClientListener {
       const ac = Actor.from(Game.getFormEx(copyId));
       if (!ac) return;
       ac.setAnimationVariableBool(name, on);
-      if (on) Debug.sendAnimationEvent(ac, hand + (held ? "_SpellAimedConcentrationStart" : "_SpellAimedStart"));
+      if (on) {
+        Debug.sendAnimationEvent(ac, castingSource === 0 ? "BeginCastLeft" : "BeginCastRight"); // the input event the game's own cast sends
+        Debug.sendAnimationEvent(ac, hand + (held ? "_SpellAimedConcentrationStart" : "_SpellAimedStart"));
+        // WHAT THE COPY DID (diagnostics, a quarter second later): drawn, casting, the hand's type and state, the aim it was given
+        const at0 = Date.now();
+        const look = () => {
+          if (Date.now() - at0 < 250) { once('update', look); return; }
+          try {
+            const a3 = Actor.from(Game.getFormEx(copyId)); if (!a3) return;
+            const b = (n: string) => { try { return a3.getAnimationVariableBool(n) ? 1 : 0; } catch (e) { return -1; } };
+            const i = (n: string) => { try { return a3.getAnimationVariableInt(n); } catch (e) { return -1; } };
+            const fl = (n: string) => { try { return Math.round(a3.getAnimationVariableFloat(n) * 100) / 100; } catch (e) { return -1; } };
+            this.greymarchMagicDiag(`magic: copy ${copyId.toString(16)} after the cast: drawn ${a3.isWeaponDrawn() ? 1 : 0}, ${name} ${b(name)}, IsCastingRight ${b("IsCastingRight")} IsCastingLeft ${b("IsCastingLeft")}, iState ${i("iState")}, iRightHandType ${i("iRightHandType")} iLeftHandType ${i("iLeftHandType")}, aim pitch ${fl("AimPitchCurrent")} heading ${fl("AimHeadingCurrent")}, angle x ${Math.round(a3.getAngleX())}`);
+          } catch (e) { /* diagnostics only */ }
+        };
+        once('update', look);
+      }
       else Debug.sendAnimationEvent(ac, "CastStop");
     } catch (e) { return; }
     if (!on || held) { this.greymarchPoseOff.delete(key); return; }
@@ -1370,7 +1386,7 @@ export class RemoteServer extends ClientListener {
     this.greymarchMagicDiagLeft--;
     try { (this.controller.emitter as any).emit("greymarchStage", text); } catch (e) { /* diagnostics only */ }
   }
-  private greymarchMagicDiagLeft = 40;
+  private greymarchMagicDiagLeft = 80;
   private greymarchDoubleCreates = 0;
   private greymarchLastCastAt = new Map<string, number>();
 
