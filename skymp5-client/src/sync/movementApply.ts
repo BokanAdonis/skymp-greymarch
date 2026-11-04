@@ -205,6 +205,17 @@ const translateTo = (refr: ObjectReference, m: Movement) => {
         0
       );
     }
+  } else {
+    // GREYMARCH: THE LOOK UP AND DOWN (2026-11-04, the owner's clip and log: another player's held Frostbite went into the ground and their body bent over
+    // while they aimed straight and up; their copy's pitch stayed at 54 degrees through every cast). The angles above go on only with a move, a turn of
+    // more than 80 degrees or a seat, so someone standing and looking up or down kept the pitch of their last move. A held spell aims from it (and the
+    // body bends to it). Standing still, a pitch more than 2 degrees off is put on alone (heading and roll as they are).
+    if (Math.abs(m.rot[0] - refr.getAngleX()) > 2) {
+      const actor = Actor.from(refr);
+      if (actor && !actor.isDead() && actor.getSitState() === 0) {
+        refr.setAngle(m.rot[0], refr.getAngleY(), refr.getAngleZ());
+      }
+    }
   }
 };
 
