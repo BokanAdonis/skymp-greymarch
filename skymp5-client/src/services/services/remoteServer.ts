@@ -1149,6 +1149,12 @@ export class RemoteServer extends ClientListener {
           showingStaff.lastSeen = Date.now();
           return;
         }
+        // the same staff from the same hand again within 0.6 s is the same shot (a game that sent it twice): shown once
+        if (!heldStaff) {
+          const lastShot = this.greymarchStaffShotAt.get(castKey) || 0;
+          if (Date.now() - lastShot < 600) return;
+          this.greymarchStaffShotAt.set(castKey, Date.now());
+        }
         let tgt: ObjectReference | null = null;
         try { tgt = msg.data.target ? ObjectReference.from(Game.getFormEx(remoteIdToLocalId(msg.data.target))) : null; } catch (e) { tgt = null; }
         let cast = false;
@@ -1321,6 +1327,7 @@ export class RemoteServer extends ClientListener {
 
   private static readonly HELD_SILENCE_MS = 2500;
   private greymarchHeldSpells = new Map<string, { spell: number, casterId: number, lastSeen: number }>();
+  private greymarchStaffShotAt = new Map<string, number>();
 
   // GREYMARCH: what this game does with other players' spell casts, a few lines per session to the server log
   private greymarchMagicDiag(text: string): void {

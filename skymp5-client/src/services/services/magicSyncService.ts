@@ -214,7 +214,7 @@ export class MagicSyncService extends ClientListener {
     // holds that staff, and the other games cast it from the copy: GreymarchCam.CastStaff). A held staff (Flames, Sparks ...) is sent again every second while
     // the charge keeps dropping, and its end once it stops for 0.7 s. A charge the server put back (bridge greymarchStaffChargeTick: storage
     // greymarchStaffChargeSetAt) is not a cast.
-    private staffLast: Record<number, { base: number, charge: number, ench: number, held: boolean, firing: boolean, lastDropAt: number, lastSentAt: number }> = {};
+    private staffLast: Record<number, { base: number, charge: number, ench: number, held: boolean, firing: boolean, shotOpen?: boolean, lastDropAt: number, lastSentAt: number }> = {};
     private staffNextAt = 0;
     private checkStaffFire() {
         const now = Date.now();
@@ -245,12 +245,19 @@ export class MagicSyncService extends ClientListener {
             const setBack = now - (Number(storage["greymarchStaffChargeSetAt"]) || 0) < 1500;
             if (dropped && !setBack) {
                 st.lastDropAt = now;
-                if (!st.held || !st.firing || now - st.lastSentAt >= 1000) {
+                // ONE SHOT, ONE CAST (2026-11-03, the owner: the Staff of Icy Spear "sends out like 5 of them"; the log: one Thunderbolt shot was 8 drops, 50 ms
+                // apart): the charge of one shot comes off over about half a second. A staff that is not held is sent once per shot: the next one only after
+                // the charge has stood still for 0.25 s (shotOpen)
+                const ready = st.held ? (!st.firing || now - st.lastSentAt >= 1000) : !st.shotOpen;
+                st.shotOpen = !st.held;
+                if (ready) {
                     st.lastSentAt = now;
                     this.staffSend(me, st.ench, hand, false);
                     if (!st.firing) this.diag(`magic: staff ${base.toString(16)} fired ${st.ench.toString(16)} hand ${hand}${st.held ? " (held)" : ""}`);
                 }
                 st.firing = st.held;
+            } else if (st.shotOpen && now - st.lastDropAt > 250) {
+                st.shotOpen = false;
             } else if (st.firing && now - st.lastDropAt > 700) {
                 this.staffEnd(hand, "the charge stopped dropping");
             }
