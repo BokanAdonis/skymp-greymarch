@@ -542,7 +542,7 @@ export class GreymarchBridge {
         this.greymarchMagicBlockDrive(); // NPC raise-the-dead and summons: ended at once
         this.greymarchShapeDrive(); // a creature form as an NPC: moved every frame like SkyMP moves other players; other players' creature attacks
         this.greymarchShapeTick(); // a creature form staff put the player in (a goat, a giant ...): the server decides, the body is changed here
-        this.greymarchHeightFrame(); // the Height slider on the Body tab: what the race menu asked for (greymarchHeightModEvent)
+        this.greymarchHeightFrame(Date.now()); // the Height slider on the Body tab: what the race menu asked for (greymarchHeightModEvent)
         this.greymarchRaceMenuQuestsTick(Date.now()); // RaceMenu's own quests started if SkyMP's load left them off (the Body Scales tab, Height)
         this.greymarchRaceMenuTick(Date.now()); // RaceMenu's extra sliders: sent when the race menu closes, put back after a relog (racemenuLook.ts)
         this.greymarchRaceMenuCopiesTick(Date.now()); // and put on the other players' copies (OTHERS SEE THEM)
@@ -2234,31 +2234,45 @@ export class GreymarchBridge {
     }
     // THE HEIGHT SLIDER ON THE BODY TAB (2026-11-04, the owner: "Can we recreate the height scaler on body menu?"). RaceMenu's own Body Scales tab never
     // showed under SkyMP (RaceMenuPlugin's script never got the menu's requests), so this game puts a Height slider on the Body tab itself, the way
-    // RaceMenu's scripts do: a line "name;;section;;callback;;min;;max;;step;;value;;category;;priority" to the menu's RSM_AddSliders (section 4 = Body),
-    // sent when the menu asks for sliders (RSM_Initialized, RSM_Reinitialized after a race change, RSMDT_SendDataRequest with the sliders bit). Moving it
-    // comes back as the mod event RSM_SliderChange (callback, value): the scale goes on the skeleton's NPC node under RaceMenu's own key, RSMPlugin, as
-    // its slider would, so RaceMenu's preset carries it and racemenulook.js keeps it and shows it to everyone. The range is the race's (the server sends
-    // it with the look, gamemode raceheights.js; until then 0.93-1.07); the server cuts it to the race's limits again whatever the game sends.
+    // RaceMenu's own scripts put theirs (RaceMenuBase.AddSlider): the line "name;;section;;callback;;min;;max;;step;;value" to the menu's RSM_AddSliders,
+    // section 4 = Body. (The longer form with a category key and a priority is for a tab of a script's own; an empty key could land on no tab.)
+    // When: once per build of the menu's lists. A build starts when the menu opens, after a race change (RSM_Reinitialized) and when the menu asks for the
+    // sliders again (RSMDT_SendDataRequest with the sliders bit, 32); the slider goes on when the menu says it is ready (RSM_Initialized, or one of those
+    // two), or 2 s into a build when no word came. Moving it comes back as RSM_SliderChange (callback, value): the scale goes on the skeleton's NPC node
+    // under RaceMenu's own key, RSMPlugin, third and first person, as RaceMenu's own slider would, so RaceMenu's preset carries it and racemenulook.js
+    // keeps it and shows it to everyone. The range is the race's (the server sends it with the look, gamemode raceheights.js; until then 0.93-1.07);
+    // the server cuts it to the race's limits again whatever the game sends.
+    // NOTHING NATIVE IN THE EVENT (2026-11-04, the log: "Invalid _skyrimPlatform_indexInPool: 0"): game objects taken inside a mod event callback cannot
+    // be given to native calls, so the callback only notes what the menu asked; the next frame does it (greymarchHeightFrame, from the update tick).
+    // Log lines (racemenu: ...): every RaceMenu event name the first time it comes, each add, the first moves with what the skeleton reads back after.
+    greymarchHeightState(): any {
+        return this.greymarchHeight || (this.greymarchHeight = { build: 0, added: -1, buildAt: 0, ready: false, wasOpen: false, want: undefined, seen: {}, seenCount: 0, sets: 0, adds: 0 });
+    }
     greymarchHeightModEvent(e: any): any {
         try {
             var name = String(e && e.eventName || "");
             if (name.indexOf("RSM") !== 0) return;
-            if (!this.greymarchHeightSaid) { this.greymarchHeightSaid = 1; this.greymarchLog("racemenu: the race menu talks (" + name + "): the Height slider goes on the Body tab"); }
-            // NOTHING NATIVE HERE (2026-11-04, the log: "Invalid _skyrimPlatform_indexInPool: 0"): game objects taken inside this callback cannot be given
-            // to native calls, so it only notes what the menu asked; the next frame does it (greymarchHeightFrame, from the update tick)
-            if (name === "RSM_Initialized" || name === "RSM_Reinitialized" || (name === "RSMDT_SendDataRequest" && (Number(e.numArg) & 32) === 32)) { this.greymarchHeightWantAdd = true; return; }
-            if (name === "RSM_SliderChange" && String(e.strArg) === GM_HEIGHT_CALLBACK) this.greymarchHeightWantSet = Number(e.numArg);
+            var h = this.greymarchHeightState(), num = Number(e.numArg);
+            if (!h.seen[name] && h.seenCount < 40) { h.seen[name] = 1; h.seenCount++; this.greymarchLog("racemenu: the race menu says " + name + " (" + String(e.strArg).substr(0, 60) + ", " + num + ")"); }
+            if (name === "RSM_Reinitialized" || (name === "RSMDT_SendDataRequest" && (num & 32) === 32)) { h.build++; h.buildAt = Date.now(); h.ready = true; return; }
+            if (name === "RSM_Initialized") { h.ready = true; return; }
+            if (name === "RSM_SliderChange" && String(e.strArg) === GM_HEIGHT_CALLBACK) h.want = num;
         } catch (err) {
             this.greymarchLog("racemenu: the Height slider: " + err);
         }
     }
-    greymarchHeightFrame(): any { // what the race menu asked for in its mod events, done in the frame (greymarchHeightModEvent)
-        if (!this.greymarchHeightWantAdd && this.greymarchHeightWantSet === undefined) return;
-        var add = !!this.greymarchHeightWantAdd, set = this.greymarchHeightWantSet;
-        this.greymarchHeightWantAdd = false; this.greymarchHeightWantSet = undefined;
+    // Every frame: a new build when the race menu opens; the slider added once per build (when the menu is ready, or 2 s in); a move applied.
+    greymarchHeightFrame(now: number): any {
+        var h = this.greymarchHeightState(), open = false;
+        try { open = !!this.sp.Ui.isMenuOpen("RaceSex Menu"); } catch (mErr) { open = false; }
+        if (!open) { h.wasOpen = false; h.want = undefined; return; }
+        if (!h.wasOpen) { h.wasOpen = true; h.build++; h.buildAt = now; h.ready = false; }
         try {
-            if (add) this.greymarchHeightAdd();
-            if (set !== undefined) this.greymarchHeightSet(set);
+            if (h.added !== h.build && (h.ready || now - h.buildAt > 2000)) {
+                h.added = h.build;
+                this.greymarchHeightAdd(h.ready ? "the menu was ready" : "no word from the menu in 2 s");
+            }
+            if (h.want !== undefined) { var v = h.want; h.want = undefined; this.greymarchHeightSet(v); }
         } catch (err) {
             this.greymarchLog("racemenu: the Height slider: " + err);
         }
@@ -2271,36 +2285,39 @@ export class GreymarchBridge {
         var r = this.greymarchHeightRange;
         return Array.isArray(r) ? r : [0.93, 1.07];
     }
-    greymarchHeightNow(): any {
-        var sp = this.sp, player = sp.Game.getPlayer(), female = this.greymarchHeightFemale(player);
-        var v = Number(sp.callNative("NiOverride", "GetNodeTransformScale", undefined, player, false, female, "NPC", "RSMPlugin"));
+    greymarchHeightNow(player: any, female: boolean): any {
+        var v = Number(this.sp.callNative("NiOverride", "GetNodeTransformScale", undefined, player, false, female, "NPC", "RSMPlugin"));
         return v > 0 ? v : 1;
     }
-    greymarchHeightAdd(): any {
-        this.greymarchHeightAdded = true;
-        var r = this.greymarchHeightLimits(), v = Math.min(r[1], Math.max(r[0], this.greymarchHeightNow()));
-        var line = "$Height;;4;;" + GM_HEIGHT_CALLBACK + ";;" + r[0] + ";;" + r[1] + ";;0.005;;" + (Math.round(v * 1000) / 1000) + ";;;;0";
-        this.sp.Ui.invokeStringA("RaceSex Menu", "_root.RaceSexMenuBaseInstance.RaceSexPanelsInstance.RSM_AddSliders", [line]);
-        if ((this.greymarchHeightAdds = (this.greymarchHeightAdds || 0) + 1) <= 5) this.greymarchLog("racemenu: Height slider on the Body tab (" + r[0] + "-" + r[1] + ", now " + v + ")");
+    greymarchHeightAdd(why: string): any {
+        var sp = this.sp, player = sp.Game.getPlayer();
+        if (!player) return;
+        var h = this.greymarchHeightState(), r = this.greymarchHeightLimits(), v = Math.min(r[1], Math.max(r[0], this.greymarchHeightNow(player, this.greymarchHeightFemale(player))));
+        var line = "$Height;;4;;" + GM_HEIGHT_CALLBACK + ";;" + r[0] + ";;" + r[1] + ";;0.005;;" + (Math.round(v * 1000) / 1000);
+        sp.Ui.invokeStringA("RaceSex Menu", "_root.RaceSexMenuBaseInstance.RaceSexPanelsInstance.RSM_AddSliders", [line]);
+        if (++h.adds <= 6) this.greymarchLog("racemenu: Height slider put on the Body tab (" + why + "; " + r[0] + "-" + r[1] + ", now " + v + ")");
     }
     greymarchHeightSet(value: number): any {
         if (!(value > 0)) return;
-        var sp = this.sp, player = sp.Game.getPlayer(), female = this.greymarchHeightFemale(player);
+        var sp = this.sp, player = sp.Game.getPlayer();
+        if (!player) return;
+        var female = this.greymarchHeightFemale(player), h = this.greymarchHeightState();
         var r = this.greymarchHeightLimits(), v = Math.round(Math.min(r[1], Math.max(r[0], value)) * 1000) / 1000;
-        if (v === 1) { sp.callNative("NiOverride", "RemoveNodeTransformScale", undefined, player, false, female, "NPC", "RSMPlugin"); sp.callNative("NiOverride", "RemoveNodeTransformScale", undefined, player, true, female, "NPC", "RSMPlugin"); }
-        else { sp.callNative("NiOverride", "AddNodeTransformScale", undefined, player, false, female, "NPC", "RSMPlugin", v); sp.callNative("NiOverride", "AddNodeTransformScale", undefined, player, true, female, "NPC", "RSMPlugin", v); }
+        if (v === 1) {
+            sp.callNative("NiOverride", "RemoveNodeTransformScale", undefined, player, false, female, "NPC", "RSMPlugin");
+            sp.callNative("NiOverride", "RemoveNodeTransformScale", undefined, player, true, female, "NPC", "RSMPlugin");
+        } else {
+            sp.callNative("NiOverride", "AddNodeTransformScale", undefined, player, false, female, "NPC", "RSMPlugin", v);
+            sp.callNative("NiOverride", "AddNodeTransformScale", undefined, player, true, female, "NPC", "RSMPlugin", v);
+        }
         sp.callNative("NiOverride", "UpdateNodeTransform", undefined, player, false, female, "NPC");
         sp.callNative("NiOverride", "UpdateNodeTransform", undefined, player, true, female, "NPC");
+        if (++h.sets <= 4) this.greymarchLog("racemenu: Height " + value + " -> " + v + " (the skeleton reads " + this.greymarchHeightNow(player, female) + ")");
     }
     greymarchRaceMenuTick(now: number): any {
         var sp = this.sp, rm = this.greymarchRmState(), open = false;
         try { open = !!sp.Ui.isMenuOpen("RaceSex Menu"); } catch (mErr) { open = false; }
         if (rm.menuWas && !open) rm.sendAt = now + 1000; // RaceMenu finishes its own work as the menu closes
-        if (open && !rm.menuWas) { rm.openedAt = now; this.greymarchHeightAdded = false; }
-        if (open && !this.greymarchHeightAdded && now - (rm.openedAt || now) > 2000) { // no menu event came: the Height slider goes on anyway (greymarchHeightModEvent)
-            this.greymarchHeightAdded = true;
-            try { this.greymarchHeightAdd(); this.greymarchLog("racemenu: no word from the race menu in 2 s: Height slider added anyway"); } catch (hErr) { this.greymarchLog("racemenu: the Height slider: " + hErr); }
-        }
         rm.menuWas = open;
         if (open) { rm.sendAt = 0; return; } // RaceMenu is the editor while it is open
         if (this.greymarchWolfOn || this.greymarchShapeOn) { rm.beast = true; rm.loadedSince = 0; return; }
