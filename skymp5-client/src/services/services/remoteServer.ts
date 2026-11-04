@@ -123,6 +123,32 @@ const BOUND_SCRIPTED = [
   { effect: 0xdc48db, item: 0xdc48d8, file: "MysticismMagic.esp" }, // Bound Shield (Mystic Binding)
 ];
 
+// GREYMARCH: THE CIRCLE SPELLS' RINGS (2026-11-04, the owner: "Do that with all the circle spells"): the ring each circle cast by another player shows here, placed at their
+// feet by the bridge (greymarchCircleTick). Each its own hazard when that hazard carries no spell (Mysticism's three colours, Guardian Circle's) or only turns
+// undead (Circle of Protection's); Apocalypse's three carry their drain or death, which would work on this player here a second time, so they show Guardian Circle's.
+// ms: how long the circle stands (gamemode circles.js); life: the hazard's own lifetime, after which it is placed again. Any other "circle" spell: Guardian's.
+const GM_CIRCLE_RINGS: { spell: number, file: string, hazard: string, ms: number, life: number }[] = [
+  { spell: 0x0e0ccf, file: "Skyrim.esm", hazard: "fead3:Skyrim.esm", ms: 60000, life: 30000 }, // Guardian Circle
+  { spell: 0x05312d, file: "Skyrim.esm", hazard: "4e80c:Skyrim.esm", ms: 60000, life: 30000 }, // Circle of Protection
+  { spell: 0xf3637f, file: "MysticismMagic.esp", hazard: "f36373:MysticismMagic.esp", ms: 120000, life: 120000 }, // Circle of Life
+  { spell: 0xf3b48d, file: "MysticismMagic.esp", hazard: "f36373:MysticismMagic.esp", ms: 120000, life: 120000 }, // Font of Life
+  { spell: 0x48ceeb, file: "MysticismMagic.esp", hazard: "f08a1c:MysticismMagic.esp", ms: 120000, life: 120000 }, // Circle of Wisdom
+  { spell: 0xf3636b, file: "MysticismMagic.esp", hazard: "f08a1c:MysticismMagic.esp", ms: 120000, life: 120000 }, // Font of Wisdom
+  { spell: 0xf21f4a, file: "MysticismMagic.esp", hazard: "f1ce37:MysticismMagic.esp", ms: 120000, life: 120000 }, // Circle of Strength
+  { spell: 0xf3635d, file: "MysticismMagic.esp", hazard: "f1ce37:MysticismMagic.esp", ms: 120000, life: 120000 }, // Font of Strength
+  { spell: 0x036a05, file: "Apocalypse - Magic of Skyrim.esp", hazard: "fead3:Skyrim.esm", ms: 30000, life: 30000 }, // Circle of Strength (a drain)
+  { spell: 0x111cfb, file: "Apocalypse - Magic of Skyrim.esp", hazard: "fead3:Skyrim.esm", ms: 30000, life: 30000 }, // Circle of the Moons (a drain)
+  { spell: 0x01220f, file: "Apocalypse - Magic of Skyrim.esp", hazard: "fead3:Skyrim.esm", ms: 30000, life: 30000 }, // Circle of Death
+];
+let gmCircleRingIds: Map<number, { hazard: string, ms: number, life: number }> | null = null;
+const greymarchCircleRing = (spellId: number): { hazard: string, ms: number, life: number } => {
+  if (!gmCircleRingIds) {
+    gmCircleRingIds = new Map();
+    for (const r of GM_CIRCLE_RINGS) { try { const f = Game.getFormFromFile(r.spell, r.file); if (f) gmCircleRingIds.set(f.getFormID() >>> 0, r); } catch (e) { /* that mod is not loaded */ } }
+  }
+  return gmCircleRingIds.get(spellId >>> 0) || GM_CIRCLE_RINGS[0];
+};
+
 const unequipIronHelmet = () => {
   const ironHelment = Armor.from(Game.getFormEx(0x00012e4d));
   const pl = Game.getPlayer();
@@ -1202,7 +1228,8 @@ export class RemoteServer extends ClientListener {
             const gl: any = Function("return this")();
             const now = Date.now(), who = msg.data.caster >>> 0;
             (gl.__gmCircleShownAt || (gl.__gmCircleShownAt = {}))[String(who)] = now;
-            (gl.__gmCircleLocalQueue || (gl.__gmCircleLocalQueue = [])).push({ key: who + ":" + now, pos: [ac.getPositionX(), ac.getPositionY(), ac.getPositionZ()], hazard: "fead3:Skyrim.esm", ms: 60000, local: true, caster: who });
+            const ring = greymarchCircleRing(spell.getFormID());
+            (gl.__gmCircleLocalQueue || (gl.__gmCircleLocalQueue = [])).push({ key: who + ":" + now, pos: [ac.getPositionX(), ac.getPositionY(), ac.getPositionZ()], hazard: ring.hazard, ms: ring.ms, life: ring.life, local: true, caster: who });
           } catch (e) { /* not shown */ }
           this.greymarchMagicDiag(`magic: saw ${msg.data.caster.toString(16)} cast the circle ${spell.getFormID().toString(16)}: its ring goes at their feet`);
           return;

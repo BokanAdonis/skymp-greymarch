@@ -1363,7 +1363,8 @@ export class GreymarchBridge {
                     if (ref) {
                         // the hazard lasts its own 30 s (GuardianCircleTurnHazard): placed again before then while the circle stands (by its id and file: a
                         // game object is good for this frame only)
-                        rings[m.key] = { id: ref.getFormID(), until: now + Math.min(10 * 60 * 1000, Number(m.ms)), hid: hid, file: file, pos: m.pos.slice(), who: who, again: now + CIRCLE_REPLACE_MS };
+                        var life = Number(m.life) > 2000 ? Number(m.life) - 2000 : CIRCLE_REPLACE_MS; // placed again just before its hazard runs out (Mysticism's last 120 s)
+                        rings[m.key] = { id: ref.getFormID(), until: now + Math.min(10 * 60 * 1000, Number(m.ms)), hid: hid, file: file, pos: m.pos.slice(), who: who, life: life, again: now + life };
                         this.greymarchLog("circle: ring " + m.hazard + " placed at " + m.pos.map(Math.round).join(" ") + " for " + Math.round(Number(m.ms) / 1000) + " s (ref " + (ref.getFormID() >>> 0).toString(16) + ")");
                         continue;
                     }
@@ -1385,8 +1386,8 @@ export class GreymarchBridge {
         for (var k in rings) {
             var r = rings[k];
             if (now >= r.until) { this.greymarchCircleRemove(r.id); delete rings[k]; continue; }
-            if (r.hid && r.again && now >= r.again) { // the last one runs out by itself (a placed hazard cannot be looked up again to take away)
-                r.again = now + CIRCLE_REPLACE_MS;
+            if (r.hid && r.again && now >= r.again && r.until - now > 1500) { // the last one runs out by itself (a placed hazard cannot be looked up again to take away)
+                r.again = now + (r.life || CIRCLE_REPLACE_MS);
                 var re = this.greymarchCirclePlace(r.hid, r.file, r.pos, r.who); r.id = re ? re.getFormID() : 0;
             }
         }
