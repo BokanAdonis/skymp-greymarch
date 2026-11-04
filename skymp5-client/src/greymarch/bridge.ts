@@ -284,6 +284,7 @@ export class GreymarchBridge {
         if (type === "greymarchMinigame") { this.greymarchMiniShow(msg); return; } // a profession mini game before the work (gamemode minigames.js)
         if (type === "greymarchMinigameDone") { this.greymarchMiniDone(msg); return; }
         if (type === "greymarchPoisoned") { this.greymarchPoisonedWant = Array.isArray(msg.actors) ? msg.actors.map((a: any) => Number(a) >>> 0).filter((a: number) => a > 0).slice(0, 64) : []; return; } // THE GLOW (greymarchPoisonGlowTick)
+        if (type === "greymarchCastCharge") { if (Number(msg.actor) > 0) (this.greymarchChargeQ || (this.greymarchChargeQ = [])).push({ actor: Number(msg.actor), hand: msg.hand === 0 ? 0 : 1, on: msg.on === true }); return; } // ANOTHER PLAYER CHARGES A SINGLE SHOT (greymarchChargeTick)
         if (type === "greymarchStaffSetCharge") { var scHand = msg.hand === 0 ? 0 : 1, scV = Number(msg.charge); if (scV >= 0 && isFinite(scV)) (this.greymarchStaffChargeSet || (this.greymarchStaffChargeSet = [])).push({ hand: scHand, base: Number(msg.base) >>> 0, charge: scV }); return; } // STAFF CHARGE (greymarchStaffChargeTick)
         if (type === "greymarchPoisonUsed") { this.greymarchPoisonStripWanted = Date.now(); return; } // POISONS ON WEAPONS (greymarchPoisonTick)
         if (type === "greymarchPoisonFx") { var pz = Number(msg.paralyze); if (pz > 0 && pz <= 60) this.greymarchPoisonParalyzeWanted = pz; return; }
@@ -556,6 +557,7 @@ export class GreymarchBridge {
         if (this.greymarchWolfOn || this.greymarchWolfLungeClick) { try { var gmLungeP = this.sp.Game.getPlayer(); if (gmLungeP) this.greymarchWolfLungeTick(gmLungeP, Date.now()); } catch (lgErr) { /* next frame */ } } // the lunge, every frame (the wolf tick runs every 250 ms)
         this.greymarchSpellCostTick(); // the Spells balance tab's costs on the spell records (GreymarchCamera.dll 1.5)
         this.greymarchSpellEditTick(); // the Magic balance tab's durations and strengths on the spell records
+        this.greymarchChargeTick(Date.now()); // another player's single-shot charge shown on their copy
         this.greymarchStaffChargeTick(); // a staff's charge reported, and set back when the server says it came back fuller (gamemode staffcharge.js)
         this.greymarchCircleTick(); // the rings of the Circle spells other players cast near (gamemode circles.js)
         this.greymarchLordKitTick(Date.now()); // the Vampire Lord's robes on, its powers in hand, no other armor (greymarchLordKitTick)
@@ -1485,6 +1487,45 @@ export class GreymarchBridge {
     // that left the pack (dropped, stored, a relog) came back full. Twice a second the charge of each enchanted staff in hand (SKSE WornObject: hand 0 left,
     // 1 right) is read and, when it changed, sent ({ customPacketType: "greymarchStaffCharge", base, hand, charge, max }); the server remembers it per
     // character and staff and, when one comes back fuller with no soul gem used, answers greymarchStaffSetCharge, which is put on the staff in that hand here.
+    // ANOTHER PLAYER CHARGES A SINGLE SHOT (2026-11-04, the owner: "so seamless its like its being casted from their game"): their game says when they start
+    // to charge a fire-and-forget spell (or let it go without casting); their copy here raises the charge at once (bWantCast..., BeginCast..., the graph's
+    // charge by the head), so the release (the cast itself, remoteServer.ts greymarchCastPose) flows on from it. A charge never followed by a word ends
+    // after 15 s. storage "greymarchCharging:<copy>:<hand>" tells the cast the charge is up.
+    greymarchChargeTick(now: number): any {
+        var sp = this.sp, q = this.greymarchChargeQ;
+        var up = this.greymarchChargeUp || (this.greymarchChargeUp = {});
+        if (q && q.length) {
+            this.greymarchChargeQ = [];
+            for (var i = 0; i < q.length; i++) {
+                var c = q[i];
+                try {
+                    var localId = misc.remoteIdToLocalId(c.actor);
+                    var ac = sp.Actor.from(sp.Game.getFormEx(localId));
+                    if (!ac || !ac.is3DLoaded() || ac.isDead()) continue;
+                    var race = ac.getRace(), rname = race ? String(race.getName() || "") : "";
+                    if (/were|vampire lord|beast/i.test(rname)) continue;
+                    var key = "greymarchCharging:" + localId + ":" + c.hand;
+                    var varName = c.hand === 0 ? "bWantCastLeft" : "bWantCastRight";
+                    if (c.on) {
+                        ac.setAnimationVariableBool(varName, true);
+                        sp.Debug.sendAnimationEvent(ac, c.hand === 0 ? "BeginCastLeft" : "BeginCastRight");
+                        sp.Debug.sendAnimationEvent(ac, (c.hand === 0 ? "MLh" : "MRh") + "_SpellAimedConcentrationStart");
+                        sp.storage[key] = now; up[key] = { localId: localId, varName: varName, at: now };
+                    } else if (sp.storage[key]) {
+                        ac.setAnimationVariableBool(varName, false);
+                        sp.Debug.sendAnimationEvent(ac, "CastStop");
+                        sp.storage[key] = 0; delete up[key];
+                    }
+                } catch (err) { /* the look only */ }
+            }
+        }
+        for (var k in up) {
+            if (!sp.storage[k]) { delete up[k]; continue; } // the cast took it over
+            if (now - up[k].at < 15000) continue;
+            try { var a2 = sp.Actor.from(sp.Game.getFormEx(up[k].localId)); if (a2) { a2.setAnimationVariableBool(up[k].varName, false); sp.Debug.sendAnimationEvent(a2, "CastStop"); } } catch (e2) { /* gone */ }
+            sp.storage[k] = 0; delete up[k];
+        }
+    }
     greymarchStaffChargeTick(): any {
         var sp = this.sp, now = Date.now();
         var setQ = this.greymarchStaffChargeSet;

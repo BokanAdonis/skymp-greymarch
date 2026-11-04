@@ -1148,6 +1148,7 @@ export class RemoteServer extends ClientListener {
         const showingStaff = this.greymarchHeldSpells.get(castKey);
         if (heldStaff && showingStaff && showingStaff.spell === ench.getFormID()) {
           showingStaff.lastSeen = Date.now();
+          this.greymarchAimCopy(ac, msg.data.aimAngle, msg.data.aimHeading);
           return;
         }
         // the same staff from the same hand again within 0.6 s is the same shot (a game that sent it twice): shown once
@@ -1160,7 +1161,7 @@ export class RemoteServer extends ClientListener {
         try { tgt = msg.data.target ? ObjectReference.from(Game.getFormEx(remoteIdToLocalId(msg.data.target))) : null; } catch (e) { tgt = null; }
         let cast = false;
         try { cast = !!callNative("GreymarchCam", "CastStaff", undefined, ac, ench, msg.data.castingSource === 0 ? 0 : 1, tgt); } catch (e) { cast = false; }
-        if (heldStaff && cast) this.greymarchHeldSpells.set(castKey, { spell: ench.getFormID(), casterId: ac.getFormID(), lastSeen: Date.now() });
+        if (heldStaff && cast) { this.greymarchHeldSpells.set(castKey, { spell: ench.getFormID(), casterId: ac.getFormID(), lastSeen: Date.now() }); this.greymarchAimCopy(ac, msg.data.aimAngle, msg.data.aimHeading); }
         else this.greymarchHeldSpells.delete(castKey);
         this.greymarchMagicDiag(`magic: saw ${msg.data.caster.toString(16)} cast staff ${msg.data.spell.toString(16)} hand ${msg.data.castingSource}: ${cast ? (heldStaff ? "held, cast here" : "cast here") : "not cast (GreymarchCamera.dll older than 1.11?)"}`);
         return;
@@ -1174,7 +1175,7 @@ export class RemoteServer extends ClientListener {
       const showing = this.greymarchHeldSpells.get(castKey);
       if (isHeld && showing && showing.spell === spell!.getFormID()) {
         showing.lastSeen = Date.now();
-        this.greymarchAimCopy(ac, msg.data.aimAngle);
+        this.greymarchAimCopy(ac, msg.data.aimAngle, msg.data.aimHeading);
         return;
       }
 
@@ -1263,7 +1264,7 @@ export class RemoteServer extends ClientListener {
         castSpellImmediate(ac.getFormID(), msg.data.castingSource, spell.getFormID(), remoteIdToLocalId(msg.data.target),
           msg.data.aimAngle, msg.data.aimHeading, actorAnimationVariables);
         this.greymarchCastPose(ac.getFormID(), msg.data.castingSource, true, isHeld);
-        if (isHeld) this.greymarchAimCopy(ac, msg.data.aimAngle);
+        if (isHeld) this.greymarchAimCopy(ac, msg.data.aimAngle, msg.data.aimHeading);
         if (isHeld) {
           this.greymarchHeldSpells.set(castKey, { spell: spell.getFormID(), casterId: ac.getFormID(), lastSeen: Date.now() });
         } else {
@@ -1332,7 +1333,10 @@ export class RemoteServer extends ClientListener {
       const ac = Actor.from(Game.getFormEx(copyId));
       if (!ac) return;
       ac.setAnimationVariableBool(name, on);
-      if (on) {
+      // a single shot whose charge was already shown (greymarchCastCharge, bridge.ts) is not started again: the charge flows into the release
+      const charging = !held && Date.now() - (Number(storage["greymarchCharging:" + copyId + ":" + castingSource]) || 0) < 15000;
+      storage["greymarchCharging:" + copyId + ":" + castingSource] = 0;
+      if (on && !charging) {
         Debug.sendAnimationEvent(ac, castingSource === 0 ? "BeginCastLeft" : "BeginCastRight"); // the input event the game's own cast sends
         // SWAPPED (2026-11-04, the owner: "when people cast a single shot they hold their hand out, and when they cast a stream they charge it by their
         // head. That animation is reversed"): in this graph _SpellAimedStart gives the hand held out (the stream) and _SpellAimedConcentrationStart the charge
@@ -1352,7 +1356,7 @@ export class RemoteServer extends ClientListener {
         };
         once('update', look);
       }
-      else { Debug.sendAnimationEvent(ac, "CastStop"); if (held === false) { try { if (Math.abs(ac.getAngleX()) > 1) ac.setAngle(0, ac.getAngleY(), ac.getAngleZ()); } catch (e2) { /* level again */ } } }
+      else { this.greymarchAimRelease(copyId); Debug.sendAnimationEvent(ac, "CastStop"); if (held === false) { try { if (Math.abs(ac.getAngleX()) > 1) ac.setAngle(0, ac.getAngleY(), ac.getAngleZ()); } catch (e2) { /* level again */ } } }
     } catch (e) { return; }
     if (!on || held) { this.greymarchPoseOff.delete(key); return; }
     const at = Date.now() + RemoteServer.POSE_FF_MS;
@@ -1368,11 +1372,40 @@ export class RemoteServer extends ClientListener {
 
   // GREYMARCH: a held spell aims from the copy's own pitch, which the movement never brings (always 0): the cast's aim (radians, the game's angle X) is put
   // on the copy, at the cast and with each of the caster's aim updates while it is held
-  private greymarchAimCopy(ac: Actor, aimAngle: number): void {
+  // SMOOTH (2026-11-04, the owner: "so seamless its like its being casted from their game"): the caster's aim (pitch and heading, the camera's, up to 10
+  // updates a second) is a target; every frame the copy turns a third of the way to it, so a sweep is followed without steps. Heading too: a standing
+  // turn under 80 degrees never reached the copy (movementApply), and the stream went off to the side. Held 1.6 s after the caster's last word (their
+  // reminders come each second), and let go at the cast's end.
+  private greymarchAimTargets = new Map<number, { pitch: number, heading: number, until: number }>();
+  private greymarchAimLoop = false;
+  private greymarchAimCopy(ac: Actor, aimAngle: number, aimHeading: number): void {
     if (!Number.isFinite(aimAngle)) return;
-    const deg = Math.max(-89, Math.min(89, aimAngle * 180 / Math.PI));
-    try { if (Math.abs(ac.getAngleX() - deg) > 1) ac.setAngle(deg, ac.getAngleY(), ac.getAngleZ()); } catch (e) { /* not loaded */ }
+    const pitch = Math.max(-89, Math.min(89, aimAngle * 180 / Math.PI));
+    let heading = Number.isFinite(aimHeading) ? aimHeading * 180 / Math.PI : NaN;
+    if (Number.isFinite(heading)) heading = ((heading % 360) + 360) % 360;
+    this.greymarchAimTargets.set(ac.getFormID(), { pitch, heading, until: Date.now() + 1600 });
+    if (this.greymarchAimLoop) return;
+    this.greymarchAimLoop = true;
+    const step = () => {
+      const now = Date.now();
+      for (const [id, t] of Array.from(this.greymarchAimTargets.entries())) {
+        if (now > t.until) { this.greymarchAimTargets.delete(id); continue; }
+        try {
+          const a = Actor.from(Game.getFormEx(id));
+          if (!a || a.isDead()) { this.greymarchAimTargets.delete(id); continue; }
+          const x = a.getAngleX(), z = a.getAngleZ();
+          const nx = Math.abs(t.pitch - x) < 0.5 ? t.pitch : x + (t.pitch - x) / 3;
+          let nz = z;
+          if (Number.isFinite(t.heading)) { let d = ((t.heading - z + 540) % 360) - 180; nz = Math.abs(d) < 0.5 ? t.heading : z + d / 3; }
+          if (Math.abs(nx - x) > 0.05 || Math.abs(nz - z) > 0.05) a.setAngle(nx, a.getAngleY(), nz);
+        } catch (e) { this.greymarchAimTargets.delete(id); }
+      }
+      if (this.greymarchAimTargets.size) once('update', step); else this.greymarchAimLoop = false;
+    };
+    once('update', step);
   }
+  // the cast ended: the copy's aim is no longer held (the movement and the level pitch take it again)
+  private greymarchAimRelease(copyId: number): void { this.greymarchAimTargets.delete(copyId); }
 
   private greymarchIsHeld(spell: Spell): boolean {
     try { const effect = spell.getNthEffectMagicEffect(0); return !!effect && effect.getCastingType() === 2; } catch (e) { return false; }

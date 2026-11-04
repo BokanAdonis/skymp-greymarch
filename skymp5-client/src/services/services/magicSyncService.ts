@@ -9,7 +9,7 @@ import { logTrace } from '../../logging';
 import { MsgType } from "../../messages";
 import { SpellCastMsgData, SpellCastMessage } from "../messages/spellCastMessage";
 import { UpdateAnimVariablesMessageMsgData } from "../messages/updateAnimVariablesMessage";
-import { sanitizeAim, sanitizeAimFloats, lookFromAngles } from "./spellAim";
+import { sanitizeAim, sanitizeAimFloats, lookFromAngles, wrapAngle } from "./spellAim";
 import { readStaffCharge } from "../../greymarch/staffCharge";
 
 export class MagicSyncService extends ClientListener {
@@ -32,6 +32,7 @@ export class MagicSyncService extends ClientListener {
     private onUpdate() {
         this.checkActiveCasts();
         this.checkStaffFire();
+        this.checkCharge();
 
         if (this.isAnyMagicStuffEquiped() === false) {
             return;
@@ -160,13 +161,13 @@ export class MagicSyncService extends ClientListener {
 
             // GREYMARCH: THE AIM WHILE HELD (2026-11-04, the owner: another player's held Frostbite stayed level while they swept it from the ground up; the
             // log: their copy's pitch is always 0, the look up and down never comes with the movement). The cast carries the aim: while the player holds the
-            // spell it is sent again with where they look now, at once when that moved more than 5 degrees (else with the reminder each second)
+            // spell it is sent again with where they look now (the camera), as soon as that moved more than 1.5 degrees, at most 10 times a second
             let aimMoved = false;
             if (cast.casterLocalId === this.playerId) {
                 const look = this.getPlayerLook(ac);
-                if (look && (Math.abs(look.lookPitch - cast.msg.aimAngle) > 5 * Math.PI / 180 || Math.abs(look.bodyHeading - cast.msg.aimHeading) > 5 * Math.PI / 180)) {
-                    cast.msg = { ...cast.msg, aimAngle: look.lookPitch, aimHeading: look.bodyHeading };
-                    aimMoved = now - cast.lastSentAt >= 150; // at most about 6 a second
+                const STEP = 1.5 * Math.PI / 180;
+                if (look && (Math.abs(look.lookPitch - cast.msg.aimAngle) > STEP || Math.abs(wrapAngle(look.bodyHeading - cast.msg.aimHeading)) > STEP)) {
+                    if (now - cast.lastSentAt >= 100) { cast.msg = { ...cast.msg, aimAngle: look.lookPitch, aimHeading: look.bodyHeading }; aimMoved = true; }
                 }
             }
             if (aimMoved || now - cast.lastSentAt >= this.keepaliveMs) {
@@ -225,7 +226,7 @@ export class MagicSyncService extends ClientListener {
     // holds that staff, and the other games cast it from the copy: GreymarchCam.CastStaff). A held staff (Flames, Sparks ...) is sent again every second while
     // the charge keeps dropping, and its end once it stops for 0.7 s. A charge the server put back (bridge greymarchStaffChargeTick: storage
     // greymarchStaffChargeSetAt) is not a cast.
-    private staffLast: Record<number, { base: number, charge: number, ench: number, held: boolean, firing: boolean, shotOpen?: boolean, lastDropAt: number, lastSentAt: number }> = {};
+    private staffLast: Record<number, { base: number, charge: number, ench: number, held: boolean, firing: boolean, shotOpen?: boolean, lastDropAt: number, lastSentAt: number, aim?: number[] }> = {};
     private staffNextAt = 0;
     private checkStaffFire() {
         const now = Date.now();
@@ -259,7 +260,13 @@ export class MagicSyncService extends ClientListener {
                 // ONE SHOT, ONE CAST (2026-11-03, the owner: the Staff of Icy Spear "sends out like 5 of them"; the log: one Thunderbolt shot was 8 drops, 50 ms
                 // apart): the charge of one shot comes off over about half a second. A staff that is not held is sent once per shot: the next one only after
                 // the charge has stood still for 0.25 s (shotOpen)
-                const ready = st.held ? (!st.firing || now - st.lastSentAt >= 1000) : !st.shotOpen;
+                // a held staff is also sent again as soon as the aim moved 1.5 degrees (at most 10 a second), as a held spell is
+                let aimMoved = false;
+                if (st.held && st.firing && now - st.lastSentAt >= 100) {
+                    const look = this.getPlayerLook(me);
+                    if (look && st.aim && (Math.abs(look.lookPitch - st.aim[0]) > 1.5 * Math.PI / 180 || Math.abs(wrapAngle(look.bodyHeading - st.aim[1])) > 1.5 * Math.PI / 180)) aimMoved = true;
+                }
+                const ready = st.held ? (!st.firing || aimMoved || now - st.lastSentAt >= 1000) : !st.shotOpen;
                 st.shotOpen = !st.held;
                 if (ready) {
                     st.lastSentAt = now;
@@ -286,6 +293,7 @@ export class MagicSyncService extends ClientListener {
         let aimAngle = 0, aimHeading = 0;
         const look = this.getPlayerLook(me);
         if (look) { aimAngle = look.lookPitch; aimHeading = look.bodyHeading; }
+        const st = this.staffLast[hand]; if (st) st.aim = [aimAngle, aimHeading];
         let vars: any = { booleans: [], floats: [], integers: [] };
         try { vars = this.getAnimationVariablesFromActorConverted(me.getFormID()); } catch (e) { /* none */ }
         const msg: SpellCastMsgData = { caster: localIdToRemoteId(me.getFormID(), true), target: 0, spell: ench, isDualCasting: false, interruptCast: end, castingSource: hand, aimAngle, aimHeading, actorAnimationVariables: vars };
@@ -294,6 +302,39 @@ export class MagicSyncService extends ClientListener {
             this.recentCasts.unshift({ casterLocalId: me.getFormID(), spell: ench, at: Date.now() }); // its blast is reported as the enchantment (findSpellForExplosion)
             this.recentCasts.length = Math.min(this.recentCasts.length, 8);
         }
+    }
+
+    // GREYMARCH: THE CHARGE OF A SINGLE SHOT (2026-11-04, the owner: "so seamless its like its being casted from their game"). A fire-and-forget spell is
+    // only sent when it leaves the hand, so others saw the arm come up as it flew. The game's bWantCastLeft / bWantCastRight go on when the player starts
+    // to charge: for a fire-and-forget spell in that hand, others are told at once ({ customPacketType: "greymarchCastCharge", hand, on: true }; the gamemode
+    // passes it to players near), and off again (on: false) when it is let go without a cast (a cast within 300 ms of letting go is the release: no word)
+    private chargeOn: Record<number, { at: number, offAt: number }> = {};
+    private checkCharge() {
+        const me = Game.getPlayer();
+        if (!me) return;
+        const now = Date.now();
+        for (const hand of [0, 1]) {
+            let want = false;
+            try { want = me.getAnimationVariableBool(hand === 0 ? "bWantCastLeft" : "bWantCastRight"); } catch (e) { continue; }
+            const st = this.chargeOn[hand];
+            if (want && !st) {
+                let ff = false;
+                try { const sp = me.getEquippedSpell(hand); const fx = sp ? sp.getNthEffectMagicEffect(0) : null; ff = !!fx && fx.getCastingType() === 1 && fx.getDeliveryType() !== 0; } catch (e) { ff = false; }
+                if (!ff) continue;
+                this.chargeOn[hand] = { at: now, offAt: 0 };
+                this.sendCharge(hand, true);
+            } else if (!want && st) {
+                if (!st.offAt) st.offAt = now;
+                const castSince = this.recentCasts.some((c) => c.casterLocalId === this.playerId && c.at >= st.at);
+                if (castSince) { delete this.chargeOn[hand]; continue; } // released: the cast itself shows it
+                if (now - st.offAt > 300) { delete this.chargeOn[hand]; this.sendCharge(hand, false); }
+            }
+        }
+    }
+    private sendCharge(hand: number, on: boolean) {
+        try {
+            this.controller.emitter.emit("sendMessage", { message: { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchCastCharge", hand, on }) }, reliability: "reliable" });
+        } catch (e) { /* the look only */ }
     }
 
     // a held spell: its first effect is cast by concentration (2)
@@ -372,13 +413,32 @@ export class MagicSyncService extends ClientListener {
     }
 
     // the player's pitch and heading in radians, or null when they cannot be read
+    // THE CAMERA FIRST (2026-11-04, the owner: another player's stream still struggled to follow their aim): in third person the player's own angle X is
+    // often 0 whatever they look at (their copy got 0 while their cast said straight up), so where the player looks is read from the camera (GreymarchCam
+    // GetCamera 3..5: the direction it looks in, in the world): pitch = -asin(z) (the game's angle X: down is positive), heading = atan2(x, y). The
+    // character's angles when the DLL is missing or the camera reads nothing.
     private getPlayerLook(ac: { getAngleX(): number, getAngleZ(): number }): { lookPitch: number, bodyHeading: number } | null {
+        if (this.cameraWorks !== false) {
+            try {
+                const x = Number(this.sp.callNative("GreymarchCam", "GetCamera", undefined, 3));
+                const y = Number(this.sp.callNative("GreymarchCam", "GetCamera", undefined, 4));
+                const z = Number(this.sp.callNative("GreymarchCam", "GetCamera", undefined, 5));
+                const len = Math.sqrt(x * x + y * y + z * z);
+                if (isFinite(len) && len > 0.5) {
+                    this.cameraWorks = true;
+                    let heading = Math.atan2(x / len, y / len);
+                    if (heading < 0) heading += 2 * Math.PI;
+                    return { lookPitch: -Math.asin(Math.max(-1, Math.min(1, z / len))), bodyHeading: heading };
+                }
+            } catch (e) { this.cameraWorks = false; }
+        }
         try {
             return lookFromAngles(ac.getAngleX(), ac.getAngleZ());
         } catch (e) {
             return null;
         }
     }
+    private cameraWorks: boolean | undefined = undefined;
 
     // its own budget: the cast lines (diagLeft) are used up after 40 casts, and a replaced aim must still reach the log
     private aimDiag(text: string) {
