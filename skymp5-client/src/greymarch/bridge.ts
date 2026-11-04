@@ -1345,6 +1345,8 @@ export class GreymarchBridge {
                 var m = q[i], had = rings[m.key];
                 if (m.off) { if (had) { this.greymarchCircleRemove(had.id); delete rings[m.key]; } continue; }
                 if (had || !Array.isArray(m.pos) || m.pos.length !== 3 || !(Number(m.ms) > 0) || typeof m.hazard !== "string") continue;
+                var shownAt = ((Function("return this")() as any).__gmCircleShownAt || {})[String(parseInt(String(m.key).split(":")[0], 10) >>> 0)] || 0;
+                if (now - shownAt < 5000) { rings[m.key] = { id: 0, until: now + Math.min(10 * 60 * 1000, Number(m.ms)) }; this.greymarchLog("circle: the ring already stands here (shown from the cast)"); continue; }
                 try {
                     var player = sp.Game.getPlayer(); if (!player) continue;
                     var at = m.hazard.indexOf(":"), hid = parseInt(m.hazard.slice(0, at), 16), file = m.hazard.slice(at + 1);

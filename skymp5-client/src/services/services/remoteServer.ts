@@ -1188,6 +1188,23 @@ export class RemoteServer extends ClientListener {
           this.greymarchMagicDiag(`magic: saw ${msg.data.caster.toString(16)} conjure ${spell.getFormID().toString(16)}: cast on their copy itself`);
           return;
         }
+        // A CIRCLE SPELL (2026-11-04, the owner: "Still can not see the ring", after the server's ring word never came): another player's Guardian Circle,
+        // Circle of Life, Font of ..., Circle of the Moons ... is shown here from the cast itself: their copy casts Guardian Circle ON ITSELF, which puts its
+        // ring at their feet (it heals that copy only, which the server overrides, and turns undead as theirs does). Never their own spell: a drain or a
+        // restore circle would work on this player here too, and what a circle does is the server's (gamemode circles.js). The bridge then skips the server's
+        // ring word for that caster (__gmCircleShownAt), so one ring stands
+        let circle = false;
+        try { circle = /circle|^font of /i.test(spell.getName() || "") && !/dispel/i.test(spell.getName() || "") && this.greymarchIsPlayerCopy(msg.data.caster); } catch (e) { circle = false; }
+        if (circle) {
+          try {
+            const guardian = Spell.from(Game.getFormFromFile(0x0e0ccf, "Skyrim.esm"));
+            if (guardian) guardian.cast(ac, ac).catch(() => { /* not shown */ });
+            const gl: any = Function("return this")();
+            (gl.__gmCircleShownAt || (gl.__gmCircleShownAt = {}))[String(msg.data.caster >>> 0)] = Date.now();
+          } catch (e) { /* not shown */ }
+          this.greymarchMagicDiag(`magic: saw ${msg.data.caster.toString(16)} cast the circle ${spell.getFormID().toString(16)}: its ring shown with Guardian Circle on their copy`);
+          return;
+        }
         this.greymarchMagicDiag(`magic: saw ${msg.data.caster.toString(16)} cast ${spell.getFormID().toString(16)} on themselves: not replayed here`);
         return;
       }
