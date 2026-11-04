@@ -95,6 +95,10 @@ public:
 private:
   void OnSpellHit(MpActor* aggressor, MpObjectReference* targetRef,
                   const HitData& hitData);
+  // GREYMARCH: a magic staff's hit (GreymarchBalance staffs): its damage in health points, as a spell's
+  void OnStaffHit(MpActor* aggressor, MpObjectReference* targetRef,
+                  const HitData& hitData, float damage, bool held);
+  std::map<std::pair<uint32_t, uint32_t>, std::chrono::steady_clock::time_point> lastStaffHit;
   void OnWeaponHit(MpActor* aggressor, MpObjectReference* targetRef,
                    HitData hitData, bool isUnarmed);
 

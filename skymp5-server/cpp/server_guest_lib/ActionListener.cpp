@@ -1260,6 +1260,10 @@ bool ShouldBeBlocked(const MpActor& aggressor, const MpActor& target)
 }
 }
 
+namespace {
+bool HoldsStaffEnchantment(const MpActor& actor, uint32_t enchId);
+}
+
 void ActionListener::OnHit(const RawMessageData& rawMsgData,
                            const HitMessage& msg)
 {
@@ -1315,6 +1319,39 @@ void ActionListener::OnHit(const RawMessageData& rawMsgData,
       aggressor->GetFormId(), targetRef->GetFormId(),
       aggressorCellOrWorld.ToFormId(files), targetCellOrWorld.ToFormId(files));
     return;
+  }
+
+  // GREYMARCH: A MAGIC STAFF (2026-11-03, the owner: staffs did next to no
+  // damage). Its hit names the staff (a weapon of 0 damage) or, for a blast,
+  // its enchantment; neither is a spell, so the spell damage never saw it.
+  // The balance table gives its damage (the F7 Staffs tab). It flies like a
+  // spell, so the reach is 8,000 units, not a cell's width
+  if (const auto& bal = GreymarchBalance::Get();
+      !bal.staffDamage.empty()) {
+    if (auto it = bal.staffDamage.find(hitData.source);
+        it != bal.staffDamage.end()) {
+      const bool npc = partOne.serverState.UserByActor(aggressor) ==
+        Networking::InvalidUserId;
+      const bool holds = npc ||
+        aggressor->GetEquipment().inv.HasItem(hitData.source) ||
+        HoldsStaffEnchantment(*aggressor, hitData.source);
+      constexpr float kStaffReach = 8000.f;
+      if (!holds) {
+        spdlog::info("staff hit dropped: {:x} does not hold {:x}",
+                     aggressor->GetFormId(), hitData.source);
+      } else if ((aggressor->GetPos() - targetRef->GetPos()).SqrLength() >
+                 kStaffReach * kStaffReach) {
+        spdlog::info("staff hit dropped: {:x} -> {:x} too far",
+                     aggressor->GetFormId(), targetRef->GetFormId());
+      } else if (!aggressor->IsDead()) {
+        auto* targetActor = targetRef->AsActor();
+        if (!targetActor || !targetActor->IsGreymarchUnharmed()) {
+          OnStaffHit(aggressor, targetRef, hitData, it->second,
+                     bal.staffHeld.count(hitData.source) > 0);
+        }
+      }
+      return;
+    }
   }
 
   // TODO: repair IsDistanceValid instead
@@ -1869,6 +1906,56 @@ float ActionListener::ConcentrationHitSeconds(uint32_t aggressorId,
   }
   lastConcentrationHit[key] = now;
   return seconds;
+}
+
+void ActionListener::OnStaffHit(MpActor* aggressor,
+                                MpObjectReference* targetRef,
+                                const HitData& hitData, float damage,
+                                bool held)
+{
+  auto* target = targetRef ? targetRef->AsActor() : nullptr;
+  if (!target || target->IsDead()) {
+    return;
+  }
+  const auto now = std::chrono::steady_clock::now();
+  const auto key = std::make_pair(aggressor->GetFormId(), target->GetFormId());
+  if (held) {
+    damage *= ConcentrationHitSeconds(aggressor->GetFormId(),
+                                      target->GetFormId(), hitData.source);
+  } else {
+    // the blast right after the bolt that set it off is one hit
+    if (auto it = lastStaffHit.find(key); it != lastStaffHit.end() &&
+        std::chrono::duration<float>(now - it->second).count() < 0.4f) {
+      return;
+    }
+    if (lastStaffHit.size() > 1024) {
+      lastStaffHit.clear();
+    }
+    lastStaffHit[key] = now;
+  }
+  SendPapyrusOnHitEvent(aggressor, targetRef, hitData);
+  const auto& balance = GreymarchBalance::Get();
+  const bool casterIsPlayer =
+    partOne.serverState.UserByActor(aggressor) != Networking::InvalidUserId;
+  damage *= casterIsPlayer ? balance.playerSpells.value_or(1.f)
+                           : balance.npcSpells.value_or(1.f);
+  if (!casterIsPlayer) {
+    damage *= aggressor->GetGreymarchDamageMult();
+  }
+  if (!(damage > 0.f)) {
+    return;
+  }
+  auto values = target->GetChangeForm().actorValues;
+  values.healthPercentage = std::min(
+    CalculateCurrentHealthPercentage(*target, damage, values.healthPercentage,
+                                     nullptr),
+    1.f);
+  static const auto kHealthAvFilter =
+    std::vector<espm::ActorValue>{ espm::ActorValue::Health };
+  target->NetSetPercentages(values, aggressor, kHealthAvFilter);
+  spdlog::info("OnStaffHit - {:x} hit {:x} with {:x} for {} damage",
+               aggressor->GetFormId(), target->GetFormId(), hitData.source,
+               damage);
 }
 
 void ActionListener::OnWeaponHit(MpActor* aggressor,

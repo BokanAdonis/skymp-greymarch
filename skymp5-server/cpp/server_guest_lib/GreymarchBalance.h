@@ -17,6 +17,9 @@
 //   powerAttack / sneak         damage multipliers for a power attack and a sneak attack
 //   spells    { "<global spell id>": multiplier }   a spell hit's damage times this (the F7 Spells balance tab: the number set / the game's, times the school's percent)
 //   dualCast                    how much harder a dual cast spell hits (the game's 2.2)
+//   staffs { "<global form id>": damage }   MAGIC STAFFS (2026-11-03, the owner: they did next to no damage): a staff (its weapon id) or its
+//               enchantment (a blast's hit names it) hits for this many health points, per second when it is in staffsHeld { id: 1 }; times
+//               playerSpells / npcSpells and an NPC's damage multiplier, as a spell (the F7 Staffs tab, gamemode staffs.js)
 //   playerSpells / npcSpells    a spell hit's damage times this when a player / an NPC cast it
 //   shieldStops { "<global form id>": percent }   percent of a hit a block with that shield stops (0..100; the tier's number), else shieldBlock
 //   enchantArmorCap             the most armor rating one worn piece's enchantment adds (none = all of it, as the game)
@@ -39,6 +42,8 @@ struct GreymarchBalanceTable
   std::optional<float> powerAttack;
   std::optional<float> sneak;
   std::unordered_map<uint32_t, float> spellMult;
+  std::unordered_map<uint32_t, float> staffDamage; // GREYMARCH: staff or its enchantment -> health points
+  std::unordered_map<uint32_t, float> staffHeld;   // GREYMARCH: those whose damage is per second
   std::optional<float> dualCast;
   std::optional<float> playerSpells;
   std::optional<float> npcSpells;

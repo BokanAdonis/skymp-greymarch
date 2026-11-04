@@ -13,6 +13,8 @@ Napi::Value GreymarchBalanceBinding::Get(Napi::Env env, ScampServer&,
   auto result = Napi::Object::New(env);
   result.Set("weapons", Napi::Number::New(env, t.weaponDamage.size()));
   result.Set("armor", Napi::Number::New(env, t.armorRating.size()));
+  // GREYMARCH: this build does the magic staffs' damage (OnStaffHit): the gamemode then leaves it to the server
+  result.Set("staffs", Napi::Number::New(env, t.staffDamage.size()));
   return result;
 }
 
