@@ -542,6 +542,7 @@ export class GreymarchBridge {
         this.greymarchMagicBlockDrive(); // NPC raise-the-dead and summons: ended at once
         this.greymarchShapeDrive(); // a creature form as an NPC: moved every frame like SkyMP moves other players; other players' creature attacks
         this.greymarchShapeTick(); // a creature form staff put the player in (a goat, a giant ...): the server decides, the body is changed here
+        this.greymarchHeightFrame(); // the Height slider on the Body tab: what the race menu asked for (greymarchHeightModEvent)
         this.greymarchRaceMenuQuestsTick(Date.now()); // RaceMenu's own quests started if SkyMP's load left them off (the Body Scales tab, Height)
         this.greymarchRaceMenuTick(Date.now()); // RaceMenu's extra sliders: sent when the race menu closes, put back after a relog (racemenuLook.ts)
         this.greymarchRaceMenuCopiesTick(Date.now()); // and put on the other players' copies (OTHERS SEE THEM)
@@ -2243,8 +2244,21 @@ export class GreymarchBridge {
             var name = String(e && e.eventName || "");
             if (name.indexOf("RSM") !== 0) return;
             if (!this.greymarchHeightSaid) { this.greymarchHeightSaid = 1; this.greymarchLog("racemenu: the race menu talks (" + name + "): the Height slider goes on the Body tab"); }
-            if (name === "RSM_Initialized" || name === "RSM_Reinitialized" || (name === "RSMDT_SendDataRequest" && (Number(e.numArg) & 32) === 32)) { this.greymarchHeightAdd(); return; }
-            if (name === "RSM_SliderChange" && String(e.strArg) === GM_HEIGHT_CALLBACK) this.greymarchHeightSet(Number(e.numArg));
+            // NOTHING NATIVE HERE (2026-11-04, the log: "Invalid _skyrimPlatform_indexInPool: 0"): game objects taken inside this callback cannot be given
+            // to native calls, so it only notes what the menu asked; the next frame does it (greymarchHeightFrame, from the update tick)
+            if (name === "RSM_Initialized" || name === "RSM_Reinitialized" || (name === "RSMDT_SendDataRequest" && (Number(e.numArg) & 32) === 32)) { this.greymarchHeightWantAdd = true; return; }
+            if (name === "RSM_SliderChange" && String(e.strArg) === GM_HEIGHT_CALLBACK) this.greymarchHeightWantSet = Number(e.numArg);
+        } catch (err) {
+            this.greymarchLog("racemenu: the Height slider: " + err);
+        }
+    }
+    greymarchHeightFrame(): any { // what the race menu asked for in its mod events, done in the frame (greymarchHeightModEvent)
+        if (!this.greymarchHeightWantAdd && this.greymarchHeightWantSet === undefined) return;
+        var add = !!this.greymarchHeightWantAdd, set = this.greymarchHeightWantSet;
+        this.greymarchHeightWantAdd = false; this.greymarchHeightWantSet = undefined;
+        try {
+            if (add) this.greymarchHeightAdd();
+            if (set !== undefined) this.greymarchHeightSet(set);
         } catch (err) {
             this.greymarchLog("racemenu: the Height slider: " + err);
         }

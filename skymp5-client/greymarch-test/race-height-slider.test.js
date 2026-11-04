@@ -14,7 +14,7 @@ test("listens to the game's mod events", () => {
 });
 
 test("the slider is added when the menu asks for sliders, in RaceMenu's own line format, on the Body section (4)", () => {
-  assert.match(body, /name === "RSM_Initialized" \|\| name === "RSM_Reinitialized" \|\| \(name === "RSMDT_SendDataRequest" && \(Number\(e\.numArg\) & 32\) === 32\)/);
+  assert.match(body, /name === "RSM_Initialized" \|\| name === "RSM_Reinitialized" \|\| \(name === "RSMDT_SendDataRequest" && \(Number\(e\.numArg\) & 32\) === 32\)\) \{ this\.greymarchHeightWantAdd = true; return; \}/);
   assert.match(body, /var line = "\$Height;;4;;" \+ GM_HEIGHT_CALLBACK \+ ";;" \+ r\[0\] \+ ";;" \+ r\[1\] \+ ";;0\.005;;" \+ \(Math\.round\(v \* 1000\) \/ 1000\) \+ ";;;;0";/);
   assert.match(body, /this\.sp\.Ui\.invokeStringA\("RaceSex Menu", "_root\.RaceSexMenuBaseInstance\.RaceSexPanelsInstance\.RSM_AddSliders", \[line\]\);/);
 });
@@ -25,7 +25,7 @@ test("and 2 s after the menu opens when no word came from it", () => {
 });
 
 test("moving it sets RaceMenu's own body scale (NPC, RSMPlugin), third and first person, inside the range; 1 takes it off", () => {
-  assert.match(body, /name === "RSM_SliderChange" && String\(e\.strArg\) === GM_HEIGHT_CALLBACK\) this\.greymarchHeightSet\(Number\(e\.numArg\)\)/);
+  assert.match(body, /name === "RSM_SliderChange" && String\(e\.strArg\) === GM_HEIGHT_CALLBACK\) this\.greymarchHeightWantSet = Number\(e\.numArg\);/);
   assert.match(body, /Math\.min\(r\[1\], Math\.max\(r\[0\], value\)\)/);
   assert.match(body, /"AddNodeTransformScale", undefined, player, false, female, "NPC", "RSMPlugin", v\); sp\.callNative\("NiOverride", "AddNodeTransformScale", undefined, player, true, female, "NPC", "RSMPlugin", v\);/);
   assert.match(body, /"RemoveNodeTransformScale", undefined, player, false, female, "NPC", "RSMPlugin"\)/);
@@ -40,5 +40,12 @@ test("the range is the race's, sent by the server with the look; 0.93-1.07 until
 test("the sex comes from the base object (Actor has no getActorBase in this SkyrimPlatform: the first build threw on it)", () => {
   assert.doesNotMatch(body, /getActorBase\(/);
   assert.match(body, /this\.sp\.ActorBase\.from\(player\.getBaseObject\(\)\)/);
+});
+
+test("nothing native inside the mod event callback (objects taken there are invalid: 'indexInPool: 0'); the frame does the work", () => {
+  const cb = body.slice(0, body.indexOf("    greymarchHeightFrame(): any {"));
+  assert.doesNotMatch(cb, /callNative|invokeStringA|getPlayer|greymarchHeightAdd\(\)|greymarchHeightSet\(/);
+  assert.match(src, /this\.greymarchHeightFrame\(\);[^\n]*\r?\n\s*this\.greymarchRaceMenuQuestsTick\(Date\.now\(\)\);/);
+  assert.match(body, /if \(add\) this\.greymarchHeightAdd\(\);\s*if \(set !== undefined\) this\.greymarchHeightSet\(set\);/);
 });
 
