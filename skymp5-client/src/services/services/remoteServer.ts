@@ -1150,6 +1150,7 @@ export class RemoteServer extends ClientListener {
         if (heldStaff && showingStaff && showingStaff.spell === ench.getFormID()) {
           showingStaff.lastSeen = Date.now();
           this.greymarchAimCopy(ac, msg.data.aimAngle, msg.data.aimHeading);
+          this.greymarchSprayAim(castKey, msg.data.aimAngle, msg.data.aimHeading);
           return;
         }
         // the same staff from the same hand again within 0.6 s is the same shot (a game that sent it twice): shown once
@@ -1161,7 +1162,9 @@ export class RemoteServer extends ClientListener {
         let tgt: ObjectReference | null = null;
         try { tgt = msg.data.target ? ObjectReference.from(Game.getFormEx(remoteIdToLocalId(msg.data.target))) : null; } catch (e) { tgt = null; }
         let cast = false;
-        try { cast = !!callNative("GreymarchCam", "CastStaff", undefined, ac, ench, msg.data.castingSource === 0 ? 0 : 1, tgt); } catch (e) { cast = false; }
+        // a held staff's spray is fired from the hand along the caster's aim (greymarchSpray), as a held spell's; anything else by CastStaff
+        if (heldStaff && this.greymarchSpray(castKey, ac, ench.getFormID(), msg.data.castingSource, msg.data.aimAngle, msg.data.aimHeading)) cast = true;
+        else { try { cast = !!callNative("GreymarchCam", "CastStaff", undefined, ac, ench, msg.data.castingSource === 0 ? 0 : 1, tgt); } catch (e) { cast = false; } }
         if (heldStaff && cast) { this.greymarchHeldSpells.set(castKey, { spell: ench.getFormID(), casterId: ac.getFormID(), lastSeen: Date.now() }); this.greymarchAimCopy(ac, msg.data.aimAngle, msg.data.aimHeading); }
         else this.greymarchHeldSpells.delete(castKey);
         this.greymarchMagicDiag(`magic: saw ${msg.data.caster.toString(16)} cast staff ${msg.data.spell.toString(16)} hand ${msg.data.castingSource}: ${cast ? (heldStaff ? "held, cast here" : "cast here") : "not cast (GreymarchCamera.dll older than 1.11?)"}`);
@@ -1177,6 +1180,7 @@ export class RemoteServer extends ClientListener {
       if (isHeld && showing && showing.spell === spell!.getFormID()) {
         showing.lastSeen = Date.now();
         this.greymarchAimCopy(ac, msg.data.aimAngle, msg.data.aimHeading);
+        this.greymarchSprayAim(castKey, msg.data.aimAngle, msg.data.aimHeading);
         return;
       }
 
@@ -1262,7 +1266,9 @@ export class RemoteServer extends ClientListener {
         return;
       }
       if (spell) {
-        castSpellImmediate(ac.getFormID(), msg.data.castingSource, spell.getFormID(), remoteIdToLocalId(msg.data.target),
+        // a held spray (Flames, Frostbite ...) is fired from the hand along the caster's own aim (greymarchSpray); anything else as SkyMP casts it
+        const sprayed = isHeld && this.greymarchSpray(castKey, ac, spell.getFormID(), msg.data.castingSource, msg.data.aimAngle, msg.data.aimHeading);
+        if (!sprayed) castSpellImmediate(ac.getFormID(), msg.data.castingSource, spell.getFormID(), remoteIdToLocalId(msg.data.target),
           msg.data.aimAngle, msg.data.aimHeading, actorAnimationVariables);
         this.greymarchCastPose(ac.getFormID(), msg.data.castingSource, true, isHeld);
         if (isHeld) this.greymarchAimCopy(ac, msg.data.aimAngle, msg.data.aimHeading);
@@ -1421,6 +1427,52 @@ export class RemoteServer extends ClientListener {
   }
   // the cast ended: the copy's aim is no longer held (the movement and the level pitch take it again)
   private greymarchAimRelease(copyId: number): void { this.greymarchAimTargets.delete(copyId); try { const m: any = storage["greymarchAimPitch"]; if (m) delete m[copyId]; } catch (e) { /* none */ } }
+
+  // GREYMARCH: ANOTHER PLAYER'S STREAM, FIRED ALONG THEIR AIM (2026-11-04, the owner: "he is shooting it directly at the statue and its going behind him").
+  // A held spray cast on the copy was aimed by the game from the copy, which never has the caster's aim. Instead its projectiles are launched here from
+  // the copy's hand along the aim the caster's game sends (the camera's: GreymarchCamera.dll 1.12 GreymarchCam.FireSpellAt), SPRAY_MS apart, easing a
+  // third of the way to each new aim, until the cast ends (greymarchHeldSpells no longer holds it). false when the DLL is older or it is no spray (a beam):
+  // then it is cast as before.
+  private static readonly SPRAY_MS = 60;
+  private greymarchSprays = new Map<string, { copyId: number, form: number, hand: number, pitch: number, heading: number, wantPitch: number, wantHeading: number }>();
+  private greymarchSpray(castKey: string, ac: Actor, form: number, castingSource: number, aimAngle: number, aimHeading: number): boolean {
+    if (!Number.isFinite(aimAngle) || !Number.isFinite(aimHeading)) return false;
+    const hand = castingSource === 0 ? 0 : 1;
+    let ok = false;
+    try { ok = !!callNative("GreymarchCam", "FireSpellAt", undefined, ac, Game.getFormEx(form), hand, aimAngle, aimHeading); } catch (e) { ok = false; }
+    if (!ok) return false;
+    const had = this.greymarchSprays.has(castKey);
+    this.greymarchSprays.set(castKey, { copyId: ac.getFormID(), form, hand, pitch: aimAngle, heading: aimHeading, wantPitch: aimAngle, wantHeading: aimHeading });
+    this.greymarchMagicDiag(`magic: spraying ${form.toString(16)} from copy ${ac.getFormID().toString(16)} along ${aimAngle.toFixed(2)}/${aimHeading.toFixed(2)}`);
+    if (had) return true;
+    let last = Date.now();
+    const tick = () => {
+      const st = this.greymarchSprays.get(castKey);
+      if (!st) return;
+      const held = this.greymarchHeldSpells.get(castKey);
+      if (!held || held.spell !== st.form) { this.greymarchSprays.delete(castKey); return; }
+      const now = Date.now();
+      if (now - last >= RemoteServer.SPRAY_MS) {
+        last = now;
+        st.pitch += (st.wantPitch - st.pitch) / 3;
+        let d = st.wantHeading - st.heading; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI;
+        st.heading += d / 3;
+        try {
+          const a = Actor.from(Game.getFormEx(st.copyId));
+          if (!a || a.isDead()) { this.greymarchSprays.delete(castKey); return; }
+          callNative("GreymarchCam", "FireSpellAt", undefined, a, Game.getFormEx(st.form), st.hand, st.pitch, st.heading);
+        } catch (e) { this.greymarchSprays.delete(castKey); return; }
+      }
+      once('update', tick);
+    };
+    once('update', tick);
+    return true;
+  }
+  private greymarchSprayAim(castKey: string, aimAngle: number, aimHeading: number): void {
+    const st = this.greymarchSprays.get(castKey);
+    if (!st || !Number.isFinite(aimAngle) || !Number.isFinite(aimHeading)) return;
+    st.wantPitch = aimAngle; st.wantHeading = aimHeading;
+  }
 
   private greymarchIsHeld(spell: Spell): boolean {
     try { const effect = spell.getNthEffectMagicEffect(0); return !!effect && effect.getCastingType() === 2; } catch (e) { return false; }
