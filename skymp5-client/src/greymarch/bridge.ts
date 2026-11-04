@@ -4462,6 +4462,7 @@ export class GreymarchBridge {
         if (!this.greymarchMealLocked) return;
         this.greymarchMealLocked = false;
         if (this.greymarchFxHave && this.greymarchFxHave.frozen) return; // staff froze the player: that lock stays
+        if (this.greymarchPoisonParalyzedUntil) return; // a paralysing poison still holds them (greymarchPoisonTick lets them go)
         try { sp.Game.enablePlayerControls(true, true, false, false, true, false, true, false, 0); } catch (e) { /* nothing else to try */ }
         this.greymarchCrumb("eat: controls back (" + why + ")");
     }
@@ -4557,15 +4558,23 @@ export class GreymarchBridge {
             this.greymarchPoisonStripWanted = 0;
             try { var n = invMod.greymarchStripPoison(sp.Game.getPlayer()); this.greymarchLog("poison: the hit used it, " + (n ? "off the blade" : "none was on the weapon in hand")); } catch (e) { this.greymarchLog("poison: could not take it off the blade: " + e); }
         }
+        // PARALYSED WITHOUT THE RAGDOLL (2026-11-03, the owner: the paralysis poison ragdolled them when it wore off): not the game's Paralysis actor value (the
+        // body falls limp and gets up again when it ends) but the controls: no moving, fighting, sneaking or using anything for its seconds, looking around
+        // and the camera still theirs; free again at once after (unless a meal or a staff freeze holds them: those keep their own lock)
         var pz = this.greymarchPoisonParalyzeWanted;
         if (pz) {
             this.greymarchPoisonParalyzeWanted = 0;
-            try { sp.Game.getPlayer().setActorValue("Paralysis", 1); this.greymarchPoisonParalyzedUntil = now + pz * 1000; this.greymarchLog("poison: paralysed for " + pz + " s"); } catch (e) { this.greymarchLog("poison: could not paralyse: " + e); }
+            try { sp.Game.disablePlayerControls(true, true, false, false, true, false, true, false, 0); this.greymarchPoisonParalyzedUntil = Math.max(this.greymarchPoisonParalyzedUntil || 0, now + pz * 1000); this.greymarchLog("poison: paralysed for " + pz + " s"); } catch (e) { this.greymarchLog("poison: could not paralyse: " + e); }
         }
         var until = this.greymarchPoisonParalyzedUntil;
         if (until) {
             var dead = false; try { dead = !!sp.Game.getPlayer().isDead(); } catch (dErr) { dead = false; }
-            if (now >= until || dead) { this.greymarchPoisonParalyzedUntil = 0; try { sp.Game.getPlayer().setActorValue("Paralysis", 0); this.greymarchLog("poison: the paralysis is over"); } catch (e) { /* the game lets go by itself */ } }
+            if (now >= until || dead) {
+                this.greymarchPoisonParalyzedUntil = 0;
+                var fz = this.greymarchFxHave;
+                if (!this.greymarchMealLocked && !(fz && fz.frozen)) { try { sp.Game.enablePlayerControls(true, true, false, false, true, false, true, false, 0); } catch (e) { /* asked again below */ } }
+                this.greymarchLog("poison: the paralysis is over");
+            }
         }
     }
     greymarchSitResetTick(now: number): any {

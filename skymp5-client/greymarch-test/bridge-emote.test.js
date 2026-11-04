@@ -926,15 +926,22 @@ test("poisons on weapons (2026-11-03): the server says the hit used it, it comes
   s.say({ customPacketType: "greymarchPoisonUsed" }); s.tick();
   assert.strictEqual(s.log.stripped, 1, "off the blade, on the next frame");
   s.tick(); assert.strictEqual(s.log.stripped, 1, "once");
+  const LOCK = [true, true, false, false, true, false, true, false, 0];
   s.say({ customPacketType: "greymarchPoisonFx", paralyze: 5 }); s.tick();
-  assert.deepStrictEqual(s.log.avSet, [["Paralysis", 1]]);
-  s.tick(4000); assert.strictEqual(s.log.avSet.length, 1, "still paralysed");
-  s.tick(1100); assert.deepStrictEqual(s.log.avSet.at(-1), ["Paralysis", 0], "let go after 5 seconds");
+  assert.deepStrictEqual(s.log.controls, [["off", ...LOCK]], "the controls, not the game's Paralysis (no ragdoll, 2026-11-03)");
+  assert.strictEqual(s.log.avSet, undefined, "the Paralysis actor value is never touched");
+  s.tick(4000); assert.strictEqual(s.log.controls.length, 1, "still paralysed");
+  s.tick(1100); assert.deepStrictEqual(s.log.controls.at(-1), ["on", ...LOCK], "free after 5 seconds");
   const d = make();
   d.say({ customPacketType: "greymarchPoisonFx", paralyze: 30 }); d.tick(); d.state.dead = true; d.tick();
-  assert.deepStrictEqual(d.log.avSet.at(-1), ["Paralysis", 0], "let go at death");
+  assert.deepStrictEqual(d.log.controls.at(-1), ["on", ...LOCK], "free at death");
+  const m = make(); // a meal ending while paralysed does not free them; the paralysis ending during a meal does not either
+  m.eat("Venison Stew"); m.tick(); m.say({ customPacketType: "greymarchPoisonFx", paralyze: 10 }); m.tick();
+  for (let i = 0; i < 110; i++) m.tick(50);
+  assert.notDeepStrictEqual(m.log.controls.at(-1), ["on", ...LOCK], "the meal is over, the paralysis is not");
+  m.tick(5000); assert.deepStrictEqual(m.log.controls.at(-1), ["on", ...LOCK], "then free");
   const x = make(); x.say({ customPacketType: "greymarchPoisonFx", paralyze: 999 }); x.tick();
-  assert.strictEqual(x.log.avSet, undefined, "nonsense is ignored");
+  assert.strictEqual(x.log.controls, undefined, "nonsense is ignored");
 });
 
 test("a poison put on the weapon in hand is reported to the server (2026-11-03: the game sends no equip event for it); once; not what was already on at entering", () => {
