@@ -1488,7 +1488,7 @@ export class GreymarchBridge {
             var base = w.getFormID() >>> 0;
             if (setQ) for (var q = 0; q < setQ.length; q++) {
                 if (setQ[q].hand !== hand || setQ[q].base !== base) continue;
-                try { sp.callNative("WornObject", "SetItemCharge", undefined, me, hand, 0, setQ[q].charge); this.greymarchLog("staff charge: set back to " + Math.round(setQ[q].charge) + " (" + base.toString(16) + ")"); } catch (e3) { /* SKSE missing */ }
+                try { sp.storage["greymarchStaffChargeSetAt"] = Date.now(); sp.callNative("WornObject", "SetItemCharge", undefined, me, hand, 0, setQ[q].charge); this.greymarchLog("staff charge: set back to " + Math.round(setQ[q].charge) + " (" + base.toString(16) + ")"); } catch (e3) { /* SKSE missing */ }
                 delete last[hand];
             }
             var charge = -1, max = -1;

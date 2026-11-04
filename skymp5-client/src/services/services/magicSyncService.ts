@@ -2,7 +2,7 @@
 import { localIdToRemoteId, remoteIdToLocalId } from "../../view/worldViewMisc";
 
 // @ts-expect-error (TODO: Remove in 2.10.0)
-import { SpellCastEvent, Actor, printConsole, Game, getAnimationVariablesFromActor, ActorAnimationVariables, SpellType, SlotType, EquippedItemType } from 'skyrimPlatform'
+import { SpellCastEvent, Actor, printConsole, Game, getAnimationVariablesFromActor, ActorAnimationVariables, SpellType, SlotType, EquippedItemType, storage } from 'skyrimPlatform'
 import { ClientListener, CombinedController, Sp } from './clientListener';
 import { logTrace } from '../../logging';
 
@@ -30,6 +30,7 @@ export class MagicSyncService extends ClientListener {
 
     private onUpdate() {
         this.checkActiveCasts();
+        this.checkStaffFire();
 
         if (this.isAnyMagicStuffEquiped() === false) {
             return;
@@ -204,6 +205,76 @@ export class MagicSyncService extends ClientListener {
         }
         this.diagLeft--;
         try { (this.controller.emitter as any).emit("greymarchStage", text); } catch (e) { /* diagnostics never break the game */ }
+    }
+
+    // GREYMARCH: A STAFF FIRED (2026-11-03, the owner: "people see me do the animation but they dont see the magic come out"). The game raises no spell
+    // cast event for a staff (the log: never a "magic: cast" line for one), so nothing was sent. Every 50 ms the charge of an enchanted staff in each hand
+    // is read (SKSE WornObject); when it drops, the staff fired: a cast of its enchantment is sent like a spell's (the server passes it on when the caster
+    // holds that staff, and the other games cast it from the copy: GreymarchCam.CastStaff). A held staff (Flames, Sparks ...) is sent again every second while
+    // the charge keeps dropping, and its end once it stops for 0.7 s. A charge the server put back (bridge greymarchStaffChargeTick: storage
+    // greymarchStaffChargeSetAt) is not a cast.
+    private staffLast: Record<number, { base: number, charge: number, ench: number, held: boolean, firing: boolean, lastDropAt: number, lastSentAt: number }> = {};
+    private staffNextAt = 0;
+    private checkStaffFire() {
+        const now = Date.now();
+        if (now < this.staffNextAt) return;
+        this.staffNextAt = now + 50;
+        const me = Game.getPlayer();
+        if (!me) return;
+        for (const hand of [0, 1]) {
+            let w: any = null;
+            try { w = me.getEquippedWeapon(hand === 0); } catch (e) { w = null; }
+            let ench: any = null;
+            try { ench = w && w.getWeaponType() === 8 ? w.getEnchantment() : null; } catch (e) { ench = null; }
+            if (!w || !ench) { this.staffEnd(hand, "staff put away"); delete this.staffLast[hand]; continue; }
+            let charge = -1;
+            try { charge = Number(this.sp.callNative("WornObject", "GetItemCharge", undefined, me, hand, 0)); } catch (e) { charge = -1; }
+            if (!(charge >= 0) || !isFinite(charge)) continue;
+            const base = w.getFormID() >>> 0;
+            let st = this.staffLast[hand];
+            if (!st || st.base !== base) {
+                if (st) this.staffEnd(hand, "another staff");
+                let held = false;
+                try { const fx = ench.getNthEffectMagicEffect(0); held = !!fx && fx.getCastingType() === 2; } catch (e) { held = false; }
+                this.staffLast[hand] = { base, charge, ench: ench.getFormID() >>> 0, held, firing: false, lastDropAt: 0, lastSentAt: 0 };
+                continue;
+            }
+            const dropped = charge < st.charge - 0.01;
+            st.charge = charge;
+            const setBack = now - (Number(storage["greymarchStaffChargeSetAt"]) || 0) < 1500;
+            if (dropped && !setBack) {
+                st.lastDropAt = now;
+                if (!st.held || !st.firing || now - st.lastSentAt >= 1000) {
+                    st.lastSentAt = now;
+                    this.staffSend(me, st.ench, hand, false);
+                    if (!st.firing) this.diag(`magic: staff ${base.toString(16)} fired ${st.ench.toString(16)} hand ${hand}${st.held ? " (held)" : ""}`);
+                }
+                st.firing = st.held;
+            } else if (st.firing && now - st.lastDropAt > 700) {
+                this.staffEnd(hand, "the charge stopped dropping");
+            }
+        }
+    }
+    private staffEnd(hand: number, reason: string) {
+        const st = this.staffLast[hand];
+        if (!st || !st.firing) return;
+        st.firing = false;
+        const me = Game.getPlayer();
+        if (me) this.staffSend(me, st.ench, hand, true);
+        this.diag(`magic: staff end ${st.ench.toString(16)} hand ${hand} (${reason})`);
+    }
+    private staffSend(me: Actor, ench: number, hand: number, end: boolean) {
+        let aimAngle = 0, aimHeading = 0;
+        const look = this.getPlayerLook(me);
+        if (look) { aimAngle = look.lookPitch; aimHeading = look.bodyHeading; }
+        let vars: any = { booleans: [], floats: [], integers: [] };
+        try { vars = this.getAnimationVariablesFromActorConverted(me.getFormID()); } catch (e) { /* none */ }
+        const msg: SpellCastMsgData = { caster: localIdToRemoteId(me.getFormID(), true), target: 0, spell: ench, isDualCasting: false, interruptCast: end, castingSource: hand, aimAngle, aimHeading, actorAnimationVariables: vars };
+        this.controller.emitter.emit("sendMessage", { message: { t: MsgType.SpellCast, data: msg }, reliability: "reliable" });
+        if (!end) {
+            this.recentCasts.unshift({ casterLocalId: me.getFormID(), spell: ench, at: Date.now() }); // its blast is reported as the enchantment (findSpellForExplosion)
+            this.recentCasts.length = Math.min(this.recentCasts.length, 8);
+        }
     }
 
     // a held spell: its first effect is cast by concentration (2)
