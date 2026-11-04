@@ -1329,6 +1329,13 @@ export class FormView {
       // its own pace, never the peaceful animals' slower one (gmMakePeaceful, before it was known to be the server's): the server's frames set how fast it goes
       try { if (ac.getActorValue("SpeedMult") !== 100) { ac.setActorValue("SpeedMult", 100); ac.modActorValue("CarryWeight", 0.1); ac.modActorValue("CarryWeight", -0.1); } } catch (e) { /* as it is */ } // never a fight of its own, never local damage
     }
+    // HELD BEFORE IT EVER MOVES (2026-11-04, the owner: "Milk cows should not be able to move", on test with every cow fix in): a milk cow on its spot has no
+    // movement from SkyMP yet, and the line below returned before the "still" hold further down was ever reached, so nothing held it and its own idle AI
+    // walked it about between the server's 5-second pins. The server's frame says "still" from the start: the hold goes on as soon as it does.
+    try {
+      const sf = (((Function("return this")() as any).__gmBeastFrames || storage["greymarchBeastFrames"] || {}) as any)[String(this.remoteRefrId)];
+      if (sf && sf.anim === "still" && !this.gmPuppetStill) { this.gmPuppetStill = true; ac.setRestrained(true); ac.setDontMove(true); }
+    } catch (e) { /* the frames below still hold it */ }
     if (!model.movement) { try { if (ac.isInCombat()) ac.stopCombat(); } catch (e) { /* next frame */ } return ""; } // nothing to play yet (a cow on its spot)
     try { if (ac.isInCombat()) ac.stopCombat(); } catch (e) { /* next frame */ }
     // the bridge's frames: through the global first (see bridge.ts greymarchBeastFrames, 2026-10-28), storage as before

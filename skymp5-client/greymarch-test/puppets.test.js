@@ -204,3 +204,11 @@ test("a server-driven animal is fearless before it ever moves (2026-11-02, the o
   assert.ok(fearless > 0 && needsMove > fearless, "Confidence 4 is set before the movement is needed");
   assert.match(fv, /ac\.setActorValue\("Confidence", puppet \? 4 : 0\)/, "a peaceful animal known to be server-driven never runs either");
 });
+
+test("a milk cow is held from its first frame, before SkyMP has any movement for it (2026-11-04: on its spot it had none, the hold was never reached and its own AI walked it)", () => {
+  const fn = formView.slice(formView.indexOf("private gmPuppetMove("), formView.indexOf("private tryHostIfNeed("));
+  const hold = fn.indexOf('if (sf && sf.anim === "still" && !this.gmPuppetStill) { this.gmPuppetStill = true; ac.setRestrained(true); ac.setDontMove(true); }');
+  const early = fn.indexOf("if (!model.movement) { try { if (ac.isInCombat()) ac.stopCombat(); }");
+  assert.ok(hold > 0, "the hold on the server's still frame");
+  assert.ok(early > 0 && hold < early, "it comes before the return for an animal with no movement yet");
+});
