@@ -49,6 +49,9 @@ public:
   {
     const WeapData* weapData = nullptr;
     const DNAM* weapDNAM = nullptr;
+    // GREYMARCH: the weapon's own enchantment (EITM, local to its file: 0 when
+    // none). A staff casts it (ActionListener::OnSpellCast)
+    uint32_t enchantmentFormId = 0;
   };
 
   Data GetData(CompressedFieldsCache& compressedFieldsCache) const noexcept;

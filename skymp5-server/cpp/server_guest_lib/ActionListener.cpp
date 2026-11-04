@@ -1423,6 +1423,34 @@ void ActionListener::OnUpdateAnimVariables(
   SendToNeighbours(myActor->idx, rawMsgData);
 }
 
+// GREYMARCH: does the actor hold (either hand) a weapon whose own enchantment
+// is this form (a staff's: its cast reports the enchantment as the spell)?
+namespace {
+bool HoldsStaffEnchantment(const MpActor& actor, uint32_t enchId)
+{
+  WorldState* espmProvider = actor.GetParent();
+  if (!espmProvider || !enchId) {
+    return false;
+  }
+  auto& browser = espmProvider->GetEspm().GetBrowser();
+  for (const auto& entry : actor.GetEquipment().inv.entries) {
+    if (entry.GetWorn() == Inventory::Worn::None) {
+      continue;
+    }
+    const auto lookup = browser.LookupById(entry.baseId);
+    if (!lookup.rec || lookup.rec->GetType() != espm::WEAP::kType) {
+      continue;
+    }
+    const auto data = espm::GetData<espm::WEAP>(entry.baseId, espmProvider);
+    if (data.enchantmentFormId &&
+        lookup.ToGlobalId(data.enchantmentFormId) == enchId) {
+      return true;
+    }
+  }
+  return false;
+}
+}
+
 void ActionListener::OnSpellCast(const RawMessageData& rawMsgData,
                                  const SpellCastMessage& msg)
 {
@@ -1479,8 +1507,13 @@ void ActionListener::OnSpellCast(const RawMessageData& rawMsgData,
 
   // GREYMARCH: a learned spell also counts (see OnHit: the server's copy of
   // the equipment can be stale)
+  // GREYMARCH (2026-11-03, the owner: a staff was only seen held, never
+  // cast): a staff casts its own enchantment, never equipped or learned as a
+  // spell. Its cast counts when the caster holds a weapon whose enchantment
+  // it is (HoldsStaffEnchantment)
   if (equipment.IsSpellEquipped(spellCastData.spell) == false &&
-      caster->IsSpellLearned(spellCastData.spell) == false) {
+      caster->IsSpellLearned(spellCastData.spell) == false &&
+      HoldsStaffEnchantment(*caster, spellCastData.spell) == false) {
     spdlog::info("ActionListener::OnSpellCast - spell {0:x} not "
                  "found in equipment",
                  spellCastData.spell);
