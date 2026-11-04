@@ -275,6 +275,7 @@ export class GreymarchBridge {
         if (type === "greymarchMinigame") { this.greymarchMiniShow(msg); return; } // a profession mini game before the work (gamemode minigames.js)
         if (type === "greymarchMinigameDone") { this.greymarchMiniDone(msg); return; }
         if (type === "greymarchPoisoned") { this.greymarchPoisonedWant = Array.isArray(msg.actors) ? msg.actors.map((a: any) => Number(a) >>> 0).filter((a: number) => a > 0).slice(0, 64) : []; return; } // THE GLOW (greymarchPoisonGlowTick)
+        if (type === "greymarchStaffSetCharge") { var scHand = msg.hand === 0 ? 0 : 1, scV = Number(msg.charge); if (scV >= 0 && isFinite(scV)) (this.greymarchStaffChargeSet || (this.greymarchStaffChargeSet = [])).push({ hand: scHand, base: Number(msg.base) >>> 0, charge: scV }); return; } // STAFF CHARGE (greymarchStaffChargeTick)
         if (type === "greymarchPoisonUsed") { this.greymarchPoisonStripWanted = Date.now(); return; } // POISONS ON WEAPONS (greymarchPoisonTick)
         if (type === "greymarchPoisonFx") { var pz = Number(msg.paralyze); if (pz > 0 && pz <= 60) this.greymarchPoisonParalyzeWanted = pz; return; }
         if (type === "greymarchOwnLook") { if (msg.look && typeof msg.look === "object" && Array.isArray(msg.look.headpartIds) && msg.look.headpartIds.length) { this.greymarchOwnLookWant = msg.look; this.greymarchOwnLookRebuild = msg.rebuild === true; } return; } // the barber refused a race or sex change (gamemode barber.js): the old look back on this body (greymarchOwnLookTick)
@@ -544,6 +545,7 @@ export class GreymarchBridge {
         if (this.greymarchWolfOn || this.greymarchWolfLungeClick) { try { var gmLungeP = this.sp.Game.getPlayer(); if (gmLungeP) this.greymarchWolfLungeTick(gmLungeP, Date.now()); } catch (lgErr) { /* next frame */ } } // the lunge, every frame (the wolf tick runs every 250 ms)
         this.greymarchSpellCostTick(); // the Spells balance tab's costs on the spell records (GreymarchCamera.dll 1.5)
         this.greymarchSpellEditTick(); // the Magic balance tab's durations and strengths on the spell records
+        this.greymarchStaffChargeTick(); // a staff's charge reported, and set back when the server says it came back fuller (gamemode staffcharge.js)
         this.greymarchCircleTick(); // the rings of the Circle spells other players cast near (gamemode circles.js)
         this.greymarchVampTick(); // a vampire: powers and potions reported, the abilities the server names, no Restoration, the feeding scene
         this.greymarchCuffsTick(Date.now()); // in cuffs: the cuffs worn, the bound pose (others' too), the chain drawn to whoever holds it
@@ -1464,6 +1466,40 @@ export class GreymarchBridge {
                 if (!this.greymarchSpellEditFailed) { this.greymarchSpellEditFailed = true; this.greymarchLog("spell edits: could not change " + d + ": " + err); }
             }
         }
+    }
+    // STAFF CHARGE (2026-11-03, the owner: drop a staff, pick it up, and it is full again). The server keeps only the staff, never its charge, so a staff
+    // that left the pack (dropped, stored, a relog) came back full. Twice a second the charge of each enchanted staff in hand (SKSE WornObject: hand 0 left,
+    // 1 right) is read and, when it changed, sent ({ customPacketType: "greymarchStaffCharge", base, hand, charge, max }); the server remembers it per
+    // character and staff and, when one comes back fuller with no soul gem used, answers greymarchStaffSetCharge, which is put on the staff in that hand here.
+    greymarchStaffChargeTick(): any {
+        var sp = this.sp, now = Date.now();
+        var setQ = this.greymarchStaffChargeSet;
+        if (!setQ && now < (this.greymarchStaffChargeNext || 0)) return;
+        this.greymarchStaffChargeNext = now + 500;
+        var me: any = null; try { me = sp.Game.getPlayer(); } catch (e0) { me = null; }
+        if (!me) return;
+        var last = this.greymarchStaffChargeLast || (this.greymarchStaffChargeLast = {});
+        for (var hand = 0; hand <= 1; hand++) {
+            var w: any = null; try { w = me.getEquippedWeapon(hand === 0); } catch (e1) { w = null; }
+            if (!w) { delete last[hand]; continue; }
+            var staff = false; try { staff = w.getWeaponType() === 8 && !!w.getEnchantment(); } catch (e2) { staff = false; }
+            if (!staff) { delete last[hand]; continue; }
+            var base = w.getFormID() >>> 0;
+            if (setQ) for (var q = 0; q < setQ.length; q++) {
+                if (setQ[q].hand !== hand || setQ[q].base !== base) continue;
+                try { sp.callNative("WornObject", "SetItemCharge", undefined, me, hand, 0, setQ[q].charge); this.greymarchLog("staff charge: set back to " + Math.round(setQ[q].charge) + " (" + base.toString(16) + ")"); } catch (e3) { /* SKSE missing */ }
+                delete last[hand];
+            }
+            var charge = -1, max = -1;
+            try { charge = Number(sp.callNative("WornObject", "GetItemCharge", undefined, me, hand, 0)); max = Number(sp.callNative("WornObject", "GetItemMaxCharge", undefined, me, hand, 0)); } catch (e4) { charge = -1; }
+            if (!(charge >= 0) || !isFinite(charge)) continue;
+            var was = last[hand];
+            if (was && was.base === base && Math.abs(was.charge - charge) < 0.5 && now - was.at < 30000) continue;
+            last[hand] = { base: base, charge: charge, at: now };
+            var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchStaffCharge", base: base, hand: hand, charge: Math.round(charge * 100) / 100, max: isFinite(max) && max > 0 ? Math.round(max) : 0 }) };
+            this.controller.emitter.emit("sendMessage", { message: message, reliability: "reliable" });
+        }
+        this.greymarchStaffChargeSet = null;
     }
     greymarchVampSend(msg: any): any {
         var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify(Object.assign({ customPacketType: "greymarchVamp" }, msg)) };
