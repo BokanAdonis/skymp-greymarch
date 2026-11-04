@@ -2189,8 +2189,11 @@ export class GreymarchBridge {
     // quest (RaceMenu 0x800) adds the rest. Both are Start Game Enabled, but SkyMP puts the player in the world by loading a save it builds itself, and the
     // tab never showed. Once the body is in the world (5 s), each one that is not running is started, checked again 10 s later, three tries at most;
     // what was found goes to the log either way ("racemenu: quest ..."), so a tab still missing with both running points at the script, not the quest.
+    // RESET (2026-11-04: the log said both running, and still no tab): RaceMenuPlugin's script checks the skee and NiOverride versions when it starts and
+    // keeps the answer, and registers for the race menu's category request; under SkyMP's built save it kept a failed answer (or lost the registration).
+    // So RaceMenuPlugin is reset and started once a session even when it runs, which runs its start-up again; RaceMenu's own quest is left alone.
     greymarchRaceMenuQuestsTick(now: number): any {
-        var st = this.greymarchRmQuests || (this.greymarchRmQuests = { since: 0, next: 0, tries: 0, done: false, said: {} });
+        var st = this.greymarchRmQuests || (this.greymarchRmQuests = { since: 0, next: 0, tries: 0, done: false, said: {}, reset: false });
         if (st.done || now < st.next) return;
         st.next = now + 1000;
         var sp = this.sp;
@@ -2205,7 +2208,13 @@ export class GreymarchBridge {
                 var q = list[i], quest = sp.Quest.from(sp.Game.getFormFromFile(q.id, q.file));
                 if (!quest) { if (!st.said[q.name]) { st.said[q.name] = 1; this.greymarchLog("racemenu: quest " + q.name + " not found (" + q.file + " not loaded)"); } continue; }
                 var running = !!quest.isRunning(), starting = !!quest.isStarting();
-                if (running) { if (st.said[q.name] !== 2) { st.said[q.name] = 2; this.greymarchLog("racemenu: quest " + q.name + " running" + (st.tries ? " (after a start)" : "")); } continue; }
+                if (running && q.name === "RaceMenuPlugin" && !st.reset) {
+                    st.reset = true; off++;
+                    quest.reset(); quest.start();
+                    this.greymarchLog("racemenu: quest RaceMenuPlugin was running: reset and started again (its start-up runs again)");
+                    continue;
+                }
+                if (running) { if (st.said[q.name] !== 2) { st.said[q.name] = 2; this.greymarchLog("racemenu: quest " + q.name + " running" + (st.tries ? " (after a start)" : "") + (q.name === "RaceMenuPlugin" && st.reset ? " (after the reset)" : "")); } continue; }
                 off++;
                 if (starting) continue;
                 if (st.tries >= 3) { this.greymarchLog("racemenu: quest " + q.name + " still not running after 3 starts"); continue; }

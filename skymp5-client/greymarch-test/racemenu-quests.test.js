@@ -36,3 +36,12 @@ test("what was found is logged either way, and an error stops the check without 
   assert.match(body, /"racemenu: quest " \+ q\.name \+ " not found \("/);
   assert.match(body, /catch \(err\) \{\s*this\.greymarchLog\("racemenu: the quests could not be checked: " \+ err\);\s*st\.done = true;/);
 });
+
+test("RaceMenuPlugin is reset and started once a session even when running (its start-up runs again); RaceMenu's own quest is not", () => {
+  assert.match(body, /if \(running && q\.name === "RaceMenuPlugin" && !st\.reset\) \{/);
+  assert.match(body, /st\.reset = true; off\+\+;\s*quest\.reset\(\); quest\.start\(\);/);
+  assert.match(body, /"racemenu: quest RaceMenuPlugin was running: reset and started again/);
+  assert.match(body, /reset: false \}/);
+  assert.strictEqual((body.match(/quest\.reset\(\)/g) || []).length, 1, "only the one reset");
+});
+
