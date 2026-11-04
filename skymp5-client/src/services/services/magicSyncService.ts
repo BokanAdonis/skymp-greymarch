@@ -10,6 +10,7 @@ import { MsgType } from "../../messages";
 import { SpellCastMsgData, SpellCastMessage } from "../messages/spellCastMessage";
 import { UpdateAnimVariablesMessageMsgData } from "../messages/updateAnimVariablesMessage";
 import { sanitizeAim, sanitizeAimFloats, lookFromAngles } from "./spellAim";
+import { readStaffCharge } from "../../greymarch/staffCharge";
 
 export class MagicSyncService extends ClientListener {
     constructor(private sp: Sp, private controller: CombinedController) {
@@ -228,7 +229,7 @@ export class MagicSyncService extends ClientListener {
             try { ench = w && w.getWeaponType() === 8 ? w.getEnchantment() : null; } catch (e) { ench = null; }
             if (!w || !ench) { this.staffEnd(hand, "staff put away"); delete this.staffLast[hand]; continue; }
             let charge = -1;
-            try { charge = Number(this.sp.callNative("WornObject", "GetItemCharge", undefined, me, hand, 0)); } catch (e) { charge = -1; }
+            charge = readStaffCharge(me, hand);
             if (!(charge >= 0) || !isFinite(charge)) continue;
             const base = w.getFormID() >>> 0;
             let st = this.staffLast[hand];

@@ -2,6 +2,7 @@
 // Greymarch bridge: everything Greymarch adds to the SkyMP client lives here, so the rest of SkyMP stays as upstream wrote it.
 // Ported from the old text patches (tools/patch-client.js in the launcher repo). Loosely typed on purpose for the first port.
 // Hooks into SkyMP are small and marked "GREYMARCH" in authService.ts, formView.ts, activationService.ts, remoteServer.ts, loadGameService.ts, singlePlayerService.ts.
+import { readStaffCharge, writeStaffCharge } from "./staffCharge";
 import { MsgType } from "../messages";
 import * as misc from "../view/worldViewMisc";
 import * as appearanceMod from "../sync/appearance";
@@ -1488,17 +1489,19 @@ export class GreymarchBridge {
             var base = w.getFormID() >>> 0;
             if (setQ) for (var q = 0; q < setQ.length; q++) {
                 if (setQ[q].hand !== hand || setQ[q].base !== base) continue;
-                try { sp.storage["greymarchStaffChargeSetAt"] = Date.now(); sp.callNative("WornObject", "SetItemCharge", undefined, me, hand, 0, setQ[q].charge); this.greymarchLog("staff charge: set back to " + Math.round(setQ[q].charge) + " (" + base.toString(16) + ")"); } catch (e3) { /* SKSE missing */ }
+                try { sp.storage["greymarchStaffChargeSetAt"] = Date.now(); writeStaffCharge(me, hand, setQ[q].charge); this.greymarchLog("staff charge: set back to " + Math.round(setQ[q].charge) + " (" + base.toString(16) + ")"); } catch (e3) { /* SKSE missing */ }
                 delete last[hand];
             }
             var charge = -1, max = -1;
-            try { charge = Number(sp.callNative("WornObject", "GetItemCharge", undefined, me, hand, 0)); max = Number(sp.callNative("WornObject", "GetItemMaxCharge", undefined, me, hand, 0)); } catch (e4) { charge = -1; }
+            charge = readStaffCharge(me, hand);
+            try { max = Number(sp.callNative("WornObject", "GetItemMaxCharge", undefined, me, hand, 0)); } catch (e4) { max = -1; }
             if (!(charge >= 0) || !isFinite(charge)) continue;
             var was = last[hand];
             if (was && was.base === base && Math.abs(was.charge - charge) < 0.5 && now - was.at < 30000) continue;
             last[hand] = { base: base, charge: charge, at: now };
             var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchStaffCharge", base: base, hand: hand, charge: Math.round(charge * 100) / 100, max: isFinite(max) && max > 0 ? Math.round(max) : 0 }) };
             this.controller.emitter.emit("sendMessage", { message: message, reliability: "reliable" });
+            if ((this.greymarchStaffChargeSaid || 0) < 10) { this.greymarchStaffChargeSaid = (this.greymarchStaffChargeSaid || 0) + 1; this.greymarchLog("staff charge: sent " + Math.round(charge) + " of " + Math.round(max) + " (" + base.toString(16) + " hand " + hand + ")"); }
         }
         this.greymarchStaffChargeSet = null;
     }
