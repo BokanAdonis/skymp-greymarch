@@ -36,3 +36,9 @@ test("the range is the race's, sent by the server with the look; 0.93-1.07 until
   assert.match(src, /if \(Array\.isArray\(msg\.height\) && msg\.height\.length === 2 && msg\.height\[0\] > 0 && msg\.height\[1\] >= msg\.height\[0\]\) this\.greymarchHeightRange = \[Number\(msg\.height\[0\]\), Number\(msg\.height\[1\]\)\];/);
   assert.match(body, /return Array\.isArray\(r\) \? r : \[0\.93, 1\.07\];/);
 });
+
+test("the sex comes from the base object (Actor has no getActorBase in this SkyrimPlatform: the first build threw on it)", () => {
+  assert.doesNotMatch(body, /getActorBase\(/);
+  assert.match(body, /this\.sp\.ActorBase\.from\(player\.getBaseObject\(\)\)/);
+});
+

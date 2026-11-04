@@ -2249,12 +2249,16 @@ export class GreymarchBridge {
             this.greymarchLog("racemenu: the Height slider: " + err);
         }
     }
+    greymarchHeightFemale(player: any): any { // Actor has no getActorBase here: the base object, as the head-part code does
+        var base = this.sp.ActorBase.from(player.getBaseObject());
+        return !!base && base.getSex() === 1;
+    }
     greymarchHeightLimits(): any {
         var r = this.greymarchHeightRange;
         return Array.isArray(r) ? r : [0.93, 1.07];
     }
     greymarchHeightNow(): any {
-        var sp = this.sp, player = sp.Game.getPlayer(), female = player.getActorBase().getSex() === 1;
+        var sp = this.sp, player = sp.Game.getPlayer(), female = this.greymarchHeightFemale(player);
         var v = Number(sp.callNative("NiOverride", "GetNodeTransformScale", undefined, player, false, female, "NPC", "RSMPlugin"));
         return v > 0 ? v : 1;
     }
@@ -2267,7 +2271,7 @@ export class GreymarchBridge {
     }
     greymarchHeightSet(value: number): any {
         if (!(value > 0)) return;
-        var sp = this.sp, player = sp.Game.getPlayer(), female = player.getActorBase().getSex() === 1;
+        var sp = this.sp, player = sp.Game.getPlayer(), female = this.greymarchHeightFemale(player);
         var r = this.greymarchHeightLimits(), v = Math.round(Math.min(r[1], Math.max(r[0], value)) * 1000) / 1000;
         if (v === 1) { sp.callNative("NiOverride", "RemoveNodeTransformScale", undefined, player, false, female, "NPC", "RSMPlugin"); sp.callNative("NiOverride", "RemoveNodeTransformScale", undefined, player, true, female, "NPC", "RSMPlugin"); }
         else { sp.callNative("NiOverride", "AddNodeTransformScale", undefined, player, false, female, "NPC", "RSMPlugin", v); sp.callNative("NiOverride", "AddNodeTransformScale", undefined, player, true, female, "NPC", "RSMPlugin", v); }
