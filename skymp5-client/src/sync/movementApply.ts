@@ -3,7 +3,8 @@ import {
   Actor,
   Game,
   TESModPlatform,
-  Debug
+  Debug,
+  storage
 } from "skyrimPlatform";
 import { RespawnNeededError } from "../lib/errors";
 import { Movement, RunMode, AnimationVariables, Transform, NiPoint3 } from "./movement";
@@ -193,12 +194,15 @@ const translateTo = (refr: ObjectReference, m: Movement) => {
       return;
     }
 
+    // GREYMARCH: while a held spell is aimed (remoteServer.ts greymarchAimCopy), its pitch, not the movement's (0 in third person)
+    let pitch = m.rot[0];
+    try { const ap: any = storage["greymarchAimPitch"]; const o = ap ? ap[refr.getFormID()] : null; if (o && Date.now() < o.until) pitch = o.deg; } catch (e) { /* the movement's */ }
     if (!actor || !actor.isDead()) {
       refr.translateTo(
         gTempTargetPos[0],
         gTempTargetPos[1],
         gTempTargetPos[2],
-        m.rot[0],
+        pitch,
         m.rot[1],
         m.rot[2],
         speed,

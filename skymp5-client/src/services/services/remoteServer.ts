@@ -1189,7 +1189,7 @@ export class RemoteServer extends ClientListener {
         return;
       }
 
-      this.greymarchMagicDiag(`magic: saw ${msg.data.caster.toString(16)} cast ${msg.data.spell.toString(16)} hand ${msg.data.castingSource} (their copy holds ${held ? held.getFormID().toString(16) : "nothing"}, casting ${spell ? spell.getFormID().toString(16) : "nothing"}; aim ${Number(msg.data.aimAngle).toFixed(2)}/${Number(msg.data.aimHeading).toFixed(2)}, copy angle ${Math.round(ac.getAngleX())}/${Math.round(ac.getAngleZ())})`);
+      this.greymarchMagicDiag(`magic: saw ${msg.data.caster.toString(16)} cast ${msg.data.spell.toString(16)} hand ${msg.data.castingSource} (their copy holds ${held ? held.getFormID().toString(16) : "nothing"}, casting ${spell ? spell.getFormID().toString(16) : "nothing"}; aim ${Number(msg.data.aimAngle).toFixed(2)}/${Number(msg.data.aimHeading).toFixed(2)}, copy angle ${Math.round(ac.getAngleX())}/${Math.round(ac.getAngleZ())}; /castanim ${castAnimMode()})`);
       // GREYMARCH (2026-11-01, the owner: a fire or frost cloak was never seen by others): a spell cast on oneself has no projectile, so the launch below
       // showed nothing; its look (each effect's shader on the caster) is played instead, and nothing else is run here (greymarch/selfShaders.ts)
       if (spell && showSelfBuff(ac, spell.getFormID())) {
@@ -1378,14 +1378,15 @@ export class RemoteServer extends ClientListener {
   // updates a second) is a target; every frame the copy turns a third of the way to it, so a sweep is followed without steps. Heading too: a standing
   // turn under 80 degrees never reached the copy (movementApply), and the stream went off to the side. Held 1.6 s after the caster's last word (their
   // reminders come each second), and let go at the cast's end.
-  private greymarchAimTargets = new Map<number, { pitch: number, heading: number, until: number }>();
+  private greymarchAimTargets = new Map<number, { pitch: number, heading: number, until: number, cur?: number, put?: number }>();
   private greymarchAimLoop = false;
   private greymarchAimCopy(ac: Actor, aimAngle: number, aimHeading: number): void {
     if (!Number.isFinite(aimAngle)) return;
     const pitch = Math.max(-89, Math.min(89, aimAngle * 180 / Math.PI));
     let heading = Number.isFinite(aimHeading) ? aimHeading * 180 / Math.PI : NaN;
     if (Number.isFinite(heading)) heading = ((heading % 360) + 360) % 360;
-    this.greymarchAimTargets.set(ac.getFormID(), { pitch, heading, until: Date.now() + 1600 });
+    const was = this.greymarchAimTargets.get(ac.getFormID());
+    this.greymarchAimTargets.set(ac.getFormID(), { pitch, heading, until: Date.now() + 1600, cur: was ? was.cur : undefined, put: was ? was.put : undefined });
     if (this.greymarchAimLoop) return;
     this.greymarchAimLoop = true;
     const step = () => {
@@ -1395,11 +1396,23 @@ export class RemoteServer extends ClientListener {
         try {
           const a = Actor.from(Game.getFormEx(id));
           if (!a || a.isDead()) { this.greymarchAimTargets.delete(id); continue; }
-          const x = a.getAngleX(), z = a.getAngleZ();
-          const nx = Math.abs(t.pitch - x) < 0.5 ? t.pitch : x + (t.pitch - x) / 3;
+          // UP AND DOWN BY TRANSLATETO (2026-11-04, the owner: "its reading side to side, but it is not reading up and down"): the game ignores SetAngle's
+          // X on a character, but keeps the X a TranslateTo brings (the movement's way: a copy once stayed 54 degrees down after one). The pitch is kept
+          // here (cur), a third of the way to the target each frame, and put on with a TranslateTo to where the copy stands; the heading by SetAngle.
+          // movementApply.ts uses the same pitch while it lasts (storage greymarchAimPitch), so a walk does not level it.
+          const cur: number = typeof t.cur === "number" && Number.isFinite(t.cur) ? t.cur : a.getAngleX();
+          const nx = Math.abs(t.pitch - cur) < 0.3 ? t.pitch : cur + (t.pitch - cur) / 3;
+          const z = a.getAngleZ();
           let nz = z;
           if (Number.isFinite(t.heading)) { let d = ((t.heading - z + 540) % 360) - 180; nz = Math.abs(d) < 0.5 ? t.heading : z + d / 3; }
-          if (Math.abs(nx - x) > 0.05 || Math.abs(nz - z) > 0.05) a.setAngle(nx, a.getAngleY(), nz);
+          if (Math.abs(nz - z) > 0.05) a.setAngle(a.getAngleX(), a.getAngleY(), nz);
+          if (typeof t.put !== "number" || !Number.isFinite(t.put) || Math.abs(nx - t.put) > 0.3) {
+            a.translateTo(a.getPositionX(), a.getPositionY(), a.getPositionZ(), nx, a.getAngleY(), nz, 100, 0);
+            t.put = nx;
+          }
+          t.cur = nx;
+          const aimPitch = storage["greymarchAimPitch"] || (storage["greymarchAimPitch"] = {});
+          (aimPitch as any)[id] = { deg: nx, until: t.until };
         } catch (e) { this.greymarchAimTargets.delete(id); }
       }
       if (this.greymarchAimTargets.size) once('update', step); else this.greymarchAimLoop = false;
@@ -1407,7 +1420,7 @@ export class RemoteServer extends ClientListener {
     once('update', step);
   }
   // the cast ended: the copy's aim is no longer held (the movement and the level pitch take it again)
-  private greymarchAimRelease(copyId: number): void { this.greymarchAimTargets.delete(copyId); }
+  private greymarchAimRelease(copyId: number): void { this.greymarchAimTargets.delete(copyId); try { const m: any = storage["greymarchAimPitch"]; if (m) delete m[copyId]; } catch (e) { /* none */ } }
 
   private greymarchIsHeld(spell: Spell): boolean {
     try { const effect = spell.getNthEffectMagicEffect(0); return !!effect && effect.getCastingType() === 2; } catch (e) { return false; }
@@ -1434,7 +1447,7 @@ export class RemoteServer extends ClientListener {
     this.greymarchMagicDiagLeft--;
     try { (this.controller.emitter as any).emit("greymarchStage", text); } catch (e) { /* diagnostics only */ }
   }
-  private greymarchMagicDiagLeft = 80;
+  private greymarchMagicDiagLeft = 400;
   private greymarchDoubleCreates = 0;
   private greymarchLastCastAt = new Map<string, number>();
 
