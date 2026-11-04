@@ -1354,11 +1354,13 @@ export class GreymarchBridge {
                     var player = sp.Game.getPlayer(); if (!player) continue;
                     var at = m.hazard.indexOf(":"), hid = parseInt(m.hazard.slice(0, at), 16), file = m.hazard.slice(at + 1);
                     var hz = at > 0 && hid > 0 ? sp.Game.getFormFromFile(hid, file) : null;
-                    var ref = hz ? this.greymarchCirclePlace(hz, m.pos) : null;
+                    var who = parseInt(String(m.key).split(":")[0], 10) >>> 0;
+                    var ref = hz ? this.greymarchCirclePlace(hid, file, m.pos, who) : null;
                     if (!hz) this.greymarchLog("circle: no hazard " + m.hazard + " in this game");
                     if (ref) {
-                        // the hazard lasts its own 30 s (GuardianCircleTurnHazard): placed again before then while the circle stands
-                        rings[m.key] = { id: ref.getFormID(), until: now + Math.min(10 * 60 * 1000, Number(m.ms)), hz: hz, pos: m.pos.slice(), again: now + CIRCLE_REPLACE_MS, check: now + 1500 };
+                        // the hazard lasts its own 30 s (GuardianCircleTurnHazard): placed again before then while the circle stands (by its id and file: a
+                        // game object is good for this frame only)
+                        rings[m.key] = { id: ref.getFormID(), until: now + Math.min(10 * 60 * 1000, Number(m.ms)), hid: hid, file: file, pos: m.pos.slice(), who: who, again: now + CIRCLE_REPLACE_MS };
                         this.greymarchLog("circle: ring " + m.hazard + " placed at " + m.pos.map(Math.round).join(" ") + " for " + Math.round(Number(m.ms) / 1000) + " s (ref " + (ref.getFormID() >>> 0).toString(16) + ")");
                         continue;
                     }
@@ -1380,25 +1382,28 @@ export class GreymarchBridge {
         for (var k in rings) {
             var r = rings[k];
             if (now >= r.until) { this.greymarchCircleRemove(r.id); delete rings[k]; continue; }
-            if (r.check && now >= r.check) { // was it drawn? (the breadcrumb that says which step fails if the ring is still not seen)
-                r.check = 0;
-                var placed: any = null; try { placed = r.id ? sp.ObjectReference.from(sp.Game.getFormEx(r.id)) : null; } catch (e) { placed = null; }
-                var loaded = false, enabled = false; try { loaded = !!placed && placed.is3DLoaded(); enabled = !!placed && !placed.isDisabled(); } catch (e) { /* unknown */ }
-                this.greymarchLog("circle: ring " + (r.id >>> 0).toString(16) + (placed ? " exists, enabled " + enabled + ", drawn " + loaded : " is gone"));
-            }
-            if (r.hz && r.again && now >= r.again) {
+            if (r.hid && r.again && now >= r.again) { // the last one runs out by itself (a placed hazard cannot be looked up again to take away)
                 r.again = now + CIRCLE_REPLACE_MS;
-                this.greymarchCircleRemove(r.id);
-                var re = this.greymarchCirclePlace(r.hz, r.pos); r.id = re ? re.getFormID() : 0;
+                var re = this.greymarchCirclePlace(r.hid, r.file, r.pos, r.who); r.id = re ? re.getFormID() : 0;
             }
         }
     }
-    // a ring (a hazard) placed on the ground at pos: placed where this player stands, then moved there
-    greymarchCirclePlace(hz: any, pos: number[]): any {
-        var ref: any = null;
-        try { ref = this.sp.Game.getPlayer().placeAtMe(hz, 1, false, false); } catch (e) { this.greymarchLog("circle: placing failed: " + e); return null; }
-        if (!ref) { this.greymarchLog("circle: the game placed nothing for " + (hz.getFormID() >>> 0).toString(16)); return null; }
-        try { ref.setPosition(Number(pos[0]), Number(pos[1]), Number(pos[2])); } catch (e) { this.greymarchLog("circle: the ring could not be moved: " + e); }
+    // a ring (a hazard) placed AT THE CASTER'S CHARACTER here (2026-11-04, the owner: "It spawned his ring around me": a hazard placed at this player and moved
+    // with SetPosition stays where it was placed). Only when their character is not loaded here is it placed at this player and moved to pos.
+    greymarchCirclePlace(hid: number, file: string, pos: number[], who: number): any {
+        var sp = this.sp, ref: any = null;
+        try {
+            var hz = sp.Game.getFormFromFile(hid, file); if (!hz) return null;
+            var local = who ? misc.remoteIdToLocalId(who) : 0;
+            var caster = local ? sp.Actor.from(sp.Game.getFormEx(local)) : null;
+            if (caster && caster.is3DLoaded()) ref = caster.placeAtMe(hz, 1, false, false);
+            else {
+                ref = sp.Game.getPlayer().placeAtMe(hz, 1, false, false);
+                if (ref) { try { ref.setPosition(Number(pos[0]), Number(pos[1]), Number(pos[2])); } catch (mErr) { /* where this player stands */ } }
+                this.greymarchLog("circle: the caster " + (who >>> 0).toString(16) + " is not loaded here, the ring is placed at this player and moved");
+            }
+        } catch (e) { this.greymarchLog("circle: placing failed: " + e); return null; }
+        if (!ref) this.greymarchLog("circle: the game placed nothing for " + (hid >>> 0).toString(16));
         return ref;
     }
     greymarchCircleRemove(id: number): any {
