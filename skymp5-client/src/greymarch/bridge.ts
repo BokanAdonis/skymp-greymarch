@@ -1482,6 +1482,22 @@ export class GreymarchBridge {
         var me: any = null; try { me = sp.Game.getPlayer(); } catch (e0) { me = null; }
         if (!me) return;
         var last = this.greymarchStaffChargeLast || (this.greymarchStaffChargeLast = {});
+        // A SOUL GEM USED (2026-11-03, the owner: a recharge went straight back to empty; the log: the filled Black Soul Gem was used and back in the pack a moment
+        // later, the server never saw it go): the filled soul gems in the pack, compared each time; one gone is remembered for a minute and sent with the next
+        // staff charge that went up ({ gem: { base, soul } }), so the server takes that gem out of its copy of the pack and keeps the recharge
+        try {
+            var gemNow: any = {}, gEntries = invMod.getInventory(me).entries;
+            for (var gi = 0; gi < gEntries.length; gi++) {
+                var ge: any = gEntries[gi]; var gf = sp.Game.getFormEx(ge.baseId);
+                if (!gf || gf.getType() !== 52) continue; // a soul gem
+                var gSoul = Number(ge.soul) || 0; if (!gSoul) { try { gSoul = Number(sp.SoulGem.from(gf).getSoulSize()) || 0; } catch (gx) { gSoul = 0; } }
+                if (!gSoul) continue;
+                var gk = (ge.baseId >>> 0) + ":" + (Number(ge.soul) || 0); gemNow[gk] = (gemNow[gk] || 0) + (Number(ge.count) || 0);
+            }
+            var gemWas = this.greymarchGemsWas;
+            if (gemWas) for (var gk2 in gemWas) if ((gemNow[gk2] || 0) < gemWas[gk2]) { var gp = gk2.split(":"); this.greymarchGemUsed = { base: Number(gp[0]) >>> 0, soul: Number(gp[1]) || 0, at: now }; this.greymarchLog("staff charge: a filled soul gem went (" + gk2 + ")"); }
+            this.greymarchGemsWas = gemNow;
+        } catch (gErr) { /* the gems only */ }
         for (var hand = 0; hand <= 1; hand++) {
             var w: any = null; try { w = me.getEquippedWeapon(hand === 0); } catch (e1) { w = null; }
             if (!w) { delete last[hand]; continue; }
@@ -1499,8 +1515,11 @@ export class GreymarchBridge {
             if (!(charge >= 0) || !isFinite(charge)) continue;
             var was = last[hand];
             if (was && was.base === base && Math.abs(was.charge - charge) < 0.5 && now - was.at < 30000) continue;
+            var wentUp = !was || was.base !== base || charge > was.charge + 0.5;
+            var gemUsed = this.greymarchGemUsed && now - this.greymarchGemUsed.at < 60000 && wentUp ? this.greymarchGemUsed : null;
+            if (gemUsed) this.greymarchGemUsed = null;
             last[hand] = { base: base, charge: charge, at: now };
-            var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchStaffCharge", base: base, hand: hand, charge: Math.round(charge * 100) / 100, max: isFinite(max) && max > 0 ? Math.round(max) : 0 }) };
+            var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchStaffCharge", base: base, hand: hand, charge: Math.round(charge * 100) / 100, max: isFinite(max) && max > 0 ? Math.round(max) : 0, gem: gemUsed ? { base: gemUsed.base, soul: gemUsed.soul } : undefined }) };
             this.controller.emitter.emit("sendMessage", { message: message, reliability: "reliable" });
             if ((this.greymarchStaffChargeSaid || 0) < 10) { this.greymarchStaffChargeSaid = (this.greymarchStaffChargeSaid || 0) + 1; this.greymarchLog("staff charge: sent " + Math.round(charge) + " of " + Math.round(max) + " (" + base.toString(16) + " hand " + hand + ")"); }
         }
