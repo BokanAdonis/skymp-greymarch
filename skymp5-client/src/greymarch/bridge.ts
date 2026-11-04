@@ -1491,7 +1491,7 @@ export class GreymarchBridge {
             if (setQ) for (var q = 0; q < setQ.length; q++) {
                 if (setQ[q].hand !== hand || setQ[q].base !== base) continue;
                 try { sp.storage["greymarchStaffChargeSetAt"] = Date.now(); writeStaffCharge(me, hand, setQ[q].charge); this.greymarchLog("staff charge: set back to " + Math.round(setQ[q].charge) + " (" + base.toString(16) + ")"); } catch (e3) { /* SKSE missing */ }
-                delete last[hand];
+                // the charge is read again below and sent only if it changed (it was sent again at once: a set that did not take was asked for 1,221 times)
             }
             var charge = -1, max = -1;
             charge = readStaffCharge(me, hand);

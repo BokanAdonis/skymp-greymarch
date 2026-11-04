@@ -9,7 +9,8 @@ export const readStaffCharge = (me: Actor, hand: number): number => {
   try { worn = Number(callNative("WornObject", "GetItemCharge", undefined, me, hand, 0)); } catch (e) { worn = NaN; }
   try { av = Number(me.getActorValue(hand === 0 ? "LeftItemCharge" : "RightItemCharge")); } catch (e) { av = NaN; }
   if (told < 6) { told++; try { writeLogs("greymarch", `staff charge: hand ${hand} WornObject ${worn} actor value ${av}`); } catch (e) { /* logs only */ } }
-  if (isFinite(worn) && worn > 0) return worn;
+  // THE ACTOR VALUE FIRST (2026-11-03, the owner's log: after a staff was picked up WornObject said 500 for good while the charge itself went down, so the
+  // charge set back was asked again and again and no cast was ever seen): it is the charge the game uses and shows
   if (isFinite(av) && av >= 0) return av;
   return isFinite(worn) && worn >= 0 ? worn : -1;
 };
