@@ -19,6 +19,7 @@ import * as messages from '../../messages';
 
 /* eslint-disable @typescript-eslint/no-empty-function */
 import { ObjectReferenceEx } from '../../extensions/objectReferenceEx';
+import { castAnimStart, castAnimStopEvent, castAnimFfMs, castAnimMode } from '../../greymarch/castAnimMode';
 import { showSelfBuff } from '../../greymarch/selfShaders';
 import { IdManager } from '../../lib/idManager';
 import { nameof } from '../../lib/nameof';
@@ -1332,16 +1333,17 @@ export class RemoteServer extends ClientListener {
     try {
       const ac = Actor.from(Game.getFormEx(copyId));
       if (!ac) return;
-      ac.setAnimationVariableBool(name, on);
+      const how = castAnimStart(castingSource, held);
+      if (how.vars) ac.setAnimationVariableBool(name, on);
       // a single shot whose charge was already shown (greymarchCastCharge, bridge.ts) is not started again: the charge flows into the release
       const charging = !held && Date.now() - (Number(storage["greymarchCharging:" + copyId + ":" + castingSource]) || 0) < 15000;
       storage["greymarchCharging:" + copyId + ":" + castingSource] = 0;
       if (on && !charging) {
-        Debug.sendAnimationEvent(ac, castingSource === 0 ? "BeginCastLeft" : "BeginCastRight"); // the input event the game's own cast sends
+        if (how.begin) Debug.sendAnimationEvent(ac, castingSource === 0 ? "BeginCastLeft" : "BeginCastRight"); // the input event the game's own cast sends
         // SWAPPED (2026-11-04, the owner: "when people cast a single shot they hold their hand out, and when they cast a stream they charge it by their
         // head. That animation is reversed"): in this graph _SpellAimedStart gives the hand held out (the stream) and _SpellAimedConcentrationStart the charge
         // by the head (the single shot)
-        Debug.sendAnimationEvent(ac, hand + (held ? "_SpellAimedStart" : "_SpellAimedConcentrationStart"));
+        if (how.sub) Debug.sendAnimationEvent(ac, how.sub); // which one: /castanim (castAnimMode.ts); the swapped set by default
         // WHAT THE COPY DID (diagnostics, a quarter second later): drawn, casting, the hand's type and state, the aim it was given
         const at0 = Date.now();
         const look = () => {
@@ -1356,16 +1358,16 @@ export class RemoteServer extends ClientListener {
         };
         once('update', look);
       }
-      else { this.greymarchAimRelease(copyId); Debug.sendAnimationEvent(ac, "CastStop"); if (held === false) { try { if (Math.abs(ac.getAngleX()) > 1) ac.setAngle(0, ac.getAngleY(), ac.getAngleZ()); } catch (e2) { /* level again */ } } }
+      else { this.greymarchAimRelease(copyId); if (castAnimStopEvent()) Debug.sendAnimationEvent(ac, "CastStop"); if (held === false) { try { if (Math.abs(ac.getAngleX()) > 1) ac.setAngle(0, ac.getAngleY(), ac.getAngleZ()); } catch (e2) { /* level again */ } } }
     } catch (e) { return; }
     if (!on || held) { this.greymarchPoseOff.delete(key); return; }
-    const at = Date.now() + RemoteServer.POSE_FF_MS;
+    const at = Date.now() + castAnimFfMs();
     this.greymarchPoseOff.set(key, at);
     const later = () => {
       if (this.greymarchPoseOff.get(key) !== at) return; // another cast since: its own timer
       if (Date.now() < at) { once('update', later); return; }
       this.greymarchPoseOff.delete(key);
-      try { const a2 = Actor.from(Game.getFormEx(copyId)); if (a2) { a2.setAnimationVariableBool(name, false); Debug.sendAnimationEvent(a2, "CastStop"); } } catch (e) { /* gone */ }
+      try { const a2 = Actor.from(Game.getFormEx(copyId)); if (a2) { if (castAnimMode() !== 6) a2.setAnimationVariableBool(name, false); if (castAnimStopEvent()) Debug.sendAnimationEvent(a2, "CastStop"); } } catch (e) { /* gone */ }
     };
     once('update', later);
   }

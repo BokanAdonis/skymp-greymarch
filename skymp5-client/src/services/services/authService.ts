@@ -256,6 +256,7 @@ export class AuthService extends ClientListener {
       case 'greymarchVampMenuOpen':
       case 'greymarchEmote': // the server asks for an emote (gamemode: a salt deposit)
       case 'greymarchPoisoned': // who carries a poisoned blade: it glows (gamemode weaponpoison.js)
+      case 'greymarchCastAnim': // how other players' casts are animated, chosen by staff (/castanim, gamemode castanim.js)
       case 'greymarchCastCharge': // another player started (or let go) the charge of a single-shot spell: their copy shows it (gamemode castcharge relay)
       case 'greymarchStaffSetCharge': // a staff came back fuller than it was left: its charge set back (gamemode staffcharge.js)
       case 'greymarchPoisonUsed': // a weapon hit used the poison: off the blade (gamemode weaponpoison.js)

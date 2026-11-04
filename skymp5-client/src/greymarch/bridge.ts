@@ -3,6 +3,7 @@
 // Ported from the old text patches (tools/patch-client.js in the launcher repo). Loosely typed on purpose for the first port.
 // Hooks into SkyMP are small and marked "GREYMARCH" in authService.ts, formView.ts, activationService.ts, remoteServer.ts, loadGameService.ts, singlePlayerService.ts.
 import { readStaffCharge, writeStaffCharge } from "./staffCharge";
+import { castAnimStart, castAnimStopEvent, castAnimMode } from "./castAnimMode";
 import { MsgType } from "../messages";
 import * as misc from "../view/worldViewMisc";
 import * as appearanceMod from "../sync/appearance";
@@ -284,6 +285,7 @@ export class GreymarchBridge {
         if (type === "greymarchMinigame") { this.greymarchMiniShow(msg); return; } // a profession mini game before the work (gamemode minigames.js)
         if (type === "greymarchMinigameDone") { this.greymarchMiniDone(msg); return; }
         if (type === "greymarchPoisoned") { this.greymarchPoisonedWant = Array.isArray(msg.actors) ? msg.actors.map((a: any) => Number(a) >>> 0).filter((a: number) => a > 0).slice(0, 64) : []; return; } // THE GLOW (greymarchPoisonGlowTick)
+        if (type === "greymarchCastAnim") { var cm = Number(msg.mode), cf = Number(msg.ffMs); if (cm >= 1 && cm <= 6) this.sp.storage["greymarchCastAnimMode"] = cm; if (cf >= 200 && cf <= 3000) this.sp.storage["greymarchCastAnimFfMs"] = cf; this.greymarchLog("magic: cast animation mode " + cm + ", single shot " + cf + " ms (/castanim)"); return; } // how other players' casts are animated (castAnimMode.ts)
         if (type === "greymarchCastCharge") { if (Number(msg.actor) > 0) (this.greymarchChargeQ || (this.greymarchChargeQ = [])).push({ actor: Number(msg.actor), hand: msg.hand === 0 ? 0 : 1, on: msg.on === true }); return; } // ANOTHER PLAYER CHARGES A SINGLE SHOT (greymarchChargeTick)
         if (type === "greymarchStaffSetCharge") { var scHand = msg.hand === 0 ? 0 : 1, scV = Number(msg.charge); if (scV >= 0 && isFinite(scV)) (this.greymarchStaffChargeSet || (this.greymarchStaffChargeSet = [])).push({ hand: scHand, base: Number(msg.base) >>> 0, charge: scV }); return; } // STAFF CHARGE (greymarchStaffChargeTick)
         if (type === "greymarchPoisonUsed") { this.greymarchPoisonStripWanted = Date.now(); return; } // POISONS ON WEAPONS (greymarchPoisonTick)
@@ -1506,14 +1508,16 @@ export class GreymarchBridge {
                     if (/were|vampire lord|beast/i.test(rname)) continue;
                     var key = "greymarchCharging:" + localId + ":" + c.hand;
                     var varName = c.hand === 0 ? "bWantCastLeft" : "bWantCastRight";
+                    var how = castAnimStart(c.hand, false); // the single shot's charge, as /castanim says (castAnimMode.ts)
                     if (c.on) {
-                        ac.setAnimationVariableBool(varName, true);
-                        sp.Debug.sendAnimationEvent(ac, c.hand === 0 ? "BeginCastLeft" : "BeginCastRight");
-                        sp.Debug.sendAnimationEvent(ac, (c.hand === 0 ? "MLh" : "MRh") + "_SpellAimedConcentrationStart");
+                        if (castAnimMode() === 6) continue;
+                        if (how.vars) ac.setAnimationVariableBool(varName, true);
+                        if (how.begin) sp.Debug.sendAnimationEvent(ac, c.hand === 0 ? "BeginCastLeft" : "BeginCastRight");
+                        if (how.sub) sp.Debug.sendAnimationEvent(ac, how.sub);
                         sp.storage[key] = now; up[key] = { localId: localId, varName: varName, at: now };
                     } else if (sp.storage[key]) {
                         ac.setAnimationVariableBool(varName, false);
-                        sp.Debug.sendAnimationEvent(ac, "CastStop");
+                        if (castAnimStopEvent()) sp.Debug.sendAnimationEvent(ac, "CastStop");
                         sp.storage[key] = 0; delete up[key];
                     }
                 } catch (err) { /* the look only */ }
