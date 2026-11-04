@@ -115,7 +115,8 @@ const CLICK_GUARD_MS = 400; // after a window closes, attacks and drawing a weap
 const MINI_KEEP_MS = 3500; // a mini game window kept up between logs (the chopping block) closes if the next does not come within this
 const MINIGAME_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmMiniRun").split("greymarch-prof").join("greymarch-minigame").split("2147483220").join("2147483226"); // the profession mini games (gamemode minigames.js): the same loader, another page, over the others
 const LEDGER_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmLedgerRun").split("greymarch-prof").join("greymarch-ledger").split("2147483220").join("2147483223"); // the guard ledger (/reports)
-const CIRCLE_FALLBACK_SPELL = 0x0e0ccf; // Guardian Circle (Skyrim.esm): cast by the caster's copy when no ring could be placed (greymarchCircleTick)
+const CIRCLE_REPLACE_MS = 28000; // a placed ring (GuardianCircleTurnHazard, lifetime 30 s) is placed again this often while its circle stands
+const CIRCLE_FALLBACK_SPELL =0x0e0ccf; // Guardian Circle (Skyrim.esm): cast by the caster's copy when no ring could be placed (greymarchCircleTick)
 const NOCLIP_FLY_SPEED = 600; // units a second flying in noclip at 100% speed (greymarchNoclipFly; Shift x3)
 const BUILD_CAM_STEPS =[[1, 1], [5, 5], [25, 15], [100, 90]]; // the free camera's steps: units and degrees ([ and ]; gamemode buildsys.js TUNE.steps)
 const SCRIBE_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmScribeRun").split("greymarch-prof").join("greymarch-scribe").split("2147483220").join("2147483227"); // the scribe's desk (/scribe): letters and books: the same loader, another page
@@ -1338,28 +1339,30 @@ export class GreymarchBridge {
     greymarchCircleTick(): any {
         var sp = this.sp, now = Date.now();
         var rings = this.greymarchCircleRings || (this.greymarchCircleRings = {});
-        var q = this.greymarchCircleQueue;
-        if (q && q.length) {
+        var gl: any = Function("return this")();
+        var q = this.greymarchCircleQueue || [];
+        if (gl.__gmCircleLocalQueue && gl.__gmCircleLocalQueue.length) { q = q.concat(gl.__gmCircleLocalQueue); gl.__gmCircleLocalQueue = []; } // rings from another player's cast seen here (remoteServer.ts A CIRCLE SPELL)
+        if (q.length) {
             this.greymarchCircleQueue = [];
             for (var i = 0; i < q.length && i < 16; i++) {
                 var m = q[i], had = rings[m.key];
                 if (m.off) { if (had) { this.greymarchCircleRemove(had.id); delete rings[m.key]; } continue; }
                 if (had || !Array.isArray(m.pos) || m.pos.length !== 3 || !(Number(m.ms) > 0) || typeof m.hazard !== "string") continue;
-                var shownAt = ((Function("return this")() as any).__gmCircleShownAt || {})[String(parseInt(String(m.key).split(":")[0], 10) >>> 0)] || 0;
-                if (now - shownAt < 5000) { rings[m.key] = { id: 0, until: now + Math.min(10 * 60 * 1000, Number(m.ms)) }; this.greymarchLog("circle: the ring already stands here (shown from the cast)"); continue; }
+                var shownAt = (gl.__gmCircleShownAt || {})[String(parseInt(String(m.key).split(":")[0], 10) >>> 0)] || 0;
+                if (!m.local && now - shownAt < 5000) { rings[m.key] = { id: 0, until: now + Math.min(10 * 60 * 1000, Number(m.ms)) }; this.greymarchLog("circle: the ring already stands here (shown from the cast)"); continue; }
                 try {
                     var player = sp.Game.getPlayer(); if (!player) continue;
                     var at = m.hazard.indexOf(":"), hid = parseInt(m.hazard.slice(0, at), 16), file = m.hazard.slice(at + 1);
                     var hz = at > 0 && hid > 0 ? sp.Game.getFormFromFile(hid, file) : null;
-                    var ref = null;
-                    if (hz) { try { ref = player.placeAtMe(hz, 1, false, false); } catch (pErr) { ref = null; this.greymarchLog("circle: placing " + m.hazard + " failed: " + pErr); } }
-                    else this.greymarchLog("circle: no hazard " + m.hazard + " in this game");
+                    var ref = hz ? this.greymarchCirclePlace(hz, m.pos) : null;
+                    if (!hz) this.greymarchLog("circle: no hazard " + m.hazard + " in this game");
                     if (ref) {
-                        ref.setPosition(Number(m.pos[0]), Number(m.pos[1]), Number(m.pos[2]));
-                        rings[m.key] = { id: ref.getFormID(), until: now + Math.min(10 * 60 * 1000, Number(m.ms)) };
-                        this.greymarchLog("circle: ring " + m.hazard + " placed at " + m.pos.join(" ") + " for " + Math.round(Number(m.ms) / 1000) + " s");
+                        // the hazard lasts its own 30 s (GuardianCircleTurnHazard): placed again before then while the circle stands
+                        rings[m.key] = { id: ref.getFormID(), until: now + Math.min(10 * 60 * 1000, Number(m.ms)), hz: hz, pos: m.pos.slice(), again: now + CIRCLE_REPLACE_MS, check: now + 1500 };
+                        this.greymarchLog("circle: ring " + m.hazard + " placed at " + m.pos.map(Math.round).join(" ") + " for " + Math.round(Number(m.ms) / 1000) + " s (ref " + (ref.getFormID() >>> 0).toString(16) + ")");
                         continue;
                     }
+                    if (m.local) continue; // seen from the cast: nothing more to try
                     // NO RING PLACED (2026-11-03, the owner: "I can't see the circle around tie"): the game may refuse to place a hazard by itself. The caster's character
                     // in this game casts Guardian Circle on itself instead, which puts the same ring at their feet (it heals only that copy, which the server overrides)
                     var casterRemote = parseInt(String(m.key).split(":")[0], 10) >>> 0;
@@ -1374,7 +1377,29 @@ export class GreymarchBridge {
                 } catch (e) { this.greymarchLog("circle: the ring could not be placed: " + e); }
             }
         }
-        for (var k in rings) if (now >= rings[k].until) { this.greymarchCircleRemove(rings[k].id); delete rings[k]; }
+        for (var k in rings) {
+            var r = rings[k];
+            if (now >= r.until) { this.greymarchCircleRemove(r.id); delete rings[k]; continue; }
+            if (r.check && now >= r.check) { // was it drawn? (the breadcrumb that says which step fails if the ring is still not seen)
+                r.check = 0;
+                var placed: any = null; try { placed = r.id ? sp.ObjectReference.from(sp.Game.getFormEx(r.id)) : null; } catch (e) { placed = null; }
+                var loaded = false, enabled = false; try { loaded = !!placed && placed.is3DLoaded(); enabled = !!placed && !placed.isDisabled(); } catch (e) { /* unknown */ }
+                this.greymarchLog("circle: ring " + (r.id >>> 0).toString(16) + (placed ? " exists, enabled " + enabled + ", drawn " + loaded : " is gone"));
+            }
+            if (r.hz && r.again && now >= r.again) {
+                r.again = now + CIRCLE_REPLACE_MS;
+                this.greymarchCircleRemove(r.id);
+                var re = this.greymarchCirclePlace(r.hz, r.pos); r.id = re ? re.getFormID() : 0;
+            }
+        }
+    }
+    // a ring (a hazard) placed on the ground at pos: placed where this player stands, then moved there
+    greymarchCirclePlace(hz: any, pos: number[]): any {
+        var ref: any = null;
+        try { ref = this.sp.Game.getPlayer().placeAtMe(hz, 1, false, false); } catch (e) { this.greymarchLog("circle: placing failed: " + e); return null; }
+        if (!ref) { this.greymarchLog("circle: the game placed nothing for " + (hz.getFormID() >>> 0).toString(16)); return null; }
+        try { ref.setPosition(Number(pos[0]), Number(pos[1]), Number(pos[2])); } catch (e) { this.greymarchLog("circle: the ring could not be moved: " + e); }
+        return ref;
     }
     greymarchCircleRemove(id: number): any {
         if (!id) return; // a ring the caster's copy cast here (no ring placed): it ends with its spell

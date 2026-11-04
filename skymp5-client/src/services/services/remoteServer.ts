@@ -1195,14 +1195,16 @@ export class RemoteServer extends ClientListener {
         // ring word for that caster (__gmCircleShownAt), so one ring stands
         let circle = false;
         try { circle = /circle|^font of /i.test(spell.getName() || "") && !/dispel/i.test(spell.getName() || "") && this.greymarchIsPlayerCopy(msg.data.caster); } catch (e) { circle = false; }
+        // (2026-11-04, the owner: "Still don't see it": Guardian Circle cast by the copy showed nothing, the copy's cast does not spawn the hazard.) The ring
+        // itself, Guardian Circle's hazard, is placed at their feet by the bridge instead (greymarchCircleTick, the same placing as the server's word)
         if (circle) {
           try {
-            const guardian = Spell.from(Game.getFormFromFile(0x0e0ccf, "Skyrim.esm"));
-            if (guardian) guardian.cast(ac, ac).catch(() => { /* not shown */ });
             const gl: any = Function("return this")();
-            (gl.__gmCircleShownAt || (gl.__gmCircleShownAt = {}))[String(msg.data.caster >>> 0)] = Date.now();
+            const now = Date.now(), who = msg.data.caster >>> 0;
+            (gl.__gmCircleShownAt || (gl.__gmCircleShownAt = {}))[String(who)] = now;
+            (gl.__gmCircleLocalQueue || (gl.__gmCircleLocalQueue = [])).push({ key: who + ":" + now, pos: [ac.getPositionX(), ac.getPositionY(), ac.getPositionZ()], hazard: "fead3:Skyrim.esm", ms: 60000, local: true, caster: who });
           } catch (e) { /* not shown */ }
-          this.greymarchMagicDiag(`magic: saw ${msg.data.caster.toString(16)} cast the circle ${spell.getFormID().toString(16)}: its ring shown with Guardian Circle on their copy`);
+          this.greymarchMagicDiag(`magic: saw ${msg.data.caster.toString(16)} cast the circle ${spell.getFormID().toString(16)}: its ring goes at their feet`);
           return;
         }
         this.greymarchMagicDiag(`magic: saw ${msg.data.caster.toString(16)} cast ${spell.getFormID().toString(16)} on themselves: not replayed here`);
