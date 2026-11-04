@@ -540,6 +540,7 @@ export class GreymarchBridge {
         this.greymarchMagicBlockDrive(); // NPC raise-the-dead and summons: ended at once
         this.greymarchShapeDrive(); // a creature form as an NPC: moved every frame like SkyMP moves other players; other players' creature attacks
         this.greymarchShapeTick(); // a creature form staff put the player in (a goat, a giant ...): the server decides, the body is changed here
+        this.greymarchRaceMenuQuestsTick(Date.now()); // RaceMenu's own quests started if SkyMP's load left them off (the Body Scales tab, Height)
         this.greymarchRaceMenuTick(Date.now()); // RaceMenu's extra sliders: sent when the race menu closes, put back after a relog (racemenuLook.ts)
         this.greymarchRaceMenuCopiesTick(Date.now()); // and put on the other players' copies (OTHERS SEE THEM)
         this.greymarchWolfTick(); // the werewolf form: the game's Beast Form power is the trigger, the server decides, the change is done here
@@ -2182,6 +2183,42 @@ export class GreymarchBridge {
     }
     greymarchRmState(): any {
         return this.greymarchRm || (this.greymarchRm = { menuWas: false, sendAt: 0, want: null, done: null, loadedSince: 0, next: 0, tries: 0, beast: false, said: {} });
+    }
+    // RACEMENU'S QUESTS (2026-11-04, the owner: no Height in the race menu). RaceMenu's Body Scales tab (Height, Head, ...) and its extra warpaints come from
+    // the script on RaceMenuPlugin.esp's quest (RaceMenuPlugin 0x801, RaceMenuBase: it registers for the race menu when the quest starts); RaceMenu.esp's
+    // quest (RaceMenu 0x800) adds the rest. Both are Start Game Enabled, but SkyMP puts the player in the world by loading a save it builds itself, and the
+    // tab never showed. Once the body is in the world (5 s), each one that is not running is started, checked again 10 s later, three tries at most;
+    // what was found goes to the log either way ("racemenu: quest ..."), so a tab still missing with both running points at the script, not the quest.
+    greymarchRaceMenuQuestsTick(now: number): any {
+        var st = this.greymarchRmQuests || (this.greymarchRmQuests = { since: 0, next: 0, tries: 0, done: false, said: {} });
+        if (st.done || now < st.next) return;
+        st.next = now + 1000;
+        var sp = this.sp;
+        try {
+            var player = sp.Game.getPlayer();
+            if (!player || !player.is3DLoaded()) { st.since = 0; return; }
+            if (!st.since) st.since = now;
+            if (now - st.since < 5000) return;
+            var list = [{ id: 0x801, file: "RaceMenuPlugin.esp", name: "RaceMenuPlugin" }, { id: 0x800, file: "RaceMenu.esp", name: "RaceMenu" }];
+            var off = 0;
+            for (var i = 0; i < list.length; i++) {
+                var q = list[i], quest = sp.Quest.from(sp.Game.getFormFromFile(q.id, q.file));
+                if (!quest) { if (!st.said[q.name]) { st.said[q.name] = 1; this.greymarchLog("racemenu: quest " + q.name + " not found (" + q.file + " not loaded)"); } continue; }
+                var running = !!quest.isRunning(), starting = !!quest.isStarting();
+                if (running) { if (st.said[q.name] !== 2) { st.said[q.name] = 2; this.greymarchLog("racemenu: quest " + q.name + " running" + (st.tries ? " (after a start)" : "")); } continue; }
+                off++;
+                if (starting) continue;
+                if (st.tries >= 3) { this.greymarchLog("racemenu: quest " + q.name + " still not running after 3 starts"); continue; }
+                this.greymarchLog("racemenu: quest " + q.name + " was not running: started (try " + (st.tries + 1) + " of 3)");
+                quest.start();
+            }
+            if (!off || st.tries >= 3) { st.done = true; return; }
+            st.tries++;
+            st.next = now + 10000;
+        } catch (err) {
+            this.greymarchLog("racemenu: the quests could not be checked: " + err);
+            st.done = true;
+        }
     }
     greymarchRaceMenuTick(now: number): any {
         var sp = this.sp, rm = this.greymarchRmState(), open = false;
