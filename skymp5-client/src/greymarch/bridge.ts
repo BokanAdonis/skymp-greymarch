@@ -2278,23 +2278,34 @@ export class GreymarchBridge {
         }
     }
     greymarchHeightFemale(player: any): any { // Actor has no getActorBase here: the base object, as the head-part code does
-        var base = this.sp.ActorBase.from(player.getBaseObject());
+        var sp = this.sp;
+        var base = this.greymarchHeightStep("ActorBase of the player", () => sp.ActorBase.from(player.getBaseObject()));
         return !!base && base.getSex() === 1;
     }
     greymarchHeightLimits(): any {
         var r = this.greymarchHeightRange;
         return Array.isArray(r) ? r : [0.93, 1.07];
     }
+    // One native step: its name goes with the error when it throws (a failure in game then says which call), and the frame carries on.
+    greymarchHeightStep(what: string, run: () => any): any {
+        try { return run(); } catch (err) { throw new Error(what + ": " + err); }
+    }
     greymarchHeightNow(player: any, female: boolean): any {
-        var v = Number(this.sp.callNative("NiOverride", "GetNodeTransformScale", undefined, player, false, female, "NPC", "RSMPlugin"));
+        var sp = this.sp;
+        var v = Number(this.greymarchHeightStep("NiOverride.GetNodeTransformScale", () => sp.callNative("NiOverride", "GetNodeTransformScale", undefined, player, false, female, "NPC", "RSMPlugin")));
         return v > 0 ? v : 1;
     }
     greymarchHeightAdd(why: string): any {
         var sp = this.sp, player = sp.Game.getPlayer();
         if (!player) return;
-        var h = this.greymarchHeightState(), r = this.greymarchHeightLimits(), v = Math.min(r[1], Math.max(r[0], this.greymarchHeightNow(player, this.greymarchHeightFemale(player))));
+        var h = this.greymarchHeightState(), r = this.greymarchHeightLimits(), cur = 1;
+        try { cur = this.greymarchHeightNow(player, this.greymarchHeightFemale(player)); } catch (readErr) { this.greymarchLog("racemenu: the Height slider starts at 1, the scale could not be read: " + readErr); }
+        var v = Math.min(r[1], Math.max(r[0], cur));
         var line = "$Height;;4;;" + GM_HEIGHT_CALLBACK + ";;" + r[0] + ";;" + r[1] + ";;0.005;;" + (Math.round(v * 1000) / 1000);
-        sp.Ui.invokeStringA("RaceSex Menu", "_root.RaceSexMenuBaseInstance.RaceSexPanelsInstance.RSM_AddSliders", [line]);
+        // ONE STRING, NOT AN ARRAY (2026-11-04, the log: "JsObjectToNativeObject - Invalid _skyrimPlatform_indexInPool: 0" right after RSM_Initialized):
+        // this SkyrimPlatform takes invokeStringA's array for a game object. SKSE hands each item of InvokeStringA to the menu's function as an argument of
+        // its own anyway, so invokeString with the one line is the same call.
+        this.greymarchHeightStep("invokeString RSM_AddSliders", () => sp.Ui.invokeString("RaceSex Menu", "_root.RaceSexMenuBaseInstance.RaceSexPanelsInstance.RSM_AddSliders", line));
         if (++h.adds <= 6) this.greymarchLog("racemenu: Height slider put on the Body tab (" + why + "; " + r[0] + "-" + r[1] + ", now " + v + ")");
     }
     greymarchHeightSet(value: number): any {
@@ -2303,15 +2314,16 @@ export class GreymarchBridge {
         if (!player) return;
         var female = this.greymarchHeightFemale(player), h = this.greymarchHeightState();
         var r = this.greymarchHeightLimits(), v = Math.round(Math.min(r[1], Math.max(r[0], value)) * 1000) / 1000;
+        var step = (what: string, run: () => any) => this.greymarchHeightStep(what, run);
         if (v === 1) {
-            sp.callNative("NiOverride", "RemoveNodeTransformScale", undefined, player, false, female, "NPC", "RSMPlugin");
-            sp.callNative("NiOverride", "RemoveNodeTransformScale", undefined, player, true, female, "NPC", "RSMPlugin");
+            step("NiOverride.RemoveNodeTransformScale", () => sp.callNative("NiOverride", "RemoveNodeTransformScale", undefined, player, false, female, "NPC", "RSMPlugin"));
+            step("NiOverride.RemoveNodeTransformScale (first person)", () => sp.callNative("NiOverride", "RemoveNodeTransformScale", undefined, player, true, female, "NPC", "RSMPlugin"));
         } else {
-            sp.callNative("NiOverride", "AddNodeTransformScale", undefined, player, false, female, "NPC", "RSMPlugin", v);
-            sp.callNative("NiOverride", "AddNodeTransformScale", undefined, player, true, female, "NPC", "RSMPlugin", v);
+            step("NiOverride.AddNodeTransformScale", () => sp.callNative("NiOverride", "AddNodeTransformScale", undefined, player, false, female, "NPC", "RSMPlugin", v));
+            step("NiOverride.AddNodeTransformScale (first person)", () => sp.callNative("NiOverride", "AddNodeTransformScale", undefined, player, true, female, "NPC", "RSMPlugin", v));
         }
-        sp.callNative("NiOverride", "UpdateNodeTransform", undefined, player, false, female, "NPC");
-        sp.callNative("NiOverride", "UpdateNodeTransform", undefined, player, true, female, "NPC");
+        step("NiOverride.UpdateNodeTransform", () => sp.callNative("NiOverride", "UpdateNodeTransform", undefined, player, false, female, "NPC"));
+        step("NiOverride.UpdateNodeTransform (first person)", () => sp.callNative("NiOverride", "UpdateNodeTransform", undefined, player, true, female, "NPC"));
         if (++h.sets <= 4) this.greymarchLog("racemenu: Height " + value + " -> " + v + " (the skeleton reads " + this.greymarchHeightNow(player, female) + ")");
     }
     greymarchRaceMenuTick(now: number): any {

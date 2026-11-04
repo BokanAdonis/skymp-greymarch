@@ -38,7 +38,8 @@ test("the frame: a build when the menu opens; the slider once per build, when th
 test("the slider line is RaceMenuBase.AddSlider's (7 fields, section 4 = Body), sent to the menu's RSM_AddSliders", () => {
   const a = fn("greymarchHeightAdd");
   assert.match(a, /var line = "\$Height;;4;;" \+ GM_HEIGHT_CALLBACK \+ ";;" \+ r\[0\] \+ ";;" \+ r\[1\] \+ ";;0\.005;;" \+ \(Math\.round\(v \* 1000\) \/ 1000\);/);
-  assert.match(a, /sp\.Ui\.invokeStringA\("RaceSex Menu", "_root\.RaceSexMenuBaseInstance\.RaceSexPanelsInstance\.RSM_AddSliders", \[line\]\);/);
+  assert.match(a, /sp\.Ui\.invokeString\("RaceSex Menu", "_root\.RaceSexMenuBaseInstance\.RaceSexPanelsInstance\.RSM_AddSliders", line\)/);
+  assert.doesNotMatch(body, /invokeStringA\(/, "the array form failed in game: 'JsObjectToNativeObject - Invalid _skyrimPlatform_indexInPool: 0'");
   // what that makes for a Bosmer man at his tallest
   const r = [0.878, 0.979], v = 0.979;
   const line = "$Height;;4;;GM_ChangeHeight;;" + r[0] + ";;" + r[1] + ";;0.005;;" + (Math.round(v * 1000) / 1000);
@@ -49,8 +50,8 @@ test("the slider line is RaceMenuBase.AddSlider's (7 fields, section 4 = Body), 
 test("moving it sets RaceMenu's own body scale (NPC, RSMPlugin), third and first person, inside the range; 1 takes it off; read back in the log", () => {
   const s = fn("greymarchHeightSet");
   assert.match(s, /Math\.min\(r\[1\], Math\.max\(r\[0\], value\)\)/);
-  assert.match(s, /"AddNodeTransformScale", undefined, player, false, female, "NPC", "RSMPlugin", v\);/);
-  assert.match(s, /"AddNodeTransformScale", undefined, player, true, female, "NPC", "RSMPlugin", v\);/);
+  assert.match(s, /"AddNodeTransformScale", undefined, player, false, female, "NPC", "RSMPlugin", v\)\);/);
+  assert.match(s, /"AddNodeTransformScale", undefined, player, true, female, "NPC", "RSMPlugin", v\)\);/);
   assert.match(s, /"RemoveNodeTransformScale", undefined, player, false, female, "NPC", "RSMPlugin"\)/);
   assert.match(s, /"UpdateNodeTransform", undefined, player, false, female, "NPC"\)/);
   assert.match(s, /"UpdateNodeTransform", undefined, player, true, female, "NPC"\)/);
@@ -59,7 +60,7 @@ test("moving it sets RaceMenu's own body scale (NPC, RSMPlugin), third and first
 
 test("the sex from the base object (Actor has no getActorBase in this SkyrimPlatform); the range the server's, 0.93-1.07 until it comes", () => {
   assert.doesNotMatch(body, /getActorBase\(/);
-  assert.match(body, /this\.sp\.ActorBase\.from\(player\.getBaseObject\(\)\)/);
+  assert.match(body, /sp\.ActorBase\.from\(player\.getBaseObject\(\)\)/);
   assert.match(src, /if \(Array\.isArray\(msg\.height\) && msg\.height\.length === 2 && msg\.height\[0\] > 0 && msg\.height\[1\] >= msg\.height\[0\]\) this\.greymarchHeightRange = \[Number\(msg\.height\[0\]\), Number\(msg\.height\[1\]\)\];/);
   assert.match(body, /return Array\.isArray\(r\) \? r : \[0\.93, 1\.07\];/);
 });
@@ -68,3 +69,10 @@ test("the old race menu tick no longer adds the slider itself", () => {
   const i = src.indexOf("    greymarchRaceMenuTick(now: number): any {");
   assert.doesNotMatch(src.slice(i, i + 3000), /greymarchHeightAdd/);
 });
+
+test("every native step is named in the error when it throws; a scale that cannot be read starts the slider at 1 instead of stopping it", () => {
+  assert.match(body, /greymarchHeightStep\(what: string, run: \(\) => any\): any \{\s*try \{ return run\(\); \} catch \(err\) \{ throw new Error\(what \+ ": " \+ err\); \}/);
+  for (const w of ["invokeString RSM_AddSliders", "NiOverride.GetNodeTransformScale", "ActorBase of the player", "NiOverride.AddNodeTransformScale", "NiOverride.UpdateNodeTransform"]) assert.ok(body.includes(`"${w}`), w);
+  assert.match(fn("greymarchHeightAdd"), /catch \(readErr\) \{ this\.greymarchLog\("racemenu: the Height slider starts at 1, the scale could not be read: "/);
+});
+
