@@ -72,14 +72,18 @@ export class HitService extends ClientListener {
         const isWeapon = this.sp.Weapon.from(e.source);
         const isSpell = !isWeapon && this.sp.Spell.from(e.source);
         const isScroll = !isWeapon && !isSpell && this.sp.Scroll.from(e.source);
+        // GREYMARCH (2026-11-03, the owner: every staff did 0 damage): a magic staff's bolt hits with the staff's ENCHANTMENT as the source; it was dropped
+        // here as neither weapon, spell nor scroll. It goes to the server as it is (the server's staff damage knows the enchantment: OnStaffHit)
+        const isEnchantment = !isWeapon && !isSpell && !isScroll && !!e.source && e.source.getType() === FormType.Enchantment;
 
         // GREYMARCH: an area spell's blast (Incinerate, Fireball, Lightning Storm) hits with its EXPLOSION as the source: reported as the
         // spell it came from (a cast of this attacker in the last 5 s whose effect explodes into it), so area damage reaches the server
         let source = e.source ? e.source.getFormID() : 0;
         let fromExplosion = false;
-        if (!isWeapon && !isSpell && !isScroll) {
+        if (!isWeapon && !isSpell && !isScroll && !isEnchantment) {
             const isExplosion = !!e.source && e.source.getType() === FormType.Explosion;
-            const spell = isExplosion ? this.controller.lookupListener(MagicSyncService).findSpellForExplosion(aggressor, source) : 0;
+            let spell = isExplosion ? this.controller.lookupListener(MagicSyncService).findSpellForExplosion(aggressor, source) : 0;
+            if (!spell && isExplosion) spell = this.staffForExplosion(e, source); // a staff's blast: the enchantment of the staff in hand that explodes into it
             if (!spell) {
                 return isExplosion ? "skipped: an explosion of no recent cast" : "skipped: the source is not a weapon, spell or scroll";
             }
@@ -89,7 +93,7 @@ export class HitService extends ClientListener {
 
         // prevent double hit that happens for some reason with magic projectiles
         // GREYMARCH: per attacker, target and spell (it was per attacker: an area spell then counted only the first of the targets it hit)
-        if (isSpell || isScroll || fromExplosion) {
+        if (isSpell || isScroll || fromExplosion || isEnchantment) {
             const key = `${aggressor}:${e.target.getFormID()}:${source}`;
             const now = Date.now();
 
@@ -109,6 +113,24 @@ export class HitService extends ClientListener {
             reliability: "reliable"
         });
         return fromExplosion ? `sent to the server as spell ${source.toString(16)}` : "sent to the server";
+    }
+
+    // GREYMARCH: the enchantment of a staff the attacker holds (either hand) whose effect explodes into this explosion, or 0
+    private staffForExplosion(e: HitEvent, explosionId: number): number {
+        try {
+            const ac = this.sp.Actor.from(e.aggressor);
+            if (!ac) return 0;
+            for (const left of [false, true]) {
+                const w = ac.getEquippedWeapon(left);
+                const ench = w ? w.getEnchantment() : null;
+                const n = ench ? ench.getNumEffects() : 0;
+                for (let i = 0; i < n; i++) {
+                    const x = ench!.getNthEffectMagicEffect(i)?.getExplosion();
+                    if (x && x.getFormID() === explosionId) return ench!.getFormID();
+                }
+            }
+        } catch (err) { /* not a staff */ }
+        return 0;
     }
 
     private getHitData(e: HitEvent): Hit {

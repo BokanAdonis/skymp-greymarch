@@ -1418,7 +1418,8 @@ export class GreymarchBridge {
         // effects are 0 here (the server deals spell damage alone), so the menu said 0. While the Magic menu (or the Tab menu that leads to it, or Favorites)
         // is open they carry the server's number (show: its share of the record's own); closed, they are 0 again. Every spell at once when that changes.
         var menu = false;
-        try { menu = this.sp.Ui.isMenuOpen("MagicMenu") || this.sp.Ui.isMenuOpen("TweenMenu") || this.sp.Ui.isMenuOpen("FavoritesMenu"); } catch (mErr) { menu = false; }
+        // the inventory, a container, trading and giving too (2026-11-03): a magic staff's damage is described there (the owner: "according to the game they do 0 damage")
+        try { menu = this.sp.Ui.isMenuOpen("MagicMenu") || this.sp.Ui.isMenuOpen("TweenMenu") || this.sp.Ui.isMenuOpen("FavoritesMenu") || this.sp.Ui.isMenuOpen("InventoryMenu") || this.sp.Ui.isMenuOpen("ContainerMenu") || this.sp.Ui.isMenuOpen("BarterMenu") || this.sp.Ui.isMenuOpen("GiftMenu"); } catch (mErr) { menu = false; }
         var flipped = menu !== !!this.greymarchSpellEditMenu;
         if (!flipped && now < (this.greymarchSpellEditNext || 0)) return;
         this.greymarchSpellEditMenu = menu;
