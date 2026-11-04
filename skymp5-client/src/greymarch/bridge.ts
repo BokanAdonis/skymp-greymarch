@@ -115,7 +115,8 @@ const CLICK_GUARD_MS = 400; // after a window closes, attacks and drawing a weap
 const MINI_KEEP_MS = 3500; // a mini game window kept up between logs (the chopping block) closes if the next does not come within this
 const MINIGAME_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmMiniRun").split("greymarch-prof").join("greymarch-minigame").split("2147483220").join("2147483226"); // the profession mini games (gamemode minigames.js): the same loader, another page, over the others
 const LEDGER_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmLedgerRun").split("greymarch-prof").join("greymarch-ledger").split("2147483220").join("2147483223"); // the guard ledger (/reports)
-const BUILD_CAM_STEPS = [[1, 1], [5, 5], [25, 15], [100, 90]]; // the free camera's steps: units and degrees ([ and ]; gamemode buildsys.js TUNE.steps)
+const NOCLIP_FLY_SPEED = 600; // units a second flying in noclip at 100% speed (greymarchNoclipFly; Shift x3)
+const BUILD_CAM_STEPS =[[1, 1], [5, 5], [25, 15], [100, 90]]; // the free camera's steps: units and degrees ([ and ]; gamemode buildsys.js TUNE.steps)
 const SCRIBE_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmScribeRun").split("greymarch-prof").join("greymarch-scribe").split("2147483220").join("2147483227"); // the scribe's desk (/scribe): letters and books: the same loader, another page
 
 // Which way the camera faces, in degrees the Skyrim way (0 = north, 90 = east). Skyrim Platform has no camera call, so 24 points on a wide ring round the head are
@@ -514,6 +515,7 @@ export class GreymarchBridge {
         if (this.greymarchMenuEscAt && Date.now() - this.greymarchMenuEscAt > 700) { this.greymarchMenuEscAt = 0; this.greymarchMenuHide(); } // Esc, and the menu page did not close itself
         this.greymarchToastTick(Date.now());
         this.greymarchEffects(); // staff effects: noclip, speed, frozen, ghosts (cheap: does real work every 400 ms)
+        this.greymarchNoclipFly(); // noclip on: the keys fly the standing body (every frame)
         this.greymarchTgmFrame(); // TGM: full magicka and stamina and no shout cooldown, every frame
         this.greymarchHungerDrive(); // hunger: the stagger, regeneration off while starving
         this.greymarchParalyzeDrive(); // a paralysis spell from another player or an NPC
@@ -2966,6 +2968,42 @@ export class GreymarchBridge {
             if (!this.greymarchTgmErr) { this.greymarchTgmErr = true; this.greymarchLog("staff: TGM refill error (shown once): " + err); }
         }
     }
+    // NOCLIP FLYING (staff, F7 noclip). Walking is off while noclip is on (greymarchEffects), so the body stays in its standing pose; every frame W/S fly forward and
+    // back and A/D to the sides the way the camera faces, Space up, Ctrl down, Shift three times as fast, at the staff speed. The game's own smooth movement
+    // (TranslateTo) carries the body a short way ahead, asked again each frame, so SkyMP sends the flight to the others like any movement; no key stops it at once.
+    greymarchNoclipFly(): any {
+        var have = this.greymarchFxHave;
+        if (!have || !have.noclip || have.frozen) return;
+        var sp = this.sp, now = Date.now();
+        try {
+            var player = sp.Game.getPlayer(); if (!player) return;
+            var input = sp.Input; if (!input || typeof input.isKeyPressed !== "function") return;
+            var typing = false; try { typing = !!(sp.browser && sp.browser.isFocused && sp.browser.isFocused()); } catch (fErr) { typing = false; }
+            var key = function (k: number) { try { return !typing && !!input.isKeyPressed(k); } catch (kErr) { return false; } };
+            var fwd = (key(0x11) ? 1 : 0) - (key(0x1f) ? 1 : 0), side = (key(0x20) ? 1 : 0) - (key(0x1e) ? 1 : 0), up = (key(0x39) ? 1 : 0) - (key(0x1d) ? 1 : 0);
+            if (!fwd && !side && !up) { this.greymarchNoclipStop(player); return; }
+            var x = player.getPositionX(), y = player.getPositionY(), z = player.getPositionZ();
+            if (now >= (this.greymarchNoclipYawAt || 0)) { // the camera's way, 10 times a second (24 points through the screen each time)
+                this.greymarchNoclipYawAt = now + 100;
+                var head = [x, y, z + 120], yaw = greymarchCameraYaw(function (pts: number[][]) { return sp.worldPointToScreenPoint.apply(null, pts); }, head);
+                this.greymarchNoclipYaw = yaw === null ? player.getAngleZ() : yaw;
+            }
+            var a = (Number(this.greymarchNoclipYaw) || 0) * Math.PI / 180;
+            var dx = fwd * Math.sin(a) + side * Math.cos(a), dy = fwd * Math.cos(a) - side * Math.sin(a), len = Math.sqrt(dx * dx + dy * dy + up * up) || 1;
+            var speed = NOCLIP_FLY_SPEED * Math.max(0.25, (Number(have.speed) || 100) / 100) * (key(0x2a) ? 3 : 1);
+            var ahead = speed * 0.3; // a short way ahead, asked again next frame: the flight is smooth and stops within a frame of the key
+            var face = fwd || side ? Math.atan2(dx, dy) * 180 / Math.PI : player.getAngleZ();
+            player.translateTo(x + dx / len * ahead, y + dy / len * ahead, z + up / len * ahead, 0, 0, face, speed, 0);
+            this.greymarchNoclipMoving = true;
+        } catch (err) {
+            if (!this.greymarchNoclipErr) { this.greymarchNoclipErr = true; this.greymarchLog("staff: noclip flying error (shown once): " + err); }
+        }
+    }
+    greymarchNoclipStop(player: any): any {
+        if (!this.greymarchNoclipMoving) return;
+        this.greymarchNoclipMoving = false;
+        try { player.stopTranslation(); } catch (e) { /* it ends where it was going */ }
+    }
     // Staff effects, applied in the update phase. Each is switched on or off only when it CHANGES, so the game is never fought with.
     greymarchEffects(): any {
         var now = Date.now();
@@ -2980,7 +3018,12 @@ export class GreymarchBridge {
             if (!player) return;
             var have = this.greymarchFxHave || (this.greymarchFxHave = { noclip: false, speed: 100, frozen: false, god: false, tgm: false });
             if (want) {
-                if (want.noclip !== have.noclip) { sp.Debug.toggleCollisions(); have.noclip = want.noclip; this.greymarchLog("staff: noclip " + (want.noclip ? "on" : "off")); }
+                if (want.noclip !== have.noclip) {
+                    sp.Debug.toggleCollisions(); have.noclip = want.noclip; this.greymarchLog("staff: noclip " + (want.noclip ? "on" : "off"));
+                    // noclip flies (2026-11-03, the owner: "just have your player in the standing pose and you fly around instead of walking"): the game's walking is
+                    // switched off so no walk plays, the body stands, and greymarchNoclipFly moves it with the keys
+                    try { if (want.noclip) { sp.Game.disablePlayerControls(true, false, false, false, true, false, false, false, 0); sp.Debug.sendAnimationEvent(player, "IdleForceDefaultState"); } else { this.greymarchNoclipStop(player); if (!have.frozen) sp.Game.enablePlayerControls(true, false, false, false, true, false, false, false, 0); } } catch (ncErr) { this.greymarchLog("staff: noclip flying could not start (" + ncErr + ")"); }
+                }
                 if (want.speed !== have.speed) { player.setActorValue("SpeedMult", want.speed); have.speed = want.speed; this.greymarchLog("staff: speed " + want.speed + "%"); }
                 if (!!want.god !== have.god) { try { player.setGhost(!!want.god); } catch (gErr) { this.greymarchLog("staff: setGhost is not available (" + gErr + "), god mode relies on refilling"); } have.god = !!want.god; this.greymarchLog("staff: god " + (want.god ? "on" : "off")); } if (want.god) { try { player.restoreActorValue("health", 100000); player.restoreActorValue("stamina", 100000); player.restoreActorValue("magicka", 100000); } catch (rErr) { /* the invulnerable flag still protects */ } } 
                 // TGM: the game's own god mode, what the console's tgm switches (Debug.SetGodMode): no drain, no shout cooldown, no carry limit, no arrows used. The server still
@@ -2990,6 +3033,7 @@ export class GreymarchBridge {
                 if (want.frozen !== have.frozen) {
                     if (want.frozen) sp.Game.disablePlayerControls(true, true, true, true, true, true, true, true, 0); else sp.Game.enablePlayerControls(true, true, true, true, true, true, true, true, 0);
                     have.frozen = want.frozen;
+                    if (!want.frozen && have.noclip) { try { sp.Game.disablePlayerControls(true, false, false, false, true, false, false, false, 0); } catch (nfErr) { /* walks until noclip goes off */ } } // still flying: no walking back
                 }
             }
             this.greymarchNoHostApply(now, player, !!have.god);
