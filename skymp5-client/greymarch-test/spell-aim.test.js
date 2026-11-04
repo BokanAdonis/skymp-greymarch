@@ -63,13 +63,13 @@ test("animation variables: normal aim offsets go out unchanged (the very same by
   assert.strictEqual(r.bytes, bytes);
 });
 
-test("animation variables: aim offsets swung round behind are reset to straight ahead at the look pitch, magic arm offsets to neutral", () => {
+test("animation variables: aim offsets swung round behind are reset to no offset (straight where the character looks), magic arm offsets to neutral", () => {
   const bytes = floatBytes({ 0: 7, 13: 1.2, 14: 2.8, 17: 1.5, 18: -0.9, 8: 4 });
   const r = aim.sanitizeAimFloats(bytes, 0.25);
   assert.strictEqual(r.fixed, true);
   close(r.pitch, 1.2, "the game's pitch is reported");
   const f = readFloats(r.bytes);
-  close(f[13], -0.25, "AimPitchCurrent = -look pitch");
+  close(f[13], 0, "AimPitchCurrent: no offset (the look pitch goes with the movement)");
   close(f[14], 0, "AimHeadingCurrent");
   close(f[17], 0, "MagicAimOffsetHeading");
   close(f[18], 0, "MagicAimOffsetPitch");
@@ -139,7 +139,7 @@ test("cast facing a wall: the angles and the aim variables go out pointing where
   close(m.aimAngle, 5 * DEG, "aimAngle = look pitch");
   close(m.aimHeading, 90 * DEG, "aimHeading = heading");
   const f = readFloats(m.actorAnimationVariables.floats);
-  close(f[13], -5 * DEG, "AimPitchCurrent");
+  close(f[13], 0, "AimPitchCurrent: no offset");
   close(f[14], 0, "AimHeadingCurrent");
   close(f[17], 0, "MagicAimOffsetHeading");
   assert.ok(g.logs.some((l) => /^magic: aim of 12fd0 replaced: game -1\.30\/4\.71, look 0\.09\/1\.57 \(rad\)$/.test(l)), g.logs.join("\n"));
@@ -176,4 +176,11 @@ test("aim lines still reach the log after the 40 cast lines are used up", () => 
   assert.ok(!g.logs.some((l) => /aim/.test(l)));
   g.cast(g.player, -1.3, 0);
   assert.ok(g.logs.some((l) => /^magic: aim of 12fd0 replaced/.test(l)), "the aim line is still written");
+});
+
+test("animation variables: looking up with no aim offset (third person) is left as it is (2026-11-04: it was sent at the ground)", () => {
+  const bytes = floatBytes({ 13: 0, 14: 0 });
+  const r = aim.sanitizeAimFloats(bytes, -0.69);
+  assert.strictEqual(r.fixed, false);
+  assert.strictEqual(r.bytes, bytes);
 });

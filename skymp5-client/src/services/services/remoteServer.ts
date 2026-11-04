@@ -1,5 +1,5 @@
 // @ts-expect-error (TODO: Remove in 2.10.0)
-import { Actor, Form, FormType, Menu, Spell, Enchantment, callNative, interruptCast, castSpellImmediate, printConsole, applyAnimationVariablesToActor, ActorAnimationVariables } from 'skyrimPlatform';
+import { Actor, Debug, Form, FormType, Menu, Spell, Enchantment, callNative, interruptCast, castSpellImmediate, printConsole, applyAnimationVariablesToActor, ActorAnimationVariables } from 'skyrimPlatform';
 import {
   Armor,
   Cell,
@@ -1323,10 +1323,15 @@ export class RemoteServer extends ClientListener {
     if (castingSource !== 0 && castingSource !== 1) return;
     const name = castingSource === 0 ? "bWantCastLeft" : "bWantCastRight";
     const key = copyId + ":" + castingSource;
+    // THE GRAPH'S OWN EVENTS (2026-11-04, the owner: still no casting animation; the variables alone, which SkyMP also sends every half second, do not move
+    // the graph): <hand>_SpellAimedStart / _SpellAimedConcentrationStart put the arm into the aimed cast, CastStop ends it (0_master / magicbehavior.hkx)
+    const hand = castingSource === 0 ? "MLh" : "MRh";
     try {
       const ac = Actor.from(Game.getFormEx(copyId));
       if (!ac) return;
       ac.setAnimationVariableBool(name, on);
+      if (on) Debug.sendAnimationEvent(ac, hand + (held ? "_SpellAimedConcentrationStart" : "_SpellAimedStart"));
+      else Debug.sendAnimationEvent(ac, "CastStop");
     } catch (e) { return; }
     if (!on || held) { this.greymarchPoseOff.delete(key); return; }
     const at = Date.now() + RemoteServer.POSE_FF_MS;
@@ -1335,7 +1340,7 @@ export class RemoteServer extends ClientListener {
       if (this.greymarchPoseOff.get(key) !== at) return; // another cast since: its own timer
       if (Date.now() < at) { once('update', later); return; }
       this.greymarchPoseOff.delete(key);
-      try { const a2 = Actor.from(Game.getFormEx(copyId)); if (a2) a2.setAnimationVariableBool(name, false); } catch (e) { /* gone */ }
+      try { const a2 = Actor.from(Game.getFormEx(copyId)); if (a2) { a2.setAnimationVariableBool(name, false); Debug.sendAnimationEvent(a2, "CastStop"); } } catch (e) { /* gone */ }
     };
     once('update', later);
   }
@@ -1350,7 +1355,7 @@ export class RemoteServer extends ClientListener {
     for (const [key, showing] of Array.from(this.greymarchHeldSpells.entries())) {
       if (now - showing.lastSeen < RemoteServer.HELD_SILENCE_MS) continue;
       this.greymarchHeldSpells.delete(key);
-      try { const ac = Actor.from(Game.getFormEx(showing.casterId)); if (ac) { ac.interruptCast(); ac.setAnimationVariableBool("bWantCastLeft", false); ac.setAnimationVariableBool("bWantCastRight", false); } } catch (e) { /* not loaded */ }
+      try { const ac = Actor.from(Game.getFormEx(showing.casterId)); if (ac) { ac.interruptCast(); ac.setAnimationVariableBool("bWantCastLeft", false); ac.setAnimationVariableBool("bWantCastRight", false); Debug.sendAnimationEvent(ac, "CastStop"); } } catch (e) { /* not loaded */ }
       this.greymarchMagicDiag(`magic: no word for ${RemoteServer.HELD_SILENCE_MS} ms about ${key} (${showing.spell.toString(16)}): ended here`);
     }
   }

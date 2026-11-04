@@ -47,13 +47,18 @@ export function sanitizeAimFloats(floatBytes: number[], lookPitch: number): { by
     const view = new DataView(new Uint8Array(floatBytes).buffer);
     const pitch = view.getFloat32(i.aimPitchCurrent * 4, true);
     const heading = view.getFloat32(i.aimHeadingCurrent * 4, true);
+    // AN OFFSET (2026-11-04, the owner: the stream showed going at the ground while they shot into the air; the log: "game pitch 0.00 ... look pitch -0.69"):
+    // like the heading, AimPitchCurrent is the aim's offset from where the character already looks (their pitch goes to the copy with their movement).
+    // It was compared with the look pitch itself, so a good aim (no offset) was "fixed" to the whole look pitch again, pointing the stream at the ground.
+    // An offset beyond MAX_AIM_OFFSET is put back to none, as the heading is. lookPitch is no longer needed.
+    void lookPitch;
     const ok = Number.isFinite(pitch) && Number.isFinite(heading)
-        && Math.abs(wrapAngle(-pitch - lookPitch)) <= MAX_AIM_OFFSET
+        && Math.abs(wrapAngle(pitch)) <= MAX_AIM_OFFSET
         && Math.abs(wrapAngle(heading)) <= MAX_AIM_OFFSET;
     if (ok) {
         return { bytes: floatBytes, fixed: false, pitch, heading };
     }
-    view.setFloat32(i.aimPitchCurrent * 4, -lookPitch, true);
+    view.setFloat32(i.aimPitchCurrent * 4, 0, true);
     view.setFloat32(i.aimHeadingCurrent * 4, 0, true);
     for (const k of [i.magicAimOffsetHeading, i.magicAimOffsetPitch]) {
         if (k < count) view.setFloat32(k * 4, 0, true);
