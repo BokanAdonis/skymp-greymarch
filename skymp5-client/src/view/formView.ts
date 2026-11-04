@@ -36,7 +36,8 @@ const GM_RUN_NUDGE_MS = 8000;
 const GM_GRAPH_RESET = "IdleForceDefaultState";
 const GM_SIT_WAKE_MS = 2000; // an NPC in furniture that is hurt or fighting is pulled out at most this often (OUT OF THE FURNITURE TO FIGHT)
 const GM_SIT_WAKE_RANGE = 3000; // ... and sent at this game's player when they are this close
-const GM_SIT_NEAR = 1200; // a hostile NPC in furniture gets up and fights once this game's player is this close (about 17 m), hurt or not
+const GM_SIT_NEAR = 1200; // a hostile NPC in furniture gets up and fights once a player is this close (about 17 m), hurt or not; one in an idle too, once it detects them
+const GM_IDLE_SURE = 500; // ... and one in an idle within this (about 7 m) whether it detects them or not
 // in a fight (DRESSED ONCE BY ITS HOST: an empty-handed NPC takes the server's gear, but not mid-fight)
 function gmInCombat(ac: Actor): boolean { try { return ac.isInCombat(); } catch (e) { return true; } }
 // A QUIVER (2026-10-28, the owner: the Skeleton archer had its bow on its back and never used it). The server sends an NPC's games only what it wears, and
@@ -1465,6 +1466,33 @@ export class FormView {
     } catch (e) { /* the next check tries again */ }
   }
   private gmSitWakeAt = 0; // GREYMARCH: when it was last pulled out of furniture to fight
+  private gmIdleWakeAt = 0; // GREYMARCH: when it was last sent out of an idle at a player (OUT OF ITS IDLE)
+  // GREYMARCH: the other players' characters this game has loaded in the same place (the host's own player is not one)
+  private gmOtherPlayers(myPlace: number, placeOf: (a: Actor) => number): Actor[] {
+    const others: Actor[] = [];
+    const arr = getViewFromStorage()?.getFormViews();
+    const n = arr ? arr.getFormViewsArrayLength() : 0;
+    for (let i = 0; i < n; i++) {
+      const fv = arr!.getNthFormView(i);
+      if (!fv || fv === this || !fv.gmIsPlayerLook) continue;
+      const ac = Actor.from(Game.getFormEx(fv.getLocalRefrId()));
+      if (!ac || ac.isDead() || !ac.is3DLoaded() || placeOf(ac) !== myPlace) continue;
+      others.push(ac);
+    }
+    return others;
+  }
+  // GREYMARCH: the nearest player (this game's or another's) within range the NPC is hostile to, or null
+  private gmNearestFoe(npc: Actor, players: Actor[], range: number): { foe: Actor, d: number } | null {
+    let best: { foe: Actor, d: number } | null = null;
+    for (const p of players) {
+      try {
+        if (!p || p.isDead()) continue;
+        const d = npc.getDistance(p);
+        if (d <= range && (!best || d < best.d) && npc.isHostileToActor(p)) best = { foe: p, d };
+      } catch (e) { /* not this one */ }
+    }
+    return best;
+  }
   private gmGroundRefight(npc: Actor): void {
     if (!this.gmGroundTargetId) return;
     try {
@@ -1604,6 +1632,9 @@ export class FormView {
       // GREYMARCH: OUT OF THE FURNITURE TO FIGHT (2026-11-03, the owner: "bandits using cooking pots in dungeons don't fight back"): an NPC using furniture (a
       // cooking pot, a forge, a chair it walked to) that is hurt, in a fight, or hostile with this game's player within GM_SIT_NEAR is pulled out of it by its host and sent at the nearest player (the frozen nudge:
       // its animation reset, startCombat, weapon drawn, its package looked at again), at most every GM_SIT_WAKE_MS. Breadcrumbs: "furniture"
+      // EVERY PLAYER COUNTS (2026-11-03, the owner: two bounty outlaws in their camp's animations would not fight while two players tested): the players near are
+      // this game's and every other player's character loaded here, since the host may be someone else's game than the one that walks up
+      const gmPlayers: Actor[] = [me, ...this.gmOtherPlayers(myPlace, placeOf)];
       {
         const gmSitNow = Date.now();
         if (gmSitNow - this.gmSitWakeAt >= GM_SIT_WAKE_MS) {
@@ -1611,18 +1642,33 @@ export class FormView {
           let gmMounted = false; try { gmMounted = npc.isOnMount(); } catch (e) { gmMounted = false; } // a rider is not in furniture
           if (gmSitting !== 0 && !gmMounted && !npc.isDead()) {
             let gmHurt = false; try { gmHurt = npc.getActorValuePercentage("Health") < 0.99 || npc.isInCombat(); } catch (e) { gmHurt = false; }
-            const gmMe = Game.getPlayer();
-            let gmClose = false; try { gmClose = !!gmMe && !gmMe.isDead() && npc.getDistance(gmMe) <= GM_SIT_WAKE_RANGE; } catch (e) { gmClose = false; }
             // a player near (2026-11-03, the owner: "NPCs should get off cooking pot and begin fighting once a player is nearby"): only one hostile to them
-            let gmNear = false; try { gmNear = !!gmMe && !gmMe.isDead() && npc.getDistance(gmMe) <= GM_SIT_NEAR && npc.isHostileToActor(gmMe); } catch (e) { gmNear = false; }
-            if ((gmHurt || gmNear) && gmMe) {
+            const gmFoe = this.gmNearestFoe(npc, gmPlayers, GM_SIT_NEAR);
+            if (gmHurt || gmFoe) {
               this.gmSitWakeAt = gmSitNow;
               let gmTarget: Actor | null = null; try { gmTarget = npc.getCombatTarget(); } catch (e) { gmTarget = null; }
-              if (!gmTarget || gmTarget.isDead()) gmTarget = gmClose ? gmMe : null;
+              if (!gmTarget || gmTarget.isDead()) { const f = gmFoe || this.gmNearestFoe(npc, gmPlayers, GM_SIT_WAKE_RANGE); gmTarget = f ? f.foe : null; }
               gmCrumb("furniture " + gmHex(this.remoteRefrId as number) + ": out of its furniture (sit state " + gmSitting + ") to fight " + (gmTarget ? gmHex(gmTarget.getFormID()) : "(no one near)"));
               if (gmTarget) this.gmFrozenNudge(npc, gmTarget);
               else { try { Debug.sendAnimationEvent(npc, GM_GRAPH_RESET); npc.evaluatePackage(); } catch (e) { /* the next check */ } }
             }
+          }
+        }
+      }
+      // GREYMARCH: OUT OF ITS IDLE (2026-11-03, the owner: "Can we prevent NPCs spawning using animations at all?"): idle markers (leaning, warming hands at the
+      // fire, crouching, sitting on the ground) are no furniture, so the step above never saw them. A hostile NPC not in a fight, with a player it is hostile to
+      // within GM_SIT_NEAR that it detects (or within GM_IDLE_SURE, seen or not), has its animation reset and is sent at that player, at most every GM_SIT_WAKE_MS.
+      // Breadcrumbs: "idle"
+      {
+        const gmINow = Date.now();
+        if (gmINow - this.gmIdleWakeAt >= GM_SIT_WAKE_MS) {
+          let gmCalm = false; try { gmCalm = npc.getCombatState() === 0 && npc.getSitState() === 0 && !npc.isOnMount(); } catch (e) { gmCalm = false; }
+          const gmFoe = gmCalm ? this.gmNearestFoe(npc, gmPlayers, GM_SIT_NEAR) : null;
+          let gmSees = false; try { gmSees = !!gmFoe && (gmFoe.d <= GM_IDLE_SURE || gmFoe.foe.isDetectedBy(npc)); } catch (e) { gmSees = false; }
+          if (gmFoe && gmSees) {
+            this.gmIdleWakeAt = gmINow;
+            gmCrumb("idle " + gmHex(this.remoteRefrId as number) + ": not fighting with " + gmHex(gmFoe.foe.getFormID()) + (gmFoe.foe.getFormID() === 0x14 ? " (me)" : "") + " " + Math.round(gmFoe.d) + " away: out of its idle, sent at them");
+            this.gmFrozenNudge(npc, gmFoe.foe);
           }
         }
       }
@@ -1662,16 +1708,7 @@ export class FormView {
           }
         } else if (gmFix) { delete gmFixes[gmKey]; }
       }
-      const others: Actor[] = [];
-      const arr = getViewFromStorage()?.getFormViews();
-      const n = arr ? arr.getFormViewsArrayLength() : 0;
-      for (let i = 0; i < n; i++) {
-        const fv = arr!.getNthFormView(i);
-        if (!fv || fv === this || !fv.gmIsPlayerLook) continue;
-        const ac = Actor.from(Game.getFormEx(fv.getLocalRefrId()));
-        if (!ac || ac.isDead() || !ac.is3DLoaded() || placeOf(ac) !== myPlace) continue;
-        others.push(ac);
-      }
+      const others = this.gmOtherPlayers(myPlace, placeOf);
       if (!others.length) return "";
       const remoteId = this.remoteRefrId as number;
       const dMe = npc.getDistance(me);
