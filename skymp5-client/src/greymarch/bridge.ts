@@ -2178,7 +2178,9 @@ export class GreymarchBridge {
                 var current = JSON.parse(text);
                 if (rmMod.sameRaceMenuParts(current, c.want)) { c.done = key; c.tries = 0; continue; }
                 if (!this.greymarchPresetWrite(rmMod.COPY_PRESET_NAME, JSON.stringify(rmMod.spliceRaceMenuParts(current, c.want)))) continue;
+                var copyParts = this.greymarchHeadPartIds(ac);
                 var ok = sp.callNative("CharGen", "LoadCharacterPresetEx", undefined, ac, rmMod.COPY_PRESET_NAME, null, rmMod.APPLY_ALL);
+                this.greymarchKeepHeadParts(ac, copyParts, Date.now());
                 if (!ok) { this.greymarchRmCopyLog(c.actor, "RaceMenu did not load the sliders on the copy (try " + c.tries + " of 3)"); continue; }
                 c.done = key; c.tries = 0;
                 this.greymarchRmCopyLog(c.actor, "sliders put on their copy (" + this.greymarchRaceMenuSay(c.want) + ")");
@@ -2333,8 +2335,45 @@ export class GreymarchBridge {
         step("NiOverride.UpdateNodeTransform (first person)", () => sp.callNative("NiOverride", "UpdateNodeTransform", undefined, player, true, female, "NPC"));
         if (++h.sets <= 4) this.greymarchLog("racemenu: Height " + value + " -> " + v + " (the skeleton reads " + this.greymarchHeightNow(player, female) + ")");
     }
+    // HEAD PARTS KEPT (2026-11-04, the owner: a Bosmer's antlers were there for a second after logging in, then gone): loading a RaceMenu preset to put the
+    // extra sliders back dropped head parts RaceMenu does not keep in a preset the way the game has them (the Bosmeri Antlers of CuyiAntlers.esp). The head
+    // parts the character had before the load are noted, and for 3 seconds after it any that are missing are put back on (ChangeHeadPart).
+    greymarchHeadPartIds(actor: any): any {
+        var out: number[] = [];
+        try { var base = this.sp.ActorBase.from(actor.getBaseObject()); var n = base.getNumHeadParts(); for (var i = 0; i < n; i++) { var hp = base.getNthHeadPart(i); if (hp) out.push(hp.getFormID() >>> 0); } } catch (e) { /* none read */ }
+        return out;
+    }
+    greymarchKeepHeadParts(actor: any, before: number[], now: number): any {
+        if (!before || !before.length) return;
+        var list = this.greymarchKeepPartsList || (this.greymarchKeepPartsList = []);
+        var id = actor.getFormID() >>> 0;
+        for (var i = list.length - 1; i >= 0; i--) if (list[i].actor === id) list.splice(i, 1);
+        list.push({ actor: id, parts: before.slice(), until: now + 3000 });
+        this.greymarchKeepPartsTick(now);
+    }
+    greymarchKeepPartsTick(now: number): any {
+        var list = this.greymarchKeepPartsList; if (!list || !list.length) return;
+        var sp = this.sp;
+        for (var i = list.length - 1; i >= 0; i--) {
+            var k = list[i];
+            if (now > k.until) { list.splice(i, 1); continue; }
+            try {
+                var ac = sp.Actor.from(sp.Game.getFormEx(k.actor)); if (!ac) { list.splice(i, 1); continue; }
+                var has = this.greymarchHeadPartIds(ac), put = 0;
+                for (var j = 0; j < k.parts.length; j++) {
+                    if (has.indexOf(k.parts[j]) >= 0) continue;
+                    var hp = sp.HeadPart.from(sp.Game.getFormEx(k.parts[j]));
+                    if (!hp) continue;
+                    ac.changeHeadPart(hp); put++;
+                    if ((this.greymarchKeepPartsSaid || 0) < 20) { this.greymarchKeepPartsSaid = (this.greymarchKeepPartsSaid || 0) + 1; this.greymarchLog("racemenu: head part " + k.parts[j].toString(16) + " put back on " + k.actor.toString(16) + " after the sliders"); }
+                }
+                if (put && k.actor === 0x14) { try { ac.regenerateHead(); } catch (e2) { /* the next build */ } }
+            } catch (e) { list.splice(i, 1); }
+        }
+    }
     greymarchRaceMenuTick(now: number): any {
         var sp = this.sp, rm = this.greymarchRmState(), open = false;
+        this.greymarchKeepPartsTick(now);
         try { open = !!sp.Ui.isMenuOpen("RaceSex Menu"); } catch (mErr) { open = false; }
         if (rm.menuWas && !open) rm.sendAt = now + 1000; // RaceMenu finishes its own work as the menu closes
         rm.menuWas = open;
@@ -2358,7 +2397,9 @@ export class GreymarchBridge {
             if (!current) return;
             if (rmMod.sameRaceMenuParts(current, rm.want)) { rm.done = key; rm.tries = 0; return; }
             if (!this.greymarchPresetWrite(rmMod.PRESET_NAME, JSON.stringify(rmMod.spliceRaceMenuParts(current, rm.want)))) { this.greymarchLog("racemenu: the kept sliders could not be written for RaceMenu (try " + rm.tries + " of 3)"); return; }
+            var partsBefore = this.greymarchHeadPartIds(player);
             var ok = sp.callNative("CharGen", "LoadCharacterPresetEx", undefined, player, rmMod.PRESET_NAME, null, rmMod.APPLY_ALL);
+            this.greymarchKeepHeadParts(player, partsBefore, now);
             if (!ok) { this.greymarchLog("racemenu: RaceMenu did not load the kept sliders (try " + rm.tries + " of 3)"); return; }
             rm.done = key; rm.tries = 0;
             this.greymarchLog("racemenu: sliders put back (" + this.greymarchRaceMenuSay(rm.want) + ")");
