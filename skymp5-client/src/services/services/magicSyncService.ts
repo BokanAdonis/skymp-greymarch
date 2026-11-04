@@ -231,7 +231,9 @@ export class MagicSyncService extends ClientListener {
         for (const cast of this.recentCasts) {
             if (cast.casterLocalId !== casterLocalId || now - cast.at > 5000) continue;
             try {
-                const spell = this.sp.Spell.from(Game.getFormEx(cast.spell));
+                // a staff's cast names its enchantment (2026-11-03): its blast is reported as that enchantment (the server's staff damage, OnStaffHit)
+                const form = Game.getFormEx(cast.spell);
+                const spell: any = this.sp.Spell.from(form) || this.sp.Enchantment.from(form);
                 const n = spell ? spell.getNumEffects() : 0;
                 for (let i = 0; i < n; i++) {
                     const explosion = spell!.getNthEffectMagicEffect(i)?.getExplosion();
