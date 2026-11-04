@@ -115,6 +115,7 @@ const CLICK_GUARD_MS = 400; // after a window closes, attacks and drawing a weap
 const MINI_KEEP_MS = 3500; // a mini game window kept up between logs (the chopping block) closes if the next does not come within this
 const MINIGAME_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmMiniRun").split("greymarch-prof").join("greymarch-minigame").split("2147483220").join("2147483226"); // the profession mini games (gamemode minigames.js): the same loader, another page, over the others
 const LEDGER_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmLedgerRun").split("greymarch-prof").join("greymarch-ledger").split("2147483220").join("2147483223"); // the guard ledger (/reports)
+const CIRCLE_FALLBACK_SPELL = 0x0e0ccf; // Guardian Circle (Skyrim.esm): cast by the caster's copy when no ring could be placed (greymarchCircleTick)
 const NOCLIP_FLY_SPEED = 600; // units a second flying in noclip at 100% speed (greymarchNoclipFly; Shift x3)
 const BUILD_CAM_STEPS =[[1, 1], [5, 5], [25, 15], [100, 90]]; // the free camera's steps: units and degrees ([ and ]; gamemode buildsys.js TUNE.steps)
 const SCRIBE_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmScribeRun").split("greymarch-prof").join("greymarch-scribe").split("2147483220").join("2147483227"); // the scribe's desk (/scribe): letters and books: the same loader, another page
@@ -246,7 +247,7 @@ export class GreymarchBridge {
         if (type === "greymarchWolfRoar") { if (Number(msg.actor) > 0) (this.greymarchWolfRoarQueue || (this.greymarchWolfRoarQueue = [])).push({ actor: Number(msg.actor), bear: !!msg.bear }); return; } // another player roared nearby: the sound on their NPC (greymarchWolfTick)
         if (type === "greymarchWolfAlphas") { var lists: any = {}; for (var lk in GM_WOLF_LISTS) lists[lk] = Array.isArray(msg[GM_WOLF_LISTS[lk]]) ? msg[GM_WOLF_LISTS[lk]] : []; this.greymarchWolfLists = lists; return; } // the other players in the Alpha form: drawn white (greymarchWolfAlphaOthers)
         if (type === "greymarchSpellCosts") { this.greymarchSpellCostWant = msg.costs && typeof msg.costs === "object" ? msg.costs : {}; this.greymarchSpellCostTold = {}; return; } // the Spells balance tab's costs (greymarchSpellCostTick)
-        if (type === "greymarchCircle") { if (typeof msg.key === "string" && msg.key.length < 64) (this.greymarchCircleQueue || (this.greymarchCircleQueue = [])).push(msg); return; } // a Circle spell someone cast near (gamemode circles.js): its ring here too (greymarchCircleTick)
+        if (type === "greymarchCircle") { this.greymarchLog("circle: word from the server " + String(msg.key) + (msg.off ? " off" : " " + String(msg.hazard))); if (typeof msg.key === "string" && msg.key.length < 64) (this.greymarchCircleQueue || (this.greymarchCircleQueue = [])).push(msg); return; } // a Circle spell someone cast near (gamemode circles.js): its ring here too (greymarchCircleTick)
         if (type === "greymarchSpellEdits") { this.greymarchSpellEditWant = msg.edits && typeof msg.edits === "object" ? msg.edits : {}; this.greymarchSpellEditTold = {}; return; } // the Magic balance tab's durations and strengths (greymarchSpellEditTick)
         if (type === "greymarchFavorites") { var favList = Array.isArray(msg.fav) ? msg.fav.filter((x: any) => x && Number(x.f) > 0).slice(0, 300) : []; var favWant: any = {}; favList.forEach((x: any) => { favWant[Number(x.f) >>> 0] = Number(x.k) >= 0 && Number(x.k) <= 7 ? Number(x.k) : -1; }); this.greymarchFavState = { pending: favList.map((x: any) => ({ f: Number(x.f) >>> 0, k: favWant[Number(x.f) >>> 0] })), want: favWant, restoreUntil: Date.now() + 60000, restoreAt: 0, loginAt: Date.now(), nextAt: Date.now() + 2000, lastSent: JSON.stringify(Object.keys(favWant).map((k) => ({ f: Number(k), k: favWant[k] })).sort((p: any, q: any) => p.f - q.f)), put: 0, menuSeen: false }; return; } // favorites remembered (greymarchFavTick)
         if (type === "greymarchMapMarkers") { this.greymarchMapState = { all: Array.isArray(msg.all) ? msg.all.filter((x: any) => typeof x === "string").slice(0, 5000) : [], found: new Set(Array.isArray(msg.found) ? msg.found.filter((x: any) => typeof x === "string") : []), restore: true, checkAt: 0, refs: {} }; return; } // the map remembered (greymarchMapTick)
@@ -1344,17 +1345,33 @@ export class GreymarchBridge {
                     var player = sp.Game.getPlayer(); if (!player) continue;
                     var at = m.hazard.indexOf(":"), hid = parseInt(m.hazard.slice(0, at), 16), file = m.hazard.slice(at + 1);
                     var hz = at > 0 && hid > 0 ? sp.Game.getFormFromFile(hid, file) : null;
-                    if (!hz) { this.greymarchLog("circle: no hazard " + m.hazard + " in this game"); continue; }
-                    var ref = player.placeAtMe(hz, 1, false, false);
-                    if (!ref) continue;
-                    ref.setPosition(Number(m.pos[0]), Number(m.pos[1]), Number(m.pos[2]));
-                    rings[m.key] = { id: ref.getFormID(), until: now + Math.min(10 * 60 * 1000, Number(m.ms)) };
+                    var ref = null;
+                    if (hz) { try { ref = player.placeAtMe(hz, 1, false, false); } catch (pErr) { ref = null; this.greymarchLog("circle: placing " + m.hazard + " failed: " + pErr); } }
+                    else this.greymarchLog("circle: no hazard " + m.hazard + " in this game");
+                    if (ref) {
+                        ref.setPosition(Number(m.pos[0]), Number(m.pos[1]), Number(m.pos[2]));
+                        rings[m.key] = { id: ref.getFormID(), until: now + Math.min(10 * 60 * 1000, Number(m.ms)) };
+                        this.greymarchLog("circle: ring " + m.hazard + " placed at " + m.pos.join(" ") + " for " + Math.round(Number(m.ms) / 1000) + " s");
+                        continue;
+                    }
+                    // NO RING PLACED (2026-11-03, the owner: "I can't see the circle around tie"): the game may refuse to place a hazard by itself. The caster's character
+                    // in this game casts Guardian Circle on itself instead, which puts the same ring at their feet (it heals only that copy, which the server overrides)
+                    var casterRemote = parseInt(String(m.key).split(":")[0], 10) >>> 0;
+                    var casterLocal = casterRemote ? misc.remoteIdToLocalId(casterRemote) : 0;
+                    var caster = casterLocal ? sp.Actor.from(sp.Game.getFormEx(casterLocal)) : null;
+                    var guardian = sp.Spell.from(sp.Game.getFormFromFile(CIRCLE_FALLBACK_SPELL, "Skyrim.esm"));
+                    if (caster && guardian && caster.is3DLoaded()) {
+                        guardian.cast(caster, caster);
+                        rings[m.key] = { id: 0, until: now + Math.min(10 * 60 * 1000, Number(m.ms)) };
+                        this.greymarchLog("circle: no ring could be placed, " + casterRemote.toString(16) + " cast Guardian Circle here instead");
+                    } else this.greymarchLog("circle: no ring could be placed and the caster " + casterRemote.toString(16) + " is not loaded here");
                 } catch (e) { this.greymarchLog("circle: the ring could not be placed: " + e); }
             }
         }
         for (var k in rings) if (now >= rings[k].until) { this.greymarchCircleRemove(rings[k].id); delete rings[k]; }
     }
     greymarchCircleRemove(id: number): any {
+        if (!id) return; // a ring the caster's copy cast here (no ring placed): it ends with its spell
         try { var r = this.sp.ObjectReference.from(this.sp.Game.getFormEx(id)); if (r) { r.disable(false); r.delete(); } } catch (e) { /* gone already */ }
     }
     greymarchSpellEditTick(): any {
