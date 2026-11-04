@@ -91,6 +91,7 @@ const VAMP_EYE_RACES = [0x13746, 0x13744, 0x13741, 0x13748, 0x13743, 0x13749, 0x
 const VAMP_FANGS = { male: 0x81c, female: 0x81d }; // GM_VampFangsMale / GM_VampFangsFemale: the human teeth with the upper canines pulled into fangs
 const VAMP_FANG_RACES = [0x13746, 0x13744, 0x13741, 0x13748, 0x13743, 0x13749, 0x13742]; // the human and elf teeth; orcs keep their tusks
 const VAMP_FANG_ITEM = 0x0323fe; // Dragonborn.esm's DLC2ApocryphaBookWarpArmor (slot 61 only, on the server too): GreymarchCore.esp makes it the worn "Vampire Fangs" (DLC2DummyHelmet before: the server's copy covered nearly every armour slot and armour came off) (the server gives it, greymarchVampFangsWear puts it on)
+const GM_HEIGHT_CALLBACK = "GM_ChangeHeight"; // our Height slider on RaceMenu's Body tab (greymarchHeightModEvent)
 const VAMP_OWN_TEETH = { male: 0x51631, female: 0x5150f }; // MaleMouthHumanoidDefault / FemaleMouthHumanoidDefault (Skyrim.esm): the race's teeth, put back for a character with no teeth part of their own
 const CHANCERY_SCRIPT =PROF_SCRIPT.split("__gmProfSend").join("__gmChanceryRun").split("greymarch-prof").join("greymarch-chancery").split("2147483220").join("2147483221"); // the chancery window (/chancery): the same loader, another page
 const EMOTE_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmEmoteRun").split("greymarch-prof").join("greymarch-emote").split("2147483220").join("2147483223").split("e.key==='x'||e.key==='X'").join("e.key==='g'||e.key==='G'"); // the emote wheel (G): the same loader, another page; letting go of G inside the page is a release too
@@ -158,6 +159,7 @@ export class GreymarchBridge {
         try { (this.sp.storage as any)["greymarchWolfOn"] = false; } catch (stErr) { /* no storage: nothing to clear */ }
         this.controller.on("browserMessage", (e: any) => this.greymarchBrowserMessage(e));
         this.controller.on("buttonEvent", (e: any) => this.greymarchKey(e)); // F7 opens the staff panel
+        try { this.sp.on("modEvent", (e: any) => this.greymarchHeightModEvent(e)); } catch (meErr) { /* no mod events: no Height slider on the Body tab */ } // RaceMenu's menu talks in mod events (the Height slider, greymarchHeightModEvent)
         try { this.sp.on("hit", (e: any) => this.greymarchHit(e)); } catch (hitErr) { /* no hit events: the combat history stays empty */ }
         this.controller.on("update", () => this.greymarchTick()); // Skyrim functions only work in the update phase, never in tick
         this.greymarchWolfLungeHook();
@@ -259,7 +261,7 @@ export class GreymarchBridge {
             if (rmcId) rmc[rmcId] = { actor: rmcId, want: msg.look && typeof msg.look === "object" ? msg.look : {}, done: null, loadedSince: 0, tries: 0 };
             return;
         }
-        if (type === "greymarchRaceMenuLook") { var rm0 = this.greymarchRmState(); rm0.want = msg.look && typeof msg.look === "object" ? msg.look : {}; rm0.tries = 0; return; } // RaceMenu's extra sliders of this character, kept by the server (greymarchRaceMenuTick)
+        if (type === "greymarchRaceMenuLook") { var rm0 = this.greymarchRmState(); rm0.want = msg.look && typeof msg.look === "object" ? msg.look : {}; rm0.tries = 0; if (Array.isArray(msg.height) && msg.height.length === 2 && msg.height[0] > 0 && msg.height[1] >= msg.height[0]) this.greymarchHeightRange = [Number(msg.height[0]), Number(msg.height[1])]; return; } // RaceMenu's extra sliders of this character, kept by the server (greymarchRaceMenuTick)
         if (type === "greymarchVampire") { this.greymarchVampWant = msg.on ? msg : null; this.greymarchVampCostTold = {}; this.greymarchHudToPage("blood", { on: !!msg.on, blood: msg.blood, empty: !!msg.empty }); return; } // a vampire's state: the blood drop and what the game applies (greymarchVampTick)
         if (type === "greymarchVampLooks") { this.greymarchVampLookList = Array.isArray(msg.vampires) ? msg.vampires : []; if (Number(msg.me) > 0) this.greymarchMeActor = Number(msg.me) >>> 0; return; } // (me: which of them is this player: the ghosts and effects packets that also say so may not have come yet, and without it the player's own eyes and fangs were never put on) // how every vampire in the world looks (eyes and fangs)
         if (type === "greymarchDrunk") { this.greymarchDrunkWant = msg.on ? { until: Date.now() + Math.max(0, Number(msg.ms) || 0), at: 0 } : { off: true }; return; } // drained to death: the drunk walk after waking (greymarchDrunkTick)
@@ -2229,10 +2231,58 @@ export class GreymarchBridge {
             st.done = true;
         }
     }
+    // THE HEIGHT SLIDER ON THE BODY TAB (2026-11-04, the owner: "Can we recreate the height scaler on body menu?"). RaceMenu's own Body Scales tab never
+    // showed under SkyMP (RaceMenuPlugin's script never got the menu's requests), so this game puts a Height slider on the Body tab itself, the way
+    // RaceMenu's scripts do: a line "name;;section;;callback;;min;;max;;step;;value;;category;;priority" to the menu's RSM_AddSliders (section 4 = Body),
+    // sent when the menu asks for sliders (RSM_Initialized, RSM_Reinitialized after a race change, RSMDT_SendDataRequest with the sliders bit). Moving it
+    // comes back as the mod event RSM_SliderChange (callback, value): the scale goes on the skeleton's NPC node under RaceMenu's own key, RSMPlugin, as
+    // its slider would, so RaceMenu's preset carries it and racemenulook.js keeps it and shows it to everyone. The range is the race's (the server sends
+    // it with the look, gamemode raceheights.js; until then 0.93-1.07); the server cuts it to the race's limits again whatever the game sends.
+    greymarchHeightModEvent(e: any): any {
+        try {
+            var name = String(e && e.eventName || "");
+            if (name.indexOf("RSM") !== 0) return;
+            if (!this.greymarchHeightSaid) { this.greymarchHeightSaid = 1; this.greymarchLog("racemenu: the race menu talks (" + name + "): the Height slider goes on the Body tab"); }
+            if (name === "RSM_Initialized" || name === "RSM_Reinitialized" || (name === "RSMDT_SendDataRequest" && (Number(e.numArg) & 32) === 32)) { this.greymarchHeightAdd(); return; }
+            if (name === "RSM_SliderChange" && String(e.strArg) === GM_HEIGHT_CALLBACK) this.greymarchHeightSet(Number(e.numArg));
+        } catch (err) {
+            this.greymarchLog("racemenu: the Height slider: " + err);
+        }
+    }
+    greymarchHeightLimits(): any {
+        var r = this.greymarchHeightRange;
+        return Array.isArray(r) ? r : [0.93, 1.07];
+    }
+    greymarchHeightNow(): any {
+        var sp = this.sp, player = sp.Game.getPlayer(), female = player.getActorBase().getSex() === 1;
+        var v = Number(sp.callNative("NiOverride", "GetNodeTransformScale", undefined, player, false, female, "NPC", "RSMPlugin"));
+        return v > 0 ? v : 1;
+    }
+    greymarchHeightAdd(): any {
+        this.greymarchHeightAdded = true;
+        var r = this.greymarchHeightLimits(), v = Math.min(r[1], Math.max(r[0], this.greymarchHeightNow()));
+        var line = "$Height;;4;;" + GM_HEIGHT_CALLBACK + ";;" + r[0] + ";;" + r[1] + ";;0.005;;" + (Math.round(v * 1000) / 1000) + ";;;;0";
+        this.sp.Ui.invokeStringA("RaceSex Menu", "_root.RaceSexMenuBaseInstance.RaceSexPanelsInstance.RSM_AddSliders", [line]);
+        if ((this.greymarchHeightAdds = (this.greymarchHeightAdds || 0) + 1) <= 5) this.greymarchLog("racemenu: Height slider on the Body tab (" + r[0] + "-" + r[1] + ", now " + v + ")");
+    }
+    greymarchHeightSet(value: number): any {
+        if (!(value > 0)) return;
+        var sp = this.sp, player = sp.Game.getPlayer(), female = player.getActorBase().getSex() === 1;
+        var r = this.greymarchHeightLimits(), v = Math.round(Math.min(r[1], Math.max(r[0], value)) * 1000) / 1000;
+        if (v === 1) { sp.callNative("NiOverride", "RemoveNodeTransformScale", undefined, player, false, female, "NPC", "RSMPlugin"); sp.callNative("NiOverride", "RemoveNodeTransformScale", undefined, player, true, female, "NPC", "RSMPlugin"); }
+        else { sp.callNative("NiOverride", "AddNodeTransformScale", undefined, player, false, female, "NPC", "RSMPlugin", v); sp.callNative("NiOverride", "AddNodeTransformScale", undefined, player, true, female, "NPC", "RSMPlugin", v); }
+        sp.callNative("NiOverride", "UpdateNodeTransform", undefined, player, false, female, "NPC");
+        sp.callNative("NiOverride", "UpdateNodeTransform", undefined, player, true, female, "NPC");
+    }
     greymarchRaceMenuTick(now: number): any {
         var sp = this.sp, rm = this.greymarchRmState(), open = false;
         try { open = !!sp.Ui.isMenuOpen("RaceSex Menu"); } catch (mErr) { open = false; }
         if (rm.menuWas && !open) rm.sendAt = now + 1000; // RaceMenu finishes its own work as the menu closes
+        if (open && !rm.menuWas) { rm.openedAt = now; this.greymarchHeightAdded = false; }
+        if (open && !this.greymarchHeightAdded && now - (rm.openedAt || now) > 2000) { // no menu event came: the Height slider goes on anyway (greymarchHeightModEvent)
+            this.greymarchHeightAdded = true;
+            try { this.greymarchHeightAdd(); this.greymarchLog("racemenu: no word from the race menu in 2 s: Height slider added anyway"); } catch (hErr) { this.greymarchLog("racemenu: the Height slider: " + hErr); }
+        }
         rm.menuWas = open;
         if (open) { rm.sendAt = 0; return; } // RaceMenu is the editor while it is open
         if (this.greymarchWolfOn || this.greymarchShapeOn) { rm.beast = true; rm.loadedSince = 0; return; }
