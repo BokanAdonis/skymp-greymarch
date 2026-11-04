@@ -1,5 +1,5 @@
 // @ts-expect-error (TODO: Remove in 2.10.0)
-import { Actor, Form, FormType, Menu, Spell, interruptCast, castSpellImmediate, printConsole, applyAnimationVariablesToActor, ActorAnimationVariables } from 'skyrimPlatform';
+import { Actor, Form, FormType, Menu, Spell, Enchantment, callNative, interruptCast, castSpellImmediate, printConsole, applyAnimationVariablesToActor, ActorAnimationVariables } from 'skyrimPlatform';
 import {
   Armor,
   Cell,
@@ -1109,6 +1109,30 @@ export class RemoteServer extends ClientListener {
 
       // GREYMARCH: the spell the caster named, when this game's copy of them does not hold it (their equipment arrived late or not at all)
       const held = ac.getEquippedSpell(msg.data.castingSource);
+      // GREYMARCH (2026-11-03, the owner: "I am just holding them in others eyes"): a STAFF's cast names its enchantment, which castSpellImmediate cannot
+      // cast (it takes a spell only). The copy casts it through GreymarchCamera.dll 1.11 (GreymarchCam.CastStaff): the bolt flies, a held staff's beam
+      // starts. Its damage here is 0 (the server sends the staffs' enchantments with the spell edits, and does a staff's damage itself: staffs.js). A held
+      // staff goes on while the caster's reminders come and ends like a held spell (their end, or HELD_SILENCE_MS without word).
+      let ench: Enchantment | null = null;
+      try { ench = Enchantment.from(Game.getFormEx(msg.data.spell)); } catch (e) { ench = null; }
+      if (ench) {
+        let heldStaff = false;
+        try { const fx = ench.getNthEffectMagicEffect(0); heldStaff = !!fx && fx.getCastingType() === 2; } catch (e) { heldStaff = false; }
+        const showingStaff = this.greymarchHeldSpells.get(castKey);
+        if (heldStaff && showingStaff && showingStaff.spell === ench.getFormID()) {
+          showingStaff.lastSeen = Date.now();
+          return;
+        }
+        let tgt: ObjectReference | null = null;
+        try { tgt = msg.data.target ? ObjectReference.from(Game.getFormEx(remoteIdToLocalId(msg.data.target))) : null; } catch (e) { tgt = null; }
+        let cast = false;
+        try { cast = !!callNative("GreymarchCam", "CastStaff", undefined, ac, ench, msg.data.castingSource === 0 ? 0 : 1, tgt); } catch (e) { cast = false; }
+        if (heldStaff && cast) this.greymarchHeldSpells.set(castKey, { spell: ench.getFormID(), casterId: ac.getFormID(), lastSeen: Date.now() });
+        else this.greymarchHeldSpells.delete(castKey);
+        this.greymarchMagicDiag(`magic: saw ${msg.data.caster.toString(16)} cast staff ${msg.data.spell.toString(16)} hand ${msg.data.castingSource}: ${cast ? (heldStaff ? "held, cast here" : "cast here") : "not cast (GreymarchCamera.dll older than 1.11?)"}`);
+        return;
+      }
+
       const spell = held || Spell.from(Game.getFormEx(msg.data.spell));
 
       // GREYMARCH: a held (concentration) spell is shown once; the caster's game repeats the cast every second while it is held, and those

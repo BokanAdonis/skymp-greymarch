@@ -1262,8 +1262,12 @@ export class GreymarchBridge {
     }
     greymarchVampSpellOf(desc: string): any { // "8d5bf:Skyrim.esm" -> that Spell in this game (null when the plugin or the record is not there)
         // looked up fresh every time: a game object kept from an earlier frame is refused by the game ("Invalid _skyrimPlatform_indexInPool", 2026-10-25)
+        // "<hex id>:" (no plugin): the form id as every game has it, a Spell or an Enchantment (the magic staffs' enchantments, zeroed: 2026-11-03)
         var at = desc.indexOf(":"), id = parseInt(desc.slice(0, at), 16), file = desc.slice(at + 1);
-        try { var fm = at > 0 && id > 0 ? this.sp.Game.getFormFromFile(id, file) : null; return fm ? this.sp.Spell.from(fm) : null; } catch (e) { return null; }
+        try {
+            if (at > 0 && id > 0 && !file) { var g = this.sp.Game.getFormEx(id); return g ? (this.sp.Spell.from(g) || this.sp.Enchantment.from(g)) : null; }
+            var fm = at > 0 && id > 0 ? this.sp.Game.getFormFromFile(id, file) : null; return fm ? this.sp.Spell.from(fm) : null;
+        } catch (e) { return null; }
     }
     // the vampire's own signals (the Lord, Mist Form, a Potion of Blood: 2026-11-03, the owner: the potion did not heal) go to the front and are never lost
     // to a queue full of other effects
