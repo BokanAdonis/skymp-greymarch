@@ -267,7 +267,13 @@ export class GreymarchBridge {
         if (type === "greymarchDrunk") { this.greymarchDrunkWant = msg.on ? { until: Date.now() + Math.max(0, Number(msg.ms) || 0), at: 0 } : { off: true }; return; } // drained to death: the drunk walk after waking (greymarchDrunkTick)
         if (type === "greymarchVampFeed") { if (!msg.on && this.greymarchVampFeedHold) this.greymarchLog("vampire: the server ended the feeding" + (msg.why ? " (" + String(msg.why).slice(0, 80) + ")" : "")); this.greymarchVampFeedWant = msg.on ? { role: msg.role, partner: msg.partner, at: Date.now(), done: false } : { off: true }; return; } // the feeding scene (held until the vampire stops: greymarchVampFeedHeld)
         if (type === "greymarchVampMist") { if (!msg.on) this.greymarchVampMistEnd = true; return; } // Mist Form refused or over: the game's own mist is ended
-        if (type === "greymarchVampLord") { if (this.greymarchVampLordWas !== !!msg.on) { this.greymarchVampLordWas = !!msg.on; this.greymarchLog("vampire: the server says the Lord's shape is " + (msg.on ? "on" : "off")); } return; } // the body itself is the creature form (greymarchShape)
+        if (type === "greymarchVampLord") {
+            if (this.greymarchVampLordWas !== !!msg.on) { this.greymarchVampLordWas = !!msg.on; this.greymarchLog("vampire: the server says the Lord's shape is " + (msg.on ? "on" : "off")); }
+            var fiOk = function (x: any) { return !!x && typeof x.f === "string" && x.f.length < 80 && Number(x.i) > 0; };
+            if (!msg.on) this.greymarchLordKit = null;
+            else if (fiOk(msg.robe) && msg.hands && typeof msg.hands === "object" && !this.greymarchLordKit) this.greymarchLordKit = { robe: msg.robe, hands: { right: fiOk(msg.hands.right) ? msg.hands.right : null, left: fiOk(msg.hands.left) ? msg.hands.left : null, power: fiOk(msg.hands.power) ? msg.hands.power : null }, done: {}, since: Date.now(), next: 0, said: {} };
+            return;
+        } // the body itself is the creature form (greymarchShape)
         if (type === "greymarchCuffs") { this.greymarchCuffsWant = msg.on ? msg : null; return; } // in cuffs (guards.js): the cuffs worn and the bound pose (greymarchCuffsTick)
         if (type === "greymarchChains") { this.greymarchChainList = Array.isArray(msg.chains) ? msg.chains.slice(0, 16) : []; this.greymarchCuffedList = Array.isArray(msg.cuffed) ? msg.cuffed.slice(0, 64) : []; return; } // who is on whose chain (drawn on the HUD), who is in cuffs (posed)
         if (type === "greymarchProgress") { var pOn = !msg.off && Number(msg.ms) > 0; this.greymarchProgressUntil = pOn ? Date.now() + Math.min(60000, Number(msg.ms)) + 500 : 0; this.greymarchGuardsHudCheck(); this.greymarchHudToPage("progress", pOn ? { on: true, ms: Number(msg.ms), text: String(msg.text || "").slice(0, 120) } : { on: false }); return; } // a timed action (the 7 seconds of cuffing): a bar on the HUD
@@ -552,6 +558,7 @@ export class GreymarchBridge {
         this.greymarchSpellEditTick(); // the Magic balance tab's durations and strengths on the spell records
         this.greymarchStaffChargeTick(); // a staff's charge reported, and set back when the server says it came back fuller (gamemode staffcharge.js)
         this.greymarchCircleTick(); // the rings of the Circle spells other players cast near (gamemode circles.js)
+        this.greymarchLordKitTick(Date.now()); // the Vampire Lord's robes on, its powers in hand, no other armor (greymarchLordKitTick)
         this.greymarchVampTick(); // a vampire: powers and potions reported, the abilities the server names, no Restoration, the feeding scene
         this.greymarchCuffsTick(Date.now()); // in cuffs: the cuffs worn, the bound pose (others' too), the chain drawn to whoever holds it
         this.greymarchEarsTick(Date.now()); // where each voice comes from, for the launcher (only while it is in voice)
@@ -2597,6 +2604,54 @@ export class GreymarchBridge {
     // THIS game changes the player's own body: Beast Form mode (no inventory or magic menus, as the werewolf), no fast travel, no first person (creature bodies have none), gear
     // off, and SetRace to the creature's race. The way back: the race the server names (the character's own), controls back, and the gear they wore put on again.
     // With no word from the server for SHAPE_SILENCE_MS (it restarted without the form, or the stream broke) the player changes back by themselves.
+    // THE VAMPIRE LORD'S KIT (2026-11-04, the owner: "Naked in lord form, no cloth and no powers"). The game's own change script (DLC1PlayerVampireChangeScript)
+    // never runs here: the body is the creature form (greymarchShape), which takes all gear off and gave the Lord nothing in hand. The server now puts the
+    // Lord's robes (DLC1VampireLordArmor) in the pack and teaches the Lord's powers, and says which go in which hand (greymarchVampLord: robe, hands). Here,
+    // twice a second while in the form:
+    //   the robes   worn by the player (SkyMP sends what the player wears to every other game, which draws the Lord robed) and, in "npc" mode, by the NPC
+    //               this game shows in the player's place (a local one: equipItem adds it there)
+    //   the hands   right Vampiric Drain, left Blood Lance, the power key Bats, once each, as soon as the player knows them (the Magic and Favorites menus stay
+    //               open in this form: the player may pick others after; menus: true from the server, no beast form)
+    //   no armor    anything else worn from the pack is taken off at once (the menus are open, the inventory too), the worn Vampire Fangs excepted
+    greymarchLordKitTick(now: number): any {
+        var kit = this.greymarchLordKit;
+        if (!kit || !this.greymarchShapeOn || now < kit.next) return;
+        kit.next = now + 500;
+        var sp = this.sp, step = "start";
+        try {
+            var player = sp.Game.getPlayer();
+            if (!player) return;
+            step = "robe"; var robe = sp.Game.getFormFromFile(Number(kit.robe.i), String(kit.robe.f));
+            if (robe && player.getItemCount(robe) > 0 && !player.isEquipped(robe)) { player.equipItem(robe, false, true); if (!kit.said.robe) { kit.said.robe = 1; this.greymarchLog("vampire: the Lord's robes on"); } }
+            step = "npc robe"; var pup = this.greymarchShapePuppet;
+            if (robe && pup && pup.ready && kit.puppetDressed !== pup.id) {
+                var pa = sp.Actor.from(sp.Game.getFormEx(pup.id));
+                if (pa) { if (!pa.isEquipped(robe)) pa.equipItem(robe, false, true); kit.puppetDressed = pup.id; this.greymarchLog("vampire: the Lord's robes on the NPC shown here"); }
+            }
+            step = "hands"; var slots: any = { left: 0, right: 1, power: 2 };
+            for (var k in slots) {
+                var h = kit.hands[k];
+                if (!h || kit.done[k]) continue;
+                var spell = sp.Spell.from(sp.Game.getFormFromFile(Number(h.i), String(h.f)));
+                if (!spell || !player.hasSpell(spell)) { if (now - kit.since > 30000 && !kit.said[k]) { kit.said[k] = 1; this.greymarchLog("vampire: the Lord's " + k + " spell (" + Number(h.i).toString(16) + ":" + h.f + ") never came in 30 s"); } continue; }
+                player.equipSpell(spell, slots[k]);
+                kit.done[k] = true;
+                this.greymarchLog("vampire: the Lord's " + k + " hand: " + spell.getName());
+            }
+            step = "no armor";
+            var fangs = sp.Game.getFormFromFile(VAMP_FANG_ITEM, "Dragonborn.esm"), robeId = robe ? robe.getFormID() : 0, fangId = fangs ? fangs.getFormID() : 0;
+            for (var b = 0; b < 32; b++) {
+                var w = player.getWornForm((1 << b) >>> 0);
+                if (!w) continue;
+                var wid = w.getFormID();
+                if (wid === robeId || wid === fangId || !sp.Armor.from(w) || player.getItemCount(w) <= 0) continue; // the robes, the fangs, the body's own skin
+                player.unequipItem(w, false, true);
+                if (!kit.said["off" + wid]) { kit.said["off" + wid] = 1; this.greymarchLog("vampire: the Lord wears no armor: " + w.getName() + " taken off"); }
+            }
+        } catch (err) {
+            if (!kit.said.err) { kit.said.err = 1; this.greymarchLog("vampire: the Lord's kit failed at '" + step + "': " + err); }
+        }
+    }
     greymarchShapeMsg(msg: any): any {
         if (msg.on) {
             var race = Number(msg.race) >>> 0;
@@ -2605,7 +2660,7 @@ export class GreymarchBridge {
             if (!was || was.race !== race) this.greymarchLog("shape: the server says " + (msg.name || "a creature") + " (race " + race.toString(16) + ")");
             var at = msg.attacks && typeof msg.attacks === "object" ? msg.attacks : {};
             var names = function (l: any) { return Array.isArray(l) ? l.filter(function (x: any) { return typeof x === "string" && x.length > 0 && x.length < 64; }) : []; };
-            this.greymarchShapeWant = { race: race, back: Number(msg.back) >>> 0, name: String(msg.name || ""), normal: names(at.normal), power: names(at.power), mode: msg.mode === "race" ? "race" : "npc" };
+            this.greymarchShapeWant = { race: race, back: Number(msg.back) >>> 0, name: String(msg.name || ""), normal: names(at.normal), power: names(at.power), mode: msg.mode === "race" ? "race" : "npc", menus: msg.menus === true };
             this.greymarchShapeWordAt = Date.now();
         } else {
             if (this.greymarchShapeWant || this.greymarchShapeOn) this.greymarchLog("shape: the server says change back");
@@ -2714,7 +2769,7 @@ export class GreymarchBridge {
         var step = "start";
         try {
             if (!this.greymarchShapeOn) {
-                step = "beast form"; sp.Game.setBeastForm(true); // no inventory, magic or favourites menus: a creature cannot put on armor or cast the character's spells
+                step = "beast form"; if (!want.menus) sp.Game.setBeastForm(true); // no inventory, magic or favourites menus: a creature cannot put on armor or cast the character's spells (the Vampire Lord keeps them: it picks its powers; greymarchLordKitTick takes off any armor)
                 step = "fast travel"; sp.Game.enableFastTravel(false);
                 step = "controls"; sp.Game.disablePlayerControls(false, false, true, false, false, false, false, false, 1); // only the camera switch: they still walk, sneak, fight and talk
                 step = "camera"; sp.Game.forceThirdPerson();
@@ -3143,7 +3198,7 @@ export class GreymarchBridge {
             this.greymarchShapeModeOn = "race";
             if (!this.greymarchShapeOn) { // from their own body (not from one creature to another): remember the race to go back to
                 this.greymarchShapeBackRace = want.back || raceId;
-                step = "beast form"; sp.Game.setBeastForm(true); // no inventory, magic or favourites menus: a creature cannot put on armor or cast the character's spells
+                step = "beast form"; if (!want.menus) sp.Game.setBeastForm(true); // no inventory, magic or favourites menus: a creature cannot put on armor or cast the character's spells (the Vampire Lord keeps them: it picks its powers; greymarchLordKitTick takes off any armor)
                 step = "fast travel"; sp.Game.enableFastTravel(false);
                 step = "controls"; sp.Game.disablePlayerControls(false, false, true, false, false, false, false, false, 1); // only the camera switch: they still walk, sneak and talk
                 step = "camera"; sp.Game.forceThirdPerson();
