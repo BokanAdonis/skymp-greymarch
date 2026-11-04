@@ -1111,6 +1111,7 @@ export class RemoteServer extends ClientListener {
           return;
         }
         interruptCast(ac.getFormID(), msg.data.castingSource, actorAnimationVariables);
+        this.greymarchCastPose(ac.getFormID(), msg.data.castingSource, false, false);
         this.greymarchMagicDiag(`magic: saw ${msg.data.caster.toString(16)} end ${msg.data.spell.toString(16)} hand ${msg.data.castingSource}`);
         // GREYMARCH: the call above does nothing when the caster's animation variables cannot be applied, and a concentration spell
         // (Flames) then kept burning in this game for good. So the game's own InterruptCast follows a moment later, unless the same
@@ -1260,6 +1261,7 @@ export class RemoteServer extends ClientListener {
       if (spell) {
         castSpellImmediate(ac.getFormID(), msg.data.castingSource, spell.getFormID(), remoteIdToLocalId(msg.data.target),
           msg.data.aimAngle, msg.data.aimHeading, actorAnimationVariables);
+        this.greymarchCastPose(ac.getFormID(), msg.data.castingSource, true, isHeld);
         if (isHeld) {
           this.greymarchHeldSpells.set(castKey, { spell: spell.getFormID(), casterId: ac.getFormID(), lastSeen: Date.now() });
         } else {
@@ -1310,6 +1312,34 @@ export class RemoteServer extends ClientListener {
     return false;
   }
 
+  // GREYMARCH: THE CASTING POSE (2026-11-04, the owner: "people actually do the magic casting animation for other people instead of just standing there
+  // shooting magic"; and a held spell's stream went in different directions, aimed from a hand hanging at the copy's side). The character graph casts
+  // with the hand's bWantCastRight / bWantCastLeft (magicbehavior.hkx: BeginCast on false to true, CastStop on true to false); SkyMP only copied them
+  // once with the cast's animation variables. They are set on the caster's copy: on at the cast, off when a held spell ends, and off after
+  // POSE_FF_MS for a fire-and-forget spell (its release). Player copies only (the human graph), hands only.
+  private static readonly POSE_FF_MS = 700;
+  private greymarchPoseOff = new Map<string, number>(); // "copy:hand" -> when its pose goes off (fire and forget)
+  private greymarchCastPose(copyId: number, castingSource: number, on: boolean, held: boolean): void {
+    if (castingSource !== 0 && castingSource !== 1) return;
+    const name = castingSource === 0 ? "bWantCastLeft" : "bWantCastRight";
+    const key = copyId + ":" + castingSource;
+    try {
+      const ac = Actor.from(Game.getFormEx(copyId));
+      if (!ac) return;
+      ac.setAnimationVariableBool(name, on);
+    } catch (e) { return; }
+    if (!on || held) { this.greymarchPoseOff.delete(key); return; }
+    const at = Date.now() + RemoteServer.POSE_FF_MS;
+    this.greymarchPoseOff.set(key, at);
+    const later = () => {
+      if (this.greymarchPoseOff.get(key) !== at) return; // another cast since: its own timer
+      if (Date.now() < at) { once('update', later); return; }
+      this.greymarchPoseOff.delete(key);
+      try { const a2 = Actor.from(Game.getFormEx(copyId)); if (a2) a2.setAnimationVariableBool(name, false); } catch (e) { /* gone */ }
+    };
+    once('update', later);
+  }
+
   private greymarchIsHeld(spell: Spell): boolean {
     try { const effect = spell.getNthEffectMagicEffect(0); return !!effect && effect.getCastingType() === 2; } catch (e) { return false; }
   }
@@ -1320,7 +1350,7 @@ export class RemoteServer extends ClientListener {
     for (const [key, showing] of Array.from(this.greymarchHeldSpells.entries())) {
       if (now - showing.lastSeen < RemoteServer.HELD_SILENCE_MS) continue;
       this.greymarchHeldSpells.delete(key);
-      try { const ac = Actor.from(Game.getFormEx(showing.casterId)); if (ac) ac.interruptCast(); } catch (e) { /* not loaded */ }
+      try { const ac = Actor.from(Game.getFormEx(showing.casterId)); if (ac) { ac.interruptCast(); ac.setAnimationVariableBool("bWantCastLeft", false); ac.setAnimationVariableBool("bWantCastRight", false); } } catch (e) { /* not loaded */ }
       this.greymarchMagicDiag(`magic: no word for ${RemoteServer.HELD_SILENCE_MS} ms about ${key} (${showing.spell.toString(16)}): ended here`);
     }
   }
