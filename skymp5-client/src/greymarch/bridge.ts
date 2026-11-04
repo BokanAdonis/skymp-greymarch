@@ -3501,7 +3501,7 @@ export class GreymarchBridge {
             var name = function (a) { try { return a.getDisplayName ? String(a.getDisplayName()).slice(0, 40) : ""; } catch (x) { return ""; } };
             var source = "";
             try { source = e.source ? String(e.source.getName()).slice(0, 60) : ""; } catch (x2) { source = ""; }
-            var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchHit", target: misc.localIdToRemoteId(target.getFormID()), aggressor: misc.localIdToRemoteId(aggressor.getFormID()), source: source, blocked: !!e.isHitBlocked, tname: name(target), aname: name(aggressor) }) };
+            var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchHit", target: misc.localIdToRemoteId(target.getFormID()), aggressor: misc.localIdToRemoteId(aggressor.getFormID()), source: source, sid: e.source ? (e.source.getFormID() >>> 0) : 0 /* the source's id: a staff's enchantment (gamemode staffs.js, the healing staffs) */, blocked: !!e.isHitBlocked, tname: name(target), aname: name(aggressor) }) };
             this.controller.emitter.emit("sendMessage", { message: message, reliability: "reliable" });
         } catch (err) { /* the combat history is a nicety: it must never break the game */ }
     }
