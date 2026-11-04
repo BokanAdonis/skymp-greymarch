@@ -571,6 +571,7 @@ test("no first person during an emote or a meal (2026-11-02, the owner: they can
   assert.deepStrictEqual((s.log.pov || []).map((c) => c[0]), ["off"], "the camera switch is turned off");
   s.state.speed = 100; for (let i = 0; i < 20; i++) s.tick(50);
   assert.strictEqual(s.gm.greymarchEmoteNow, null, "moving ends it");
+  s.tick(2100); // getting up: third person 2 s more (2026-11-03)
   assert.strictEqual(s.log.pov.at(-1)[0], "on", "and the camera switch is on again");
   const o = make();
   o.page({ type: "emote", id: "wave" }); o.tick();
@@ -594,6 +595,7 @@ test("back to first person after an emote or a meal, only if they were in first 
   assert.strictEqual(s.state.cam, 9, "third person while it lasts");
   s.state.speed = 100; for (let i = 0; i < 20; i++) s.tick(50);
   assert.strictEqual(s.gm.greymarchEmoteNow, null);
+  assert.strictEqual(s.state.cam, 9, "still third person while getting up (2026-11-03)"); s.tick(2100);
   assert.strictEqual(s.state.cam, 0, "first person again"); assert.strictEqual(s.log.firstPerson, 1);
   const t = make(); // in third person already: left there
   t.page({ type: "emote", id: "hey" }); t.tick(); t.state.speed = 100; for (let i = 0; i < 20; i++) t.tick(50);
@@ -623,6 +625,7 @@ test("profession work in third person (2026-11-02, the owner: skinning with the 
   assert.deepStrictEqual(s.log.idles, [emotes.emoteById("searchbody").idle], "then the kneel");
   s.say({ customPacketType: "greymarchMinigameDone", ok: true, target: 0x1234 });
   for (let i = 0; i < 40; i++) s.tick(50);
+  s.tick(2100); // up from the kneel: third person 2 s more
   assert.strictEqual(s.log.pov.at(-1)[0], "on", "first person allowed again");
   assert.strictEqual(s.state.cam, 0, "and back in it");
 });
@@ -959,4 +962,17 @@ test("a poisoned blade glows (2026-11-03): the server's list goes to GreymarchCa
   s.say({ customPacketType: "greymarchPoisoned", actors: [] }); s.tick(600);
   assert.strictEqual(glows().length, 3, "taken off");
   s.tick(600); s.tick(5000); assert.strictEqual(glows().length, 3, "nothing more");
+});
+
+test("getting up from lying down or wounded in first person: back to first person only 2 seconds after it ends (2026-11-03: someone floated again)", () => {
+  for (const id of ["lie", "wounded2", "wounded3", "hey"]) {
+    const s = make(); s.state.cam = 0;
+    s.page({ type: "emote", id }); s.tick();
+    assert.strictEqual(s.state.cam, 9, id + ": third person");
+    s.state.speed = 100; for (let i = 0; i < 20; i++) s.tick(50); // 1 s: moved, it ended
+    assert.strictEqual(s.gm.greymarchEmoteNow, null, id);
+    assert.strictEqual(s.state.cam, 9, id + ": still third person while getting up");
+    s.tick(2100);
+    assert.strictEqual(s.state.cam, 0, id + ": then first person");
+  }
 });
