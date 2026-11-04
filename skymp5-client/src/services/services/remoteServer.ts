@@ -1334,7 +1334,10 @@ export class RemoteServer extends ClientListener {
       ac.setAnimationVariableBool(name, on);
       if (on) {
         Debug.sendAnimationEvent(ac, castingSource === 0 ? "BeginCastLeft" : "BeginCastRight"); // the input event the game's own cast sends
-        Debug.sendAnimationEvent(ac, hand + (held ? "_SpellAimedConcentrationStart" : "_SpellAimedStart"));
+        // SWAPPED (2026-11-04, the owner: "when people cast a single shot they hold their hand out, and when they cast a stream they charge it by their
+        // head. That animation is reversed"): in this graph _SpellAimedStart gives the hand held out (the stream) and _SpellAimedConcentrationStart the charge
+        // by the head (the single shot)
+        Debug.sendAnimationEvent(ac, hand + (held ? "_SpellAimedStart" : "_SpellAimedConcentrationStart"));
         // WHAT THE COPY DID (diagnostics, a quarter second later): drawn, casting, the hand's type and state, the aim it was given
         const at0 = Date.now();
         const look = () => {
