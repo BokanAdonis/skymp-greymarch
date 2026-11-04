@@ -1174,6 +1174,7 @@ export class RemoteServer extends ClientListener {
       const showing = this.greymarchHeldSpells.get(castKey);
       if (isHeld && showing && showing.spell === spell!.getFormID()) {
         showing.lastSeen = Date.now();
+        this.greymarchAimCopy(ac, msg.data.aimAngle);
         return;
       }
 
@@ -1262,6 +1263,7 @@ export class RemoteServer extends ClientListener {
         castSpellImmediate(ac.getFormID(), msg.data.castingSource, spell.getFormID(), remoteIdToLocalId(msg.data.target),
           msg.data.aimAngle, msg.data.aimHeading, actorAnimationVariables);
         this.greymarchCastPose(ac.getFormID(), msg.data.castingSource, true, isHeld);
+        if (isHeld) this.greymarchAimCopy(ac, msg.data.aimAngle);
         if (isHeld) {
           this.greymarchHeldSpells.set(castKey, { spell: spell.getFormID(), casterId: ac.getFormID(), lastSeen: Date.now() });
         } else {
@@ -1347,7 +1349,7 @@ export class RemoteServer extends ClientListener {
         };
         once('update', look);
       }
-      else Debug.sendAnimationEvent(ac, "CastStop");
+      else { Debug.sendAnimationEvent(ac, "CastStop"); if (held === false) { try { if (Math.abs(ac.getAngleX()) > 1) ac.setAngle(0, ac.getAngleY(), ac.getAngleZ()); } catch (e2) { /* level again */ } } }
     } catch (e) { return; }
     if (!on || held) { this.greymarchPoseOff.delete(key); return; }
     const at = Date.now() + RemoteServer.POSE_FF_MS;
@@ -1359,6 +1361,14 @@ export class RemoteServer extends ClientListener {
       try { const a2 = Actor.from(Game.getFormEx(copyId)); if (a2) { a2.setAnimationVariableBool(name, false); Debug.sendAnimationEvent(a2, "CastStop"); } } catch (e) { /* gone */ }
     };
     once('update', later);
+  }
+
+  // GREYMARCH: a held spell aims from the copy's own pitch, which the movement never brings (always 0): the cast's aim (radians, the game's angle X) is put
+  // on the copy, at the cast and with each of the caster's aim updates while it is held
+  private greymarchAimCopy(ac: Actor, aimAngle: number): void {
+    if (!Number.isFinite(aimAngle)) return;
+    const deg = Math.max(-89, Math.min(89, aimAngle * 180 / Math.PI));
+    try { if (Math.abs(ac.getAngleX() - deg) > 1) ac.setAngle(deg, ac.getAngleY(), ac.getAngleZ()); } catch (e) { /* not loaded */ }
   }
 
   private greymarchIsHeld(spell: Spell): boolean {

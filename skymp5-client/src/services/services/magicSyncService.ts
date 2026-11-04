@@ -158,7 +158,18 @@ export class MagicSyncService extends ClientListener {
                 }
             }
 
-            if (now - cast.lastSentAt >= this.keepaliveMs) {
+            // GREYMARCH: THE AIM WHILE HELD (2026-11-04, the owner: another player's held Frostbite stayed level while they swept it from the ground up; the
+            // log: their copy's pitch is always 0, the look up and down never comes with the movement). The cast carries the aim: while the player holds the
+            // spell it is sent again with where they look now, at once when that moved more than 5 degrees (else with the reminder each second)
+            let aimMoved = false;
+            if (cast.casterLocalId === this.playerId) {
+                const look = this.getPlayerLook(ac);
+                if (look && (Math.abs(look.lookPitch - cast.msg.aimAngle) > 5 * Math.PI / 180 || Math.abs(look.bodyHeading - cast.msg.aimHeading) > 5 * Math.PI / 180)) {
+                    cast.msg = { ...cast.msg, aimAngle: look.lookPitch, aimHeading: look.bodyHeading };
+                    aimMoved = now - cast.lastSentAt >= 150; // at most about 6 a second
+                }
+            }
+            if (aimMoved || now - cast.lastSentAt >= this.keepaliveMs) {
                 cast.lastSentAt = now;
                 const again: SpellCastMsgData = { ...cast.msg, interruptCast: false };
                 try { again.actorAnimationVariables = this.getAnimationVariablesFromActorConverted(cast.casterLocalId); } catch (e) { /* keep the last ones */ }
