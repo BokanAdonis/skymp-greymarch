@@ -76,3 +76,22 @@ test("when the game sends no attack while sprinting, the bridge plays the leap i
     assert.deepStrictEqual(s.log.events, ["AttackStartRightSprinting"], "the game sent its own attack (swapped): nothing played twice");
   } finally { s.done(); }
 });
+
+test("the lunge diagnostic: a leap the game reports a hit for logs it; one it reports nothing for logs that, with how far the closest actor was", () => {
+  const s = make();
+  try {
+    s.gm.greymarchWolfOn = true;
+    s.sprint(true); s.frame();
+    assert.strictEqual(s.gameSends("attackStartRight"), "AttackStartRightSprinting");
+    s.advance(300);
+    const me = s.gm.sp.Game.getPlayer(); me.getFormID = () => 0x14;
+    s.gm.greymarchHit({ aggressor: { getFormID: () => 0x14 }, target: { getFormID: () => 0xff000a01, getDisplayName: () => "x" }, source: null });
+    assert.ok(s.log.lines.some((l) => /wolf lunge: hit ff000a01 300 ms after the leap/.test(l)), s.log.lines.join("\n"));
+    s.advance(1600); s.frame();
+    assert.ok(!s.log.lines.some((l) => /no hit reported/.test(l)), "a leap that hit is not reported as a miss");
+    s.gm.sp.Game.findClosestActorFromRef = () => ({ id: 1 }); me.getDistance = () => 140.4;
+    assert.strictEqual(s.gameSends("attackStartLeft"), "AttackStartLeftSprinting");
+    s.advance(1500); s.frame();
+    assert.ok(s.log.lines.some((l) => /wolf lunge: no hit reported by the game within 1500 ms, the closest actor 140 units away/.test(l)), s.log.lines.join("\n"));
+  } finally { s.done(); }
+});

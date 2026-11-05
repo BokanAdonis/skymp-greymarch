@@ -63,6 +63,7 @@ const GM_WOLF_LISTS: { [kind: string]: string } = { alpha: "actors", pup: "pups"
 const WOLF_LUNGE_SPRINT_MS = 300; // still counted as sprinting this long after the last frame that was (the click itself can stop the sprint)
 const WOLF_LUNGE_WAIT_MS = 80; // after a click, how long the game has to send its own attack before the bridge plays the leap itself
 const WOLF_LUNGE_GAP_MS = 1500; // one leap per this long
+const WOLF_LUNGE_WATCH_MS = 1500; // a leap's hit is looked for this long (the diagnostic in greymarchWolfLungeTick)
 const WOLF_ROAR_MS = 0; // R: no wait between roars (2026-10-21, the owner's call; the server has none either: werewolf.js TUNE.howlCooldownMs). One roar per press of R.
 // GREYMARCH: THE HOWL SHOUT (2026-10-23). The vanilla howl is the werewolf's voice: PlayerWerewolfChangeScript puts a howl shout in the voice slot, and the graph's
 // howl (HowlStart) casts it (BeginCastVoice). With none there the howl state had nothing to cast and stalled: the roar played once, then only its sound. A
@@ -70,6 +71,7 @@ const WOLF_ROAR_MS = 0; // R: no wait between roars (2026-10-21, the owner's cal
 // HowlWerewolfDetectLife (Skyrim.esm): its effect only shows the living, so roaring (no wait between roars) changes nothing in play. HowlWerewolfFear
 // (0x0CF790, Howl of Terror, the vanilla first howl) would make the NPCs near the roarer flee at every roar.
 const WOLF_HOWL_SHOUT = 0x0ce218;
+const WOLF_HOWL_IDLE = 0x0cdd9f; // the idle HowlStart (Skyrim.esm), WerewolfBehavior.hkx, needs isHowling == 0: played on other players' werewolves (greymarchWolfHowlOther)
 const WOLF_ROAR_SOUND = 0x101008, BEAR_ROAR_SOUND = 0x0f95bb; // NPCWerewolfShout (the werewolf's howl) and NPCBearAggroWarning01 (a bear's warning roar), Skyrim.esm
 // vampires (gamemode vampire.js): the game's own records, inside Dawnguard.esm (read from the game files); the real IDs are looked up with Game.getFormFromFile
 // DRAINED TO DEATH (2026-11-03, the owner: "if the player dies and wakes up in the temple they drunk walk for 5 minutes"): the server says { greymarchDrunk on, ms };
@@ -865,7 +867,7 @@ export class GreymarchBridge {
                     if (now - (self.greymarchWolfLungeAt || 0) < WOLF_LUNGE_GAP_MS) return;
                     var lunge = /left/i.test(ev) ? "AttackStartLeftSprinting" : "AttackStartRightSprinting";
                     ctx.animEventName = lunge;
-                    self.greymarchWolfLungeAt = now;
+                    self.greymarchWolfLungeAt = now; self.greymarchWolfLungeWatch = now;
                     self.greymarchWolfLungeNote = ev + " -> " + lunge;
                 } catch (hErr) { /* the game's own attack */ }
             },
@@ -880,6 +882,13 @@ export class GreymarchBridge {
         if (!this.greymarchWolfOn || this.greymarchWolfMorph || this.greymarchWolfBearRace) { this.greymarchWolfLungeClick = null; return; } // a werewolf's leap (a werebear's graph has none)
         try { if (player.isSprinting()) this.greymarchWolfSprintAt = now; } catch (sErr) { /* not known: no leap */ }
         if (this.greymarchWolfLungeNote) { this.greymarchLog("wolf lunge: the game's " + this.greymarchWolfLungeNote); this.greymarchWolfLungeNote = ""; }
+        // DIAGNOSTIC (2026-11-04, the owner: lunges that touch someone and do nothing): a leap the game reported no hit for within WOLF_LUNGE_WATCH_MS goes to the log
+        // with how far the closest actor was, so a test shows whether the game never saw the contact (here) or the server dropped the hit (the server log)
+        if (this.greymarchWolfLungeWatch && now - this.greymarchWolfLungeWatch >= WOLF_LUNGE_WATCH_MS) {
+            this.greymarchWolfLungeWatch = 0;
+            var near = -1; try { var na = sp.Game.findClosestActorFromRef(player, 600); if (na) near = Math.round(player.getDistance(na)); } catch (nErr) { near = -1; }
+            this.greymarchLog("wolf lunge: no hit reported by the game within " + WOLF_LUNGE_WATCH_MS + " ms" + (near >= 0 ? ", the closest actor " + near + " units away" : ", nobody within 600 units"));
+        }
         var click = this.greymarchWolfLungeClick;
         if (!click || now - click.at < WOLF_LUNGE_WAIT_MS) return;
         this.greymarchWolfLungeClick = null;
@@ -889,7 +898,7 @@ export class GreymarchBridge {
         var inMenu = false; try { inMenu = !!sp.Utility.isInMenuMode(); } catch (mErr) { inMenu = false; }
         if (inMenu || this.greymarchChatTyping) return;
         var lunge = click.left ? "AttackStartLeftSprinting" : "AttackStartRightSprinting";
-        this.greymarchWolfLungeAt = now;
+        this.greymarchWolfLungeAt = now; this.greymarchWolfLungeWatch = now;
         try { sp.Debug.sendAnimationEvent(player, lunge); this.greymarchLog("wolf lunge: no attack from the game while sprinting, played " + lunge); }
         catch (aErr) { this.greymarchLog("wolf lunge: " + lunge + " failed: " + String(aErr).slice(0, 120)); }
     }
@@ -1078,6 +1087,13 @@ export class GreymarchBridge {
             }
             var otherRel = this.greymarchWolfOtherRelease;
             if (otherRel) for (var orl in otherRel) { if (now >= otherRel[orl]) { delete otherRel[orl]; try { var oa = sp.Actor.from(sp.Game.getFormEx(Number(orl))); if (oa) sp.Debug.sendAnimationEvent(oa, "HowlRelease"); } catch (oErr) { /* gone */ } } }
+            var howlCheck = this.greymarchWolfHowlCheck;
+            if (howlCheck) for (var hcl in howlCheck) {
+                if (now < howlCheck[hcl].at) continue;
+                var hc = howlCheck[hcl]; delete howlCheck[hcl];
+                var after = -1; try { var hca = sp.Actor.from(sp.Game.getFormEx(Number(hcl))); if (hca) after = hca.getAnimationVariableInt("isHowling"); } catch (cErr) { /* gone */ }
+                this.greymarchLog("wolf: howl on " + (Number(hcl) >>> 0).toString(16) + " via " + (hc.viaIdle ? "idle" : "event") + ", isHowling " + hc.before + " -> " + after);
+            }
             if (this.greymarchWolfRoarRelease && now >= this.greymarchWolfRoarRelease) { this.greymarchWolfRoarRelease = 0; if (this.greymarchWolfOn) sp.Debug.sendAnimationEvent(player, "HowlRelease"); }
             // other players' roars: the howl on their NPC here once it has settled (greymarchWolfHowlOther), else the sound only. ONE HOWL, ONE SOUND (2026-10-27):
             // the howl brings its own sound, so a werewolf NPC that howls gets no second one (played on top it was heard as a repeat); a werebear adds the bear's
@@ -3795,6 +3811,7 @@ export class GreymarchBridge {
     greymarchHit(e: any): any {
         try {
             var now = Date.now();
+            if (this.greymarchWolfLungeWatch && e.aggressor && e.target) { try { if (e.aggressor.getFormID() === this.sp.Game.getPlayer().getFormID()) { this.greymarchLog("wolf lunge: hit " + (e.target.getFormID() >>> 0).toString(16) + " " + (now - this.greymarchWolfLungeWatch) + " ms after the leap"); this.greymarchWolfLungeWatch = 0; } } catch (lwErr) { /* the log is a nicety */ } }
             if (now - (this.greymarchHitAt || 0) < 100) return; // at most 10 reports a second
             this.greymarchHitAt = now;
             var target = e.target, aggressor = e.aggressor;
@@ -5062,9 +5079,16 @@ export class GreymarchBridge {
         var cur = ac.getEquippedShout();
         if (!cur || cur.getFormID() !== WOLF_HOWL_SHOUT) { ac.addShout(howl); ac.equipShout(howl); }
         try { ac.setVoiceRecoveryTime(0); } catch (vErr) { /* the howl as before */ }
-        this.greymarchCrumb("beast: howl on " + (localId >>> 0).toString(16));
-        this.sp.Debug.sendAnimationEvent(ac, "HowlStart");
+        // 2026-11-04 (the owner: watchers still cannot see the roar; the crumbs show "howl on" sent ~20 times that day, nothing seen): the raw HowlStart event
+        // on an NPC can be thrown away by its idle handling. The game's own idle HowlStart (0x0CDD9F, condition isHowling == 0) goes through it, so it is played
+        // first, the raw event only when the idle is refused. isHowling before and 400 ms after goes to the log: stuck at 1 means the last howl never ended.
+        var howlingBefore = -1; try { howlingBefore = ac.getAnimationVariableInt("isHowling"); } catch (hErr) { /* unknown */ }
+        var viaIdle = false;
+        try { var hIdle = this.sp.Idle.from(this.sp.Game.getFormEx(WOLF_HOWL_IDLE)); viaIdle = !!hIdle && !!ac.playIdle(hIdle); } catch (iErr) { viaIdle = false; }
+        if (!viaIdle) this.sp.Debug.sendAnimationEvent(ac, "HowlStart");
+        this.greymarchCrumb("beast: howl on " + (localId >>> 0).toString(16) + (viaIdle ? " (idle)" : " (event)") + " isHowling " + howlingBefore);
         (this.greymarchWolfOtherRelease || (this.greymarchWolfOtherRelease = {}))[localId] = now + 200;
+        (this.greymarchWolfHowlCheck || (this.greymarchWolfHowlCheck = {}))[localId] = { at: now + 400, before: howlingBefore, viaIdle: viaIdle };
         return true;
     }
     greymarchIsBeastBody(actor: any): boolean {

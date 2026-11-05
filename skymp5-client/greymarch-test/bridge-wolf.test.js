@@ -575,3 +575,21 @@ test("a werewolf body while not changed (the respawn put the beast's look back a
   const h = make(); h.tick(); h.tick(3100);
   assert.strictEqual(h.race(), NORD, "a human is left alone");
 });
+
+test("watchers: the howl on another player's NPC is the game's idle HowlStart (0x0CDD9F) when it takes it, the raw event only when refused; isHowling before and after goes to the log", () => {
+  const s = make({ others: { 731: 0xff001001, 732: 0xff001002 }, actors: {} });
+  const order = roarNpc(s, 0xff001001, { v: 0 }); const order2 = roarNpc(s, 0xff001002, { v: 0 });
+  const a = s.sp.Actor.from({ id: 0xff001001 }), b = s.sp.Actor.from({ id: 0xff001002 });
+  let howling = 0;
+  a.getAnimationVariableInt = (n) => (n === "isHowling" ? howling : 0);
+  a.playIdle = (idle) => { order.push("idle " + idle.id.toString(16)); howling = 1; return true; };
+  b.playIdle = () => false; // refused (its graph is still howling)
+  s.sp.Idle = { from: (f) => (f ? { id: f.id } : null) };
+  s.say({ customPacketType: "greymarchWolfRoar", actor: 731, bear: false });
+  s.say({ customPacketType: "greymarchWolfRoar", actor: 732, bear: false });
+  s.tick(); s.tick(500);
+  assert.deepStrictEqual(order.filter((e) => /^(idle|howl)/i.test(e)), ["idle cdd9f", "HowlRelease"], "the idle, no raw HowlStart on top");
+  assert.deepStrictEqual(order2.filter((e) => /^howl/i.test(e)), ["HowlStart", "HowlRelease"], "refused: the raw event");
+  assert.ok(s.log.lines.some((l) => l.endsWith("wolf: howl on ff001001 via idle, isHowling 0 -> 1")), s.log.lines.join("\n"));
+  assert.ok(s.log.lines.some((l) => /wolf: howl on ff001002 via event/.test(l)));
+});
