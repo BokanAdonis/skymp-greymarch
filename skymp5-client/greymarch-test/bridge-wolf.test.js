@@ -593,3 +593,69 @@ test("watchers: the howl on another player's NPC is the game's idle HowlStart (0
   assert.ok(s.log.lines.some((l) => l.endsWith("wolf: howl on ff001001 via idle, isHowling 0 -> 1")), s.log.lines.join("\n"));
   assert.ok(s.log.lines.some((l) => /wolf: howl on ff001002 via event/.test(l)));
 });
+
+// ---- a carrier's perks, night eye and the scent (2026-11-04, the owner)
+const perksSetup = () => {
+  const s = make();
+  const player = s.sp.Game.getPlayer();
+  const av = { DiseaseResist: 0, HealRateMult: 100, DetectLifeRange: 0 };
+  let combat = false;
+  player.modActorValue = (n, d) => { av[n] = (av[n] || 0) + d; };
+  player.getActorValue = (n) => av[n] || 0;
+  player.isInCombat = () => combat; player.isDead = () => false;
+  const imods = [];
+  s.sp.ImageSpaceModifier = { from: (f) => (f ? { apply: () => imods.push("apply " + f.id.toString(16)), applyCrossFade: () => imods.push("hold " + f.id.toString(16)) } : null), removeCrossFade: () => imods.push("release") };
+  const perksTick = () => { const real = Date.now; try { s.gm.greymarchWolfPerksTick(); } finally { Date.now = real; } };
+  return { s, av, imods, perksTick, fight: (v) => { combat = v; } };
+};
+
+test("a carrier's perks: the server's numbers move DiseaseResist and HealRateMult (healing only out of combat), and go back when the blood is taken", () => {
+  const { s, av, perksTick, fight } = perksSetup();
+  s.say({ customPacketType: "greymarchWolfPerks", carrier: true, diseaseResist: 100, healRegen: 50, nightEye: true, scent: false });
+  perksTick();
+  assert.deepStrictEqual([av.DiseaseResist, av.HealRateMult], [100, 150]);
+  perksTick();
+  assert.deepStrictEqual([av.DiseaseResist, av.HealRateMult], [100, 150], "not added twice");
+  fight(true); perksTick();
+  assert.strictEqual(av.HealRateMult, 100, "in combat: the normal healing");
+  fight(false); perksTick();
+  assert.strictEqual(av.HealRateMult, 150);
+  s.say({ customPacketType: "greymarchWolfPerks", carrier: false, diseaseResist: 0, healRegen: 0 });
+  perksTick();
+  assert.deepStrictEqual([av.DiseaseResist, av.HealRateMult], [0, 100], "all put back");
+});
+
+test("N in human form toggles the game's Night Eye look (intro, held image space, outro, sounds); changing into the wolf takes it off; not for others", () => {
+  const { s, imods, perksTick } = perksSetup();
+  s.key(49, true); s.key(49, false); perksTick();
+  assert.deepStrictEqual(imods, [], "no blood: N does nothing");
+  s.say({ customPacketType: "greymarchWolfPerks", carrier: true, diseaseResist: 100, healRegen: 50, nightEye: true, scent: false });
+  s.key(49, true); s.key(49, false); perksTick();
+  assert.deepStrictEqual(imods, ["apply 6b10a", "hold 6b108"], "on");
+  assert.ok(s.log.sounds.some((x) => x[0] === 0x07c723));
+  s.key(49, true); s.key(49, false); perksTick();
+  assert.deepStrictEqual(imods.slice(2), ["apply 6b10b", "release"], "off");
+  s.key(49, true); s.key(49, false); perksTick();
+  s.say({ customPacketType: "greymarchWolfPerks", carrier: true, diseaseResist: 100, healRegen: 50, nightEye: false, scent: true });
+  s.gm.greymarchWolfOn = true; perksTick();
+  assert.deepStrictEqual(imods.slice(-2), ["apply 6b10b", "release"], "changed: night eye off");
+});
+
+test("N while changed asks the server for the scent (once a second at most); the server's answer raises DetectLifeRange for its time, then puts it back", () => {
+  const { s, av, imods, perksTick } = perksSetup();
+  s.say({ customPacketType: "greymarchWolfPerks", carrier: true, diseaseResist: 100, healRegen: 50, nightEye: false, scent: true });
+  s.gm.greymarchWolfOn = true;
+  s.key(49, true); s.key(49, false); perksTick();
+  assert.deepStrictEqual(s.log.sent.filter((m) => m.op === "scent"), [{ customPacketType: "greymarchWolf", op: "scent" }]);
+  s.key(49, true); s.key(49, false); perksTick();
+  assert.strictEqual(s.log.sent.filter((m) => m.op === "scent").length, 1, "mashed: one ask a second");
+  assert.strictEqual(av.DetectLifeRange, 0, "nothing until the server says so");
+  s.say({ customPacketType: "greymarchWolfScent", ms: 10000, range: 4200 });
+  perksTick();
+  assert.strictEqual(av.DetectLifeRange, 4200);
+  assert.ok(imods.includes("apply 2fb1d"), "the Detect Life look");
+  assert.ok(s.log.lines.some((l) => /the scent for 10000 ms \(DetectLifeRange now 4200\)/.test(l)));
+  const real = Date.now; const t0 = real(); Date.now = () => t0 + 10500;
+  try { s.gm.greymarchWolfPerksTick(); } finally { Date.now = real; }
+  assert.strictEqual(av.DetectLifeRange, 0, "put back after its time");
+});

@@ -71,6 +71,12 @@ const WOLF_ROAR_MS = 0; // R: no wait between roars (2026-10-21, the owner's cal
 // HowlWerewolfDetectLife (Skyrim.esm): its effect only shows the living, so roaring (no wait between roars) changes nothing in play. HowlWerewolfFear
 // (0x0CF790, Howl of Terror, the vanilla first howl) would make the NPCs near the roarer flee at every roar.
 const WOLF_HOWL_SHOUT = 0x0ce218;
+// A CARRIER'S PERKS AND THE SCENT (2026-11-04, the owner; the server says who has what: werewolf.js perksOf, greymarchWolfPerks). N is the one senses key: night eye
+// in human form, the scent while changed. Night eye is the game's own Night Eye look (the Khajiit power's script: the intro, the image space held by a cross-fade,
+// the outro, its sounds); the scent is the werewolf's own Detect Life vision (DetectLifeWerewolfVision raises DetectLifeRange: the engine shows the living through
+// walls within it) for the time the server gives, with the Detect Life image space.
+const NIGHT_EYE_IMOD = 0x06b108, NIGHT_EYE_INTRO = 0x06b10a, NIGHT_EYE_OUTRO = 0x06b10b, NIGHT_EYE_ON_SOUND = 0x07c723, NIGHT_EYE_OFF_SOUND = 0x07c722; // Skyrim.esm
+const SCENT_IMOD = 0x02fb1d; // DetectLifeImod, Skyrim.esm
 const WOLF_HOWL_IDLE = 0x0cdd9f; // the idle HowlStart (Skyrim.esm), WerewolfBehavior.hkx, needs isHowling == 0: played on other players' werewolves (greymarchWolfHowlOther)
 const WOLF_ROAR_SOUND = 0x101008, BEAR_ROAR_SOUND = 0x0f95bb; // NPCWerewolfShout (the werewolf's howl) and NPCBearAggroWarning01 (a bear's warning roar), Skyrim.esm
 // vampires (gamemode vampire.js): the game's own records, inside Dawnguard.esm (read from the game files); the real IDs are looked up with Game.getFormFromFile
@@ -251,6 +257,8 @@ export class GreymarchBridge {
         if (type === "greymarchBeast") { this.greymarchBeastFrames(msg); return; } // a server-driven animal moved (gamemode wildlifebrain.js): played by formView (gmPuppetMove)
         if (type === "greymarchShapeAnim") { if (typeof msg.ev === "string" && msg.ev.length < 64 && Number(msg.actor) > 0) (this.greymarchShapeAnimQueue || (this.greymarchShapeAnimQueue = [])).push({ actor: Number(msg.actor), ev: msg.ev }); return; } // another player's creature attacked (played in greymarchShapeDrive) // a creature form (staff): greymarchShapeTick changes the body
         if (type === "greymarchWolfForm") { if (this.greymarchWolfWant !== !!msg.on) this.greymarchLog("wolf: the server says " + (msg.on ? "changed" : "no (change back)")); this.greymarchWolfWant = !!msg.on; if (msg.on) { this.greymarchWolfWordAt = Date.now(); this.greymarchWolfAlpha = !!msg.alpha; this.greymarchWolfPup = !msg.alpha && !!msg.pup; this.greymarchWolfKind = msg.kind && GM_WOLF_FORMS[msg.kind] && msg.kind !== "black" && msg.kind !== "polar" ? String(msg.kind) : this.greymarchWolfAlpha ? "alpha" : this.greymarchWolfPup ? "pup" : ""; this.greymarchWolfBearRace = msg.bear && Number(msg.race) > 0 ? Number(msg.race) >>> 0 : 0; if (this.greymarchWolfBearRace) this.greymarchWolfBearSeen = this.greymarchWolfBearRace; this.greymarchWolfBlack = !!this.greymarchWolfBearRace && !!msg.black; this.greymarchWolfPolar = !!this.greymarchWolfBearRace && !!msg.polar; } return; } // (logged only when it changes: the server repeats it every 5 seconds) // the werewolf form (greymarchWolfTick)
+        if (type === "greymarchWolfPerks") { this.greymarchWolfPerks = { carrier: !!msg.carrier, diseaseResist: Math.max(0, Math.min(100, Number(msg.diseaseResist) || 0)), healRegen: Math.max(0, Math.min(200, Number(msg.healRegen) || 0)), nightEye: !!msg.nightEye, scent: !!msg.scent, scentReadyIn: Math.max(0, Number(msg.scentReadyIn) || 0) }; return; } // what this carrier has (greymarchWolfPerksTick)
+        if (type === "greymarchWolfScent") { this.greymarchWolfScentWant = { ms: Math.max(1000, Math.min(30000, Number(msg.ms) || 10000)), range: Math.max(500, Math.min(8000, Number(msg.range) || 4200)) }; return; } // the server gave the scent (greymarchWolfPerksTick)
         if (type === "greymarchWolfRoar") { if (Number(msg.actor) > 0) (this.greymarchWolfRoarQueue || (this.greymarchWolfRoarQueue = [])).push({ actor: Number(msg.actor), bear: !!msg.bear }); return; } // another player roared nearby: the sound on their NPC (greymarchWolfTick)
         if (type === "greymarchWolfAlphas") { var lists: any = {}; for (var lk in GM_WOLF_LISTS) lists[lk] = Array.isArray(msg[GM_WOLF_LISTS[lk]]) ? msg[GM_WOLF_LISTS[lk]] : []; this.greymarchWolfLists = lists; return; } // the other players in the Alpha form: drawn white (greymarchWolfAlphaOthers)
         if (type === "greymarchSpellCosts") { this.greymarchSpellCostWant = msg.costs && typeof msg.costs === "object" ? msg.costs : {}; this.greymarchSpellCostTold = {}; return; } // the Spells balance tab's costs (greymarchSpellCostTick)
@@ -557,6 +565,7 @@ export class GreymarchBridge {
         this.greymarchRaceMenuQuestsTick(Date.now()); // RaceMenu's own quests started if SkyMP's load left them off (the Body Scales tab, Height)
         this.greymarchRaceMenuTick(Date.now()); // RaceMenu's extra sliders: sent when the race menu closes, put back after a relog (racemenuLook.ts)
         this.greymarchRaceMenuCopiesTick(Date.now()); // and put on the other players' copies (OTHERS SEE THEM)
+        try { this.greymarchWolfPerksTick(); } catch (pkErr) { /* next frame */ } // a carrier's perks, night eye and the scent
         this.greymarchWolfTick(); // the werewolf form: the game's Beast Form power is the trigger, the server decides, the change is done here
         if (this.greymarchWolfOn || this.greymarchWolfLungeClick) { try { var gmLungeP = this.sp.Game.getPlayer(); if (gmLungeP) this.greymarchWolfLungeTick(gmLungeP, Date.now()); } catch (lgErr) { /* next frame */ } } // the lunge, every frame (the wolf tick runs every 250 ms)
         this.greymarchSpellCostTick(); // the Spells balance tab's costs on the spell records (GreymarchCamera.dll 1.5)
@@ -906,6 +915,7 @@ export class GreymarchBridge {
     greymarchKey(e: any): any {
         if (this.greymarchBuildCam && this.greymarchBuildCamKey(e)) return; // the build system's free camera has the keys it uses
         if (this.greymarchEmoteNow && this.greymarchEmoteNow.kind === "loop" && !this.greymarchEmoteNow.meal && (e.code === 17 || e.code === 30 || e.code === 31 || e.code === 32 || e.code === 57)) { var mvDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (mvDown && e.isUp !== true) this.greymarchEmoteStopWanted = Date.now(); } // W A S D or Space ends an emote that lasts (greymarchEmoteTick)
+        if (e.code === 49) { var nDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (e.isUp === true) nDown = false; if (nDown && !this.greymarchKey49 && !this.greymarchChatTyping) this.greymarchSensesAt = Date.now(); this.greymarchKey49 = nDown; if (this.greymarchWolfPerks && this.greymarchWolfPerks.carrier) return; } // N: night eye or the scent (greymarchWolfPerksTick)
         if (e.code === 19) { var rDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (e.isUp === true) rDown = false; if (rDown && !this.greymarchKey19 && this.greymarchWolfOn && !this.greymarchChatTyping) this.greymarchWolfRoarAt = Date.now(); this.greymarchKey19 = rDown; return; } // R: the werewolf roars (greymarchWolfTick; only while changed)
         if (e.code === 44) { var zDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (e.isUp === true) zDown = false; if (zDown && !this.greymarchKey44 && !this.greymarchChatTyping) { if (this.greymarchWolfOn) this.greymarchWolfBackAt = Date.now(); else { this.greymarchWolfKeyAt = Date.now(); this.greymarchVampKeyAt = Date.now(); } } this.greymarchKey44 = zDown; return; } // Z while changed: ask the server to change back (greymarchWolfTick)
         if (e.code === 256 || e.code === 257) { var mDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (e.isUp === true) mDown = false; if (mDown && !this["greymarchKey" + e.code]) { this.greymarchShapeButton(e.code === 257); if (this.greymarchWolfOn) this.greymarchWolfLungeClick = { at: Date.now(), left: e.code === 257 }; } this["greymarchKey" + e.code] = mDown; return; } // mouse buttons: a creature's attacks (greymarchShapeTick)
@@ -5090,6 +5100,64 @@ export class GreymarchBridge {
         (this.greymarchWolfOtherRelease || (this.greymarchWolfOtherRelease = {}))[localId] = now + 200;
         (this.greymarchWolfHowlCheck || (this.greymarchWolfHowlCheck = {}))[localId] = { at: now + 400, before: howlingBefore, viaIdle: viaIdle };
         return true;
+    }
+    // a carrier's perks (see NIGHT_EYE_IMOD): the actor values are moved by what is wanted minus what this already added, so nothing else's changes are touched
+    greymarchWolfPerksTick(): any {
+        var sp = this.sp, now = Date.now();
+        var perks = this.greymarchWolfPerks;
+        var player = sp.Game.getPlayer();
+        if (!player) return;
+        var inCombat = false; try { inCombat = !!player.isInCombat(); } catch (cErr) { inCombat = false; }
+        var dead = false; try { dead = !!player.isDead(); } catch (dErr) { dead = false; }
+        var add = this.greymarchWolfPerkAdded || (this.greymarchWolfPerkAdded = { DiseaseResist: 0, HealRateMult: 0 });
+        var want: any = { DiseaseResist: perks ? perks.diseaseResist : 0, HealRateMult: perks && !inCombat && !dead ? perks.healRegen : 0 }; // faster healing out of combat only
+        for (var av in want) {
+            if (want[av] === add[av]) continue;
+            try { player.modActorValue(av, want[av] - add[av]); } catch (mErr) { this.greymarchLog("wolf: " + av + " could not be set: " + mErr); }
+            add[av] = want[av];
+        }
+        // N: night eye in human form, the scent while changed (the server decides the scent and its wait)
+        var pressed = this.greymarchSensesAt; this.greymarchSensesAt = 0;
+        var inMenu = false; try { inMenu = !!sp.Utility.isInMenuMode(); } catch (miErr) { inMenu = false; }
+        if (pressed && perks && !inMenu) {
+            if (this.greymarchWolfOn && perks.scent) {
+                if (now - (this.greymarchWolfScentAskAt || 0) > 1000) {
+                    this.greymarchWolfScentAskAt = now;
+                    var scentMsg = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchWolf", op: "scent" }) };
+                    this.controller.emitter.emit("sendMessage", { message: scentMsg, reliability: "reliable" });
+                    this.greymarchLog("wolf: N, the scent asked for" + (perks.scentReadyIn > 0 ? " (the server last said " + perks.scentReadyIn + " s to wait)" : ""));
+                }
+            } else if (!this.greymarchWolfOn && perks.nightEye) this.greymarchNightEyeWant = !this.greymarchNightEyeWant;
+        }
+        var eyeOn = !!this.greymarchNightEyeWant && !!perks && perks.nightEye && !this.greymarchWolfOn;
+        if (eyeOn !== !!this.greymarchNightEyeShown) {
+            this.greymarchNightEyeShown = eyeOn;
+            try {
+                var imod = sp.ImageSpaceModifier.from(sp.Game.getFormEx(eyeOn ? NIGHT_EYE_INTRO : NIGHT_EYE_OUTRO)); if (imod) imod.apply(1);
+                if (eyeOn) { var held = sp.ImageSpaceModifier.from(sp.Game.getFormEx(NIGHT_EYE_IMOD)); if (held) held.applyCrossFade(1.0); }
+                else sp.ImageSpaceModifier.removeCrossFade(1.0);
+                var snd = sp.Sound.from(sp.Game.getFormEx(eyeOn ? NIGHT_EYE_ON_SOUND : NIGHT_EYE_OFF_SOUND)); if (snd) snd.play(player);
+            } catch (eErr) { this.greymarchLog("wolf: night eye could not be " + (eyeOn ? "shown" : "taken off") + ": " + eErr); }
+            this.greymarchLog("wolf: night eye " + (eyeOn ? "on" : "off"));
+            if (!eyeOn && !(perks && perks.nightEye)) this.greymarchNightEyeWant = false; // changed or the blood taken: off, and it stays off after
+        }
+        // the scent the server gave: DetectLifeRange raised for its time, then put back
+        var sw = this.greymarchWolfScentWant;
+        if (sw) {
+            this.greymarchWolfScentWant = null;
+            if (!this.greymarchWolfScentUntil) {
+                try { player.modActorValue("DetectLifeRange", sw.range); this.greymarchWolfScentRange = sw.range; var simod = sp.ImageSpaceModifier.from(sp.Game.getFormEx(SCENT_IMOD)); if (simod) simod.apply(1); } catch (sErr) { this.greymarchLog("wolf: the scent could not be set: " + sErr); }
+                var range = -1; try { range = Math.round(player.getActorValue("DetectLifeRange")); } catch (rErr) { range = -1; }
+                this.greymarchLog("wolf: the scent for " + sw.ms + " ms (DetectLifeRange now " + range + ")");
+            }
+            this.greymarchWolfScentUntil = now + sw.ms;
+        }
+        if (this.greymarchWolfScentUntil && (now >= this.greymarchWolfScentUntil || !this.greymarchWolfOn)) {
+            this.greymarchWolfScentUntil = 0;
+            try { player.modActorValue("DetectLifeRange", -(this.greymarchWolfScentRange || 0)); } catch (sbErr) { /* gone with the form */ }
+            this.greymarchWolfScentRange = 0;
+            this.greymarchLog("wolf: the scent fades");
+        }
     }
     greymarchIsBeastBody(actor: any): boolean {
         try {
