@@ -94,3 +94,48 @@ test("the client starts the service", () => {
   assert.match(index, /import \{ ClutterFreezeService \} from "\.\/services\/services\/clutterFreezeService";/);
   assert.match(index, /new ClutterFreezeService\(sp, controller\),/);
 });
+
+// the sweep (2026-11-05, the owner: weapons, shields and the keep's plates still thrown about): the player's cell is walked and what the load event missed is frozen
+function sweepSetup() {
+  const handlers = {}, set = [], logs = [];
+  const cells = new Map(); // cellId -> [{ id, type, loaded }]
+  let playerCell = 0x3c01;
+  const asRef = (r) => ({ getFormID: () => r.id, getBaseObject: () => ({ getType: () => r.type }), is3DLoaded: () => r.loaded !== false, setMotionType: (m, a) => { set.push([r.id, m, a]); return Promise.resolve(); } });
+  const cellOf = (id) => ({ getFormID: () => id, getNumRefs: () => (cells.get(id) || []).length, getNthRef: (i) => asRef(cells.get(id)[i]) });
+  const sp = {
+    Game: { getFormEx: (id) => ({ id }), getPlayer: () => ({ getParentCell: () => cellOf(playerCell) }) },
+    Cell: { from: (f) => (f && cells.has(f.id) ? cellOf(f.id) : null) },
+    ObjectReference: { from: () => null },
+    writeLogs: (name, line) => logs.push([name, line]),
+    printConsole() {},
+  };
+  const controller = { on: (ev, f) => (handlers[ev] = f), emitter: { on: () => {} } };
+  new M.ClutterFreezeService(sp, controller);
+  return { cells, set, logs, update: () => handlers.update(), move: (c) => { playerCell = c; } };
+}
+
+test("the sweep: the player's cell is walked and loose objects from the world the load event missed are frozen, once; dropped items, statics and unloaded ones are left", () => {
+  const realNow = Date.now; let t = 1_000_000; Date.now = () => t;
+  try {
+    const s = sweepSetup();
+    s.cells.set(0x3c01, [{ id: 0x1001, type: FT.Weapon }, { id: 0x1002, type: FT.Armor }, { id: 0x1003, type: FT.Static }, { id: 0xff000010, type: FT.Misc }, { id: 0x1004, type: FT.Misc, loaded: false }]);
+    s.update();
+    assert.deepStrictEqual(s.set, [[0x1001, 4, false], [0x1002, 4, false]], "a weapon and a shield on the wall");
+    assert.match(s.logs.pop()[1], /cell 3c01: 3 loose objects, 2 frozen by the sweep/);
+    t += M.SWEEP_MS; s.update();
+    assert.strictEqual(s.set.length, 2, "not frozen twice");
+    assert.strictEqual(s.logs.length, 0, "nothing new: no log line");
+    s.cells.set(0x3c02, [{ id: 0x2001, type: FT.Misc }]);
+    s.move(0x3c02); t += 10; s.update();
+    assert.deepStrictEqual(s.set.pop(), [0x2001, 4, false], "a new cell is swept at once");
+  } finally { Date.now = realNow; }
+});
+
+test("a big cell is swept over frames (SWEEP_PER_UPDATE a frame)", () => {
+  const s = sweepSetup();
+  s.cells.set(0x3c01, Array.from({ length: M.SWEEP_PER_UPDATE + 5 }, (_, i) => ({ id: 0x5000 + i, type: FT.Misc })));
+  s.update();
+  assert.strictEqual(s.set.length, M.SWEEP_PER_UPDATE);
+  s.update();
+  assert.strictEqual(s.set.length, M.SWEEP_PER_UPDATE + 5);
+});
