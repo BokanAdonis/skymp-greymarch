@@ -48,10 +48,18 @@ test("Esc with nothing open: the game's Journal is shut the frame it is seen and
   assert.ok(log.focused.includes(true), "the page takes the keyboard and the mouse");
 });
 
+test("the Esc press that opened it does not close it again (2026-11-05, in game: it opened and closed at once)", () => {
+  const { gm, open, esc } = make();
+  open.add("Journal Menu"); gm.greymarchPauseTick(Date.now());
+  esc(); // the same press reaching the key handler after the menu came up
+  assert.strictEqual(gm.greymarchPauseOn, true);
+});
+
 test("Esc closes the pause menu, and the Journal that same Esc opens is shut without showing the pause menu again", () => {
   const { gm, log, open, esc } = make();
   open.add("Journal Menu"); gm.greymarchPauseTick(Date.now());
   assert.strictEqual(gm.greymarchPauseOn, true);
+  gm.greymarchPauseShownAt -= 1000; // a moment later
   esc();
   assert.strictEqual(gm.greymarchPauseOn, false);
   assert.deepStrictEqual(log.pages.pop(), { fn: "hide", arg: true });

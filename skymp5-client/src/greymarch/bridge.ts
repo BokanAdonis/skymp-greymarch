@@ -944,6 +944,7 @@ export class GreymarchBridge {
         }
         if (!down || was) return;
         if (e.code === 1 && Date.now() - (this.greymarchPauseTapAt || 0) < 400) return; // our own tap that shut the game's Journal, not the player
+        if (e.code === 1 && this.greymarchPauseOn && Date.now() - (this.greymarchPauseShownAt || 0) < 500) return; // the Esc that opened it (its press can reach here after the menu is up): not a close
         if (e.code === 1 && this.greymarchPauseOn) { this.greymarchEscUsedAt = Date.now(); this.greymarchPauseHide(); return; } // Esc closes the pause menu
         if (e.code === 1 && this.greymarchPanelHasKeys()) this.greymarchEscUsedAt = Date.now(); // Esc closes a window below: not a pause menu as well
         if (e.code === 59) { if (!this.greymarchChatTyping) this.greymarchHudToPage("logoToggle", true); return; } // F1: the Greymarch logo top right hides and shows (greymarch-hud.html; 2026-10-31, the owner)
@@ -4199,6 +4200,7 @@ export class GreymarchBridge {
         if (this.greymarchPauseOn || this.greymarchScreenUp) return; // not over the select screen
         this.greymarchLog("pause: opened");
         this.greymarchPauseOn = true;
+        this.greymarchPauseShownAt = Date.now();
         this.sp.browser.setVisible(true);
         this.sp.browser.setFocused(true);
         this.greymarchPauseToPage("show", { name: this.greymarchPlayingName || "", id: this.greymarchPlayingId || "" });
