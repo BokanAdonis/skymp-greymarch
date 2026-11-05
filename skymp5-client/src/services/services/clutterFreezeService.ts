@@ -12,6 +12,7 @@
 // THE SWEEP (2026-11-05, the owner: weapons, shields and the plates in the keep still got thrown about): the load event alone missed some, so every SWEEP_MS and
 // on every cell change the player's own cell is walked (SWEEP_PER_UPDATE references a frame) and any loose object from the world that is not frozen yet is
 // frozen. What a sweep had to catch is written to greymarch-logs.txt (at most LOG_LINES lines a session).
+// WEAPON RACKS: the sweep also puts each rack's starting weapon or shield onto the rack's pivot node, as the game's rack script would (rack() below).
 import { FormType, MotionType } from "skyrimPlatform";
 import { logError } from "../../logging";
 import { ConnectionMessage } from "../events/connectionMessage";
@@ -24,6 +25,10 @@ export const MAX_WAITING = 6000;
 export const SWEEP_MS = 2000;
 export const SWEEP_PER_UPDATE = 200;
 export const LOG_LINES = 40;
+export const WRACK_TRIGGER = 0x06d95e; // Skyrim.esm WRackTrigger: a rack's activator -> its trigger (the part with the pivot nodes)
+export const WEAPTYPE_WARHAMMER = 0x06d930; // Skyrim.esm WeapTypeWarhammer: a two-handed blunt weapon is a warhammer, else a battleaxe
+// Weapon.GetWeaponType -> the rack's pivot node (1 sword, 2 dagger, 3 war axe, 4 mace, 5 greatsword, 7 bow, 8 staff, 9 crossbow; 6 is the battleaxe or warhammer)
+export const WEAPON_PIVOTS: Record<number, string> = { 1: "SwordPivot01", 2: "DaggerPivot01", 3: "WarAxePivot01", 4: "MacePivot01", 5: "GreatSwordPivot01", 7: "BowPivot01", 8: "StaffPivot01", 9: "BowPivot01" };
 export const LOOSE_TYPES: ReadonlySet<number> = new Set<number>([
     FormType.Misc, FormType.Ingredient, FormType.Potion, FormType.Book, FormType.Weapon, FormType.Armor, FormType.Key, FormType.SoulGem,
     FormType.ScrollItem, FormType.Ammo, FormType.Light, FormType.MovableStatic,
@@ -43,7 +48,8 @@ export class ClutterFreezeService extends ClientListener {
     private waiting: { id: number; at: number }[] = [];
     private frozen = new Set<number>(); // frozen since the player entered this cell (a 3D reload undoes it: the load event freezes those again)
     private cellId = 0;
-    private sweep: { cellId: number; n: number; i: number; caught: number; loose: number } | null = null;
+    private sweep: { cellId: number; n: number; i: number; caught: number; loose: number; racked: number } | null = null;
+    private racked = new Set<number>(); // rack activators handled since the player entered this cell
     private lastSweep = 0;
     private logsLeft = LOG_LINES;
 
@@ -82,8 +88,8 @@ export class ClutterFreezeService extends ClientListener {
             if (!cell) return;
             let id = 0, n = 0;
             try { id = cell.getFormID(); n = cell.getNumRefs(0); } catch (err) { return; }
-            if (id !== this.cellId) { this.cellId = id; this.frozen.clear(); }
-            this.sweep = { cellId: id, n, i: 0, caught: 0, loose: 0 };
+            if (id !== this.cellId) { this.cellId = id; this.frozen.clear(); this.racked.clear(); }
+            this.sweep = { cellId: id, n, i: 0, caught: 0, loose: 0, racked: 0 };
         }
         const s = this.sweep;
         let cell: any = null;
@@ -97,7 +103,9 @@ export class ClutterFreezeService extends ClientListener {
                 const id = ref.getFormID();
                 if (madeInGame(id)) continue; // a dropped item: the load event freezes it once it has fallen
                 const base = ref.getBaseObject();
-                if (!base || !isLoose(base.getType())) continue;
+                if (!base) continue;
+                if (base.getType() === FormType.Activator) { if (this.rack(ref, id)) s.racked++; continue; }
+                if (!isLoose(base.getType())) continue;
                 s.loose++;
                 if (this.frozen.has(id) || !ref.is3DLoaded()) continue;
                 this.freeze(ref, id);
@@ -108,10 +116,47 @@ export class ClutterFreezeService extends ClientListener {
         }
         if (s.i < s.n) return;
         this.sweep = null;
-        if (s.caught > 0 && this.logsLeft > 0) {
+        if ((s.caught > 0 || s.racked > 0) && this.logsLeft > 0) {
             this.logsLeft--;
-            try { this.sp.writeLogs("greymarch", "clutter: cell " + (s.cellId >>> 0).toString(16) + ": " + s.loose + " loose objects, " + s.caught + " frozen by the sweep (the load event missed them)"); } catch (err) { /* no log */ }
+            try { this.sp.writeLogs("greymarch", "clutter: cell " + (s.cellId >>> 0).toString(16) + ": " + s.loose + " loose objects, " + s.caught + " frozen by the sweep (the load event missed them), " + s.racked + " put on their racks"); } catch (err) { /* no log */ }
         }
+    }
+
+    // A WEAPON RACK (2026-11-05, the owner: Bruma's weapons and shields hung beside their racks): the rack's activator links to its trigger (keyword WRackTrigger)
+    // and, with no keyword, to the item it starts with. The game's script (WeaponRackActivateSCRIPT) moves that item onto the trigger's pivot node for its kind
+    // when the cell loads; scripts never run here, so the item stayed where the editor dropped it. Done here instead, once a cell visit, then frozen in place.
+    private rack(activator: any, id: number): boolean {
+        if (this.racked.has(id)) return false;
+        const kw = this.keyword(WRACK_TRIGGER);
+        if (!kw) return false;
+        const trigger = activator.getLinkedRef(kw);
+        if (!trigger) { this.racked.add(id); return false; } // some other activator
+        const item = activator.getLinkedRef(null);
+        if (!item) { this.racked.add(id); return false; } // an empty rack
+        if (!item.is3DLoaded() || !trigger.is3DLoaded()) return false; // the next sweep
+        this.racked.add(id);
+        const node = this.pivotOf(item.getBaseObject());
+        if (!node) return false;
+        const moved = item.moveToNode(trigger, node);
+        const done = () => this.freeze(item, item.getFormID());
+        if (moved && typeof moved.then === "function") moved.then(done, () => { /* its 3D went away */ }); else done();
+        return true;
+    }
+
+    // the pivot node of a rack for an item: ShieldPivot01 for a shield, else by the weapon's kind
+    private pivotOf(base: any): string {
+        if (!base) return "";
+        const t = base.getType();
+        if (t === FormType.Armor) return "ShieldPivot01";
+        if (t !== FormType.Weapon) return "";
+        const w = this.sp.Weapon.from(base);
+        const kind = w ? w.getWeaponType() : 0;
+        if (kind === 6) { const hammer = this.keyword(WEAPTYPE_WARHAMMER); return hammer && base.hasKeyword(hammer) ? "WarhammerPivot01" : "BattleAxePivot01"; }
+        return WEAPON_PIVOTS[kind] || "";
+    }
+
+    private keyword(formId: number): any {
+        try { return this.sp.Keyword.from(this.sp.Game.getFormEx(formId)); } catch (err) { return null; }
     }
 
     private playerCell(): any {

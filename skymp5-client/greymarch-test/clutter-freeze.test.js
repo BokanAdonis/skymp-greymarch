@@ -139,3 +139,59 @@ test("a big cell is swept over frames (SWEEP_PER_UPDATE a frame)", () => {
   s.update();
   assert.strictEqual(s.set.length, M.SWEEP_PER_UPDATE + 5);
 });
+
+// weapon racks (2026-11-05, the owner: Bruma's weapons and shields hung beside their racks): the rack's script never runs here, so the client puts the item on the pivot
+function rackSetup() {
+  const handlers = {}, set = [], moves = [], logs = [];
+  const KW = { 0x06d95e: "WRackTrigger", 0x06d930: "WeapTypeWarhammer" };
+  const refs = new Map(); // id -> { type, weaponType, keywords, links: { kwName|"": id }, loaded }
+  const cellRefs = [];
+  const asRef = (id) => { const r = refs.get(id); if (!r) return null; return {
+    getFormID: () => id, is3DLoaded: () => r.loaded !== false,
+    getBaseObject: () => ({ getType: () => r.type, hasKeyword: (k) => (r.keywords || []).includes(k.name) , _wt: r.weaponType }),
+    getLinkedRef: (k) => { const to = (r.links || {})[k ? k.name : ""]; return to ? asRef(to) : null; },
+    moveToNode: (target, node) => { moves.push([id, target.getFormID(), node]); return Promise.resolve(); },
+    setMotionType: (m, a) => { set.push([id, m, a]); return Promise.resolve(); },
+  }; };
+  const sp = {
+    Game: { getFormEx: (id) => ({ id }), getPlayer: () => ({ getParentCell: () => cell }) },
+    Cell: { from: () => cell },
+    Keyword: { from: (f) => (f && KW[f.id] ? { name: KW[f.id] } : null) },
+    Weapon: { from: (b) => (b && b._wt !== undefined ? { getWeaponType: () => b._wt } : null) },
+    ObjectReference: { from: () => null },
+    writeLogs: (n, l) => logs.push(l), printConsole() {},
+  };
+  const cell = { getFormID: () => 0x3c09, getNumRefs: () => cellRefs.length, getNthRef: (i) => asRef(cellRefs[i]) };
+  const controller = { on: (ev, f) => (handlers[ev] = f), emitter: { on: () => {} } };
+  new M.ClutterFreezeService(sp, controller);
+  const add = (id, r) => { refs.set(id, r); cellRefs.push(id); };
+  return { add, refs, set, moves, logs, update: () => handlers.update() };
+}
+FT.Activator = 24;
+
+test("a weapon rack: its starting item goes onto the trigger's pivot for its kind (a shield on ShieldPivot01, a bow on BowPivot01, a warhammer on WarhammerPivot01), then is frozen; once a visit", async () => {
+  const s = rackSetup();
+  s.add(0x10, { type: FT.Activator, links: { WRackTrigger: 0x11, "": 0x12 } }); s.add(0x11, { type: FT.Activator, links: { WRackActivator: 0x10 } }); s.add(0x12, { type: FT.Armor });
+  s.add(0x20, { type: FT.Activator, links: { WRackTrigger: 0x21, "": 0x22 } }); s.add(0x21, { type: FT.Activator }); s.add(0x22, { type: FT.Weapon, weaponType: 7 });
+  s.add(0x30, { type: FT.Activator, links: { WRackTrigger: 0x31, "": 0x32 } }); s.add(0x31, { type: FT.Activator }); s.add(0x32, { type: FT.Weapon, weaponType: 6, keywords: ["WeapTypeWarhammer"] });
+  s.add(0x40, { type: FT.Activator, links: { WRackTrigger: 0x41 } }); s.add(0x41, { type: FT.Activator }); // an empty rack
+  s.add(0x50, { type: FT.Activator }); // a lever: no rack
+  s.update(); await new Promise((r) => setImmediate(r));
+  assert.deepStrictEqual(s.moves, [[0x12, 0x11, "ShieldPivot01"], [0x22, 0x21, "BowPivot01"], [0x32, 0x31, "WarhammerPivot01"]]);
+  for (const id of [0x12, 0x22, 0x32]) assert.ok(s.set.some(([i]) => i === id), "frozen on the rack: " + id.toString(16));
+  assert.match(s.logs.pop(), /3 put on their racks/);
+  const realNow = Date.now; Date.now = () => realNow() + M.SWEEP_MS + 1;
+  try { s.update(); } finally { Date.now = realNow; }
+  assert.strictEqual(s.moves.length, 3, "once a visit");
+});
+
+test("a rack whose item is not loaded yet is tried again on the next sweep; a battleaxe goes on BattleAxePivot01", async () => {
+  const s = rackSetup();
+  s.add(0x10, { type: FT.Activator, links: { WRackTrigger: 0x11, "": 0x12 } }); s.add(0x11, { type: FT.Activator }); s.add(0x12, { type: FT.Weapon, weaponType: 6, loaded: false });
+  s.update();
+  assert.strictEqual(s.moves.length, 0);
+  s.refs.get(0x12).loaded = true;
+  const realNow = Date.now; Date.now = () => realNow() + M.SWEEP_MS + 1;
+  try { s.update(); } finally { Date.now = realNow; }
+  assert.deepStrictEqual(s.moves, [[0x12, 0x11, "BattleAxePivot01"]]);
+});
