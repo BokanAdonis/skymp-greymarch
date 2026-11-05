@@ -1386,6 +1386,7 @@ export class RemoteServer extends ClientListener {
   // reminders come each second), and let go at the cast's end.
   private greymarchAimTargets = new Map<number, { pitch: number, heading: number, until: number, cur?: number, put?: number }>();
   private greymarchAimLoop = false;
+  private greymarchPitchNative: boolean | undefined = undefined; // GreymarchCamera.dll 1.13 SetActorPitch there?
   private greymarchAimCopy(ac: Actor, aimAngle: number, aimHeading: number): void {
     if (!Number.isFinite(aimAngle)) return;
     const pitch = Math.max(-89, Math.min(89, aimAngle * 180 / Math.PI));
@@ -1415,12 +1416,18 @@ export class RemoteServer extends ClientListener {
           let nz = z;
           if (Number.isFinite(t.heading)) { const d = ((t.heading - z + 540) % 360) - 180; if (Math.abs(d) > 1) nz = z + d * alpha; }
           if (nz !== z) a.setAngle(a.getAngleX(), a.getAngleY(), nz);
-          // the pitch only for a stream the game aims from the copy (a beam): a sprayed one is fired along the caster's own aim (greymarchSpray), and moving
-          // the copy every frame to tilt it made it twitch and slide
-          if (Array.from(this.greymarchSprays.values()).some((sp) => sp.copyId === id)) { try { const m: any = storage["greymarchAimPitch"]; if (m) delete m[id]; } catch (e2) { /* none */ } continue; }
+          // THE PITCH (2026-11-04, the owner: "now it not even moving up and down": the game aims a spray, and a beam, from the copy's own pitch). Eased by
+          // time and written straight into the copy every frame (GreymarchCamera.dll 1.13 SetActorPitch: no movement, so no twitch). An older DLL: a
+          // TranslateTo, but only when it moved 1.5 degrees (one every frame made the copy twitch and slide)
           const cur: number = typeof t.cur === "number" && Number.isFinite(t.cur) ? t.cur : a.getAngleX();
-          const nx = Math.abs(t.pitch - cur) < 0.3 ? t.pitch : cur + (t.pitch - cur) * alpha;
-          if (typeof t.put !== "number" || !Number.isFinite(t.put) || Math.abs(nx - t.put) > 1.5) {
+          const nx = Math.abs(t.pitch - cur) < 0.2 ? t.pitch : cur + (t.pitch - cur) * alpha;
+          let direct = false;
+          if (this.greymarchPitchNative !== false) {
+            try { direct = !!callNative("GreymarchCam", "SetActorPitch", undefined, a, nx * Math.PI / 180); } catch (e3) { direct = false; }
+            this.greymarchPitchNative = direct;
+          }
+          if (direct) { t.cur = nx; t.put = nx; }
+          else if (typeof t.put !== "number" || !Number.isFinite(t.put) || Math.abs(nx - t.put) > 1.5) {
             a.translateTo(a.getPositionX(), a.getPositionY(), a.getPositionZ(), nx, a.getAngleY(), nz, 100, 0);
             t.put = nx;
           }
@@ -1464,6 +1471,9 @@ export class RemoteServer extends ClientListener {
         const k = 1 - Math.exp(-(now - last) / 70); // eased by time toward the newest aim
         last = now;
         st.pitch += (st.wantPitch - st.pitch) * k;
+        // one pitch for the copy and its spray: the aim loop's (greymarchAimCopy), when it holds this copy
+        const aimT = this.greymarchAimTargets.get(st.copyId);
+        if (aimT && typeof aimT.cur === "number" && Number.isFinite(aimT.cur)) st.pitch = aimT.cur * Math.PI / 180;
         let d = st.wantHeading - st.heading; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI;
         st.heading += d * k;
         try {
