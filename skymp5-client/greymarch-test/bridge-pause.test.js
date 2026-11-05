@@ -202,3 +202,21 @@ test("Quit uses Debug.quitGame (there is no Game.quitGame), and the main menu if
   gm.greymarchPauseTick(Date.now() + 500);
   assert.strictEqual(log.menu, 1);
 });
+
+test("the right mouse button (code 1 from the mouse) is not Esc: it neither opens nor closes the pause menu, and does not close the chat input", () => {
+  const { gm, open } = make({ journalKey: true });
+  gm.greymarchPauseTick(Date.now()); // Esc's Journal binding off: Esc opens the pause menu straight from the key
+  const right = (down) => gm.greymarchKey({ code: 1, device: 1, isDown: () => down, isUp: !down });
+  right(true); right(false);
+  gm.greymarchPauseTick(Date.now());
+  assert.strictEqual(!!gm.greymarchPauseOn, false, "a right click does not open it");
+  gm.greymarchKey({ code: 1, device: 0, isDown: () => true }); gm.greymarchKey({ code: 1, device: 0, isDown: () => false, isUp: true });
+  gm.greymarchPauseTick(Date.now());
+  assert.strictEqual(gm.greymarchPauseOn, true, "the keyboard's Esc does");
+  gm.greymarchPauseShownAt -= 1000;
+  right(true);
+  assert.strictEqual(gm.greymarchPauseOn, true, "a right click does not close it");
+  let closed = 0; gm.greymarchChatTyping = true; gm.greymarchChatClose = () => { closed++; };
+  right(true);
+  assert.strictEqual(closed, 0, "nor the chat input");
+});

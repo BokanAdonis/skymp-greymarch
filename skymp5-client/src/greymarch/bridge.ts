@@ -921,6 +921,7 @@ export class GreymarchBridge {
     }
     // F7 opens the panel (the page itself closes it with F7 or Escape). Escape also closes it from here, because the game un-focuses the browser on Escape.
     greymarchKey(e: any): any {
+        if (e && e.code === ESC_KEY && e.device !== undefined && e.device !== 0) return; // code 1 from the mouse is its right button, not Esc (2026-11-05: right click opened the pause menu); only the keyboard's Esc counts
         if (this.greymarchBuildCam && this.greymarchBuildCamKey(e)) return; // the build system's free camera has the keys it uses
         if (this.greymarchEmoteNow && this.greymarchEmoteNow.kind === "loop" && !this.greymarchEmoteNow.meal && (e.code === 17 || e.code === 30 || e.code === 31 || e.code === 32 || e.code === 57)) { var mvDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (mvDown && e.isUp !== true) this.greymarchEmoteStopWanted = Date.now(); } // W A S D or Space ends an emote that lasts (greymarchEmoteTick)
         if (e.code === 49) { var nDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (e.isUp === true) nDown = false; if (nDown && !this.greymarchKey49 && !this.greymarchChatTyping) this.greymarchSensesAt = Date.now(); this.greymarchKey49 = nDown; if (this.greymarchWolfPerks && this.greymarchWolfPerks.carrier) return; } // N: night eye or the scent (greymarchWolfPerksTick)
