@@ -11,8 +11,8 @@ const ts = require("typescript");
 const src = fs.readFileSync(path.join(__dirname, "..", "src", "greymarch", "bridge.ts"), "utf8");
 const js = ts.transpileModule(src, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2019 } }).outputText;
 
-function make({ closeMenu = true } = {}) {
-  const log = { sent: [], lines: [], closed: [], taps: [], pages: [], visible: [], focused: [], quit: 0 };
+function make({ closeMenu = true, journalKey = false } = {}) {
+  const log = { sent: [], lines: [], closed: [], taps: [], pages: [], visible: [], focused: [], quit: 0, journalKey: [], opened: [] };
   const misc = { remoteIdToLocalId: () => 0, localIdToRemoteId: () => 0, getViewFromStorage: () => null };
   const mods = { "../messages": { MsgType: { CustomPacket: 77 } }, "../view/worldViewMisc": misc, "../sync/appearance": {}, "../services/services/remoteServer": { RemoteServer: {} }, "../services/services/singlePlayerService": { SinglePlayerService: {} } };
   const mod = { exports: {} };
@@ -24,7 +24,12 @@ function make({ closeMenu = true } = {}) {
     Game: { getPlayer: () => null, quitGame: () => { log.quit++; } },
     Ui: { isMenuOpen: (name) => open.has(name) },
     Input: { tapKey: (k) => { log.taps.push(k); if (k === 1) { if (open.has("Journal Menu")) open.delete("Journal Menu"); else open.add("Journal Menu"); } } },
-    callNative: (cls, fn, self, name) => { if (cls === "GreymarchCam" && fn === "CloseMenu" && closeMenu) { log.closed.push(name); open.delete(name); return true; } throw new Error("no such native"); },
+    callNative: (cls, fn, self, name) => {
+      if (cls === "GreymarchCam" && fn === "CloseMenu" && closeMenu) { log.closed.push(name); open.delete(name); return true; }
+      if (cls === "GreymarchCam" && fn === "SetJournalKey" && journalKey) { log.journalKey.push(name); return true; }
+      if (cls === "GreymarchCam" && fn === "OpenMenu" && journalKey) { log.opened.push(name); open.add(name); return true; }
+      throw new Error("no such native");
+    },
     browser: {
       setVisible: (v) => log.visible.push(v), setFocused: (f) => { focus = f; log.focused.push(f); }, isFocused: () => focus,
       executeJavaScript: (code) => { const m = /__gmPauseRun\((\{.*\})\);$/.exec(code); if (m) log.pages.push(JSON.parse(m[1])); },
@@ -156,4 +161,33 @@ test("health, magicka, stamina: the game's own meters are hidden and the three p
   assert.ok(set.every(([, v]) => v === true) && set.length === 3, "the game's bars are back while the select screen is up");
   assert.deepStrictEqual(vit.pop(), { off: true });
   assert.ok(log.lines.some((l) => /vitals: the game's bars hidden/.test(l)));
+});
+
+test("no flash (GreymarchCamera.dll 1.14): Esc's Journal binding is taken off once, Esc then opens the pause menu itself, and Skyrim settings opens the game's menu by name", () => {
+  const { gm, log, open, esc } = make({ journalKey: true });
+  const t = Date.now();
+  gm.greymarchPauseTick(t);
+  assert.deepStrictEqual(log.journalKey, [false]);
+  assert.strictEqual(gm.greymarchJournalKeyOff, true);
+  gm.greymarchPauseTick(t + 5000);
+  assert.deepStrictEqual(log.journalKey, [false], "once");
+  esc();
+  assert.ok(!open.has("Journal Menu"), "the game's menu never opened");
+  gm.greymarchPauseTick(Date.now());
+  assert.strictEqual(gm.greymarchPauseOn, true);
+  assert.deepStrictEqual(log.closed, [], "nothing to shut");
+  gm.greymarchPauseAction({ op: "skyrim" });
+  gm.greymarchPauseTick(Date.now() + 1000);
+  assert.deepStrictEqual(log.opened, ["Journal Menu"]);
+  assert.deepStrictEqual(log.taps, [], "no Esc tap needed");
+  assert.ok(open.has("Journal Menu"));
+});
+
+test("an older DLL without SetJournalKey: tried five times, then the old way (the Journal shut when it opens)", () => {
+  const { gm, log, open } = make();
+  for (let i = 0; i < 6; i++) gm.greymarchPauseTick(Date.now() + i * 4000);
+  assert.ok(!gm.greymarchJournalKeyOff);
+  assert.ok(log.lines.some((l) => /SetJournalKey not there/.test(l)));
+  open.add("Journal Menu"); gm.greymarchPauseTick(Date.now() + 30000);
+  assert.strictEqual(gm.greymarchPauseOn, true);
 });

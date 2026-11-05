@@ -948,6 +948,7 @@ export class GreymarchBridge {
         if (e.code === 1 && this.greymarchPauseOn && Date.now() - (this.greymarchPauseShownAt || 0) < 500) return; // the Esc that opened it (its press can reach here after the menu is up): not a close
         if (e.code === 1 && this.greymarchPauseOn) { this.greymarchEscUsedAt = Date.now(); this.greymarchPauseHide(); return; } // Esc closes the pause menu
         if (e.code === 1 && this.greymarchPanelHasKeys()) this.greymarchEscUsedAt = Date.now(); // Esc closes a window below: not a pause menu as well
+        else if (e.code === 1 && this.greymarchJournalKeyOff && !this.greymarchScreenUp) { this.greymarchPauseWanted = Date.now(); return; } // Esc no longer opens the game's menu (GreymarchCamera.dll 1.14): ours opens, from the update phase
         if (e.code === 59) { if (!this.greymarchChatTyping) this.greymarchHudToPage("logoToggle", true); return; } // F1: the Greymarch logo top right hides and shows (greymarch-hud.html; 2026-10-31, the owner)
         if (e.code === 34 && !this.greymarchChatTyping && !this.greymarchPanelHasKeys()) this.greymarchEmoteWanted = Date.now(); // G: the emote wheel, opened from the update phase (greymarchEmoteTick), where the game's menus can be asked about
         else if (e.code === 1 && this.greymarchEmoteOn) this.greymarchEmoteHide();
@@ -4254,6 +4255,15 @@ export class GreymarchBridge {
     }
     greymarchPauseTick(now: number): any {
         var sp = this.sp, journal = false;
+        // NO FLASH (GreymarchCamera.dll 1.14, 2026-11-05, the owner: the game's menu flashed before ours): Esc's Journal binding is taken off once, so Esc never opens
+        // the game's menu and the key handler asks for ours (greymarchPauseWanted). An older DLL answers no: then the Journal is still shut the frame it is seen, below.
+        if (!this.greymarchJournalKeyOff && !this.greymarchScreenUp && (this.greymarchJournalKeyTries || 0) < 5 && now >= (this.greymarchJournalKeyNext || 0)) {
+            this.greymarchJournalKeyNext = now + 3000; this.greymarchJournalKeyTries = (this.greymarchJournalKeyTries || 0) + 1;
+            var off = false; try { off = !!sp.callNative("GreymarchCam", "SetJournalKey", undefined, false); } catch (e) { off = false; }
+            if (off) { this.greymarchJournalKeyOff = true; this.greymarchLog("pause: Esc no longer opens the game's menu (GreymarchCamera.dll 1.14)"); }
+            else if (this.greymarchJournalKeyTries >= 5) this.greymarchLog("pause: SetJournalKey not there (GreymarchCamera.dll older than 1.14): the game's menu is shut when it opens");
+        }
+        if (this.greymarchPauseWanted) { var asked = this.greymarchPauseWanted; this.greymarchPauseWanted = 0; if (now - asked < 1000 && !this.greymarchChatTyping && !this.greymarchPanelHasKeys()) this.greymarchPauseShow(); }
         try { journal = !!sp.Ui.isMenuOpen(JOURNAL_MENU); } catch (e) { journal = false; }
         if (this.greymarchJournalOk) {
             // "Skyrim settings": the Journal may stay open until the player closes it
@@ -4264,7 +4274,11 @@ export class GreymarchBridge {
             if (!shut && now >= (this.greymarchPauseTapNext || 0)) { this.greymarchPauseTapNext = now + 1000; this.greymarchPauseTapAt = now; try { sp.Input.tapKey(ESC_KEY); } catch (e) { /* shut next frame */ } }
             if (!this.greymarchPauseOn && now - (this.greymarchEscUsedAt || 0) > 700 && !this.greymarchChatTyping && !this.greymarchPanelHasKeys()) this.greymarchPauseShow();
         }
-        if (this.greymarchJournalWant && now >= this.greymarchJournalWant) { this.greymarchJournalWant = 0; this.greymarchJournalOk = now; this.greymarchJournalSeen = false; this.greymarchPauseTapAt = now; try { sp.Input.tapKey(ESC_KEY); } catch (e) { this.greymarchJournalOk = 0; } }
+        if (this.greymarchJournalWant && now >= this.greymarchJournalWant) {
+            this.greymarchJournalWant = 0; this.greymarchJournalOk = now; this.greymarchJournalSeen = false;
+            var opened = false; if (this.greymarchJournalKeyOff) { try { opened = !!sp.callNative("GreymarchCam", "OpenMenu", undefined, JOURNAL_MENU); } catch (e) { opened = false; } } // Esc no longer opens it: asked for by name
+            if (!opened) { this.greymarchPauseTapAt = now; try { sp.Input.tapKey(ESC_KEY); } catch (e) { this.greymarchJournalOk = 0; } }
+        }
         if (this.greymarchQuitWant && now >= this.greymarchQuitWant) { this.greymarchQuitWant = 0; try { sp.Game.quitGame(); } catch (e) { this.greymarchLog("pause: quitGame failed: " + e); } }
         // SkyMP takes the browser's focus away on Esc and hides the browser while the game's menus are up: the open pause menu takes both back (like the forge window)
         if (this.greymarchPauseOn && !journal && now >= (this.greymarchPauseFocusNext || 0)) {
