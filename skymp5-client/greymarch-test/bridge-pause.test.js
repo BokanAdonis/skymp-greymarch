@@ -21,7 +21,8 @@ function make({ closeMenu = true, journalKey = false } = {}) {
   let focus = false;
   const sp = {
     printConsole() {}, writeLogs: (n, l) => log.lines.push(l),
-    Game: { getPlayer: () => null, quitGame: () => { log.quit++; } },
+    Game: { getPlayer: () => null, quitToMainMenu: () => { log.menu = (log.menu || 0) + 1; } },
+    Debug: { quitGame: () => { log.quit++; } },
     Ui: { isMenuOpen: (name) => open.has(name) },
     Input: { tapKey: (k) => { log.taps.push(k); if (k === 1) { if (open.has("Journal Menu")) open.delete("Journal Menu"); else open.add("Journal Menu"); } } },
     callNative: (cls, fn, self, name) => {
@@ -190,4 +191,14 @@ test("an older DLL without SetJournalKey: tried five times, then the old way (th
   assert.ok(log.lines.some((l) => /SetJournalKey not there/.test(l)));
   open.add("Journal Menu"); gm.greymarchPauseTick(Date.now() + 30000);
   assert.strictEqual(gm.greymarchPauseOn, true);
+});
+
+test("Quit uses Debug.quitGame (there is no Game.quitGame), and the main menu if that fails", () => {
+  const { gm, log } = make();
+  assert.match(src, /sp\.Debug\.quitGame\(\)/);
+  assert.doesNotMatch(src, /sp\.Game\.quitGame\(/);
+  gm.sp.Debug.quitGame = () => { throw new Error("no"); };
+  gm.greymarchPauseAction({ op: "quit" });
+  gm.greymarchPauseTick(Date.now() + 500);
+  assert.strictEqual(log.menu, 1);
 });

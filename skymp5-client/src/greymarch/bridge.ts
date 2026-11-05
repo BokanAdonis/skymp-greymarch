@@ -4222,7 +4222,7 @@ export class GreymarchBridge {
     // Help and keys, Quit) instead of the game's Journal menu. The Journal cannot be stopped from on("menuOpen") (the game's functions cannot be called there), so the
     // update loop shuts it the frame it is seen, like the console (greymarchConsoleTick): GreymarchCamera.dll's CloseMenu, or an Esc tap if that fails. An Esc that
     // closed something else (the chat input, a window, this menu) does not open the pause menu as well (greymarchEscUsedAt). "Skyrim settings" lets the Journal open
-    // once on purpose (greymarchJournalOk until it closes). Quit asks the game to close (Game.quitGame) from the update phase. The world does not pause.
+    // once on purpose (greymarchJournalOk until it closes). Quit asks the game to close (Debug.quitGame) from the update phase. The world does not pause.
     greymarchPauseToPage(fn: any, arg: any): any {
         var json = JSON.stringify({ fn: fn, arg: arg }).replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
         try {
@@ -4279,7 +4279,12 @@ export class GreymarchBridge {
             var opened = false; if (this.greymarchJournalKeyOff) { try { opened = !!sp.callNative("GreymarchCam", "OpenMenu", undefined, JOURNAL_MENU); } catch (e) { opened = false; } } // Esc no longer opens it: asked for by name
             if (!opened) { this.greymarchPauseTapAt = now; try { sp.Input.tapKey(ESC_KEY); } catch (e) { this.greymarchJournalOk = 0; } }
         }
-        if (this.greymarchQuitWant && now >= this.greymarchQuitWant) { this.greymarchQuitWant = 0; try { sp.Game.quitGame(); } catch (e) { this.greymarchLog("pause: quitGame failed: " + e); } }
+        // Quit: Papyrus Debug.QuitGame (the game closes to the desktop; there is no Game.quitGame: in game it failed with "not a function"), the main menu if that fails
+        if (this.greymarchQuitWant && now >= this.greymarchQuitWant) {
+            this.greymarchQuitWant = 0;
+            try { sp.Debug.quitGame(); this.greymarchLog("pause: quitting"); }
+            catch (e) { this.greymarchLog("pause: Debug.quitGame failed: " + e + ", to the main menu"); try { sp.Game.quitToMainMenu(); } catch (e2) { this.greymarchLog("pause: quitToMainMenu failed: " + e2); } }
+        }
         // SkyMP takes the browser's focus away on Esc and hides the browser while the game's menus are up: the open pause menu takes both back (like the forge window)
         if (this.greymarchPauseOn && !journal && now >= (this.greymarchPauseFocusNext || 0)) {
             this.greymarchPauseFocusNext = now + 200;
