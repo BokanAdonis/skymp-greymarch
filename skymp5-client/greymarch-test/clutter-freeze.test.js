@@ -169,7 +169,7 @@ function rackSetup() {
 }
 FT.Activator = 24;
 
-test("a weapon rack: its starting item goes onto the trigger's pivot for its kind (a shield on ShieldPivot01, a bow on BowPivot01, a warhammer on WarhammerPivot01), then is frozen; once a visit", async () => {
+test("a weapon rack: its starting item goes onto the trigger's pivot for its kind (a shield on ShieldPivot01, a bow on BowPivot01, a warhammer on WarhammerPivot01), then is frozen; once a visit", { skip: !M.RACKS_ON }, async () => {
   const s = rackSetup();
   s.add(0x10, { type: FT.Activator, links: { WRackTrigger: 0x11, "": 0x12 } }); s.add(0x11, { type: FT.Activator, links: { WRackActivator: 0x10 } }); s.add(0x12, { type: FT.Armor });
   s.add(0x20, { type: FT.Activator, links: { WRackTrigger: 0x21, "": 0x22 } }); s.add(0x21, { type: FT.Activator }); s.add(0x22, { type: FT.Weapon, weaponType: 7 });
@@ -185,7 +185,7 @@ test("a weapon rack: its starting item goes onto the trigger's pivot for its kin
   assert.strictEqual(s.moves.length, 3, "once a visit");
 });
 
-test("a rack whose item is not loaded yet is tried again on the next sweep; a battleaxe goes on BattleAxePivot01", async () => {
+test("a rack whose item is not loaded yet is tried again on the next sweep; a battleaxe goes on BattleAxePivot01", { skip: !M.RACKS_ON }, async () => {
   const s = rackSetup();
   s.add(0x10, { type: FT.Activator, links: { WRackTrigger: 0x11, "": 0x12 } }); s.add(0x11, { type: FT.Activator }); s.add(0x12, { type: FT.Weapon, weaponType: 6, loaded: false });
   s.update();
@@ -194,4 +194,12 @@ test("a rack whose item is not loaded yet is tried again on the next sweep; a ba
   const realNow = Date.now; Date.now = () => realNow() + M.SWEEP_MS + 1;
   try { s.update(); } finally { Date.now = realNow; }
   assert.deepStrictEqual(s.moves, [[0x12, 0x11, "BattleAxePivot01"]]);
+});
+
+test("racks are off (2026-11-05: the game crashed in Bruma Castle seconds after the rack items were moved): nothing is moved", async () => {
+  if (M.RACKS_ON) return;
+  const s = rackSetup();
+  s.add(0x10, { type: FT.Activator, links: { WRackTrigger: 0x11, "": 0x12 } }); s.add(0x11, { type: FT.Activator }); s.add(0x12, { type: FT.Armor });
+  s.update(); await new Promise((r) => setImmediate(r));
+  assert.deepStrictEqual(s.moves, []);
 });

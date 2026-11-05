@@ -25,6 +25,9 @@ export const MAX_WAITING = 6000;
 export const SWEEP_MS = 2000;
 export const SWEEP_PER_UPDATE = 200;
 export const LOG_LINES = 40;
+// OFF (2026-11-05, the owner: the game kept crashing in Bruma Castle): the game crashed seconds after the sweep moved its 27 rack items onto their racks
+// (moveToNode). Kept for a later look; the racks are left as they are.
+export const RACKS_ON = false;
 export const WRACK_TRIGGER = 0x06d95e; // Skyrim.esm WRackTrigger: a rack's activator -> its trigger (the part with the pivot nodes)
 export const WEAPTYPE_WARHAMMER = 0x06d930; // Skyrim.esm WeapTypeWarhammer: a two-handed blunt weapon is a warhammer, else a battleaxe
 // Weapon.GetWeaponType -> the rack's pivot node (1 sword, 2 dagger, 3 war axe, 4 mace, 5 greatsword, 7 bow, 8 staff, 9 crossbow; 6 is the battleaxe or warhammer)
@@ -48,7 +51,8 @@ export class ClutterFreezeService extends ClientListener {
     private waiting: { id: number; at: number }[] = [];
     private frozen = new Set<number>(); // frozen since the player entered this cell (a 3D reload undoes it: the load event freezes those again)
     private cellId = 0;
-    private sweep: { cellId: number; n: number; i: number; caught: number; loose: number; racked: number; food: number; foodOff: number; food3d: number } | null = null;
+    private sweep: { cellId: number; n: number; i: number; caught: number; loose: number; racked: number; food: number; foodOff: number; food3d: number; ids: number[] } | null = null;
+    private seenLoose = new Map<number, number[]>(); // cell -> the loose objects from the world it had on the first visit (to log what a later visit lacks)
     private sweepsInCell = 0; // completed sweeps since the player entered this cell: the 1st and the 6th (about 10 s in) are written to the log
     private racked = new Set<number>(); // rack activators handled since the player entered this cell
     private lastSweep = 0;
@@ -90,7 +94,7 @@ export class ClutterFreezeService extends ClientListener {
             let id = 0, n = 0;
             try { id = cell.getFormID(); n = cell.getNumRefs(0); } catch (err) { return; }
             if (id !== this.cellId) { this.cellId = id; this.frozen.clear(); this.racked.clear(); this.sweepsInCell = 0; }
-            this.sweep = { cellId: id, n, i: 0, caught: 0, loose: 0, racked: 0, food: 0, foodOff: 0, food3d: 0 };
+            this.sweep = { cellId: id, n, i: 0, caught: 0, loose: 0, racked: 0, food: 0, foodOff: 0, food3d: 0, ids: [] };
         }
         const s = this.sweep;
         let cell: any = null;
@@ -105,9 +109,10 @@ export class ClutterFreezeService extends ClientListener {
                 if (madeInGame(id)) continue; // a dropped item: the load event freezes it once it has fallen
                 const base = ref.getBaseObject();
                 if (!base) continue;
-                if (base.getType() === FormType.Activator) { if (this.rack(ref, id)) s.racked++; continue; }
+                if (base.getType() === FormType.Activator) { if (RACKS_ON && this.rack(ref, id)) s.racked++; continue; }
                 if (!isLoose(base.getType())) continue;
                 s.loose++;
+                s.ids.push(id);
                 if (base.getType() === FormType.Potion) { s.food++; if (ref.isDisabled()) s.foodOff++; if (ref.is3DLoaded()) s.food3d++; }
                 if (this.frozen.has(id) || !ref.is3DLoaded()) continue;
                 this.freeze(ref, id);
@@ -121,6 +126,8 @@ export class ClutterFreezeService extends ClientListener {
         this.sweepsInCell++;
         if ((s.caught > 0 || s.racked > 0 || this.sweepsInCell === 1 || this.sweepsInCell === 6) && this.logsLeft > 0) {
             this.logsLeft--;
+            if (this.sweepsInCell === 6) this.compareVisits(s.cellId, s.ids);
+            if (this.sweepsInCell === 6 && (s.cellId >>> 0) === 0x1677c) this.probe();
             try { this.sp.writeLogs("greymarch", "clutter: cell " + (s.cellId >>> 0).toString(16) + " (sweep " + this.sweepsInCell + ", " + s.n + " references): " + s.loose + " loose objects, " + s.caught + " frozen by the sweep (the load event missed them), " + s.racked + " put on their racks; food and potions " + s.food + " (" + s.foodOff + " disabled, " + s.food3d + " drawn)"); } catch (err) { /* no log */ }
         }
     }
@@ -160,6 +167,52 @@ export class ClutterFreezeService extends ClientListener {
 
     private keyword(formId: number): any {
         try { return this.sp.Keyword.from(this.sp.Game.getFormEx(formId)); } catch (err) { return null; }
+    }
+
+    // DIAGNOSTIC (2026-11-05, the Palace of the Kings' table food gone on a second visit): the first visit's loose objects are kept; a later visit logs how
+    // many are missing and, for a few, what the game says about them (there at all, deleted, disabled, in which cell, where)
+    private compareVisits(cellId: number, ids: number[]) {
+        const before = this.seenLoose.get(cellId);
+        if (!before) { if (this.seenLoose.size < 50) this.seenLoose.set(cellId, ids.slice()); return; }
+        const now = new Set(ids);
+        const missing = before.filter((id) => !now.has(id));
+        const say = (t: string) => { try { this.sp.writeLogs("greymarch", t); } catch (err) { /* no log */ } };
+        say("clutter: cell " + (cellId >>> 0).toString(16) + " again: " + missing.length + " of the first visit's " + before.length + " loose objects missing");
+        for (const id of missing.slice(0, 8)) {
+            let t = "  missing " + (id >>> 0).toString(16) + ": ";
+            try {
+                const form = this.sp.Game.getFormEx(id);
+                const ref = form ? this.sp.ObjectReference.from(form) : null;
+                if (!ref) t += form ? "a form, not a reference" : "no such form";
+                else {
+                    const c = ref.getParentCell();
+                    const b = ref.getBaseObject();
+                    t += (b ? b.getName() + " (type " + b.getType() + ")" : "no base") + ", deleted " + ref.isDeleted() + ", disabled " + ref.isDisabled() + ", 3D " + ref.is3DLoaded()
+                        + ", cell " + (c ? (c.getFormID() >>> 0).toString(16) : "none") + ", at " + [ref.getPositionX(), ref.getPositionY(), ref.getPositionZ()].map((v: number) => Math.round(v)).join(",");
+                }
+            } catch (err) { t += "error " + err; }
+            say(t);
+        }
+    }
+
+    // DIAGNOSTIC: a few of the Palace of the Kings' table foods, looked up by their plugin ids
+    private probe() {
+        const say = (t: string) => { try { this.sp.writeLogs("greymarch", t); } catch (err) { /* no log */ } };
+        for (const [id, file] of [[0xeb4, "JK's Palace of the Kings.esp"], [0xec1, "JK's Palace of the Kings.esp"], [0xed6, "JK's Palace of the Kings.esp"], [0xc1140, "Skyrim.esm"], [0xc114c, "Skyrim.esm"]] as [number, string][]) {
+            let t = "  probe " + file + " " + id.toString(16) + ": ";
+            try {
+                const form = this.sp.Game.getFormFromFile(id, file);
+                const ref = form ? this.sp.ObjectReference.from(form) : null;
+                if (!ref) t += form ? "a form, not a reference" : "no such form";
+                else {
+                    const c = ref.getParentCell();
+                    const b = ref.getBaseObject();
+                    t += "id " + (ref.getFormID() >>> 0).toString(16) + ", " + (b ? b.getName() : "no base") + ", deleted " + ref.isDeleted() + ", disabled " + ref.isDisabled() + ", 3D " + ref.is3DLoaded()
+                        + ", cell " + (c ? (c.getFormID() >>> 0).toString(16) : "none") + ", at " + [ref.getPositionX(), ref.getPositionY(), ref.getPositionZ()].map((v: number) => Math.round(v)).join(",");
+                }
+            } catch (err) { t += "error " + err; }
+            say(t);
+        }
     }
 
     private playerCell(): any {
