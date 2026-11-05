@@ -48,7 +48,8 @@ export class ClutterFreezeService extends ClientListener {
     private waiting: { id: number; at: number }[] = [];
     private frozen = new Set<number>(); // frozen since the player entered this cell (a 3D reload undoes it: the load event freezes those again)
     private cellId = 0;
-    private sweep: { cellId: number; n: number; i: number; caught: number; loose: number; racked: number } | null = null;
+    private sweep: { cellId: number; n: number; i: number; caught: number; loose: number; racked: number; food: number; foodOff: number; food3d: number } | null = null;
+    private sweepsInCell = 0; // completed sweeps since the player entered this cell: the 1st and the 6th (about 10 s in) are written to the log
     private racked = new Set<number>(); // rack activators handled since the player entered this cell
     private lastSweep = 0;
     private logsLeft = LOG_LINES;
@@ -88,8 +89,8 @@ export class ClutterFreezeService extends ClientListener {
             if (!cell) return;
             let id = 0, n = 0;
             try { id = cell.getFormID(); n = cell.getNumRefs(0); } catch (err) { return; }
-            if (id !== this.cellId) { this.cellId = id; this.frozen.clear(); this.racked.clear(); }
-            this.sweep = { cellId: id, n, i: 0, caught: 0, loose: 0, racked: 0 };
+            if (id !== this.cellId) { this.cellId = id; this.frozen.clear(); this.racked.clear(); this.sweepsInCell = 0; }
+            this.sweep = { cellId: id, n, i: 0, caught: 0, loose: 0, racked: 0, food: 0, foodOff: 0, food3d: 0 };
         }
         const s = this.sweep;
         let cell: any = null;
@@ -107,6 +108,7 @@ export class ClutterFreezeService extends ClientListener {
                 if (base.getType() === FormType.Activator) { if (this.rack(ref, id)) s.racked++; continue; }
                 if (!isLoose(base.getType())) continue;
                 s.loose++;
+                if (base.getType() === FormType.Potion) { s.food++; if (ref.isDisabled()) s.foodOff++; if (ref.is3DLoaded()) s.food3d++; }
                 if (this.frozen.has(id) || !ref.is3DLoaded()) continue;
                 this.freeze(ref, id);
                 s.caught++;
@@ -116,9 +118,10 @@ export class ClutterFreezeService extends ClientListener {
         }
         if (s.i < s.n) return;
         this.sweep = null;
-        if ((s.caught > 0 || s.racked > 0) && this.logsLeft > 0) {
+        this.sweepsInCell++;
+        if ((s.caught > 0 || s.racked > 0 || this.sweepsInCell === 1 || this.sweepsInCell === 6) && this.logsLeft > 0) {
             this.logsLeft--;
-            try { this.sp.writeLogs("greymarch", "clutter: cell " + (s.cellId >>> 0).toString(16) + ": " + s.loose + " loose objects, " + s.caught + " frozen by the sweep (the load event missed them), " + s.racked + " put on their racks"); } catch (err) { /* no log */ }
+            try { this.sp.writeLogs("greymarch", "clutter: cell " + (s.cellId >>> 0).toString(16) + " (sweep " + this.sweepsInCell + ", " + s.n + " references): " + s.loose + " loose objects, " + s.caught + " frozen by the sweep (the load event missed them), " + s.racked + " put on their racks; food and potions " + s.food + " (" + s.foodOff + " disabled, " + s.food3d + " drawn)"); } catch (err) { /* no log */ }
         }
     }
 

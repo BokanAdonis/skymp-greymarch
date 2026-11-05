@@ -121,7 +121,7 @@ test("the sweep: the player's cell is walked and loose objects from the world th
     s.cells.set(0x3c01, [{ id: 0x1001, type: FT.Weapon }, { id: 0x1002, type: FT.Armor }, { id: 0x1003, type: FT.Static }, { id: 0xff000010, type: FT.Misc }, { id: 0x1004, type: FT.Misc, loaded: false }]);
     s.update();
     assert.deepStrictEqual(s.set, [[0x1001, 4, false], [0x1002, 4, false]], "a weapon and a shield on the wall");
-    assert.match(s.logs.pop()[1], /cell 3c01: 3 loose objects, 2 frozen by the sweep/);
+    assert.match(s.logs.pop()[1], /cell 3c01 \(sweep 1, 5 references\): 3 loose objects, 2 frozen by the sweep/);
     t += M.SWEEP_MS; s.update();
     assert.strictEqual(s.set.length, 2, "not frozen twice");
     assert.strictEqual(s.logs.length, 0, "nothing new: no log line");
