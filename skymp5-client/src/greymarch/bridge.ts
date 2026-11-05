@@ -121,6 +121,9 @@ export const CONSOLE_BLOCKED = [
 ];
 const OPEN_ON_RELEASE = [65, 35, 48, 64, 66, 37]; // F7, H, B, F6, F8, K: their windows open when the key is let go (greymarchKey)
 const FORGE_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmForgeRun").split("greymarch-prof").join("greymarch-forge").split("2147483220").join("2147483225"); // the Greymarch forge window: the same loader, another page
+const PAUSE_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmPauseRun").split("greymarch-prof").join("greymarch-pause").split("2147483220").join("2147483230"); // the pause menu (Esc): the same loader, another page, over every other window
+const JOURNAL_MENU = "Journal Menu"; // the game's own pause menu (Esc, J): closed the frame it opens, the pause menu shows instead (greymarchPauseTick)
+const ESC_KEY = 1;
 const CRAFT_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmCraftRun").split("greymarch-prof").join("greymarch-craft").split("2147483220").join("2147483224"); // the crafting panel (a station was used): the same loader, another page
 const CLICK_GUARD_MS = 400; // after a window closes, attacks and drawing a weapon are ignored this long: the click on its X is not a swing (greymarchClickGuard)
 const MINI_KEEP_MS = 3500; // a mini game window kept up between logs (the chopping block) closes if the next does not come within this
@@ -360,6 +363,7 @@ export class GreymarchBridge {
             this.greymarchLog("entered " + msg.id + " new=" + !!msg.isNew + " kit=" + (Array.isArray(msg.kit) ? msg.kit.length : 0) + " equip=" + (Array.isArray(msg.equip) ? msg.equip.length : 0));
             this.greymarchScreenUp = true;
             this.greymarchHudToPage("character", msg.id); // the voice display tells the launcher which character this is
+            this.greymarchPlayingId = typeof msg.id === "string" ? msg.id : ""; this.greymarchPlayingName = typeof msg.name === "string" ? msg.name : ""; // the pause menu's heading
             if (msg.isNew) {
                 // a NEW character: empty the inventory down to exactly the starting kit (the game's vanilla starting items would otherwise stay),
                 // take off the default armor, then put the starting clothes on (see greymarchTick)
@@ -556,6 +560,7 @@ export class GreymarchBridge {
         this.greymarchPointerGuard(Date.now()); // a window that holds the mouse always has its pointer (the game's Cursor Menu)
         this.greymarchHotkeyTick(Date.now()); // a window hotkey whose key-up the game never sent
         this.greymarchConsoleTick(Date.now()); // the console (~) is closed the frame it opens
+        this.greymarchPauseTick(Date.now()); // Esc: the pause menu instead of the game's Journal menu
         this.greymarchMiniActivateTick(); // a mini game won: the thing is used again (the server lets it through)
         this.greymarchClickGuardTick(); // the click that closed a window is not a swing
         this.greymarchMagicBlockDrive(); // NPC raise-the-dead and summons: ended at once
@@ -741,6 +746,8 @@ export class GreymarchBridge {
         if (data && data.type === "craft-close") { this.greymarchCraftHide(); return; }
         if (data && data.type === "forge") { this.greymarchForgeAsk(data); return; } // the forge window asks the server (the SERVER decides and makes the item)
         if (data && data.type === "forge-close") { this.greymarchForgeHide(); return; }
+        if (data && data.type === "pause-close") { this.greymarchPauseHide(); return; }
+        if (data && data.type === "pause") { this.greymarchPauseAction(data); return; } // Skyrim settings, quit, the logo: done from the update phase
         if (data && data.type === "forge-turn") { this.greymarchForgeTurn(data); return; } // a drag, the wheel or a double-click over the display: the smith examines the piece
         if (data && data.type === "forge-preview") { if (this.greymarchForgeOn) this.greymarchForgePreviewWant = (this.greymarchForgeStation === "smelter" || this.greymarchForgeStation === "kiln") ? "" : String(data.key || "").slice(0, 80); return; } // never at the smelter or the charcoal kiln (2026-10-26, the owner) // the piece picked in the forge window: shown in front of the smith (greymarchForgePreviewTick); only while the window is open
         if (data && data.type === "vampire") { this.greymarchVampMenuAsk(data); return; } // the vampire window asks the server (the SERVER decides)
@@ -922,7 +929,7 @@ export class GreymarchBridge {
         if (e.code !== 65 && e.code !== 66 && e.code !== 64 && e.code !== 35 && e.code !== 48 && e.code !== 1 && e.code !== 45 && e.code !== 28 && e.code !== 37 && e.code !== 34 && e.code !== 59) return;
         var down = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true);
         if (e.isUp === true) down = false;
-        if (e.code === 1 && down && this.greymarchChatTyping) { this.greymarchChatClose(); return; } // Esc cancels whenever the input is open (the messages stay on screen), whatever the key-up history says
+        if (e.code === 1 && down && this.greymarchChatTyping) { this.greymarchEscUsedAt = Date.now(); this.greymarchChatClose(); return; } // Esc cancels whenever the input is open (the messages stay on screen), whatever the key-up history says
         if (e.code === 28) { if (down && e.isRepeating !== true) { this.greymarchChatWanted = Date.now(); if (!this.greymarchEnterSeen) { this.greymarchEnterSeen = true; this.greymarchLog("chat: the first Enter press reached the game"); } } return; } // Enter: the chat is opened from the update phase (greymarchChatPending), where the game's menus can be asked about; a held key does not repeat it and a missed key-up can never swallow the next press
         var was = this["greymarchKey" + e.code];
         this["greymarchKey" + e.code] = down;
@@ -936,6 +943,9 @@ export class GreymarchBridge {
             return;
         }
         if (!down || was) return;
+        if (e.code === 1 && Date.now() - (this.greymarchPauseTapAt || 0) < 400) return; // our own tap that shut the game's Journal, not the player
+        if (e.code === 1 && this.greymarchPauseOn) { this.greymarchEscUsedAt = Date.now(); this.greymarchPauseHide(); return; } // Esc closes the pause menu
+        if (e.code === 1 && this.greymarchPanelHasKeys()) this.greymarchEscUsedAt = Date.now(); // Esc closes a window below: not a pause menu as well
         if (e.code === 59) { if (!this.greymarchChatTyping) this.greymarchHudToPage("logoToggle", true); return; } // F1: the Greymarch logo top right hides and shows (greymarch-hud.html; 2026-10-31, the owner)
         if (e.code === 34 && !this.greymarchChatTyping && !this.greymarchPanelHasKeys()) this.greymarchEmoteWanted = Date.now(); // G: the emote wheel, opened from the update phase (greymarchEmoteTick), where the game's menus can be asked about
         else if (e.code === 1 && this.greymarchEmoteOn) this.greymarchEmoteHide();
@@ -4172,6 +4182,61 @@ export class GreymarchBridge {
         if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchEmoteOn || !!this.greymarchGuardsHud || !!this.greymarchProfOn || !!this.greymarchChanceryOn || !!this.greymarchVampMenuOn || !!this.greymarchLedgerOn || !!this.greymarchScribeOn || this.greymarchScribeOn || !!this.greymarchForgeOn); }
     }
     // ---- THE GREYMARCH FORGE WINDOW. The page is Platform/UI/greymarch-forge.html; the SERVER decides everything (gamemode/src/forgemenu.js). Using a forge, the server
+    // ---- THE PAUSE MENU (2026-11-05, the owner): Esc with no Greymarch window open shows greymarch-pause.html (Resume, Settings, Skyrim settings, Call a Game Master,
+    // Help and keys, Quit) instead of the game's Journal menu. The Journal cannot be stopped from on("menuOpen") (the game's functions cannot be called there), so the
+    // update loop shuts it the frame it is seen, like the console (greymarchConsoleTick): GreymarchCamera.dll's CloseMenu, or an Esc tap if that fails. An Esc that
+    // closed something else (the chat input, a window, this menu) does not open the pause menu as well (greymarchEscUsedAt). "Skyrim settings" lets the Journal open
+    // once on purpose (greymarchJournalOk until it closes). Quit asks the game to close (Game.quitGame) from the update phase. The world does not pause.
+    greymarchPauseToPage(fn: any, arg: any): any {
+        var json = JSON.stringify({ fn: fn, arg: arg }).replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
+        try {
+            this.sp.browser.executeJavaScript(PAUSE_SCRIPT + "window.__gmPauseRun(" + json + ");");
+        } catch (err) {
+            this.sp.printConsole("[greymarch] could not reach the pause menu: " + err);
+        }
+    }
+    greymarchPauseShow(): any {
+        if (this.greymarchPauseOn || this.greymarchScreenUp) return; // not over the select screen
+        this.greymarchLog("pause: opened");
+        this.greymarchPauseOn = true;
+        this.sp.browser.setVisible(true);
+        this.sp.browser.setFocused(true);
+        this.greymarchPauseToPage("show", { name: this.greymarchPlayingName || "", id: this.greymarchPlayingId || "" });
+    }
+    greymarchPauseHide(): any {
+        if (!this.greymarchPauseOn) return;
+        this.greymarchClickGuard(); // the click that closed it is not a swing
+        this.greymarchPauseOn = false;
+        this.greymarchPauseToPage("hide", true);
+        if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchForgeOn || !!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchEmoteOn || !!this.greymarchGuardsHud || !!this.greymarchProfOn || !!this.greymarchChanceryOn || !!this.greymarchVampMenuOn || !!this.greymarchLedgerOn || !!this.greymarchScribeOn || this.greymarchScribeOn || !!this.greymarchCraftOn); }
+    }
+    greymarchPauseAction(data: any): any {
+        var op = data && data.op;
+        if (op === "logo") this.greymarchHudToPage("logoToggle", true); // the HUD page keeps the choice (localStorage greymarchLogo); the pause page reads it back
+        else if (op === "skyrim") { this.greymarchPauseHide(); this.greymarchJournalWant = Date.now() + 150; } // the game's own menu, on purpose
+        else if (op === "quit") { this.greymarchLog("pause: quit asked"); this.greymarchQuitWant = Date.now() + 100; }
+    }
+    greymarchPauseTick(now: number): any {
+        var sp = this.sp, journal = false;
+        try { journal = !!sp.Ui.isMenuOpen(JOURNAL_MENU); } catch (e) { journal = false; }
+        if (this.greymarchJournalOk) {
+            // "Skyrim settings": the Journal may stay open until the player closes it
+            if (journal) this.greymarchJournalSeen = true;
+            else if (this.greymarchJournalSeen || now - this.greymarchJournalOk > 3000) { this.greymarchJournalOk = 0; this.greymarchJournalSeen = false; }
+        } else if (journal && !this.greymarchScreenUp) {
+            var shut = false; try { shut = !!sp.callNative("GreymarchCam", "CloseMenu", undefined, JOURNAL_MENU); } catch (e) { shut = false; }
+            if (!shut && now >= (this.greymarchPauseTapNext || 0)) { this.greymarchPauseTapNext = now + 1000; this.greymarchPauseTapAt = now; try { sp.Input.tapKey(ESC_KEY); } catch (e) { /* shut next frame */ } }
+            if (!this.greymarchPauseOn && now - (this.greymarchEscUsedAt || 0) > 700 && !this.greymarchChatTyping && !this.greymarchPanelHasKeys()) this.greymarchPauseShow();
+        }
+        if (this.greymarchJournalWant && now >= this.greymarchJournalWant) { this.greymarchJournalWant = 0; this.greymarchJournalOk = now; this.greymarchJournalSeen = false; this.greymarchPauseTapAt = now; try { sp.Input.tapKey(ESC_KEY); } catch (e) { this.greymarchJournalOk = 0; } }
+        if (this.greymarchQuitWant && now >= this.greymarchQuitWant) { this.greymarchQuitWant = 0; try { sp.Game.quitGame(); } catch (e) { this.greymarchLog("pause: quitGame failed: " + e); } }
+        // SkyMP takes the browser's focus away on Esc and hides the browser while the game's menus are up: the open pause menu takes both back (like the forge window)
+        if (this.greymarchPauseOn && !journal && now >= (this.greymarchPauseFocusNext || 0)) {
+            this.greymarchPauseFocusNext = now + 200;
+            var focused = true; try { focused = !!sp.browser.isFocused(); } catch (e) { focused = true; }
+            if (!focused) { sp.browser.setVisible(true); sp.browser.setFocused(true); }
+        }
+    }
     // keeps the game's menu shut and opens this ({ customPacketType: "greymarchForgeOpen" }) for a game that said it has it ("greymarchForgeReady", sent on entering the world).
     greymarchForgeToPage(fn: any, arg: any): any {
         var json = JSON.stringify({ fn: fn, arg: arg }).replace(/\u2028/g, "\\u2028").replace(/\u2029/g, "\\u2029");
@@ -5362,7 +5427,7 @@ export class GreymarchBridge {
     // The chat page answers every "show" (a few seconds apart) with whether it is really typing. If the game thinks otherwise, the game gives way: a keyboard that the page is not using is released,
     // so movement can never stay locked behind a chat that is not open. (An input opened less than a second ago is left alone: the answer may have been sent before it.)
     // The windows that hold the keyboard (and the mouse cursor) while they are open. The chat's keyboard releases leave them alone: releasing it every 2 s took the K window's cursor away (2026-10-18).
-    greymarchPanelHasKeys(): any { return !!(this.greymarchMiniOn || this.greymarchAdminOn || this.greymarchMenuOn || this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchScribeOn || this.greymarchCraftOn || this.greymarchForgeOn || this.greymarchEmoteOn); }
+    greymarchPanelHasKeys(): any { return !!(this.greymarchMiniOn || this.greymarchAdminOn || this.greymarchMenuOn || this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchScribeOn || this.greymarchCraftOn || this.greymarchForgeOn || this.greymarchEmoteOn || this.greymarchPauseOn); }
     // ---- THE FIELD OF VIEW (the chatbox's Settings). Skyrim Platform cannot reach the camera's field of view and the camera never reads the game's settings
     // again, so the value goes into fDefaultWorldFOV / fDefault1stPersonFOV (the Skyrim.ini ones) and Greymarch's SKSE plugin GreymarchCamera.dll (in the game
     // files; launcher repo skse/GreymarchCamera) sees the change within a quarter of a second and puts it on the camera, in any view. (Switching the view and
@@ -5430,7 +5495,7 @@ export class GreymarchBridge {
     // them is still marked open means the mark is stale (the window closed without saying so, or lost the keyboard): the mark is cleared and that window hidden, so the chat opens.
     // While the browser really has the keyboard, the window is open for real and Enter belongs to it.
     greymarchChatStaleWindows(): any {
-        if (!this.greymarchAdminOn && !this.greymarchMenuOn && !this.greymarchProfOn && !this.greymarchChanceryOn && !this.greymarchVampMenuOn && !this.greymarchLedgerOn && !this.greymarchScribeOn && !this.greymarchCraftOn && !this.greymarchForgeOn && !this.greymarchEmoteOn) return;
+        if (!this.greymarchPauseOn && !this.greymarchAdminOn && !this.greymarchMenuOn && !this.greymarchProfOn && !this.greymarchChanceryOn && !this.greymarchVampMenuOn && !this.greymarchLedgerOn && !this.greymarchScribeOn && !this.greymarchCraftOn && !this.greymarchForgeOn && !this.greymarchEmoteOn) return;
         var focused = true;
         try { focused = !!this.sp.browser.isFocused(); } catch (e) { focused = true; } // cannot tell: leave the window alone
         if (focused) return;
@@ -5444,6 +5509,7 @@ export class GreymarchBridge {
         if (this.greymarchScribeOn) { try { this.greymarchScribeHide(); } catch (e7) { this.greymarchScribeOn = false; } }
         if (this.greymarchCraftOn) { try { this.greymarchCraftHide(); } catch (e7) { this.greymarchCraftOn = false; } }
         if (this.greymarchForgeOn) { try { this.greymarchForgeHide(); } catch (e8) { this.greymarchForgeOn = false; } }
+        if (this.greymarchPauseOn) { try { this.greymarchPauseHide(); } catch (e9) { this.greymarchPauseOn = false; } }
         if (this.greymarchMiniOn) { try { this.greymarchMiniHide(); } catch (e8) { this.greymarchMiniOn = false; } }
         if (this.greymarchEmoteOn) { try { this.greymarchEmoteHide(); } catch (e6) { this.greymarchEmoteOn = false; } }
     }
