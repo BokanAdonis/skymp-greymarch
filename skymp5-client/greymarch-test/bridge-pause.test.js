@@ -134,3 +134,26 @@ test("the page's messages reach the bridge: pause-close and pause", () => {
   assert.match(src, /if \(data && data\.type === "pause"\) \{ this\.greymarchPauseAction\(data\); return; \}/);
   assert.match(src, /const PAUSE_SCRIPT = PROF_SCRIPT\.split\("__gmProfSend"\)\.join\("__gmPauseRun"\)\.split\("greymarch-prof"\)\.join\("greymarch-pause"\)/);
 });
+
+test("health, magicka, stamina: the game's own meters are hidden and the three percentages go to the HUD page when they move; they come back when our page is not up", () => {
+  const { gm, log } = make();
+  const set = []; const vit = [];
+  gm.sp.Ui.setBool = (menu, target, v) => set.push([target, v]);
+  gm.sp.Ui.getBool = () => true;
+  gm.greymarchHudToPage = (fn, arg) => { if (fn === "vitals") vit.push(arg); };
+  let pct = { Health: 0.5, Magicka: 1, Stamina: 0.25 };
+  gm.sp.Game.getPlayer = () => ({ getActorValuePercentage: (n) => pct[n] });
+  gm.greymarchChatOn = true;
+  const t = Date.now() + 10000;
+  gm.greymarchVitalsTick(t);
+  assert.deepStrictEqual(set, [["_root.HUDMovieBaseInstance.Health._visible", false], ["_root.HUDMovieBaseInstance.Magica._visible", false], ["_root.HUDMovieBaseInstance.Stamina._visible", false]]);
+  assert.deepStrictEqual(vit, [{ h: 0.5, m: 1, s: 0.25 }]);
+  gm.greymarchVitalsTick(t + 150);
+  assert.strictEqual(vit.length, 1, "nothing moved: nothing sent");
+  pct.Health = 0.4; gm.greymarchVitalsTick(t + 300);
+  assert.deepStrictEqual(vit[1], { h: 0.4, m: 1, s: 0.25 });
+  set.length = 0; gm.greymarchScreenUp = true; gm.greymarchVitalsTick(t + 450);
+  assert.ok(set.every(([, v]) => v === true) && set.length === 3, "the game's bars are back while the select screen is up");
+  assert.deepStrictEqual(vit.pop(), { off: true });
+  assert.ok(log.lines.some((l) => /vitals: the game's bars hidden/.test(l)));
+});

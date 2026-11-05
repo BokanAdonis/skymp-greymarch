@@ -561,6 +561,7 @@ export class GreymarchBridge {
         this.greymarchHotkeyTick(Date.now()); // a window hotkey whose key-up the game never sent
         this.greymarchConsoleTick(Date.now()); // the console (~) is closed the frame it opens
         this.greymarchPauseTick(Date.now()); // Esc: the pause menu instead of the game's Journal menu
+        this.greymarchVitalsTick(Date.now()); // health, magicka, stamina: our glass bars instead of the game's
         this.greymarchMiniActivateTick(); // a mini game won: the thing is used again (the server lets it through)
         this.greymarchClickGuardTick(); // the click that closed a window is not a swing
         this.greymarchMagicBlockDrive(); // NPC raise-the-dead and summons: ended at once
@@ -4183,6 +4184,39 @@ export class GreymarchBridge {
         if (!this.greymarchScreenUp) { this.sp.browser.setFocused(false); this.sp.browser.setVisible(!!this.greymarchHudOn || !!this.greymarchAdminOn || !!this.greymarchMenuOn || !!this.greymarchChatOn || !!this.greymarchEmoteOn || !!this.greymarchGuardsHud || !!this.greymarchProfOn || !!this.greymarchChanceryOn || !!this.greymarchVampMenuOn || !!this.greymarchLedgerOn || !!this.greymarchScribeOn || this.greymarchScribeOn || !!this.greymarchForgeOn); }
     }
     // ---- THE GREYMARCH FORGE WINDOW. The page is Platform/UI/greymarch-forge.html; the SERVER decides everything (gamemode/src/forgemenu.js). Using a forge, the server
+    // ---- HEALTH, MAGICKA AND STAMINA (2026-11-05, the owner: still bars, more role-play friendly, minimal, a little grey glass). Ten times a second the player's three
+    // percentages go to the HUD page (greymarch-hud.html draws the bars), only when one moved or every 2 s; the game's own three meters are hidden (their _visible, set
+    // again every half second because the HUD shows them again on its own). They come back whenever our page cannot be seen (the character select is up, or no layer
+    // of ours keeps the browser on), so a player is never left without bars.
+    greymarchVitalsTick(now: number): any {
+        if (now < (this.greymarchVitalsNext || 0)) return;
+        this.greymarchVitalsNext = now + 100;
+        var ours = !this.greymarchScreenUp && !!(this.greymarchChatOn || this.greymarchHudOn);
+        if (ours && now >= (this.greymarchVitalsHideNext || 0)) { this.greymarchVitalsHideNext = now + 500; this.greymarchVitalsGame(false); }
+        else if (!ours && this.greymarchVitalsHidden) this.greymarchVitalsGame(true);
+        if (!ours) { if (this.greymarchVitalsSent) { this.greymarchVitalsSent = null; this.greymarchHudToPage("vitals", { off: true }); } return; }
+        var player: any = null, v: any = null;
+        try {
+            player = this.sp.Game.getPlayer();
+            if (player) v = { h: player.getActorValuePercentage("Health"), m: player.getActorValuePercentage("Magicka"), s: player.getActorValuePercentage("Stamina") };
+        } catch (e) { v = null; }
+        if (!v || ![v.h, v.m, v.s].every(function (n: any) { return typeof n === "number" && isFinite(n); })) return;
+        v = { h: Math.round(v.h * 1000) / 1000, m: Math.round(v.m * 1000) / 1000, s: Math.round(v.s * 1000) / 1000 };
+        var last = this.greymarchVitalsSent;
+        if (last && last.h === v.h && last.m === v.m && last.s === v.s && now - (this.greymarchVitalsSentAt || 0) < 2000) return;
+        this.greymarchVitalsSent = v; this.greymarchVitalsSentAt = now;
+        this.greymarchHudToPage("vitals", v);
+    }
+    // the game's own Health, Magicka and Stamina meters (hudmenu: HUDMovieBaseInstance.Health / Magica / Stamina): shown (true) or hidden (false)
+    greymarchVitalsGame(show: boolean): any {
+        var ui = this.sp.Ui, names = ["Health", "Magica", "Stamina"], seen: string[] = [];
+        for (var i = 0; i < names.length; i++) {
+            var target = "_root.HUDMovieBaseInstance." + names[i] + "._visible";
+            try { if (!show && !this.greymarchVitalsLogged && ui.getBool("HUD Menu", target)) seen.push(names[i]); ui.setBool("HUD Menu", target, show); } catch (e) { /* not in this HUD */ }
+        }
+        this.greymarchVitalsHidden = !show;
+        if (!show && !this.greymarchVitalsLogged) { this.greymarchVitalsLogged = true; this.greymarchLog("vitals: the game's bars hidden; visible before: " + (seen.length ? seen.join(", ") : "none of them")); }
+    }
     // ---- THE PAUSE MENU (2026-11-05, the owner): Esc with no Greymarch window open shows greymarch-pause.html (Resume, Settings, Skyrim settings, Call a Game Master,
     // Help and keys, Quit) instead of the game's Journal menu. The Journal cannot be stopped from on("menuOpen") (the game's functions cannot be called there), so the
     // update loop shuts it the frame it is seen, like the console (greymarchConsoleTick): GreymarchCamera.dll's CloseMenu, or an Esc tap if that fails. An Esc that
