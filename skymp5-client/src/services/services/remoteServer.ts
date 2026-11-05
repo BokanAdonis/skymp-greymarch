@@ -1395,8 +1395,12 @@ export class RemoteServer extends ClientListener {
     this.greymarchAimTargets.set(ac.getFormID(), { pitch, heading, until: Date.now() + 1600, cur: was ? was.cur : undefined, put: was ? was.put : undefined });
     if (this.greymarchAimLoop) return;
     this.greymarchAimLoop = true;
+    let prev = Date.now();
     const step = () => {
       const now = Date.now();
+      // CLEAN (2026-11-04, the owner: following now, "but its extremely buggy"): eased by time, not by frame (the same speed at any frame rate)
+      const alpha = 1 - Math.exp(-Math.max(1, now - prev) / 90);
+      prev = now;
       for (const [id, t] of Array.from(this.greymarchAimTargets.entries())) {
         if (now > t.until) { this.greymarchAimTargets.delete(id); continue; }
         try {
@@ -1406,13 +1410,17 @@ export class RemoteServer extends ClientListener {
           // X on a character, but keeps the X a TranslateTo brings (the movement's way: a copy once stayed 54 degrees down after one). The pitch is kept
           // here (cur), a third of the way to the target each frame, and put on with a TranslateTo to where the copy stands; the heading by SetAngle.
           // movementApply.ts uses the same pitch while it lasts (storage greymarchAimPitch), so a walk does not level it.
-          const cur: number = typeof t.cur === "number" && Number.isFinite(t.cur) ? t.cur : a.getAngleX();
-          const nx = Math.abs(t.pitch - cur) < 0.3 ? t.pitch : cur + (t.pitch - cur) / 3;
+          // the heading: the body turns smoothly to face where the stream goes (a turn of under a degree is left alone: no twitch)
           const z = a.getAngleZ();
           let nz = z;
-          if (Number.isFinite(t.heading)) { let d = ((t.heading - z + 540) % 360) - 180; nz = Math.abs(d) < 0.5 ? t.heading : z + d / 3; }
-          if (Math.abs(nz - z) > 0.05) a.setAngle(a.getAngleX(), a.getAngleY(), nz);
-          if (typeof t.put !== "number" || !Number.isFinite(t.put) || Math.abs(nx - t.put) > 0.3) {
+          if (Number.isFinite(t.heading)) { const d = ((t.heading - z + 540) % 360) - 180; if (Math.abs(d) > 1) nz = z + d * alpha; }
+          if (nz !== z) a.setAngle(a.getAngleX(), a.getAngleY(), nz);
+          // the pitch only for a stream the game aims from the copy (a beam): a sprayed one is fired along the caster's own aim (greymarchSpray), and moving
+          // the copy every frame to tilt it made it twitch and slide
+          if (Array.from(this.greymarchSprays.values()).some((sp) => sp.copyId === id)) { try { const m: any = storage["greymarchAimPitch"]; if (m) delete m[id]; } catch (e2) { /* none */ } continue; }
+          const cur: number = typeof t.cur === "number" && Number.isFinite(t.cur) ? t.cur : a.getAngleX();
+          const nx = Math.abs(t.pitch - cur) < 0.3 ? t.pitch : cur + (t.pitch - cur) * alpha;
+          if (typeof t.put !== "number" || !Number.isFinite(t.put) || Math.abs(nx - t.put) > 1.5) {
             a.translateTo(a.getPositionX(), a.getPositionY(), a.getPositionZ(), nx, a.getAngleY(), nz, 100, 0);
             t.put = nx;
           }
@@ -1433,7 +1441,7 @@ export class RemoteServer extends ClientListener {
   // the copy's hand along the aim the caster's game sends (the camera's: GreymarchCamera.dll 1.12 GreymarchCam.FireSpellAt), SPRAY_MS apart, easing a
   // third of the way to each new aim, until the cast ends (greymarchHeldSpells no longer holds it). false when the DLL is older or it is no spray (a beam):
   // then it is cast as before.
-  private static readonly SPRAY_MS = 60;
+  private static readonly SPRAY_MS = 33; // about 30 a second: a steady stream, not puffs
   private greymarchSprays = new Map<string, { copyId: number, form: number, hand: number, pitch: number, heading: number, wantPitch: number, wantHeading: number }>();
   private greymarchSpray(castKey: string, ac: Actor, form: number, castingSource: number, aimAngle: number, aimHeading: number): boolean {
     if (!Number.isFinite(aimAngle) || !Number.isFinite(aimHeading)) return false;
@@ -1453,10 +1461,11 @@ export class RemoteServer extends ClientListener {
       if (!held || held.spell !== st.form) { this.greymarchSprays.delete(castKey); return; }
       const now = Date.now();
       if (now - last >= RemoteServer.SPRAY_MS) {
+        const k = 1 - Math.exp(-(now - last) / 70); // eased by time toward the newest aim
         last = now;
-        st.pitch += (st.wantPitch - st.pitch) / 3;
+        st.pitch += (st.wantPitch - st.pitch) * k;
         let d = st.wantHeading - st.heading; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI;
-        st.heading += d / 3;
+        st.heading += d * k;
         try {
           const a = Actor.from(Game.getFormEx(st.copyId));
           if (!a || a.isDead()) { this.greymarchSprays.delete(castKey); return; }
