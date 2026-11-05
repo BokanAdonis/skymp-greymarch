@@ -51,6 +51,7 @@ PropertyBindingFactory::CreateStandardPropertyBindings()
   result["fistMult"] = std::make_shared<FistMultBinding>(); // GREYMARCH
   result["hitsToKill"] = std::make_shared<HitsToKillBinding>(); // GREYMARCH
   result["unharmed"] = std::make_shared<UnharmedBinding>(); // GREYMARCH
+  result["takenMult"] = std::make_shared<TakenMultBinding>(); // GREYMARCH
   result["regenBonus"] = std::make_shared<RegenBonusBinding>(); // GREYMARCH
   result["combatPerks"] = std::make_shared<CombatPerksBinding>(); // GREYMARCH
   result["greymarchBalance"] =

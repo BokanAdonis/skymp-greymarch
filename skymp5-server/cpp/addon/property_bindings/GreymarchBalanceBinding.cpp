@@ -108,3 +108,35 @@ void UnharmedBinding::Set(Napi::Env, ScampServer& scampServer,
   actor.SetGreymarchUnharmed(newValue.IsBoolean() &&
                              newValue.As<Napi::Boolean>().Value());
 }
+
+Napi::Value TakenMultBinding::Get(Napi::Env env, ScampServer& scampServer,
+                                  uint32_t formId)
+{
+  auto& actor =
+    scampServer.GetPartOne()->worldState.GetFormAt<MpActor>(formId);
+  auto result = Napi::Object::New(env);
+  result.Set("mult", Napi::Number::New(env, actor.GetGreymarchTakenMult()));
+  result.Set("silver",
+             Napi::Number::New(env, actor.GetGreymarchSilverTakenMult()));
+  return result;
+}
+
+void TakenMultBinding::Set(Napi::Env, ScampServer& scampServer,
+                           uint32_t formId, Napi::Value newValue)
+{
+  auto clampMult = [](Napi::Value v) {
+    float m = v.IsNumber() ? v.As<Napi::Number>().FloatValue() : 1.f;
+    return std::isfinite(m) ? std::clamp(m, 0.f, 5.f) : 1.f;
+  };
+  float mult = 1.f, silver = 1.f;
+  if (newValue.IsNumber()) {
+    mult = silver = clampMult(newValue);
+  } else if (newValue.IsObject()) {
+    auto obj = newValue.As<Napi::Object>();
+    mult = clampMult(obj.Get("mult"));
+    silver = obj.Has("silver") ? clampMult(obj.Get("silver")) : mult;
+  }
+  auto& actor =
+    scampServer.GetPartOne()->worldState.GetFormAt<MpActor>(formId);
+  actor.SetGreymarchTakenMult(mult, silver);
+}

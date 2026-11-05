@@ -205,6 +205,15 @@ public:
   // milk cows, 2026-11-01). Not saved: the gamemode sets it again.
   void SetGreymarchUnharmed(bool unharmed) noexcept;
   bool IsGreymarchUnharmed() const noexcept;
+  // GREYMARCH: multipliers on the damage every hit on this actor does (a
+  // weapon, claw, fist, staff or spell), taken in the damage step itself: the
+  // werewolf's resist, 2026-11-04 (the owner: the bar dropped, then popped
+  // back when the gamemode gave the health back after the hit). The silver
+  // one is used instead for a silver weapon (keyword WeapMaterialSilver, or
+  // "silver" in its editor ID). 1 = no change. Not saved.
+  void SetGreymarchTakenMult(float mult, float silverMult) noexcept;
+  float GetGreymarchTakenMult() const noexcept;
+  float GetGreymarchSilverTakenMult() const noexcept;
   // GREYMARCH: armor rating a self-cast spell adds for a while (Oakflesh,
   // Stoneflesh, Ironflesh, Ebonyflesh): the damage formula counts it with the
   // worn armor until it runs out. Not saved. A new cast replaces the old one.

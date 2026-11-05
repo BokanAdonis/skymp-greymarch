@@ -22,6 +22,7 @@
 #include <fmt/ranges.h>
 #include <spdlog/spdlog.h>
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <unordered_map>
 #include <unordered_set>
@@ -972,6 +973,32 @@ bool IsUnarmedAttack(const uint32_t sourceFormId)
   return sourceFormId == 0x1f4;
 }
 
+// GREYMARCH (2026-11-04): what the target takes of a hit with this source: its
+// takenMult, or its silver one for a silver weapon (keyword
+// WeapMaterialSilver, or "silver" in the editor ID, as werewolf.js reads
+// names). 1 for everyone the gamemode did not set.
+float GreymarchTakenMult(const MpActor& target, uint32_t source,
+                         WorldState& worldState)
+{
+  const float mult = target.GetGreymarchTakenMult();
+  const float silverMult = target.GetGreymarchSilverTakenMult();
+  if (mult == silverMult) {
+    return mult;
+  }
+  auto lookup = worldState.GetEspm().GetBrowser().LookupById(source);
+  if (!lookup.rec || lookup.rec->GetType() != espm::WEAP::kType) {
+    return mult;
+  }
+  if (worldState.HasKeyword(source, "WeapMaterialSilver")) {
+    return silverMult;
+  }
+  const char* rawEdid = lookup.rec->GetEditorId(worldState.GetEspmCache());
+  std::string edid = rawEdid ? rawEdid : "";
+  std::transform(edid.begin(), edid.end(), edid.begin(),
+                 [](unsigned char c) { return std::tolower(c); });
+  return edid.find("silver") != std::string::npos ? silverMult : mult;
+}
+
 float CalculateCurrentHealthPercentage(const MpActor& actor, float damage,
                                        float healthPercentage,
                                        float* outBaseHealth)
@@ -1687,6 +1714,8 @@ void ActionListener::OnSpellHit(MpActor* aggressor,
   if (!casterIsPlayer) {
     damage *= aggressor->GetGreymarchDamageMult();
   }
+  damage *=
+    GreymarchTakenMult(*targetActorPtr, hitData.source, partOne.worldState);
 
   // GREYMARCH: a heal raises the target's health here, and the new value is
   // sent to them, so their own regeneration check no longer takes it back
@@ -1942,6 +1971,7 @@ void ActionListener::OnStaffHit(MpActor* aggressor,
   if (!casterIsPlayer) {
     damage *= aggressor->GetGreymarchDamageMult();
   }
+  damage *= GreymarchTakenMult(*target, hitData.source, partOne.worldState);
   if (!(damage > 0.f)) {
     return;
   }
@@ -2120,6 +2150,9 @@ void ActionListener::OnWeaponHit(MpActor* aggressor,
 
   float damage = partOne.CalculateDamage(*aggressor, targetActor, hitData);
   damage = damage < 0.f ? 0.f : damage;
+  const float takenMult =
+    GreymarchTakenMult(targetActor, hitData.source, partOne.worldState);
+  damage *= takenMult;
   float outBaseHealth = 0.f;
   currentActorValues.healthPercentage = CalculateCurrentHealthPercentage(
     targetActor, damage, healthPercentage, &outBaseHealth);
@@ -2134,7 +2167,7 @@ void ActionListener::OnWeaponHit(MpActor* aggressor,
   if (hitsToKill > 0 &&
       partOne.serverState.UserByActor(&targetActor) !=
         Networking::InvalidUserId) {
-    float share = 1.f / static_cast<float>(hitsToKill) + 0.0005f;
+    float share = (1.f / static_cast<float>(hitsToKill) + 0.0005f) * takenMult;
     if (hitData.isHitBlocked) {
       const auto& balance = GreymarchBalance::Get();
       share *= (blockedByShield ? balance.shieldBlock : balance.weaponBlock)

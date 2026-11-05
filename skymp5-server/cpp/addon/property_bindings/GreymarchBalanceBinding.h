@@ -25,6 +25,18 @@ public:
            Napi::Value newValue) override;
 };
 
+// GREYMARCH: mp.set(actorId, "takenMult", { mult: 0.1, silver: 1.5 }) multiplies the damage every hit on that actor does (0 to 5 each; silver is for a
+// silver weapon). A plain number sets both. The werewolf's resist (werewolf.js).
+class TakenMultBinding : public PropertyBinding
+{
+public:
+  std::string GetPropertyName() const override { return "takenMult"; }
+  Napi::Value Get(Napi::Env env, ScampServer& scampServer,
+                  uint32_t formId) override;
+  void Set(Napi::Env env, ScampServer& scampServer, uint32_t formId,
+           Napi::Value newValue) override;
+};
+
 // GREYMARCH: mp.set(actorId, "unharmed", true) makes every weapon, fist or spell hit on that actor do nothing (the milk cows).
 class UnharmedBinding : public PropertyBinding
 {

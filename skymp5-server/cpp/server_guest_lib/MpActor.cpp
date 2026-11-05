@@ -57,6 +57,8 @@ struct MpActor::Impl
   float greymarchFistMult = 1.f;                // GREYMARCH
   int greymarchHitsToKill = 0;                  // GREYMARCH
   bool greymarchUnharmed = false;               // GREYMARCH
+  float greymarchTakenMult = 1.f;               // GREYMARCH
+  float greymarchSilverTakenMult = 1.f;         // GREYMARCH
   float greymarchArmorBuff = 0.f;               // GREYMARCH
   std::chrono::steady_clock::time_point greymarchArmorBuffUntil; // GREYMARCH
   MpActor::RegenBonus regenBonus;               // GREYMARCH
@@ -1838,6 +1840,22 @@ int MpActor::GetGreymarchHitsToKill() const noexcept
 void MpActor::SetGreymarchUnharmed(bool unharmed) noexcept
 {
   pImpl->greymarchUnharmed = unharmed;
+}
+
+void MpActor::SetGreymarchTakenMult(float mult, float silverMult) noexcept
+{
+  pImpl->greymarchTakenMult = mult;
+  pImpl->greymarchSilverTakenMult = silverMult;
+}
+
+float MpActor::GetGreymarchTakenMult() const noexcept
+{
+  return pImpl->greymarchTakenMult;
+}
+
+float MpActor::GetGreymarchSilverTakenMult() const noexcept
+{
+  return pImpl->greymarchSilverTakenMult;
 }
 
 bool MpActor::IsGreymarchUnharmed() const noexcept
