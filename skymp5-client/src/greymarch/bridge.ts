@@ -2573,7 +2573,9 @@ export class GreymarchBridge {
     // A MASK HIDES THE BEARD: the beard (the head parts of the facial hair type, 4, and their extra parts) is scaled down to nothing on the body while a mask
     // is worn, and back to full size when it comes off. A rebuilt head (a change of gear) is drawn at full size again, so the scale is set again every 2 s
     // while the mask is on. On this player (greymarchDressTick) and on every other character this game draws (formView.ts, __gmDressHead).
-    greymarchBeard(ac: any, masked: boolean, now: number): any {
+    // drawn: the head parts the character's head is drawn with, when known (another player: the appearance the server sent, formView.ts). Their copy's own
+    // list holds only a placeholder beard (2026-11-05, the other player's log: "KhajiitNoBeard"), so the beard was never found on others.
+    greymarchBeard(ac: any, masked: boolean, now: number, drawn?: number[]): any {
         var id = ac.getFormID() >>> 0;
         var all = this.greymarchBeardSt || (this.greymarchBeardSt = {});
         var s = all[id] || (all[id] = { masked: false, at: 0, names: [] });
@@ -2590,6 +2592,7 @@ export class GreymarchBridge {
         if (masked) {
             var names: string[] = [];
             var ids = this.greymarchHeadPartIds(ac);
+            if (Array.isArray(drawn)) drawn.forEach(function (d) { var n = Number(d) >>> 0; if (n && ids.indexOf(n) < 0) ids.push(n); });
             for (var i = 0; i < ids.length; i++) {
                 try {
                     var hp = this.sp.HeadPart.from(this.sp.Game.getFormEx(ids[i]));
@@ -2608,7 +2611,7 @@ export class GreymarchBridge {
     }
     greymarchDressTick(now: number): any {
         var gl: any = Function("return this")();
-        if (!gl.__gmDressHead) gl.__gmDressHead = (ac: any) => { try { if (ac) this.greymarchBeard(ac, this.greymarchMasked(ac, Date.now()), Date.now()); } catch (e) { /* their beard stays */ } };
+        if (!gl.__gmDressHead) gl.__gmDressHead = (ac: any, drawn?: number[]) => { try { if (ac) this.greymarchBeard(ac, this.greymarchMasked(ac, Date.now()), Date.now(), drawn); } catch (e) { /* their beard stays */ } };
         if (now < (this.greymarchDressNext || 0)) return;
         this.greymarchDressNext = now + 100;
         if (this.greymarchWolfOn || this.greymarchShapeOn) return;

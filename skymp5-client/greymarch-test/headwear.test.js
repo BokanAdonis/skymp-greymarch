@@ -53,4 +53,5 @@ test("the bridge and the characters' views use it: the hood on the ears (own bod
   assert.match(bridgeSrc, /hp\.getType\(\) !== 4/, "the facial hair head parts");
   assert.match(bridgeSrc, /NetImmerse\.setNodeScale\(ac, s\.names\[k\], masked \? 0\.001 : 1, false\)/);
   assert.match(viewSrc, /__gmDressHead/);
+  assert.ok(viewSrc.includes("gmDress(Actor.from(refr), model.appearance.headpartIds)"),"another player's beard: from the head parts their head is drawn with (2026-11-05)");
 });

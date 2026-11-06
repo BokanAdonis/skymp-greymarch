@@ -1090,7 +1090,7 @@ export class FormView {
       this.gmDressNext = Date.now() + 100;
       try {
         const gmDress = (Function("return this")() as any).__gmDressHead;
-        if (gmDress && refr.is3DLoaded()) gmDress(Actor.from(refr));
+        if (gmDress && refr.is3DLoaded()) gmDress(Actor.from(refr), model.appearance.headpartIds); // the head parts their head is drawn with (their copy's own list has only a placeholder beard)
       } catch (gmErr) { /* their beard stays */ }
     }
 
