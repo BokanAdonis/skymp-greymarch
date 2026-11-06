@@ -1085,9 +1085,9 @@ export class FormView {
       }
     }
 
-    // GREYMARCH: A MASK HIDES THE BEARD (2026-11-05, the owner): twice a second, a character wearing a mask has their beard hidden (bridge.ts greymarchBeard)
+    // GREYMARCH: A MASK HIDES THE BEARD (2026-11-05, the owner): about ten times a second, a character wearing a mask has their beard kept hidden (bridge.ts greymarchBeard)
     if (this.refrId && model.appearance && Date.now() >= this.gmDressNext) {
-      this.gmDressNext = Date.now() + 500;
+      this.gmDressNext = Date.now() + 100;
       try {
         const gmDress = (Function("return this")() as any).__gmDressHead;
         if (gmDress && refr.is3DLoaded()) gmDress(Actor.from(refr));

@@ -2578,7 +2578,15 @@ export class GreymarchBridge {
         var all = this.greymarchBeardSt || (this.greymarchBeardSt = {});
         var s = all[id] || (all[id] = { masked: false, at: 0, names: [] });
         if (!masked && !s.masked) return;
-        if (masked === s.masked && now < s.at) return;
+        // NO FLASH (2026-11-05, the owner: the beard came back, then vanished again): the head is rebuilt now and then (gear, the look put on again) and comes
+        // back at full size, which the 2 s re-set let show. Now looked at about every tenth of a second: a beard part not at the hidden size is hidden again at
+        // once (its parts read again every 2 s, for a new beard)
+        if (masked && s.masked && now < s.at) {
+            for (var q = 0; q < s.names.length; q++) {
+                try { if (this.sp.NetImmerse.getNodeScale(ac, s.names[q], false) > 0.01) this.sp.NetImmerse.setNodeScale(ac, s.names[q], 0.001, false); } catch (e) { /* not drawn now */ }
+            }
+            return;
+        }
         if (masked) {
             var names: string[] = [];
             var ids = this.greymarchHeadPartIds(ac);
@@ -2599,11 +2607,21 @@ export class GreymarchBridge {
     }
     greymarchDressTick(now: number): any {
         var gl: any = Function("return this")();
-        if (!gl.__gmDressHead) gl.__gmDressHead = (ac: any) => { try { if (ac) this.greymarchBeard(ac, this.greymarchHeadwear(ac).mask, Date.now()); } catch (e) { /* their beard stays */ } };
+        if (!gl.__gmDressHead) gl.__gmDressHead = (ac: any) => { try { if (ac) this.greymarchBeard(ac, this.greymarchMasked(ac, Date.now()), Date.now()); } catch (e) { /* their beard stays */ } };
         if (now < (this.greymarchDressNext || 0)) return;
-        this.greymarchDressNext = now + 500;
+        this.greymarchDressNext = now + 100;
         if (this.greymarchWolfOn || this.greymarchShapeOn) return;
-        try { var player = this.sp.Game.getPlayer(); if (player && player.is3DLoaded()) this.greymarchBeard(player, this.greymarchHeadwear(player).mask, now); } catch (e) { /* the next look */ }
+        try { var player = this.sp.Game.getPlayer(); if (player && player.is3DLoaded()) this.greymarchBeard(player, this.greymarchMasked(player, now), now); } catch (e) { /* the next look */ }
+    }
+    // whether a mask is worn, read from the gear at most every half second for each character (the beard itself is looked at more often)
+    greymarchMasked(ac: any, now: number): boolean {
+        var id = ac.getFormID() >>> 0;
+        var c = this.greymarchMaskSeen || (this.greymarchMaskSeen = {});
+        var m = c[id];
+        if (m && now < m.until) return m.mask;
+        var mask = !!this.greymarchHeadwear(ac).mask;
+        c[id] = { mask: mask, until: now + 500 };
+        return mask;
     }
     greymarchRaceMenuSay(parts: any): string {
         var out = [];
