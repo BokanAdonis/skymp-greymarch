@@ -574,6 +574,7 @@ export class GreymarchBridge {
         this.greymarchRaceMenuQuestsTick(Date.now()); // RaceMenu's own quests started if SkyMP's load left them off (the Body Scales tab, Height)
         this.greymarchRaceMenuTick(Date.now()); // RaceMenu's extra sliders: sent when the race menu closes, put back after a relog (racemenuLook.ts)
         this.greymarchRaceMenuCopiesTick(Date.now()); // and put on the other players' copies (OTHERS SEE THEM)
+        this.greymarchDressTick(Date.now()); // a mask hides the beard (and, through the ticks above, a hood the big ears)
         try { this.greymarchWolfPerksTick(); } catch (pkErr) { /* next frame */ } // a carrier's perks, night eye and the scent
         this.greymarchWolfTick(); // the werewolf form: the game's Beast Form power is the trigger, the server decides, the change is done here
         if (this.greymarchWolfOn || this.greymarchWolfLungeClick) { try { var gmLungeP = this.sp.Game.getPlayer(); if (gmLungeP) this.greymarchWolfLungeTick(gmLungeP, Date.now()); } catch (lgErr) { /* next frame */ } } // the lunge, every frame (the wolf tick runs every 250 ms)
@@ -2253,7 +2254,9 @@ export class GreymarchBridge {
                 if (!ac || !ac.is3DLoaded() || ac.isDisabled()) { c.loadedSince = 0; c.done = null; continue; }
                 if (!c.loadedSince) c.loadedSince = now;
                 if (now - c.loadedSince < 4000 || did) continue;
-                var key = JSON.stringify(c.want);
+                var cwant = rmMod.dressLook(c.want, this.greymarchHeadwear(ac).hood); // a hood worn: the big-ear sliders at 0 (DRESSED, racemenuLook.ts)
+                var key = JSON.stringify(cwant);
+                if (c.lastKey !== key) { c.lastKey = key; c.tries = 0; } // the hood went on or came off: tried afresh
                 if (c.done === key || c.tries >= 3) continue;
                 var race = ac.getRace(), rname = race ? String(race.getName() || "") : "";
                 if (/were|vampire lord|beast/i.test(rname)) continue; // a creature form: not the character's own body
@@ -2264,8 +2267,8 @@ export class GreymarchBridge {
                 var text = this.greymarchPresetRead(rmMod.COPY_PRESET_NAME);
                 if (!text) { this.greymarchRmCopyLog(c.actor, "RaceMenu wrote no preset for the copy (try " + c.tries + " of 3)"); continue; }
                 var current = JSON.parse(text);
-                if (rmMod.sameRaceMenuParts(current, c.want)) { c.done = key; c.tries = 0; continue; }
-                if (!this.greymarchPresetWrite(rmMod.COPY_PRESET_NAME, JSON.stringify(rmMod.spliceRaceMenuParts(current, c.want)))) continue;
+                if (rmMod.sameRaceMenuParts(current, cwant)) { c.done = key; c.tries = 0; continue; }
+                if (!this.greymarchPresetWrite(rmMod.COPY_PRESET_NAME, JSON.stringify(rmMod.spliceRaceMenuParts(current, cwant)))) continue;
                 var copyParts = this.greymarchHeadPartIds(ac);
                 var ok = sp.callNative("CharGen", "LoadCharacterPresetEx", undefined, ac, rmMod.COPY_PRESET_NAME, null, rmMod.APPLY_ALL);
                 this.greymarchKeepHeadParts(ac, copyParts, Date.now());
@@ -2478,18 +2481,21 @@ export class GreymarchBridge {
             if (!player || !player.is3DLoaded()) { rm.loadedSince = 0; return; }
             if (!rm.loadedSince) rm.loadedSince = now;
             if (now - rm.loadedSince < 4000) return;
-            var key = JSON.stringify(rm.want);
+            var want = rmMod.dressLook(rm.want, this.greymarchHeadwear(player).hood); // a hood worn: the big-ear sliders at 0 (DRESSED, racemenuLook.ts)
+            var key = JSON.stringify(want);
+            if (rm.lastKey !== key) { rm.lastKey = key; rm.tries = 0; } // the hood went on or came off: tried afresh
             if (rm.done === key || rm.tries >= 3) return;
             rm.tries++;
             var current = this.greymarchRaceMenuExport(player);
             if (!current) return;
-            if (rmMod.sameRaceMenuParts(current, rm.want)) { rm.done = key; rm.tries = 0; return; }
-            if (!this.greymarchPresetWrite(rmMod.PRESET_NAME, JSON.stringify(rmMod.spliceRaceMenuParts(current, rm.want)))) { this.greymarchLog("racemenu: the kept sliders could not be written for RaceMenu (try " + rm.tries + " of 3)"); return; }
+            if (rmMod.sameRaceMenuParts(current, want)) { rm.done = key; rm.tries = 0; rm.earsDown = want !== rm.want; return; }
+            if (!this.greymarchPresetWrite(rmMod.PRESET_NAME, JSON.stringify(rmMod.spliceRaceMenuParts(current, want)))) { this.greymarchLog("racemenu: the kept sliders could not be written for RaceMenu (try " + rm.tries + " of 3)"); return; }
             var partsBefore = this.greymarchHeadPartIds(player);
             var ok = sp.callNative("CharGen", "LoadCharacterPresetEx", undefined, player, rmMod.PRESET_NAME, null, rmMod.APPLY_ALL);
             this.greymarchKeepHeadParts(player, partsBefore, now);
             if (!ok) { this.greymarchLog("racemenu: RaceMenu did not load the kept sliders (try " + rm.tries + " of 3)"); return; }
-            rm.done = key; rm.tries = 0;
+            rm.done = key; rm.tries = 0; rm.earsDown = want !== rm.want; // the ears are under a hood now (keepEarsUnderHood, when the race menu saves)
+            if (want !== rm.want || rm.earsSaid) { rm.earsSaid = want !== rm.want; this.greymarchCrumb("racemenu: " + (want !== rm.want ? "hood on, big ears down" : "hood off, ears back")); }
             this.greymarchLog("racemenu: sliders put back (" + this.greymarchRaceMenuSay(rm.want) + ")");
         } catch (err) {
             this.greymarchLog("racemenu: the sliders could not be put back (try " + rm.tries + " of 3): " + err);
@@ -2546,13 +2552,58 @@ export class GreymarchBridge {
             var current = this.greymarchRaceMenuExport(this.sp.Game.getPlayer());
             if (!current) return;
             var parts = rmMod.pickRaceMenuParts(current);
-            rm.want = parts; rm.done = JSON.stringify(parts); rm.tries = 0; // what the player just made is on the body already
+            var earsKept = !!rm.earsDown && rm.want; // opened under a hood: the ears were down, the player's own ear sliders are kept (keepEarsUnderHood)
+            if (earsKept) parts = rmMod.pickRaceMenuParts(rmMod.keepEarsUnderHood(parts, rm.want));
+            rm.want = parts; rm.done = earsKept ? null : JSON.stringify(parts); rm.tries = 0; // what the player just made is on the body already (the ears: put right by the next tick)
             var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchRaceMenuLook", look: parts }) };
             this.controller.emitter.emit("sendMessage", { message: message, reliability: "reliable" });
             this.greymarchLog("racemenu: sent after the race menu (" + this.greymarchRaceMenuSay(parts) + ")");
         } catch (err) {
             this.greymarchLog("racemenu: the sliders could not be read: " + err);
         }
+    }
+    // DRESSED FOR A HOOD AND A MASK (2026-11-05, the owner; racemenuLook.ts): whether a hood or a mask is worn, read from the names of what is on the head and face
+    greymarchHeadwear(ac: any): any {
+        var names: string[] = [];
+        for (var i = 0; i < rmMod.HEAD_SLOTS.length; i++) {
+            try { var f = ac.getWornForm(rmMod.HEAD_SLOTS[i]); var n = f ? String(f.getName() || "") : ""; if (n && names.indexOf(n) < 0) names.push(n); } catch (e) { /* that slot is not read */ }
+        }
+        return rmMod.headwearOf(names);
+    }
+    // A MASK HIDES THE BEARD: the beard (the head parts of the facial hair type, 4, and their extra parts) is scaled down to nothing on the body while a mask
+    // is worn, and back to full size when it comes off. A rebuilt head (a change of gear) is drawn at full size again, so the scale is set again every 2 s
+    // while the mask is on. On this player (greymarchDressTick) and on every other character this game draws (formView.ts, __gmDressHead).
+    greymarchBeard(ac: any, masked: boolean, now: number): any {
+        var id = ac.getFormID() >>> 0;
+        var all = this.greymarchBeardSt || (this.greymarchBeardSt = {});
+        var s = all[id] || (all[id] = { masked: false, at: 0, names: [] });
+        if (!masked && !s.masked) return;
+        if (masked === s.masked && now < s.at) return;
+        if (masked) {
+            var names: string[] = [];
+            var ids = this.greymarchHeadPartIds(ac);
+            for (var i = 0; i < ids.length; i++) {
+                try {
+                    var hp = this.sp.HeadPart.from(this.sp.Game.getFormEx(ids[i]));
+                    if (!hp || hp.getType() !== 4) continue;
+                    names.push(String(hp.getPartName() || ""));
+                    for (var j = 0; j < hp.getNumExtraParts(); j++) { var ex = hp.getNthExtraPart(j); if (ex) names.push(String(ex.getPartName() || "")); }
+                } catch (e) { /* that part is not read */ }
+            }
+            s.names = names.filter(function (n) { return !!n; });
+        }
+        for (var k = 0; k < s.names.length; k++) { try { this.sp.NetImmerse.setNodeScale(ac, s.names[k], masked ? 0.001 : 1, false); } catch (e) { /* not drawn now */ } }
+        if (masked !== s.masked && (this.greymarchBeardSaid = (this.greymarchBeardSaid || 0) + 1) <= 20) this.greymarchCrumb("beard " + id.toString(16) + (masked ? " hidden under a mask (" + s.names.join(", ") + ")" : " back"));
+        s.masked = masked; s.at = now + 2000;
+        if (!masked) delete all[id];
+    }
+    greymarchDressTick(now: number): any {
+        var gl: any = Function("return this")();
+        if (!gl.__gmDressHead) gl.__gmDressHead = (ac: any) => { try { if (ac) this.greymarchBeard(ac, this.greymarchHeadwear(ac).mask, Date.now()); } catch (e) { /* their beard stays */ } };
+        if (now < (this.greymarchDressNext || 0)) return;
+        this.greymarchDressNext = now + 500;
+        if (this.greymarchWolfOn || this.greymarchShapeOn) return;
+        try { var player = this.sp.Game.getPlayer(); if (player && player.is3DLoaded()) this.greymarchBeard(player, this.greymarchHeadwear(player).mask, now); } catch (e) { /* the next look */ }
     }
     greymarchRaceMenuSay(parts: any): string {
         var out = [];

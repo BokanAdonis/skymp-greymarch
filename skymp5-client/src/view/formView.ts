@@ -1085,6 +1085,15 @@ export class FormView {
       }
     }
 
+    // GREYMARCH: A MASK HIDES THE BEARD (2026-11-05, the owner): twice a second, a character wearing a mask has their beard hidden (bridge.ts greymarchBeard)
+    if (this.refrId && model.appearance && Date.now() >= this.gmDressNext) {
+      this.gmDressNext = Date.now() + 500;
+      try {
+        const gmDress = (Function("return this")() as any).__gmDressHead;
+        if (gmDress && refr.is3DLoaded()) gmDress(Actor.from(refr));
+      } catch (gmErr) { /* their beard stays */ }
+    }
+
     // GREYMARCH: where this player's head is, about 10 times a second, so the launcher can play their voice from there (direction, muffle, floors; see bridge.ts greymarchEarsTick)
     if (this.refrId && model.appearance?.name && Date.now() >= this.gmEarNext) {
       this.gmEarNext = Date.now() + 100;
@@ -1861,6 +1870,7 @@ export class FormView {
   private textNameShown: string | undefined = undefined;
   private textIdId: number | undefined = undefined; // GREYMARCH: the ID line under an introduced character's name
   private gmEarNext = 0; // GREYMARCH: when this player's head position is next reported for the voice (see update)
+  private gmDressNext = 0; // GREYMARCH: when this character's mask and beard are next looked at (see update)
 
 
   public static isDisplayingNicknames: boolean = true;

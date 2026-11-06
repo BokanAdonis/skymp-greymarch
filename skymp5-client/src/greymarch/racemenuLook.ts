@@ -52,3 +52,48 @@ export function sameRaceMenuParts(a: any, b: any): boolean {
     };
     return JSON.stringify(norm(pickRaceMenuParts(a))) === JSON.stringify(norm(pickRaceMenuParts(b)));
 }
+
+// DRESSED FOR A HOOD AND A MASK (2026-11-05, the owner: "make it so mask hides beards and hoods hides ears if they are big", the ears from a RaceMenu slider).
+// A hood worn: RaceMenu's big-ear sliders (CME_ElfEar, NSK_ElfEarUpper, ece_EarLarge, from RaceMenu.bsa's head morphs) are put on at 0, so the ears stay
+// under the hood; taken off, they come back. A mask worn: the beard is hidden (bridge.ts greymarchBeard). What counts as a hood or a mask is read from the
+// names of what is worn on the head and face.
+export const EAR_BIG = /(elf.?ears?|ears?.?large|ears?.?upper|ears?.?size|ears?.?tip)/i;
+export const HOOD = /\b(hoods?|cowls?)\b/i;
+export const MASK = /\b(masks?|masque|bandana|veil|balaclava|face ?wrap|face ?cover|morokei|konahrik|nahkriin|vokun|volsung|hevnoraak|otar|rahgot|krosis|miraak)\b/i;
+// the worn slots looked at: 30 head, 31 hair, 41 long hair, 42 circlet, 43 ears, 44, 45, 46, 47, 52, 55, 56, 57 (where mods put masks and hoods); not the body
+export const HEAD_SLOTS = [0x1, 0x2, 0x800, 0x1000, 0x2000, 0x4000, 0x8000, 0x10000, 0x20000, 0x400000, 0x2000000, 0x4000000, 0x8000000];
+export function headwearOf(names: string[]): { hood: boolean, mask: boolean } {
+    var hood = false, mask = false;
+    (names || []).forEach(function (n: any) { var s = String(n || ""); if (HOOD.test(s)) hood = true; if (MASK.test(s)) mask = true; });
+    return { hood: hood, mask: mask };
+}
+// the kept look with the big-ear sliders at 0 while a hood is worn (the same object when there is nothing to change)
+export function dressLook(want: any, hooded: boolean): any {
+    if (!hooded || !want || !want.morphs || !Array.isArray(want.morphs.custom)) return want;
+    var changed = false;
+    var custom = want.morphs.custom.map(function (c: any) {
+        if (c && typeof c.name === "string" && EAR_BIG.test(c.name) && typeof c.value === "number" && c.value > 0) { changed = true; return Object.assign({}, c, { value: 0 }); }
+        return c;
+    });
+    if (!changed) return want;
+    var out: any = JSON.parse(JSON.stringify(want));
+    out.morphs.custom = custom;
+    return out;
+}
+// The race menu opened while the hood had the ears down: what it saves keeps the player's own big-ear sliders, unless they set one themselves in the menu
+// (an ear slider still at 0 in the save is taken as untouched and the kept value goes back).
+export function keepEarsUnderHood(saved: any, kept: any): any {
+    var km = kept && kept.morphs && Array.isArray(kept.morphs.custom) ? kept.morphs.custom : [];
+    var ears = km.filter(function (c: any) { return c && typeof c.name === "string" && EAR_BIG.test(c.name) && typeof c.value === "number" && c.value > 0; });
+    if (!ears.length) return saved;
+    var out: any = JSON.parse(JSON.stringify(saved || {}));
+    out.morphs = out.morphs && typeof out.morphs === "object" ? out.morphs : {};
+    var custom: any[] = Array.isArray(out.morphs.custom) ? out.morphs.custom : [];
+    ears.forEach(function (k: any) {
+        var cur = custom.filter(function (c: any) { return c && c.name === k.name; })[0];
+        if (!cur) custom.push({ name: k.name, value: k.value });
+        else if (!cur.value) cur.value = k.value;
+    });
+    out.morphs.custom = custom;
+    return out;
+}
