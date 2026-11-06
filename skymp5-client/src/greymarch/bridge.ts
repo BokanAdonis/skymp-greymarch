@@ -2601,6 +2601,7 @@ export class GreymarchBridge {
             s.names = names.filter(function (n) { return !!n; });
         }
         for (var k = 0; k < s.names.length; k++) { try { this.sp.NetImmerse.setNodeScale(ac, s.names[k], masked ? 0.001 : 1, false); } catch (e) { /* not drawn now */ } }
+        if (masked && id !== 0x14 && masked !== s.masked) { var sc = -1; try { sc = s.names.length ? this.sp.NetImmerse.getNodeScale(ac, s.names[0], false) : -1; } catch (e) { sc = -2; } this.greymarchLog("dress: " + id.toString(16) + " beard hidden (" + s.names.join(", ") + "; first part now at scale " + sc + ")"); }
         if (masked !== s.masked && (this.greymarchBeardSaid = (this.greymarchBeardSaid || 0) + 1) <= 20) this.greymarchCrumb("beard " + id.toString(16) + (masked ? " hidden under a mask (" + s.names.join(", ") + ")" : " back"));
         s.masked = masked; s.at = now + 2000;
         if (!masked) delete all[id];
@@ -2621,6 +2622,17 @@ export class GreymarchBridge {
         if (m && now < m.until) return m.mask;
         var mask = !!this.greymarchHeadwear(ac).mask;
         c[id] = { mask: mask, until: now + 500 };
+        // what another character is seen wearing on the head, once each (2026-11-05, the owner: others still saw his beard under the mask): the log says
+        // whether this game reads their gear at all
+        if (id !== 0x14) {
+            var said = this.greymarchMaskSaid || (this.greymarchMaskSaid = {});
+            if (!said[id] && Object.keys(said).length < 30) {
+                var worn: string[] = [];
+                for (var i = 0; i < rmMod.HEAD_SLOTS.length; i++) { try { var f = ac.getWornForm(rmMod.HEAD_SLOTS[i]); if (f) worn.push((rmMod.HEAD_SLOTS[i] >>> 0).toString(16) + ":" + String(f.getName() || "?")); } catch (e) { worn.push("?"); } }
+                var facial = 0; try { var hids = this.greymarchHeadPartIds(ac); for (var j = 0; j < hids.length; j++) { var hp = this.sp.HeadPart.from(this.sp.Game.getFormEx(hids[j])); if (hp && hp.getType() === 4) facial++; } } catch (e) { facial = -1; }
+                if (worn.length || mask) { said[id] = true; this.greymarchLog("dress: " + id.toString(16) + " wears on the head [" + worn.join(", ") + "], mask " + mask + ", beard parts " + facial); }
+            }
+        }
         return mask;
     }
     greymarchRaceMenuSay(parts: any): string {
