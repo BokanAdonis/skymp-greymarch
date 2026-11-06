@@ -1408,6 +1408,14 @@ export class FormView {
       // no death sound); the death itself comes from the server (applyDeathState). isWeapDrawn: hunting, it stands in its fighting stance (the owner: no
       // attack animations; a creature attacks only from there)
     }
+    // JUMPS (2026-11-05, the owner: "the giants are basically teleporting"): a frame that puts it far from where it stands here is noted (how far, what the
+    // frame says it does, whether this game drove it until now), to see in the log what makes the jumps
+    if (f && this.movState.everApplied) {
+      try {
+        const jx = refr.getPositionX() - f.pos[0], jy = refr.getPositionY() - f.pos[1], jump = Math.round(Math.sqrt(jx * jx + jy * jy));
+        if (jump > 300 && (this.gmPuppetJumps = (this.gmPuppetJumps || 0) + 1) <= 40) gmCrumb("puppet " + gmHex(this.remoteRefrId as number) + " " + String(Actor.from(refr)?.getBaseObject()?.getName() || "?") + ": frame " + jump + " units off (" + f.anim + ", speed " + f.speed + (f.hunt ? ", hunting" : "") + (f.mine ? ", mine" : "") + (now < this.gmPuppetLungeUntil + 500 ? ", after a lunge" : "") + (now - this.movState.lastApply > 1500 ? ", no frame for " + (now - this.movState.lastApply) + " ms" : "") + ")");
+      } catch (e) { /* a note only */ }
+    }
     this.movState.lastApply = now;
     try {
       applyMovement(refr, m as Movement, false);
@@ -1768,6 +1776,7 @@ export class FormView {
   private gmHostCheckAt = 0;
   private gmWasHost = false;
   private gmPuppetSeenAt = 0; // GREYMARCH: when this puppet was first played (its breadcrumbs, gmPuppetMove)
+  private gmPuppetJumps = 0; // GREYMARCH: how many far-off frames of this puppet were noted (gmPuppetMove, JUMPS)
   private gmPuppetCrumbed = false; // GREYMARCH: this game hosted this NPC at the last update
   private gmDriftAt = 0;
   private gmRunAt = 0; // A STUCK RUNNER: when it was last checked, where it was then, checks in a row stuck, when it was last nudged
