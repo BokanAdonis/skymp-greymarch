@@ -1099,8 +1099,8 @@ export class FormView {
       this.gmEarNext = Date.now() + 100;
       try {
         if (refr.is3DLoaded() && Game.getPlayer()!.getDistance(refr) <= 4500) {
-          const gmHead = "NPC Head [Head]";
-          (SpApiInteractor.getControllerInstance().emitter as any).emit("greymarchEar", { name: model.appearance.name, id: this.refrId, x: NetImmerse.getNodeWorldPositionX(refr, gmHead, false), y: NetImmerse.getNodeWorldPositionY(refr, gmHead, false), z: NetImmerse.getNodeWorldPositionZ(refr, gmHead, false) });
+          const gmEar = FormView.gmHeadAt(refr);
+          (SpApiInteractor.getControllerInstance().emitter as any).emit("greymarchEar", { name: model.appearance.name, id: this.refrId, x: gmEar[0], y: gmEar[1], z: gmEar[2] });
         }
       } catch (gmErr) { /* their voice just stays centred */ }
     }
@@ -1115,11 +1115,8 @@ export class FormView {
         && playerActor.hasLOS(refr)
         && !this.isSweetHidePerson(refr);
       if (isVisibleByPlayer) {
-        const headScreenPos = worldPointToScreenPoint([
-          NetImmerse.getNodeWorldPositionX(refr, headPart, false),
-          NetImmerse.getNodeWorldPositionY(refr, headPart, false),
-          NetImmerse.getNodeWorldPositionZ(refr, headPart, false) + 32
-        ])[0];
+        const gmHeadNow = NetImmerse.hasNode(refr, headPart, false) ? [NetImmerse.getNodeWorldPositionX(refr, headPart, false), NetImmerse.getNodeWorldPositionY(refr, headPart, false), NetImmerse.getNodeWorldPositionZ(refr, headPart, false)] : FormView.gmHeadAt(refr); // GREYMARCH: a creature form has no human head node
+        const headScreenPos = worldPointToScreenPoint([gmHeadNow[0], gmHeadNow[1], gmHeadNow[2] + 32])[0];
         const resolution = getScreenResolution();
         const textXPos = Math.round(headScreenPos[0] * resolution.width);
         const textYPos = Math.round((1 - headScreenPos[1]) * resolution.height);
@@ -1878,6 +1875,19 @@ export class FormView {
   private textNameId: number | undefined = undefined;
   private textNameShown: string | undefined = undefined;
   private textIdId: number | undefined = undefined; // GREYMARCH: the ID line under an introduced character's name
+  // GREYMARCH: where a player's head is: the "NPC Head [Head]" node of a person, or for a creature form (2026-11-06, the owner: "in certain forms VOIP ... moves your
+  // voip somewhere else"), whose skeleton names its head another way, the body's own place at about head height. A missing node reads as 0,0,0 (the middle of the
+  // world map), which is where their voice used to come from.
+  static gmHeadAt(refr: ObjectReference): number[] {
+    const node = "NPC Head [Head]";
+    if (NetImmerse.hasNode(refr, node, false)) {
+      const p = [NetImmerse.getNodeWorldPositionX(refr, node, false), NetImmerse.getNodeWorldPositionY(refr, node, false), NetImmerse.getNodeWorldPositionZ(refr, node, false)];
+      if (p.every((v) => isFinite(v)) && !(p[0] === 0 && p[1] === 0 && p[2] === 0)) return p;
+    }
+    let h = 110;
+    try { const got = refr.getHeight(); if (isFinite(got) && got > 10) h = Math.min(600, got * 0.9); } catch (e) { /* about a person's head height */ }
+    return [refr.getPositionX(), refr.getPositionY(), refr.getPositionZ() + h];
+  }
   private gmEarNext = 0; // GREYMARCH: when this player's head position is next reported for the voice (see update)
   private gmDressNext = 0; // GREYMARCH: when this character's mask and beard are next looked at (see update)
 

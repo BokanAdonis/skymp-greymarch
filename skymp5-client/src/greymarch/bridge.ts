@@ -2934,7 +2934,7 @@ export class GreymarchBridge {
             if (!was || was.race !== race) this.greymarchLog("shape: the server says " + (msg.name || "a creature") + " (race " + race.toString(16) + ")");
             var at = msg.attacks && typeof msg.attacks === "object" ? msg.attacks : {};
             var names = function (l: any) { return Array.isArray(l) ? l.filter(function (x: any) { return typeof x === "string" && x.length > 0 && x.length < 64; }) : []; };
-            this.greymarchShapeWant = { race: race, back: Number(msg.back) >>> 0, name: String(msg.name || ""), normal: names(at.normal), power: names(at.power), mode: msg.mode === "race" ? "race" : "npc", menus: msg.menus === true };
+            this.greymarchShapeWant = { race: race, back: Number(msg.back) >>> 0, name: String(msg.name || ""), normal: names(at.normal), power: names(at.power), mode: msg.mode === "race" ? "race" : "npc", menus: msg.menus === true, weapon: Number(msg.weapon) >>> 0 }; // weapon: the form's own (a giant's club, a skeleton's sword; greymarchShapeArmTick)
             this.greymarchShapeWordAt = Date.now();
         } else {
             if (this.greymarchShapeWant || this.greymarchShapeOn) this.greymarchLog("shape: the server says change back");
@@ -2972,6 +2972,7 @@ export class GreymarchBridge {
                     if (now - (this.greymarchShapeAlphaAt || 0) > 2000) { this.greymarchShapeAlphaAt = now; player.setAlpha(0, false); } // the player's own body stays invisible
                     var pup = this.greymarchShapePuppet; // no NPC (its first placing failed) or one that never got ready (its spawn steps failed): placed again, at most every 3 seconds
                     if ((!pup || (!pup.ready && now - pup.at > SHAPE_NPC_READY_MS)) && now - (this.greymarchShapeRemakeAt || 0) > 3000) { this.greymarchShapeRemakeAt = now; this.greymarchShapeRemake(pup ? "the NPC never got ready" : "there was no NPC"); }
+                    this.greymarchShapeArmTick(want); // the creature shown here holds the form's weapon too
                 }
                 else if (raceId !== want.race && now - (this.greymarchShapeFixAt || 0) > 3000) { // something put another race back (a respawn, the game itself)
                     this.greymarchShapeFixAt = now;
@@ -3101,6 +3102,22 @@ export class GreymarchBridge {
                 }, fail("resurrect"));
             }, fail("enable"));
         }, fail("position")).catch(fail("spawn")); // a step that throws (not only one that fails) is logged too; greymarchShapeTick places a never-ready NPC again
+    }
+    // THE FORM'S WEAPON (2026-11-06, the owner: the giant had no club, the skeleton should have an Ancient Nord Sword). The server puts it in the player's pack and on
+    // (shapeshift.js giveWeapon: every other game draws it in the creature's hand); the creature NPC this game shows in the player's place (mode "npc") is a local one,
+    // so it gets its own copy here, once it is ready. A copy that is gone (the NPC placed again) is given again.
+    greymarchShapeArmTick(want: any): any {
+        var pup = this.greymarchShapePuppet;
+        if (!want || !want.weapon || !pup || !pup.ready || pup.armed === want.weapon) return;
+        var sp = this.sp;
+        try {
+            var ac = this.greymarchShapePuppetActor(); var w = sp.Game.getFormEx(want.weapon);
+            if (!ac || !w) return;
+            if (ac.getItemCount(w) < 1) ac.addItem(w, 1, true);
+            ac.equipItem(w, false, true);
+            pup.armed = want.weapon;
+            this.greymarchLog("shape: the " + (want.name || "creature") + " shown here holds " + (w.getName() || want.weapon.toString(16)));
+        } catch (err) { if (!pup.armSaid) { pup.armSaid = true; this.greymarchLog("shape: the weapon could not be put in the creature's hand: " + err); } }
     }
     greymarchShapePuppetActor(): any {
         var p = this.greymarchShapePuppet;
