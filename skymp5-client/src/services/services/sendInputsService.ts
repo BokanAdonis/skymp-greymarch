@@ -135,9 +135,13 @@ export class SendInputsService extends ClientListener {
         const now = Date.now();
         const last = this.lastSendMovementMoment.get(refrIdStr);
         if (!last || now - last > sendMovementRateMs) {
+            const movement = getMovement(owner, form);
+            // GREYMARCH: a player in a creature form shown as an NPC has a hidden person's body that never draws a weapon (bridge.ts SHAPE_NO_FISTS); while the creature
+            // attacks, its combat stance goes out with the movement so every other game puts the creature it draws into it (some creatures attack only from it)
+            if (owner.getFormID() === 0x14 && Number((this.sp.storage as any)["greymarchShapeCombatUntil"]) > now) movement.isWeapDrawn = true;
             const message: MessageWithRefrId<UpdateMovementMessage> = {
                 t: MsgType.UpdateMovement,
-                data: getMovement(owner, form),
+                data: movement,
                 _refrId
             };
             this.controller.emitter.emit("sendMessageWithRefrId", {

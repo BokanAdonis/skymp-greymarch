@@ -237,12 +237,14 @@ test("NPC mode: the player becomes invisible and a creature NPC is placed, prote
   assert.deepStrictEqual(s.log.moves.map((m) => m.id), [s.PUP, s.PUP], "moved every frame by the player's movement");
 });
 
-test("NPC mode: a click plays the attack on the NPC, in combat stance, and the report names the animation", async () => {
+test("NPC mode: a click plays the attack on the NPC, in combat stance, and the report names the animation; the hidden person never fights", async () => {
   const s = make();
   s.say(giantNpc); s.tick(); await flushAll();
   s.click(); s.tick(10);
   assert.ok(ATTACKS.normal.includes(s.log.events[s.log.events.length - 1]));
-  assert.ok(s.log.calls.includes("drawWeapon"));
+  assert.ok(!s.log.calls.includes("drawWeapon"), "the hidden person never draws (SHAPE_NO_FISTS, 2026-11-06)");
+  assert.ok(s.storage.greymarchShapeCombatUntil > 0, "the combat stance goes out with the movement instead (sendInputsService.ts)");
+  assert.strictEqual(s.storage.greymarchShapeNpc, true, "the hidden body sends no animations (animation.ts)");
   s.drive();
   assert.strictEqual(s.log.moves.pop().weap, true, "the creature's combat stance");
   s.tick(500);

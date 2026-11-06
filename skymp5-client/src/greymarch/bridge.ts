@@ -3016,7 +3016,7 @@ export class GreymarchBridge {
                 var ev = pool[Math.floor(Math.random() * pool.length)];
                 var body = this.greymarchShapeModeOn === "npc" ? this.greymarchShapePuppetActor() : player; // the creature NPC (mode "npc"), or the player's own body (mode "race")
                 if (body) {
-                    if (this.greymarchShapeModeOn === "npc") { this.greymarchShapeCombatUntil = now + 6000; try { if (!player.isWeaponDrawn()) player.drawWeapon(); } catch (dErr) { /* the stance is set on the NPC anyway */ } } // combat stance: here and, through the player's movement, in everyone's game
+                    if (this.greymarchShapeModeOn === "npc") { this.greymarchShapeCombatUntil = now + 6000; try { (sp.storage as any)["greymarchShapeCombatUntil"] = now + 6000; } catch (dErr) { /* the stance is set on the NPC here anyway */ } } // combat stance: here (greymarchShapeDrive) and, through the movement this game sends (sendInputsService.ts sendMovement), in everyone's game; the hidden person never draws (SHAPE_NO_FISTS)
                     sp.Debug.sendAnimationEvent(body, ev);
                     this.greymarchShapeLastSwing = { at: now, power: power };
                     this.greymarchShapeReport = { at: now + SHAPE_LAND_MS, power: power, ev: ev };
@@ -3046,10 +3046,11 @@ export class GreymarchBridge {
             if (!this.greymarchShapeOn) {
                 step = "beast form"; if (!want.menus) sp.Game.setBeastForm(true); // no inventory, magic or favourites menus: a creature cannot put on armor or cast the character's spells (the Vampire Lord keeps them: it picks its powers; greymarchLordKitTick takes off any armor)
                 step = "fast travel"; sp.Game.enableFastTravel(false);
-                step = "controls"; sp.Game.disablePlayerControls(false, false, true, false, false, false, false, false, 1); // only the camera switch: they still walk, sneak, fight and talk
+                step = "controls"; sp.Game.disablePlayerControls(false, true, true, false, false, false, false, false, 1); // the camera switch and FIGHTING: they walk, sneak and talk; a click is the creature's attack (greymarchShapeButton), never the hidden person's fists (SHAPE_NO_FISTS)
                 step = "camera"; sp.Game.forceThirdPerson();
                 step = "unequip"; player.unequipAll();
                 try { (sp.storage as any)["greymarchShapeOn"] = true; } catch (stErr) { /* hitService then reports the game's own hits too */ }
+                try { (sp.storage as any)["greymarchShapeNpc"] = true; } catch (stErr) { /* animation.ts then sends the hidden body's animations as before */ }
             }
             step = "invisible"; player.setAlpha(0, false);
             step = "npc"; this.greymarchShapePuppetRemove();
@@ -3459,11 +3460,11 @@ export class GreymarchBridge {
         var step = "start";
         this.greymarchShapeOn = 0; this.greymarchShapeModeOn = null;
         this.greymarchShapeSwing = null; this.greymarchShapeReport = null; this.greymarchShapeCombatUntil = 0;
-        try { (sp.storage as any)["greymarchShapeOn"] = false; } catch (stErr) { /* nothing was set */ }
+        try { (sp.storage as any)["greymarchShapeOn"] = false; (sp.storage as any)["greymarchShapeNpc"] = false; (sp.storage as any)["greymarchShapeCombatUntil"] = 0; } catch (stErr) { /* nothing was set */ }
         try {
             step = "npc"; this.greymarchShapePuppetRemove();
             step = "visible"; player.setAlpha(1, false);
-            step = "controls"; sp.Game.enablePlayerControls(false, false, true, false, false, false, false, false, 1);
+            step = "controls"; sp.Game.enablePlayerControls(false, true, true, false, false, false, false, false, 1);
             step = "beast form"; sp.Game.setBeastForm(false);
             step = "fast travel"; sp.Game.enableFastTravel(false); // never on again (2026-10-30, the owner: fast travel off for everything)
             this.greymarchShapeWearAt = Date.now() + 1000; // the gear, and the character's own look SkyMP kept aside, a moment later
@@ -3491,7 +3492,7 @@ export class GreymarchBridge {
                 this.greymarchShapeBackRace = want.back || raceId;
                 step = "beast form"; if (!want.menus) sp.Game.setBeastForm(true); // no inventory, magic or favourites menus: a creature cannot put on armor or cast the character's spells (the Vampire Lord keeps them: it picks its powers; greymarchLordKitTick takes off any armor)
                 step = "fast travel"; sp.Game.enableFastTravel(false);
-                step = "controls"; sp.Game.disablePlayerControls(false, false, true, false, false, false, false, false, 1); // only the camera switch: they still walk, sneak and talk
+                step = "controls"; sp.Game.disablePlayerControls(false, true, true, false, false, false, false, false, 1); // the camera switch and fighting: a click is the creature's own attack (greymarchShapeButton), never a person's (SHAPE_NO_FISTS)
                 step = "camera"; sp.Game.forceThirdPerson();
                 step = "unequip"; player.unequipAll();
                 step = "head"; this.greymarchShapeStripHead(player);
@@ -3544,7 +3545,7 @@ export class GreymarchBridge {
             if (!back) { try { var base = sp.ActorBase.from(player.getBaseObject()); back = base ? base.getRace() : null; } catch (baseErr) { back = null; } }
             if (back) player.setRace(back); else this.greymarchLog("shape: no race known to change back to");
             step = "animation"; sp.Debug.sendAnimationEvent(player, "IdleForceDefaultState");
-            step = "controls"; sp.Game.enablePlayerControls(false, false, true, false, false, false, false, false, 1);
+            step = "controls"; sp.Game.enablePlayerControls(false, true, true, false, false, false, false, false, 1);
             step = "beast form"; sp.Game.setBeastForm(false);
             step = "fast travel"; sp.Game.enableFastTravel(false); // never on again (2026-10-30, the owner: fast travel off for everything)
             step = "redraw"; player.queueNiNodeUpdate(); // the head is drawn again

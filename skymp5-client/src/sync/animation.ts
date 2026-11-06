@@ -261,6 +261,13 @@ export class AnimationSource {
     if (ignoredAnims.has(animEventName)) {
       return;
     }
+    // GREYMARCH (SHAPE_NO_FISTS, 2026-11-06, the owner: in a creature form "all the attacks are just regular fists or they crash you when you try to attack"): a player in
+    // a creature form shown as an NPC (bridge.ts, mode "npc") keeps a hidden PERSON's body, and every animation of that body (a punch, a jump, drawing fists) was sent to
+    // every other game, which played it on the creature it draws for them: a person's event in a creature's animation graph showed fists or crashed the game. Nothing
+    // of the hidden body is sent; the creature's own attacks reach the others through the server (shapeshift.js greymarchShapeAnim).
+    if (this.refrId === 0x14 && storage["greymarchShapeNpc"] === true) {
+      return;
+    }
 
     const lower = animEventName.toLowerCase();
 
