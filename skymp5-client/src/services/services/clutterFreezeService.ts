@@ -136,7 +136,7 @@ export class ClutterFreezeService extends ClientListener {
         this.sweepsInCell++;
         if ((s.caught > 0 || s.racked > 0 || this.sweepsInCell === 1 || this.sweepsInCell === SWEEP_AT_MS.length) && this.logsLeft > 0) {
             this.logsLeft--;
-            if (this.sweepsInCell === SWEEP_AT_MS.length) this.compareVisits(s.cellId, [...this.visitLoose]);
+            if (this.sweepsInCell === SWEEP_AT_MS.length) this.compareVisits(s.cellId, Array.from(this.visitLoose));
             if (this.sweepsInCell === SWEEP_AT_MS.length && (s.cellId >>> 0) === 0x1677c) this.probe();
             try { this.sp.writeLogs("greymarch", "clutter: cell " + (s.cellId >>> 0).toString(16) + " (sweep " + this.sweepsInCell + ", " + s.n + " references): " + s.loose + " loose objects, " + s.caught + " frozen by the sweep (the load event missed them), " + s.racked + " put on their racks; food and potions " + s.food + " (" + s.foodOff + " disabled, " + s.food3d + " drawn)"); } catch (err) { /* no log */ }
         }
