@@ -2584,8 +2584,10 @@ export class GreymarchBridge {
         // back at full size, which the 2 s re-set let show. Now looked at about every tenth of a second: a beard part not at the hidden size is hidden again at
         // once (its parts read again every 2 s, for a new beard)
         if (masked && s.masked && now < s.at) {
+            // set every time, not only when it reads full size (2026-11-05, the owner's clip: scrolling out of first person showed the beard for half a second;
+            // the head rebuilt by the camera switch was not caught by the size check)
             for (var q = 0; q < s.names.length; q++) {
-                try { if (this.sp.NetImmerse.getNodeScale(ac, s.names[q], false) > 0.01) this.sp.NetImmerse.setNodeScale(ac, s.names[q], 0.001, false); } catch (e) { /* not drawn now */ }
+                try { this.sp.NetImmerse.setNodeScale(ac, s.names[q], 0.001, false); } catch (e) { /* not drawn now */ }
             }
             return;
         }
@@ -2612,9 +2614,7 @@ export class GreymarchBridge {
     greymarchDressTick(now: number): any {
         var gl: any = Function("return this")();
         if (!gl.__gmDressHead) gl.__gmDressHead = (ac: any, drawn?: number[]) => { try { if (ac) this.greymarchBeard(ac, this.greymarchMasked(ac, Date.now()), Date.now(), drawn); } catch (e) { /* their beard stays */ } };
-        if (now < (this.greymarchDressNext || 0)) return;
-        this.greymarchDressNext = now + 100;
-        if (this.greymarchWolfOn || this.greymarchShapeOn) return;
+        if (this.greymarchWolfOn || this.greymarchShapeOn) return; // this player's own beard: every frame (a camera switch rebuilds the head)
         try { var player = this.sp.Game.getPlayer(); if (player && player.is3DLoaded()) this.greymarchBeard(player, this.greymarchMasked(player, now), now); } catch (e) { /* the next look */ }
     }
     // whether a mask is worn, read from the gear at most every half second for each character (the beard itself is looked at more often)
