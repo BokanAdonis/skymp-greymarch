@@ -9,9 +9,13 @@
 // buckets, barrels that are not containers). Items are still picked up with E (activation is the server's, as before); Z (grab) no longer drags clutter.
 // OFF while the server says so: { customPacketType: "greymarchClutterFreeze", on: false } (the gamemode sends it while greymarch-data/clutter-freeze.off exists);
 // on: true turns it back on. Turning it off only stops freezing new loads; what is frozen stays frozen until its cell loads again.
-// THE SWEEP (2026-11-05, the owner: weapons, shields and the plates in the keep still got thrown about): the load event alone missed some, so every SWEEP_MS and
+// THE SWEEP (2026-11-05, the owner: weapons, shields and the plates in the keep still got thrown about): the load event alone missed some, so at the times of SWEEP_AT_MS and
 // on every cell change the player's own cell is walked (SWEEP_PER_UPDATE references a frame) and any loose object from the world that is not frozen yet is
 // frozen. What a sweep had to catch is written to greymarch-logs.txt (at most LOG_LINES lines a session).
+// LIGHTER (2026-11-06, the owner: players lost frames since the update): it walked 200 references a frame with several game calls each and started over every
+// 2 s for as long as the player stayed, so a big cell (a town, a palace) cost part of almost every frame. Now a cell is swept SWEEP_AT_MS after the player
+// enters it (at once, 3 s, 10 s and 30 s in) and then not again until the next cell, SWEEP_PER_UPDATE references a frame, and a reference found not to be
+// loose clutter (or already frozen) is not asked about again in that visit.
 // WEAPON RACKS: the sweep also puts each rack's starting weapon or shield onto the rack's pivot node, as the game's rack script would (rack() below).
 import { FormType, MotionType } from "skyrimPlatform";
 import { logError } from "../../logging";
@@ -22,8 +26,8 @@ import { ClientListener, CombinedController, Sp } from "./clientListener";
 export const DROP_SETTLE_MS = 3000;
 export const PER_UPDATE = 150; // references looked at per frame (a cell load reports hundreds)
 export const MAX_WAITING = 6000;
-export const SWEEP_MS = 2000;
-export const SWEEP_PER_UPDATE = 200;
+export const SWEEP_AT_MS: readonly number[] = [0, 3000, 10000, 30000];
+export const SWEEP_PER_UPDATE = 30;
 export const LOG_LINES = 40;
 // OFF (2026-11-05, the owner: the game kept crashing in Bruma Castle): the game crashed seconds after the sweep moved its 27 rack items onto their racks
 // (moveToNode). Kept for a later look; the racks are left as they are.
@@ -53,9 +57,11 @@ export class ClutterFreezeService extends ClientListener {
     private cellId = 0;
     private sweep: { cellId: number; n: number; i: number; caught: number; loose: number; racked: number; food: number; foodOff: number; food3d: number; ids: number[] } | null = null;
     private seenLoose = new Map<number, number[]>(); // cell -> the loose objects from the world it had on the first visit (to log what a later visit lacks)
-    private sweepsInCell = 0; // completed sweeps since the player entered this cell: the 1st and the 6th (about 10 s in) are written to the log
+    private sweepsInCell = 0; // completed sweeps since the player entered this cell: the 1st and the last (30 s in) are written to the log
+    private enteredAt = 0; // when the player entered this cell (SWEEP_AT_MS counts from here)
+    private visitLoose = new Set<number>(); // the loose objects from the world seen in this cell this visit (a settled one is not looked at again)
+    private settled = new Set<number>(); // indices in this cell's reference list that need no more looks this visit (not loose, made in game, frozen)
     private racked = new Set<number>(); // rack activators handled since the player entered this cell
-    private lastSweep = 0;
     private logsLeft = LOG_LINES;
 
     constructor(private sp: Sp, private controller: CombinedController) {
@@ -79,21 +85,21 @@ export class ClutterFreezeService extends ClientListener {
         if (this.on) this.onSweepUpdate();
     }
 
-    // the player's cell, walked a little every frame: any loose object from the world that is not frozen yet is frozen now
+    // the player's cell, walked a little every frame at the times of SWEEP_AT_MS: any loose object from the world that is not frozen yet is frozen now
     private onSweepUpdate() {
         const now = Date.now();
         if (!this.sweep) {
-            if (now - this.lastSweep < SWEEP_MS) {
-                // a new cell starts a sweep at once
-                const id = this.playerCellId();
-                if (!id || id === this.cellId) return;
+            const here = this.playerCellId();
+            if (!here) return;
+            if (here === this.cellId) {
+                if (this.sweepsInCell >= SWEEP_AT_MS.length) return; // this visit's sweeps are done: the load event keeps up from here
+                if (now - this.enteredAt < SWEEP_AT_MS[this.sweepsInCell]) return;
             }
-            this.lastSweep = now;
             const cell = this.playerCell();
             if (!cell) return;
             let id = 0, n = 0;
             try { id = cell.getFormID(); n = cell.getNumRefs(0); } catch (err) { return; }
-            if (id !== this.cellId) { this.cellId = id; this.frozen.clear(); this.racked.clear(); this.sweepsInCell = 0; }
+            if (id !== this.cellId) { this.cellId = id; this.frozen.clear(); this.racked.clear(); this.settled.clear(); this.visitLoose.clear(); this.sweepsInCell = 0; this.enteredAt = now; }
             this.sweep = { cellId: id, n, i: 0, caught: 0, loose: 0, racked: 0, food: 0, foodOff: 0, food3d: 0, ids: [] };
         }
         const s = this.sweep;
@@ -102,20 +108,24 @@ export class ClutterFreezeService extends ClientListener {
         if (!cell) { this.sweep = null; return; }
         const end = Math.min(s.n, s.i + SWEEP_PER_UPDATE);
         for (; s.i < end; s.i++) {
+            if (this.settled.has(s.i)) continue;
             try {
                 const ref = cell.getNthRef(s.i, 0);
                 if (!ref) continue;
                 const id = ref.getFormID();
-                if (madeInGame(id)) continue; // a dropped item: the load event freezes it once it has fallen
+                if (madeInGame(id)) { this.settled.add(s.i); continue; } // a dropped item: the load event freezes it once it has fallen
                 const base = ref.getBaseObject();
                 if (!base) continue;
-                if (base.getType() === FormType.Activator) { if (RACKS_ON && this.rack(ref, id)) s.racked++; continue; }
-                if (!isLoose(base.getType())) continue;
+                if (base.getType() === FormType.Activator) { if (RACKS_ON) { if (this.rack(ref, id)) s.racked++; } else this.settled.add(s.i); continue; }
+                if (!isLoose(base.getType())) { this.settled.add(s.i); continue; }
                 s.loose++;
                 s.ids.push(id);
+                this.visitLoose.add(id);
                 if (base.getType() === FormType.Potion) { s.food++; if (ref.isDisabled()) s.foodOff++; if (ref.is3DLoaded()) s.food3d++; }
-                if (this.frozen.has(id) || !ref.is3DLoaded()) continue;
+                if (this.frozen.has(id)) { this.settled.add(s.i); continue; }
+                if (!ref.is3DLoaded()) continue;
                 this.freeze(ref, id);
+                this.settled.add(s.i);
                 s.caught++;
             } catch (err) {
                 /* gone */
@@ -124,10 +134,10 @@ export class ClutterFreezeService extends ClientListener {
         if (s.i < s.n) return;
         this.sweep = null;
         this.sweepsInCell++;
-        if ((s.caught > 0 || s.racked > 0 || this.sweepsInCell === 1 || this.sweepsInCell === 6) && this.logsLeft > 0) {
+        if ((s.caught > 0 || s.racked > 0 || this.sweepsInCell === 1 || this.sweepsInCell === SWEEP_AT_MS.length) && this.logsLeft > 0) {
             this.logsLeft--;
-            if (this.sweepsInCell === 6) this.compareVisits(s.cellId, s.ids);
-            if (this.sweepsInCell === 6 && (s.cellId >>> 0) === 0x1677c) this.probe();
+            if (this.sweepsInCell === SWEEP_AT_MS.length) this.compareVisits(s.cellId, [...this.visitLoose]);
+            if (this.sweepsInCell === SWEEP_AT_MS.length && (s.cellId >>> 0) === 0x1677c) this.probe();
             try { this.sp.writeLogs("greymarch", "clutter: cell " + (s.cellId >>> 0).toString(16) + " (sweep " + this.sweepsInCell + ", " + s.n + " references): " + s.loose + " loose objects, " + s.caught + " frozen by the sweep (the load event missed them), " + s.racked + " put on their racks; food and potions " + s.food + " (" + s.foodOff + " disabled, " + s.food3d + " drawn)"); } catch (err) { /* no log */ }
         }
     }

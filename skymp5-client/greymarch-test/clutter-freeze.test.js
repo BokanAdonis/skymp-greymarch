@@ -122,7 +122,7 @@ test("the sweep: the player's cell is walked and loose objects from the world th
     s.update();
     assert.deepStrictEqual(s.set, [[0x1001, 4, false], [0x1002, 4, false]], "a weapon and a shield on the wall");
     assert.match(s.logs.pop()[1], /cell 3c01 \(sweep 1, 5 references\): 3 loose objects, 2 frozen by the sweep/);
-    t += M.SWEEP_MS; s.update();
+    t += M.SWEEP_AT_MS[1]; s.update();
     assert.strictEqual(s.set.length, 2, "not frozen twice");
     assert.strictEqual(s.logs.length, 0, "nothing new: no log line");
     s.cells.set(0x3c02, [{ id: 0x2001, type: FT.Misc }]);
@@ -180,7 +180,7 @@ test("a weapon rack: its starting item goes onto the trigger's pivot for its kin
   assert.deepStrictEqual(s.moves, [[0x12, 0x11, "ShieldPivot01"], [0x22, 0x21, "BowPivot01"], [0x32, 0x31, "WarhammerPivot01"]]);
   for (const id of [0x12, 0x22, 0x32]) assert.ok(s.set.some(([i]) => i === id), "frozen on the rack: " + id.toString(16));
   assert.match(s.logs.pop(), /3 put on their racks/);
-  const realNow = Date.now; Date.now = () => realNow() + M.SWEEP_MS + 1;
+  const realNow = Date.now; Date.now = () => realNow() + M.SWEEP_AT_MS[1] + 1;
   try { s.update(); } finally { Date.now = realNow; }
   assert.strictEqual(s.moves.length, 3, "once a visit");
 });
@@ -191,7 +191,7 @@ test("a rack whose item is not loaded yet is tried again on the next sweep; a ba
   s.update();
   assert.strictEqual(s.moves.length, 0);
   s.refs.get(0x12).loaded = true;
-  const realNow = Date.now; Date.now = () => realNow() + M.SWEEP_MS + 1;
+  const realNow = Date.now; Date.now = () => realNow() + M.SWEEP_AT_MS[1] + 1;
   try { s.update(); } finally { Date.now = realNow; }
   assert.deepStrictEqual(s.moves, [[0x12, 0x11, "BattleAxePivot01"]]);
 });
@@ -202,4 +202,29 @@ test("racks are off (2026-11-05: the game crashed in Bruma Castle seconds after 
   s.add(0x10, { type: FT.Activator, links: { WRackTrigger: 0x11, "": 0x12 } }); s.add(0x11, { type: FT.Activator }); s.add(0x12, { type: FT.Armor });
   s.update(); await new Promise((r) => setImmediate(r));
   assert.deepStrictEqual(s.moves, []);
+});
+
+test("lighter (2026-11-06, the owner: frame loss since the update): a cell is swept only at SWEEP_AT_MS after the player enters, a few references a frame, and what is settled is not asked about again", () => {
+  const realNow = Date.now; let t = 2_000_000; Date.now = () => t;
+  try {
+    assert.ok(M.SWEEP_PER_UPDATE <= 50, "a few references a frame");
+    assert.deepStrictEqual([...M.SWEEP_AT_MS], [0, 3000, 10000, 30000]);
+    const s = sweepSetup();
+    let asked = 0;
+    const list = [{ id: 0x6001, type: FT.Static }, { id: 0x6002, type: FT.Misc }, { id: 0x6003, type: FT.Misc, loaded: false }];
+    s.cells.set(0x3c01, list.map((r) => ({ ...r, get type() { asked++; return r.type; } })));
+    const sweepAll = () => { for (let i = 0; i < 5; i++) s.update(); };
+    sweepAll();
+    assert.deepStrictEqual(s.set.map((x) => x[0]), [0x6002], "the loaded loose one");
+    const first = asked;
+    t += 1000; sweepAll(); assert.strictEqual(asked, first, "no sweep before 3 s");
+    list[2].loaded = true; s.cells.get(0x3c01)[2].loaded = true;
+    t += 2000; sweepAll();
+    assert.deepStrictEqual(s.set.map((x) => x[0]), [0x6002, 0x6003], "3 s in: the one that loaded late");
+    assert.ok(asked - first > 0 && asked - first <= 3, "only the one not settled was looked at again (its type read up to 3 times), not the static or the frozen one");
+    t += 7000; sweepAll(); t += 20000; sweepAll();
+    const done = asked;
+    t += 60000; sweepAll(); t += 60000; sweepAll();
+    assert.strictEqual(asked, done, "after the 30 s sweep nothing more this visit");
+  } finally { Date.now = realNow; }
 });
