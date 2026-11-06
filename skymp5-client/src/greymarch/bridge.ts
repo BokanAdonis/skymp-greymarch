@@ -2615,7 +2615,22 @@ export class GreymarchBridge {
         var gl: any = Function("return this")();
         if (!gl.__gmDressHead) gl.__gmDressHead = (ac: any, drawn?: number[]) => { try { if (ac) this.greymarchBeard(ac, this.greymarchMasked(ac, Date.now()), Date.now(), drawn); } catch (e) { /* their beard stays */ } };
         if (this.greymarchWolfOn || this.greymarchShapeOn) return; // this player's own beard: every frame (a camera switch rebuilds the head)
-        try { var player = this.sp.Game.getPlayer(); if (player && player.is3DLoaded()) this.greymarchBeard(player, this.greymarchMasked(player, now), now); } catch (e) { /* the next look */ }
+        try { var player = this.sp.Game.getPlayer(); if (player && player.is3DLoaded()) { this.greymarchBeardTrace(player, now); this.greymarchBeard(player, this.greymarchMasked(player, now), now); } } catch (e) { /* the next look */ }
+    }
+    // BEARD TRACE (2026-11-05, the owner: the beard still shows when scrolling out of first person, with it set hidden every frame): for 1.5 s after each
+    // camera switch, every 100 ms, what size this game reads the first beard part at BEFORE it is set again, with the camera state. Reads "0.001" while the
+    // beard shows: another copy of the head is drawn; reads "1": something sets it back between frames.
+    greymarchBeardTrace(player: any, now: number): any {
+        var s = this.greymarchBeardSt && this.greymarchBeardSt[0x14];
+        if (!s || !s.masked || !s.names.length) return;
+        var cam = -1; try { cam = Number(this.sp.Game.getCameraState()); } catch (e) { cam = -1; }
+        var tr = this.greymarchBeardTr || (this.greymarchBeardTr = { cam: cam, until: 0, next: 0, said: 0 });
+        if (cam !== tr.cam) { tr.until = now + 1500; tr.next = 0; this.greymarchCrumb("beard trace: camera " + tr.cam + " -> " + cam); tr.cam = cam; }
+        if (now > tr.until || now < tr.next || tr.said > 300) return;
+        tr.next = now + 100; tr.said++;
+        var sizes: string[] = [];
+        for (var i = 0; i < Math.min(3, s.names.length); i++) { try { sizes.push(s.names[i] + "=" + Math.round(this.sp.NetImmerse.getNodeScale(player, s.names[i], false) * 1000) / 1000); } catch (e) { sizes.push(s.names[i] + "=?"); } }
+        this.greymarchCrumb("beard trace: cam " + cam + ", " + sizes.join(", "));
     }
     // whether a mask is worn, read from the gear at most every half second for each character (the beard itself is looked at more often)
     greymarchMasked(ac: any, now: number): boolean {
