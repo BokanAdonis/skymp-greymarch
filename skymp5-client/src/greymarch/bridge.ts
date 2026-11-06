@@ -5194,17 +5194,15 @@ export class GreymarchBridge {
             var ref = base ? player.placeAtMe(base, 1, false, false) : null;
             if (!ref) return false;
             try { ref.setAngle(0, 0, player.getAngleZ()); } catch (aErr) { /* faces north: they turn to it */ }
-            this.greymarchSeat = { refId: ref.getFormID() >>> 0, id: em.id, event: em.event, at: Date.now(), state: "placed" };
+            this.greymarchSeat = { ref: ref, id: em.id, event: em.event, at: Date.now(), state: "placed" };
             this.greymarchCrumb("seat: placed for " + em.id);
             return true;
         } catch (err) { this.greymarchCrumb("seat: could not place (" + err + ")"); return false; }
     }
-    // the seat is held by its form id: a SkyrimPlatform object is good only in the frame it was got in (2026-11-05: kept from one frame to the next, using it failed)
-    greymarchSeatRef(st: any): any { return this.sp.ObjectReference.from(this.sp.Game.getFormEx(st.refId)); }
     greymarchSeatDrop(why: string): any {
         var st = this.greymarchSeat; this.greymarchSeat = null;
         if (!st) return;
-        try { var dr = this.greymarchSeatRef(st); if (dr) { dr.disable(false); dr.delete(); } } catch (e) { /* gone with the cell */ }
+        try { st.ref.disable(false); st.ref.delete(); } catch (e) { /* gone with the cell */ }
         this.greymarchCrumb("seat: taken away (" + why + ")");
     }
     greymarchSeatTick(now: number): any {
@@ -5219,14 +5217,14 @@ export class GreymarchBridge {
             try { sp.Debug.sendAnimationEvent(player, st.event); } catch (e) { /* not sitting */ }
         };
         if (st.state === "placed") {
-            var loaded = false; try { loaded = !!this.greymarchSeatRef(st).is3DLoaded(); } catch (lErr) { loaded = false; }
+            var loaded = false; try { loaded = !!st.ref.is3DLoaded(); } catch (lErr) { loaded = false; }
             if (!loaded && now - st.at < SEAT_TAKE_MS) return;
-            try { this.greymarchSeatRef(st).activate(player, false); st.state = "asked"; st.askedAt = now; } catch (aErr) { fallback("could not use it: " + aErr); }
+            try { st.ref.activate(player, false); st.state = "asked"; st.askedAt = now; } catch (aErr) { fallback("could not use it: " + aErr); }
             return;
         }
         if (st.state === "asked") {
             var f: any = null; try { f = player.getFurnitureReference(); } catch (fErr) { f = null; }
-            if (f && (f.getFormID() >>> 0) === st.refId) { st.state = "sat"; this.greymarchCrumb("seat: sitting in it (" + this.greymarchBodyState(player) + ")"); }
+            if (f && (f.getFormID() >>> 0) === (st.ref.getFormID() >>> 0)) { st.state = "sat"; this.greymarchCrumb("seat: sitting in it (" + this.greymarchBodyState(player) + ")"); }
             else if (now - st.askedAt > SEAT_TAKE_MS) fallback("not taken");
         }
     }
