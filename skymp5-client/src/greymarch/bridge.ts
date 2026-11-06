@@ -124,6 +124,8 @@ const OPEN_ON_RELEASE = [65, 35, 48, 64, 66, 37]; // F7, H, B, F6, F8, K: their 
 const FORGE_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmForgeRun").split("greymarch-prof").join("greymarch-forge").split("2147483220").join("2147483225"); // the Greymarch forge window: the same loader, another page
 const PAUSE_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmPauseRun").split("greymarch-prof").join("greymarch-pause").split("2147483220").join("2147483230"); // the pause menu (Esc): the same loader, another page, over every other window
 const JOURNAL_MENU = "Journal Menu"; // the game's own pause menu (Esc, J): closed the frame it opens, the pause menu shows instead (greymarchPauseTick)
+const VITALS_AWAY_Y = -20000; // the game's own health, magicka and stamina meters are moved this far above the screen while ours show (greymarchVitalsGame)
+const PAUSE_AFTER_MENU_MS = 400; // an Esc this soon after a game menu (inventory, map, a chest ...) was seen open closed that menu: no pause menu (greymarchPauseTick)
 const ESC_KEY = 1;
 const CRAFT_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmCraftRun").split("greymarch-prof").join("greymarch-craft").split("2147483220").join("2147483224"); // the crafting panel (a station was used): the same loader, another page
 const CLICK_GUARD_MS = 400; // after a window closes, attacks and drawing a weapon are ignored this long: the click on its X is not a swing (greymarchClickGuard)
@@ -748,7 +750,7 @@ export class GreymarchBridge {
         if (data && data.type === "craft-close") { this.greymarchCraftHide(); return; }
         if (data && data.type === "forge") { this.greymarchForgeAsk(data); return; } // the forge window asks the server (the SERVER decides and makes the item)
         if (data && data.type === "forge-close") { this.greymarchForgeHide(); return; }
-        if (data && data.type === "pause-close") { this.greymarchPauseHide(); return; }
+        if (data && data.type === "pause-close") { this.greymarchEscUsedAt = Date.now(); this.greymarchPauseHide(); return; } // closed by the page (its own Esc): that same Esc reaching the game is not a new pause menu (2026-11-05, the owner: stuck in it)
         if (data && data.type === "pause") { this.greymarchPauseAction(data); return; } // Skyrim settings, quit, the logo: done from the update phase
         if (data && data.type === "forge-turn") { this.greymarchForgeTurn(data); return; } // a drag, the wheel or a double-click over the display: the smith examines the piece
         if (data && data.type === "forge-preview") { if (this.greymarchForgeOn) this.greymarchForgePreviewWant = (this.greymarchForgeStation === "smelter" || this.greymarchForgeStation === "kiln") ? "" : String(data.key || "").slice(0, 80); return; } // never at the smelter or the charcoal kiln (2026-10-26, the owner) // the piece picked in the forge window: shown in front of the smith (greymarchForgePreviewTick); only while the window is open
@@ -4195,7 +4197,7 @@ export class GreymarchBridge {
         if (now < (this.greymarchVitalsNext || 0)) return;
         this.greymarchVitalsNext = now + 100;
         var ours = !this.greymarchScreenUp && !!(this.greymarchChatOn || this.greymarchHudOn);
-        if (ours && now >= (this.greymarchVitalsHideNext || 0)) { this.greymarchVitalsHideNext = now + 500; this.greymarchVitalsGame(false); }
+        if (ours && now >= (this.greymarchVitalsHideNext || 0)) { this.greymarchVitalsHideNext = now + 100; this.greymarchVitalsGame(false); } // every tenth of a second (was half a second: the old bars flashed between)
         else if (!ours && this.greymarchVitalsHidden) this.greymarchVitalsGame(true);
         if (!ours) { if (this.greymarchVitalsSent) { this.greymarchVitalsSent = null; this.greymarchHudToPage("vitals", { off: true }); } return; }
         var player: any = null, v: any = null;
@@ -4213,9 +4215,20 @@ export class GreymarchBridge {
     // the game's own Health, Magicka and Stamina meters (hudmenu: HUDMovieBaseInstance.Health / Magica / Stamina): shown (true) or hidden (false)
     greymarchVitalsGame(show: boolean): any {
         var ui = this.sp.Ui, names = ["Health", "Magica", "Stamina"], seen: string[] = [];
+        // OFF THE SCREEN TOO (2026-11-05, the owner's video: the old bars flashed under ours): the HUD shows a meter again by itself whenever it changes (a hit, a
+        // sprint, a menu closing), faster than it can be hidden again. So each meter is also moved far above the screen (its _y; the HUD never moves them back
+        // by itself), where showing it shows nothing; its own place is kept and given back when the game's bars come back
+        var ys = this.greymarchVitalsY || (this.greymarchVitalsY = {});
         for (var i = 0; i < names.length; i++) {
-            var target = "_root.HUDMovieBaseInstance." + names[i] + "._visible";
+            var clip = "_root.HUDMovieBaseInstance." + names[i], target = clip + "._visible";
             try { if (!show && !this.greymarchVitalsLogged && ui.getBool("HUD Menu", target)) seen.push(names[i]); ui.setBool("HUD Menu", target, show); } catch (e) { /* not in this HUD */ }
+            try {
+                if (!show) {
+                    var y = Number(ui.getNumber("HUD Menu", clip + "._y"));
+                    if (isFinite(y) && y > VITALS_AWAY_Y / 2) ys[names[i]] = y; // its own place, before it was moved
+                    if (ys[names[i]] !== undefined && y !== VITALS_AWAY_Y) ui.setNumber("HUD Menu", clip + "._y", VITALS_AWAY_Y);
+                } else if (ys[names[i]] !== undefined) { ui.setNumber("HUD Menu", clip + "._y", ys[names[i]]); delete ys[names[i]]; }
+            } catch (e) { /* not in this HUD */ }
         }
         this.greymarchVitalsHidden = !show;
         if (!show && !this.greymarchVitalsLogged) { this.greymarchVitalsLogged = true; this.greymarchLog("vitals: the game's bars hidden; visible before: " + (seen.length ? seen.join(", ") : "none of them")); }
@@ -4265,8 +4278,19 @@ export class GreymarchBridge {
             if (off) { this.greymarchJournalKeyOff = true; this.greymarchLog("pause: Esc no longer opens the game's menu (GreymarchCamera.dll 1.14)"); }
             else if (this.greymarchJournalKeyTries >= 5) this.greymarchLog("pause: SetJournalKey not there (GreymarchCamera.dll older than 1.14): the game's menu is shut when it opens");
         }
-        if (this.greymarchPauseWanted) { var asked = this.greymarchPauseWanted; this.greymarchPauseWanted = 0; if (now - asked < 1000 && !this.greymarchChatTyping && !this.greymarchPanelHasKeys()) this.greymarchPauseShow(); }
         try { journal = !!sp.Ui.isMenuOpen(JOURNAL_MENU); } catch (e) { journal = false; }
+        // AN ESC THAT CLOSED THE GAME'S OWN MENU (2026-11-05, the owner's video: Esc out of the inventory, the map, a chest ... opened the pause menu as well, and
+        // they got stuck in it): every frame a game menu is open (other than the Journal, which ours stands in for) is noted, and an Esc pressed while one was
+        // open (seen within PAUSE_AFTER_MENU_MS before the press) only closes that menu
+        var inMenu = false; try { inMenu = !!sp.Utility.isInMenuMode(); } catch (e) { inMenu = false; }
+        if (inMenu && !journal) this.greymarchGameMenuAt = now;
+        var menuEsc = (at: number) => at - (this.greymarchGameMenuAt || -1e12) < PAUSE_AFTER_MENU_MS;
+        if (this.greymarchPauseWanted) {
+            var asked = this.greymarchPauseWanted; this.greymarchPauseWanted = 0;
+            if (Math.abs(asked - (this.greymarchEscUsedAt || -1e12)) < 500) { /* that Esc closed the pause menu (or a window) itself: it does not open it again */ }
+            else if (menuEsc(asked)) { this.greymarchEscUsedAt = asked; this.greymarchCrumb("pause: Esc closed a game menu, no pause menu"); }
+            else if (now - asked < 1000 && !this.greymarchChatTyping && !this.greymarchPanelHasKeys()) this.greymarchPauseShow();
+        }
         if (this.greymarchJournalOk) {
             // "Skyrim settings": the Journal may stay open until the player closes it
             if (journal) this.greymarchJournalSeen = true;
@@ -4274,7 +4298,7 @@ export class GreymarchBridge {
         } else if (journal && !this.greymarchScreenUp) {
             var shut = false; try { shut = !!sp.callNative("GreymarchCam", "CloseMenu", undefined, JOURNAL_MENU); } catch (e) { shut = false; }
             if (!shut && now >= (this.greymarchPauseTapNext || 0)) { this.greymarchPauseTapNext = now + 1000; this.greymarchPauseTapAt = now; try { sp.Input.tapKey(ESC_KEY); } catch (e) { /* shut next frame */ } }
-            if (!this.greymarchPauseOn && now - (this.greymarchEscUsedAt || 0) > 700 && !this.greymarchChatTyping && !this.greymarchPanelHasKeys()) this.greymarchPauseShow();
+            if (!this.greymarchPauseOn && now - (this.greymarchEscUsedAt || 0) > 700 && !menuEsc(now - 100) && !this.greymarchChatTyping && !this.greymarchPanelHasKeys()) this.greymarchPauseShow();
         }
         if (this.greymarchJournalWant && now >= this.greymarchJournalWant) {
             this.greymarchJournalWant = 0; this.greymarchJournalOk = now; this.greymarchJournalSeen = false;

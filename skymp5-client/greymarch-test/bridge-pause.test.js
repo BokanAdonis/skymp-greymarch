@@ -18,12 +18,14 @@ function make({ closeMenu = true, journalKey = false } = {}) {
   const mod = { exports: {} };
   new Function("require", "exports", "module", js)((p) => mods[p], mod.exports, mod);
   const open = new Set();
+  const mode = { on: false }; // a game menu (inventory, map, a chest ...) is open
   let focus = false;
   const sp = {
     printConsole() {}, writeLogs: (n, l) => log.lines.push(l),
     Game: { getPlayer: () => null, quitToMainMenu: () => { log.menu = (log.menu || 0) + 1; } },
     Debug: { quitGame: () => { log.quit++; } },
     Ui: { isMenuOpen: (name) => open.has(name) },
+    Utility: { isInMenuMode: () => mode.on },
     Input: { tapKey: (k) => { log.taps.push(k); if (k === 1) { if (open.has("Journal Menu")) open.delete("Journal Menu"); else open.add("Journal Menu"); } } },
     callNative: (cls, fn, self, name) => {
       if (cls === "GreymarchCam" && fn === "CloseMenu" && closeMenu) { log.closed.push(name); open.delete(name); return true; }
@@ -40,7 +42,7 @@ function make({ closeMenu = true, journalKey = false } = {}) {
   const controller = { on() {}, emitter: { on() {}, emit: (n, p) => log.sent.push([n, p]) } };
   const gm = new mod.exports.GreymarchBridge(sp, controller);
   const esc = () => { gm.greymarchKey({ code: 1, isDown: () => true }); gm.greymarchKey({ code: 1, isDown: () => false, isUp: true }); };
-  return { gm, log, open, esc, setFocus: (f) => { focus = f; } };
+  return { gm, log, open, esc, mode, setFocus: (f) => { focus = f; } };
 }
 
 test("Esc with nothing open: the game's Journal is shut the frame it is seen and the pause menu shows instead, with the character's name", () => {
@@ -136,7 +138,7 @@ test("the open pause menu takes the keyboard back when SkyMP lets it go, and cou
 });
 
 test("the page's messages reach the bridge: pause-close and pause", () => {
-  assert.match(src, /if \(data && data\.type === "pause-close"\) \{ this\.greymarchPauseHide\(\); return; \}/);
+  assert.match(src, /if \(data && data\.type === "pause-close"\) \{ this\.greymarchEscUsedAt = Date\.now\(\); this\.greymarchPauseHide\(\); return; \}/);
   assert.match(src, /if \(data && data\.type === "pause"\) \{ this\.greymarchPauseAction\(data\); return; \}/);
   assert.match(src, /const PAUSE_SCRIPT = PROF_SCRIPT\.split\("__gmProfSend"\)\.join\("__gmPauseRun"\)\.split\("greymarch-prof"\)\.join\("greymarch-pause"\)/);
 });
@@ -219,4 +221,46 @@ test("the right mouse button (code 1 from the mouse) is not Esc: it neither open
   let closed = 0; gm.greymarchChatTyping = true; gm.greymarchChatClose = () => { closed++; };
   right(true);
   assert.strictEqual(closed, 0, "nor the chat input");
+});
+
+test("Esc that closes the game's own menu (inventory, map, a chest ...) does not open the pause menu too (2026-11-05, the owner's video)", () => {
+  const { gm, log, esc, mode } = make({ journalKey: true });
+  const realNow = Date.now; let t = realNow(); Date.now = () => t; // the bridge reads the clock itself
+  try {
+    gm.greymarchPauseTick(t);
+    mode.on = true; gm.greymarchPauseTick(t += 16); // the inventory is open
+    t += 5; esc(); mode.on = false; gm.greymarchPauseTick(t += 11); // Esc closes it
+    assert.strictEqual(gm.greymarchPauseOn, undefined, "no pause menu");
+    assert.ok(!log.pages.some((p) => p.fn === "show"));
+    gm.greymarchPauseTick(t += 2000); esc(); gm.greymarchPauseTick(t += 16);
+    assert.strictEqual(gm.greymarchPauseOn, true, "a later Esc with nothing open: the pause menu");
+  } finally { Date.now = realNow; }
+});
+
+test("the pause menu closed by its own page (Esc there) is not opened again by that same Esc reaching the game (2026-11-05, the owner: stuck in it)", () => {
+  const { gm, esc } = make({ journalKey: true });
+  let t = Date.now(); gm.greymarchPauseTick(t);
+  esc(); gm.greymarchPauseTick(t += 16); assert.strictEqual(gm.greymarchPauseOn, true);
+  gm.greymarchPauseShownAt = Date.now() - 2000;
+  gm.greymarchBrowserMessage({ arguments: ["greymarch", JSON.stringify({ type: "pause-close" })] });
+  assert.strictEqual(gm.greymarchPauseOn, false, "closed by the page");
+  esc(); gm.greymarchPauseTick(Date.now() + 16);
+  assert.strictEqual(gm.greymarchPauseOn, false, "the same Esc reaching the game leaves it closed");
+});
+
+test("the game's own meters are also moved far off the screen while ours show, and put back in their place after (2026-11-05, the owner: the old bars flashed under ours)", () => {
+  const { gm } = make();
+  const nums = { "_root.HUDMovieBaseInstance.Health._y": 650, "_root.HUDMovieBaseInstance.Magica._y": 650, "_root.HUDMovieBaseInstance.Stamina._y": 650 };
+  gm.sp.Ui.setBool = () => {}; gm.sp.Ui.getBool = () => true;
+  gm.sp.Ui.getNumber = (m, k) => nums[k]; gm.sp.Ui.setNumber = (m, k, v) => { nums[k] = v; };
+  gm.sp.Game.getPlayer = () => ({ getActorValuePercentage: () => 1 });
+  gm.greymarchHudToPage = () => {};
+  gm.greymarchChatOn = true;
+  const t = Date.now() + 10000;
+  gm.greymarchVitalsTick(t);
+  assert.ok(Object.values(nums).every((y) => y < -10000), "all three off the screen");
+  gm.greymarchVitalsTick(t + 150);
+  assert.ok(Object.values(nums).every((y) => y < -10000), "and kept there");
+  gm.greymarchScreenUp = true; gm.greymarchVitalsTick(t + 300);
+  assert.deepStrictEqual(Object.values(nums), [650, 650, 650], "back in their own place when the game's bars come back");
 });
