@@ -4194,11 +4194,13 @@ export class GreymarchBridge {
     // again every half second because the HUD shows them again on its own). They come back whenever our page cannot be seen (the character select is up, or no layer
     // of ours keeps the browser on), so a player is never left without bars.
     greymarchVitalsTick(now: number): any {
+        var ours = !this.greymarchScreenUp && !!(this.greymarchChatOn || this.greymarchHudOn);
+        // EVERY FRAME (2026-11-05, the owner: closing the inventory, the map or the magic menu flashed the old bars): the HUD shows its meters again the moment a
+        // menu closes, so they are hidden again on every frame, not every tenth of a second
+        if (ours) this.greymarchVitalsGame(false);
+        else if (this.greymarchVitalsHidden) this.greymarchVitalsGame(true);
         if (now < (this.greymarchVitalsNext || 0)) return;
         this.greymarchVitalsNext = now + 100;
-        var ours = !this.greymarchScreenUp && !!(this.greymarchChatOn || this.greymarchHudOn);
-        if (ours && now >= (this.greymarchVitalsHideNext || 0)) { this.greymarchVitalsHideNext = now + 100; this.greymarchVitalsGame(false); } // every tenth of a second (was half a second: the old bars flashed between)
-        else if (!ours && this.greymarchVitalsHidden) this.greymarchVitalsGame(true);
         if (!ours) { if (this.greymarchVitalsSent) { this.greymarchVitalsSent = null; this.greymarchHudToPage("vitals", { off: true }); } return; }
         var player: any = null, v: any = null;
         try {
@@ -4225,6 +4227,7 @@ export class GreymarchBridge {
             try {
                 if (!show) {
                     var y = Number(ui.getNumber("HUD Menu", clip + "._y"));
+                    if (isFinite(y) && y > VITALS_AWAY_Y / 2 && ys[names[i]] !== undefined && (this.greymarchVitalsBackSaid = (this.greymarchVitalsBackSaid || 0) + 1) <= 12) this.greymarchCrumb("vitals: the HUD put " + names[i] + " back on screen (y " + Math.round(y) + ")"); // the HUD moved it back itself: noted, to learn when
                     if (isFinite(y) && y > VITALS_AWAY_Y / 2) ys[names[i]] = y; // its own place, before it was moved
                     if (ys[names[i]] !== undefined && y !== VITALS_AWAY_Y) ui.setNumber("HUD Menu", clip + "._y", VITALS_AWAY_Y);
                 } else if (ys[names[i]] !== undefined) { ui.setNumber("HUD Menu", clip + "._y", ys[names[i]]); delete ys[names[i]]; }
