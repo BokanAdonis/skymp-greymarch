@@ -5448,7 +5448,9 @@ export class GreymarchBridge {
         // GETTING UP FROM ANY POSE (2026-11-03, the owner: someone floated again after getting up): lying down, wounded on the ground ... also have a getting-up
         // animation, and going back to first person in the middle of it left the body floating, as with sitting. Third person stays for SIT_RESET_MS after any
         // emote that lasted (greymarchEmotePovLock), then first person if they were in it.
-        else if (!cur.meal && cur.kind !== "once") this.greymarchEmotePovUntil = Math.max(this.greymarchEmotePovUntil || 0, Date.now() + (emoteMod.GETUP_MS[cur.id] || SIT_RESET_MS));
+        // HELD UNTIL THE STAND-UP IS OVER (2026-11-05, the owner: scrolling while pressing W put them in first person the moment the 2 s ran out, mid stand-up,
+        // and they floated through walls): each pose holds third person (the mouse wheel and F do nothing) for its own getting-up time (emotes.ts GETUP_MS)
+        if (!cur.meal && cur.kind !== "once") this.greymarchEmotePovUntil = Math.max(this.greymarchEmotePovUntil || 0, Date.now() + (emoteMod.GETUP_MS[cur.id] || SIT_RESET_MS));
         if (cur.resume && why === "done eating") this.greymarchEmoteNow = { id: cur.resume.id, kind: cur.resume.kind, stop: cur.resume.stop, stopEvent: cur.resume.stopEvent, at: Date.now() }; // a meal on an edge: still sitting there
     }
     // THE CONSOLE (~). SkyrimPlatform's findConsoleCommand swaps a command's code for ours, and ours answering false means the game's own never runs:

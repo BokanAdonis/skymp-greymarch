@@ -918,7 +918,8 @@ test("sitting in first person: back to first person only after the stand-up is o
   s.tick(1500); assert.strictEqual(s.state.cam, 9, "and while it plays");
   s.tick(600);
   assert.strictEqual(s.log.events.at(-1), "IdleForceDefaultState");
-  assert.strictEqual(s.state.cam, 0, "then first person");
+  assert.strictEqual(s.state.cam, 9, "still third person: the stand-up takes 5 s (2026-11-05)");
+  s.tick(3000); assert.strictEqual(s.state.cam, 0, "then first person");
 });
 
 test("poisons on weapons (2026-11-03): the server says the hit used it, it comes off the blade; a paralysing poison paralyses this player for its seconds, let go after or at death", () => {
@@ -993,8 +994,9 @@ test("a wheel sit leaves the game saying 'sitting' after the stand-up (2026-11-0
   s.key(17, true); s.tick(); s.key(17, false);
   s.tick(2100);
   assert.strictEqual(s.log.events.at(-1), "IdleForceDefaultState", "stood up: back to normal although the game still says sitting");
-  const n = s.log.events.length; s.state.cam = 0; s.tick();
-  assert.strictEqual(s.log.events.length, n + 1, "and again on scrolling into first person");
+  s.state.cam = 0; s.tick(); assert.strictEqual(s.state.cam, 9, "scrolling mid stand-up: back to third at once (2026-11-05)");
+  s.tick(3000); const n = s.log.events.length; s.state.cam = 0; s.tick();
+  assert.strictEqual(s.log.events.length, n + 1, "and again on scrolling into first person once it is over");
   const c = make(); c.state.refuse = true;
   c.page({ type: "emote", id: "hey" }); c.tick(); c.state.speed = 100; for (let i = 0; i < 20; i++) c.tick(50); c.state.speed = 0; c.tick(2100);
   c.state.furn = 0x1234; c.state.sitState = 3; c.state.cam = 0; c.tick();
@@ -1006,7 +1008,7 @@ test("scrolling into first person right after an emote puts the body back to nor
   s.page({ type: "emote", id: "lie" }); s.tick();
   s.state.speed = 100; for (let i = 0; i < 20; i++) s.tick(50); s.state.speed = 0;
   s.state.cam = 0; s.tick(); assert.strictEqual(s.state.cam, 9, "still locked: the wheel's first person is put back");
-  s.tick(4100); assert.strictEqual(s.log.pov.at(-1)[0], "on", "the lock let go");
+  s.tick(5100); assert.strictEqual(s.log.pov.at(-1)[0], "on", "the lock let go");
   assert.ok(!s.log.events.includes("IdleForceDefaultState"), "in third person: the body is left alone");
   s.state.cam = 0; s.tick();
   assert.strictEqual(s.log.events.at(-1), "IdleForceDefaultState", "first person: the body is put back to normal at once");

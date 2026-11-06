@@ -91,7 +91,7 @@ export const EMOTE_GROUPS: EmoteGroup[] = [
 export const EAT_SECONDS = 5;
 // GETTING UP TAKES LONGER FROM THE GROUND (2026-11-05, the owner: people still scroll into first person after an emote and float through walls): lying down and the
 // wounded poses take longer than 2 s to stand up from, so first person stays off this long after they end (bridge.ts greymarchEmoteEnd); every other emote 2 s
-export const GETUP_MS: { [id: string]: number } = { lie: 4000, wounded2: 4000, wounded3: 4000, cower: 3000 };
+export const GETUP_MS: { [id: string]: number } = { sit: 5000, sitledge: 5000, lie: 5000, wounded2: 5000, wounded3: 5000, cower: 3000 }; // sitting too (2026-11-05, the owner: 2 s let them scroll into first person mid stand-up)
 // EATING SITTING DOWN (2026-11-02, the owner: "if you are sitting down and you eat or drink you still do an animation sitting down"). Seated in a chair or on a bench
 // (the game's GetSitting 3) or on an edge (the wheel's "sitledge"), food and drinks play the game's own seated idles instead of the standing ones: ChairEatingStart
 // (065D06) and ChairDrinkingStart (065D07), the ones the NPCs at an inn table use. Both end with the event IdleStop (the chair graph: ChairEatingState / ChairDrinkingState -> IdleStop -> the seated idle; ChairEatingStop is not
