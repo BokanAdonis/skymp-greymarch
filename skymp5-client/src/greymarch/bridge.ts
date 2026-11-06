@@ -41,6 +41,8 @@ const SHAPE_SILENCE_MS = 20000; // a creature form: with no word from the server
 const POISON_GLOW_SHADER = 0x5d606; // EnchGreenFXShader (Skyrim.esm): the green glow the game puts on an enchanted weapon, for a poisoned blade (greymarchPoisonGlowTick)
 const SIT_RESET_MS = 2000; // standing up from the wheel's sitting: the body is put back to normal this long after the stand-up starts (greymarchSitResetTick)
 const WORK_SHEATHE_MS = 1500; // profession work: the kneel waits this long after the weapon is put away (the put-away animation ends first)
+const SEAT_TAKE_MS = 1500; // the wheel's sitting: the hidden seat is used within this long, or the old way is used (greymarchSeatTick)
+const SEAT_DROP_MS = 4000; // and it is taken away this long after they get up
 const UNSTICK_AFTER_MS = 300; // after the body reset: the player is moved onto their own spot this long later (greymarchUnstickTick)
 const EMOTE_POV_WATCH_MS = 10000; // after an emote's camera lock lets go: going into first person within this long puts the body back to normal (greymarchEmotePovLock)
 const EMOTE_ONCE_POV_MS = 5000; // a one-off emote (a wave, a bow): first person stays off this long (greymarchEmotePovLock)
@@ -4870,6 +4872,7 @@ export class GreymarchBridge {
                 if (cur.meal) { this.greymarchEmoteStopWanted = 0; if (player.isDead()) stopWhy = "died"; } // a meal lasts its full time: moving, a weapon or Stop do not end it (the controls are locked)
                 else if (player.isWeaponDrawn()) stopWhy = "weapon drawn";
                 else if (cur.kind === "loop" && now - cur.at > 700 && player.getAnimationVariableFloat("Speed") > 30) stopWhy = "moved";
+                else if (this.greymarchSeat && this.greymarchSeat.id === cur.id && this.greymarchSeat.state === "sat" && !this.greymarchInRealSeat(player)) stopWhy = "stood up"; // got up out of the hidden seat (moving does that by itself)
             } catch (e) { /* asked again in a moment */ }
         }
         if (stopWhy) this.greymarchEmoteEnd(stopWhy);
@@ -5176,7 +5179,57 @@ export class GreymarchBridge {
         try { out.push("cam " + this.sp.Game.getCameraState()); } catch (e) { /* not known */ }
         return out.join(", ");
     }
+    // A REAL SEAT FOR THE WHEEL'S SITTING (2026-11-05, the owner: after standing up they could still scroll into first person and float through walls, the body
+    // reset and the move onto their own spot done: the log had the game still saying "seated" afterwards). Sitting by the animation event alone leaves the game
+    // thinking the player sits in a chair that is not there, and nothing clears that. So the wheel's sitting places the game's own invisible sitting spot
+    // (SitCrossLeggedMarkerNoSandbox, SitLedgeMarker: the ones NPCs sit on) where the player stands, facing their way, and has them use it: a real seat, which
+    // the game stands them up from properly. If it is not taken within SEAT_TAKE_MS, the old way (the animation event). The seat goes SEAT_DROP_MS after they get up.
+    greymarchSeatPlace(player: any, em: any): boolean {
+        var sp = this.sp, baseId = emoteMod.SEAT_MARKERS[em.id];
+        if (!baseId) return false;
+        try {
+            if (this.greymarchInRealSeat(player)) return false; // already in a seat
+            if (this.greymarchSeat) this.greymarchSeatDrop("a new seat");
+            var base = sp.Game.getFormEx(baseId);
+            var ref = base ? player.placeAtMe(base, 1, false, false) : null;
+            if (!ref) return false;
+            try { ref.setAngle(0, 0, player.getAngleZ()); } catch (aErr) { /* faces north: they turn to it */ }
+            this.greymarchSeat = { ref: ref, id: em.id, event: em.event, at: Date.now(), state: "placed" };
+            this.greymarchCrumb("seat: placed for " + em.id);
+            return true;
+        } catch (err) { this.greymarchCrumb("seat: could not place (" + err + ")"); return false; }
+    }
+    greymarchSeatDrop(why: string): any {
+        var st = this.greymarchSeat; this.greymarchSeat = null;
+        if (!st) return;
+        try { st.ref.disable(false); st.ref.delete(); } catch (e) { /* gone with the cell */ }
+        this.greymarchCrumb("seat: taken away (" + why + ")");
+    }
+    greymarchSeatTick(now: number): any {
+        var st = this.greymarchSeat;
+        if (!st) return;
+        var sp = this.sp, cur = this.greymarchEmoteNow;
+        if (st.state === "drop") { if (now >= st.dropAt) this.greymarchSeatDrop("stood up"); return; }
+        if (!cur || cur.id !== st.id) { this.greymarchSeatDrop("the emote ended"); return; }
+        var player: any = null; try { player = sp.Game.getPlayer(); } catch (e) { return; }
+        var fallback = (why: string) => { // the old way: the sitting animation without a seat
+            this.greymarchSeatDrop(why);
+            try { sp.Debug.sendAnimationEvent(player, st.event); } catch (e) { /* not sitting */ }
+        };
+        if (st.state === "placed") {
+            var loaded = false; try { loaded = !!st.ref.is3DLoaded(); } catch (lErr) { loaded = false; }
+            if (!loaded && now - st.at < SEAT_TAKE_MS) return;
+            try { st.ref.activate(player, false); st.state = "asked"; st.askedAt = now; } catch (aErr) { fallback("could not use it: " + aErr); }
+            return;
+        }
+        if (st.state === "asked") {
+            var f: any = null; try { f = player.getFurnitureReference(); } catch (fErr) { f = null; }
+            if (f && (f.getFormID() >>> 0) === (st.ref.getFormID() >>> 0)) { st.state = "sat"; this.greymarchCrumb("seat: sitting in it (" + this.greymarchBodyState(player) + ")"); }
+            else if (now - st.askedAt > SEAT_TAKE_MS) fallback("not taken");
+        }
+    }
     greymarchSitResetTick(now: number): any {
+        this.greymarchSeatTick(now);
         this.greymarchUnstickTick(now);
         var at = this.greymarchSitResetAt;
         if (!at || now < at) return;
@@ -5208,8 +5261,11 @@ export class GreymarchBridge {
             this.greymarchEmotePovNote(); try { sp.Game.forceThirdPerson(); } catch (tpErr) { /* the emote still plays */ }
             var idle = sp.Idle.from(sp.Game.getFormEx(em.idle));
             this.greymarchCrumb("emote " + em.id + " idle " + (Number(em.idle) >>> 0).toString(16));
-            ok = !!idle && !!player.playIdle(idle);
-            if (!ok && em.event) { sp.Debug.sendAnimationEvent(player, em.event); ok = true; } // a sitting idle asks for a seat: its own event sits anywhere (emotes.ts, SITTING DOWN)
+            if (em.event && this.greymarchSeatPlace(player, em)) ok = true; // a hidden seat to sit in (greymarchSeatTick)
+            else {
+                ok = !!idle && !!player.playIdle(idle);
+                if (!ok && em.event) { sp.Debug.sendAnimationEvent(player, em.event); ok = true; } // a sitting idle asks for a seat: its own event sits anywhere (emotes.ts, SITTING DOWN)
+            }
         } catch (err) { ok = false; }
         var n = this.greymarchEmoteLogged = (this.greymarchEmoteLogged || 0) + 1;
         if (n <= 20) this.greymarchLog("emote: " + em.id + " (idle " + em.idle.toString(16) + ", " + em.kind + ") " + (ok ? "played" : "refused by the game"));
@@ -5472,14 +5528,24 @@ export class GreymarchBridge {
         if (!cur) return;
         if (cur.meal) this.greymarchMealLock(false, why);
         this.greymarchCrumb("emote end " + cur.id + " (" + why + ")");
+        var seat = this.greymarchSeat && this.greymarchSeat.id === cur.id && this.greymarchSeat.state !== "drop" ? this.greymarchSeat : null; // sat in a hidden seat
+        var seated = false;
         try {
             var player = sp.Game.getPlayer();
-            var idle = cur.stop ? sp.Idle.from(sp.Game.getFormEx(cur.stop)) : null; // stop 0: the stop event only (a seated meal)
-            var ok = !!idle && !!player.playIdle(idle);
-            if (!ok) sp.Debug.sendAnimationEvent(player, cur.stopEvent ? cur.stopEvent : cur.stop === emoteMod.OFFSET_STOP ? "OffsetStop" : cur.stop === emoteMod.DRUNK_STOP ? "DrunkStop" : "IdleStop"); // the stop event itself
+            seated = !!seat && this.greymarchInRealSeat(player);
+            if (!seat || seated) { // out of a hidden seat already (they stood up themselves): nothing to stop
+                var idle = cur.stop ? sp.Idle.from(sp.Game.getFormEx(cur.stop)) : null; // stop 0: the stop event only (a seated meal)
+                var ok = !!idle && !!player.playIdle(idle);
+                if (!ok) sp.Debug.sendAnimationEvent(player, cur.stopEvent ? cur.stopEvent : cur.stop === emoteMod.OFFSET_STOP ? "OffsetStop" : cur.stop === emoteMod.DRUNK_STOP ? "DrunkStop" : "IdleStop"); // the stop event itself
+            }
         } catch (err) { /* the next movement ends it anyway */ }
         if ((this.greymarchEmoteLogged || 0) <= 20) this.greymarchLog("emote: " + cur.id + " ended (" + why + ")");
-        if (cur.stopEvent === "IdleChairExitStart") this.greymarchSitResetAt = Date.now() + SIT_RESET_MS; // STANDING UP CLEANLY (greymarchSitResetTick)
+        if (seat) { // the game stands them up out of a real seat itself: third person while it does, and the seat taken away after
+            seat.state = "drop"; seat.dropAt = Date.now() + SEAT_DROP_MS;
+            this.greymarchEmotePovUntil = Math.max(this.greymarchEmotePovUntil || 0, Date.now() + SIT_RESET_MS);
+            this.greymarchCrumb("seat: standing up (" + (seated ? "from the seat" : "already up") + ")");
+        }
+        else if (cur.stopEvent === "IdleChairExitStart") this.greymarchSitResetAt = Date.now() + SIT_RESET_MS; // STANDING UP CLEANLY (greymarchSitResetTick)
         // GETTING UP FROM ANY POSE (2026-11-03, the owner: someone floated again after getting up): lying down, wounded on the ground ... also have a getting-up
         // animation, and going back to first person in the middle of it left the body floating, as with sitting. Third person stays for SIT_RESET_MS after any
         // emote that lasted (greymarchEmotePovLock), then first person if they were in it.
