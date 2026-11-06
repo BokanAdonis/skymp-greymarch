@@ -41,6 +41,7 @@ const SHAPE_SILENCE_MS = 20000; // a creature form: with no word from the server
 const POISON_GLOW_SHADER = 0x5d606; // EnchGreenFXShader (Skyrim.esm): the green glow the game puts on an enchanted weapon, for a poisoned blade (greymarchPoisonGlowTick)
 const SIT_RESET_MS = 2000; // standing up from the wheel's sitting: the body is put back to normal this long after the stand-up starts (greymarchSitResetTick)
 const WORK_SHEATHE_MS = 1500; // profession work: the kneel waits this long after the weapon is put away (the put-away animation ends first)
+const EMOTE_POV_WATCH_MS = 10000; // after an emote's camera lock lets go: going into first person within this long puts the body back to normal (greymarchEmotePovLock)
 const EMOTE_ONCE_POV_MS = 5000; // a one-off emote (a wave, a bow): first person stays off this long (greymarchEmotePovLock)
 const WOLF_BACK_GRACE_MS = 2000; // Z changes back, but not in the first 2 seconds after the body changed
 const STANDUP_FALLBACK_MS = 1500; // greymarchStandUp: still in the furniture this long after the get-up animation was asked for, the player is snapped to standing
@@ -5036,13 +5037,21 @@ export class GreymarchBridge {
             this.greymarchEmotePovLocked = true; this.greymarchEmotePovAgainAt = now + 1000;
             return;
         }
+        // FIRST PERSON AFTER AN EMOTE (2026-11-05, the owner: people scroll into first person right after an emote and float about, through walls): first
+        // person while the body is still in an emote's pose (or half out of it) leaves the camera loose from the body. For EMOTE_POV_WATCH_MS after the lock
+        // lets go, the first frame in first person puts the body back to its normal state (greymarchBodyReset), as standing up from sitting does
+        if (now < (this.greymarchEmotePovWatchUntil || 0)) {
+            var ws = -1; try { ws = Number(sp.Game.getCameraState()); } catch (wsErr) { ws = -1; }
+            if (ws === 0) { this.greymarchEmotePovWatchUntil = 0; this.greymarchBodyReset("first person after an emote"); }
+        }
         if (!this.greymarchEmotePovLocked) { this.greymarchEmotePovBack = null; return; } // an emote the game refused: nothing to go back to
         this.greymarchEmotePovLocked = false;
+        this.greymarchEmotePovWatchUntil = now + EMOTE_POV_WATCH_MS;
         var back = this.greymarchEmotePovBack === true; this.greymarchEmotePovBack = null;
         var fx = this.greymarchFxHave;
         if (this.greymarchWolfOn || this.greymarchShapeOn || (fx && fx.frozen)) return; // those hold the camera switch themselves
         try { sp.Game.enablePlayerControls(false, false, true, false, false, false, false, false, 0); } catch (e) { /* nothing else to try */ }
-        if (back) { try { sp.Game.forceFirstPerson(); } catch (e) { /* they press F */ } } // they were in first person before it: back to it (2026-11-02, the owner)
+        if (back) { this.greymarchEmotePovWatchUntil = 0; this.greymarchBodyReset("back to first person"); try { sp.Game.forceFirstPerson(); } catch (e) { /* they press F */ } } // they were in first person before it: back to it (2026-11-02, the owner)
         this.greymarchCrumb("emote: first person back");
     }
     // STANDING UP CLEANLY (2026-11-02, the owner: standing up from sitting looked like falling, then they could float around): the wheel's sitting is the game's
@@ -5121,6 +5130,18 @@ export class GreymarchBridge {
                 this.greymarchLog("poison: the paralysis is over");
             }
         }
+    }
+    // the body back to its normal state (the game's IdleForceDefaultState; SkyMP passes it to the other games): not while an emote or a meal is on, a weapon is
+    // out (drawing it already ended the pose), they sit in a real seat, or are dead or a beast
+    greymarchBodyReset(why: string): any {
+        if (this.greymarchEmoteNow || this.greymarchWolfOn || this.greymarchShapeOn) return;
+        try {
+            var player = this.sp.Game.getPlayer();
+            var seat = 0; try { seat = Number(player.getSitState()); } catch (sErr) { seat = 0; }
+            if (seat === 3 || player.isDead() || player.isWeaponDrawn()) return;
+            this.sp.Debug.sendAnimationEvent(player, "IdleForceDefaultState");
+            this.greymarchCrumb("emote: body back to normal (" + why + ")");
+        } catch (err) { /* nothing else to try */ }
     }
     greymarchSitResetTick(now: number): any {
         var at = this.greymarchSitResetAt;
@@ -5422,7 +5443,7 @@ export class GreymarchBridge {
         // GETTING UP FROM ANY POSE (2026-11-03, the owner: someone floated again after getting up): lying down, wounded on the ground ... also have a getting-up
         // animation, and going back to first person in the middle of it left the body floating, as with sitting. Third person stays for SIT_RESET_MS after any
         // emote that lasted (greymarchEmotePovLock), then first person if they were in it.
-        else if (!cur.meal && cur.kind !== "once") this.greymarchEmotePovUntil = Math.max(this.greymarchEmotePovUntil || 0, Date.now() + SIT_RESET_MS);
+        else if (!cur.meal && cur.kind !== "once") this.greymarchEmotePovUntil = Math.max(this.greymarchEmotePovUntil || 0, Date.now() + (emoteMod.GETUP_MS[cur.id] || SIT_RESET_MS));
         if (cur.resume && why === "done eating") this.greymarchEmoteNow = { id: cur.resume.id, kind: cur.resume.kind, stop: cur.resume.stop, stopEvent: cur.resume.stopEvent, at: Date.now() }; // a meal on an edge: still sitting there
     }
     // THE CONSOLE (~). SkyrimPlatform's findConsoleCommand swaps a command's code for ours, and ours answering false means the game's own never runs:

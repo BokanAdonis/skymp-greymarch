@@ -979,7 +979,33 @@ test("getting up from lying down or wounded in first person: back to first perso
     s.state.speed = 100; for (let i = 0; i < 20; i++) s.tick(50); // 1 s: moved, it ended
     assert.strictEqual(s.gm.greymarchEmoteNow, null, id);
     assert.strictEqual(s.state.cam, 9, id + ": still third person while getting up");
-    s.tick(2100);
+    const wait = emotes.GETUP_MS[id] || 2000; // 2026-11-05: longer from the ground
+    s.tick(wait - 300); assert.strictEqual(s.state.cam, 9, id + ": still getting up " + (wait - 300) + " ms on");
+    s.tick(400);
     assert.strictEqual(s.state.cam, 0, id + ": then first person");
+    assert.strictEqual(s.log.events.at(-1), "IdleForceDefaultState", id + ": the body back to normal before first person");
   }
+});
+
+test("scrolling into first person right after an emote puts the body back to normal (2026-11-05, the owner: people floated through walls); not with a weapon out, not long after", () => {
+  const s = make(); // third person throughout
+  s.page({ type: "emote", id: "lie" }); s.tick();
+  s.state.speed = 100; for (let i = 0; i < 20; i++) s.tick(50); s.state.speed = 0;
+  s.state.cam = 0; s.tick(); assert.strictEqual(s.state.cam, 9, "still locked: the wheel's first person is put back");
+  s.tick(4100); assert.strictEqual(s.log.pov.at(-1)[0], "on", "the lock let go");
+  assert.ok(!s.log.events.includes("IdleForceDefaultState"), "in third person: the body is left alone");
+  s.state.cam = 0; s.tick();
+  assert.strictEqual(s.log.events.at(-1), "IdleForceDefaultState", "first person: the body is put back to normal at once");
+  const n = s.log.events.length; s.state.cam = 9; s.tick(); s.state.cam = 0; s.tick();
+  assert.strictEqual(s.log.events.length, n, "once");
+  const o = make(); // a one-off emote
+  o.page({ type: "emote", id: "surrender" }); o.tick(); o.tick(5100);
+  o.state.cam = 0; o.tick(); assert.strictEqual(o.log.events.at(-1), "IdleForceDefaultState", "after a one-off too");
+  const w = make(); // a weapon out
+  w.page({ type: "emote", id: "hey" }); w.tick(); w.state.drawn = true; for (let i = 0; i < 6; i++) w.tick(50); w.tick(2100);
+  w.state.cam = 0; w.tick(); assert.ok(!w.log.events.includes("IdleForceDefaultState"), "drawing the weapon already ended the pose");
+  const l = make(); // long after
+  l.page({ type: "emote", id: "hey" }); l.tick(); l.state.speed = 100; for (let i = 0; i < 20; i++) l.tick(50); l.state.speed = 0; l.tick(2100);
+  l.tick(11000); l.state.cam = 0; l.tick();
+  assert.ok(!l.log.events.includes("IdleForceDefaultState"), "10 s later it is ordinary first person");
 });
