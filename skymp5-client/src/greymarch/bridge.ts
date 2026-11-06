@@ -2577,6 +2577,7 @@ export class GreymarchBridge {
     // list holds only a placeholder beard (2026-11-05, the other player's log: "KhajiitNoBeard"), so the beard was never found on others.
     greymarchBeard(ac: any, masked: boolean, now: number, drawn?: number[]): any {
         var id = ac.getFormID() >>> 0;
+        try { this.greymarchBeardSwap(ac, masked, now, drawn); } catch (e) { /* the scale below still hides it */ }
         var all = this.greymarchBeardSt || (this.greymarchBeardSt = {});
         var s = all[id] || (all[id] = { masked: false, at: 0, names: [] });
         if (!masked && !s.masked) return;
@@ -2610,6 +2611,51 @@ export class GreymarchBridge {
         if (masked !== s.masked && (this.greymarchBeardSaid = (this.greymarchBeardSaid || 0) + 1) <= 20) this.greymarchCrumb("beard " + id.toString(16) + (masked ? " hidden under a mask (" + s.names.join(", ") + ")" : " back"));
         s.masked = masked; s.at = now + 2000;
         if (!masked) delete all[id];
+    }
+    // THE BEARD SWAPPED OUT (2026-11-05, the owner: "I still see it" when scrolling out, and others still saw it): scaling the beard down only reaches the
+    // copy of the head the game hands back by name, and a rebuilt head (a camera switch) was drawn with its beard. While a mask is worn the beard itself is now
+    // changed for the game's own blank one (HumanBeard00NoBeard; a Khajiit's KhajiitNoBeard), so every head the game builds has none; the character's own
+    // beard is put back when the mask comes off, and while this player's race menu is open (so it is never saved without it). Looked at again every 2 s: a
+    // head the server's look was put on again gets the blank one again.
+    greymarchBeardSwap(ac: any, masked: boolean, now: number, drawn?: number[]): any {
+        var sp = this.sp, id = ac.getFormID() >>> 0;
+        var all = this.greymarchSwapSt || (this.greymarchSwapSt = {});
+        var s = all[id];
+        if (id === 0x14) { try { if (sp.Ui.isMenuOpen("RaceSex Menu")) masked = false; } catch (e) { /* as worn */ } }
+        if (!masked && !s) return;
+        if (masked && s && now < s.next) return;
+        var BLANKS = [0xf5009, 0xee855]; // HumanBeard00NoBeard, KhajiitNoBeard (Skyrim.esm)
+        var race = ""; try { var r = ac.getRace(); race = r ? String(r.getName() || "") : ""; } catch (e) { race = ""; }
+        var blankId = /khajiit/i.test(race) ? 0xee855 : 0xf5009;
+        var baseIds = this.greymarchHeadPartIds(ac);
+        var mainBeard = (ids: number[]): number => {
+            for (var i = 0; i < ids.length; i++) {
+                if (BLANKS.indexOf(ids[i]) >= 0) continue;
+                try { var hp = sp.HeadPart.from(sp.Game.getFormEx(ids[i])); if (hp && hp.getType() === 4 && !hp.isExtraPart()) return ids[i]; } catch (e) { /* the next */ }
+            }
+            return 0;
+        };
+        if (masked) {
+            var known = baseIds.slice(); if (Array.isArray(drawn)) drawn.forEach(function (d) { var n = Number(d) >>> 0; if (n && known.indexOf(n) < 0) known.push(n); });
+            var own = mainBeard(drawn && drawn.length ? (drawn as number[]).map(function (d) { return Number(d) >>> 0; }) : baseIds) || mainBeard(known);
+            if (!s) { if (!own) { all[id] = { orig: 0, next: now + 2000 }; return; } s = all[id] = { orig: own, next: 0 }; }
+            s.next = now + 2000;
+            if (!s.orig) return; // no beard to hide
+            if (baseIds.indexOf(blankId) >= 0 && !mainBeard(baseIds)) return; // the blank one is on
+            var blank = sp.HeadPart.from(sp.Game.getFormEx(blankId));
+            if (!blank) return;
+            ac.changeHeadPart(blank);
+            if (id === 0x14) { try { ac.regenerateHead(); } catch (e) { /* drawn at the next update */ } }
+            if ((this.greymarchSwapSaid = (this.greymarchSwapSaid || 0) + 1) <= 30) this.greymarchCrumb("beard " + id.toString(16) + ": " + (s.orig >>> 0).toString(16) + " swapped for the blank one under the mask");
+            return;
+        }
+        delete all[id];
+        if (!s.orig) return;
+        var back = sp.HeadPart.from(sp.Game.getFormEx(s.orig));
+        if (!back) return;
+        ac.changeHeadPart(back);
+        if (id === 0x14) { try { ac.regenerateHead(); } catch (e) { /* drawn at the next update */ } }
+        if ((this.greymarchSwapSaid = (this.greymarchSwapSaid || 0) + 1) <= 30) this.greymarchCrumb("beard " + id.toString(16) + ": " + (s.orig >>> 0).toString(16) + " put back");
     }
     greymarchDressTick(now: number): any {
         var gl: any = Function("return this")();
