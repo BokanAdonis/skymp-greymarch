@@ -5137,8 +5137,8 @@ export class GreymarchBridge {
         if (this.greymarchEmoteNow || this.greymarchWolfOn || this.greymarchShapeOn) return;
         try {
             var player = this.sp.Game.getPlayer();
-            var seat = 0; try { seat = Number(player.getSitState()); } catch (sErr) { seat = 0; }
-            if (seat === 3 || player.isDead() || player.isWeaponDrawn()) return;
+            var skip = this.greymarchInRealSeat(player) ? "in a real seat" : player.isDead() ? "dead" : player.isWeaponDrawn() ? "weapon out" : "";
+            if (skip) { this.greymarchCrumb("emote: body left as it is (" + why + ": " + skip + ")"); return; }
             this.sp.Debug.sendAnimationEvent(player, "IdleForceDefaultState");
             this.greymarchCrumb("emote: body back to normal (" + why + ")");
         } catch (err) { /* nothing else to try */ }
@@ -5150,11 +5150,16 @@ export class GreymarchBridge {
         if (this.greymarchEmoteNow || this.greymarchWolfOn || this.greymarchShapeOn) return;
         try {
             var player = this.sp.Game.getPlayer();
-            var seat = 0; try { seat = Number(player.getSitState()); } catch (sErr) { seat = 0; }
-            if (seat === 3 || player.isDead()) return;
+            if (this.greymarchInRealSeat(player) || player.isDead()) { this.greymarchCrumb("sit: body left as it is (a real seat, or dead)"); return; }
             this.sp.Debug.sendAnimationEvent(player, "IdleForceDefaultState");
             this.greymarchCrumb("sit: stood up, body back to normal");
         } catch (err) { /* nothing else to try */ }
+    }
+    // IN A REAL SEAT (2026-11-05, the owner: still floating after standing up): asked of the seat itself (the chair or bench the player uses), not the game's
+    // sitting state. The wheel's sitting puts the body in that same state with no seat at all, and it stays there after the stand-up, so the body was never
+    // put back to normal after a wheel sit (the reset took it for a chair).
+    greymarchInRealSeat(player: any): boolean {
+        try { return !!player.getFurnitureReference(); } catch (e) { return false; }
     }
     greymarchEmotePlay(em: any): any {
         var sp = this.sp;

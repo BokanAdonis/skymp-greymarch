@@ -905,7 +905,7 @@ test("standing up from sitting puts the body back to normal 2 seconds later (202
   e.state.refuse = false; e.page({ type: "emote", id: "hey" }); e.tick();
   e.tick(2500); assert.ok(!e.log.events.includes("IdleForceDefaultState"), "another emote meanwhile: left alone");
   const c = make(); c.state.refuse = true;
-  c.page({ type: "emote", id: "sit" }); c.tick(); c.key(17, true); c.tick(); c.state.sitState = 3;
+  c.page({ type: "emote", id: "sit" }); c.tick(); c.key(17, true); c.tick(); c.state.sitState = 3; c.state.furn = 0x1234;
   c.tick(2500); assert.ok(!c.log.events.includes("IdleForceDefaultState"), "in a real seat: left alone");
 });
 
@@ -985,6 +985,20 @@ test("getting up from lying down or wounded in first person: back to first perso
     assert.strictEqual(s.state.cam, 0, id + ": then first person");
     assert.strictEqual(s.log.events.at(-1), "IdleForceDefaultState", id + ": the body back to normal before first person");
   }
+});
+
+test("a wheel sit leaves the game saying 'sitting' after the stand-up (2026-11-05, the owner: still floating): the body is put back to normal all the same; only a real seat (a chair the player uses) is left alone", () => {
+  const s = make(); s.state.refuse = true;
+  s.page({ type: "emote", id: "sit" }); s.tick(); s.state.sitState = 3; // the sitting state, with no seat
+  s.key(17, true); s.tick(); s.key(17, false);
+  s.tick(2100);
+  assert.strictEqual(s.log.events.at(-1), "IdleForceDefaultState", "stood up: back to normal although the game still says sitting");
+  const n = s.log.events.length; s.state.cam = 0; s.tick();
+  assert.strictEqual(s.log.events.length, n + 1, "and again on scrolling into first person");
+  const c = make(); c.state.refuse = true;
+  c.page({ type: "emote", id: "hey" }); c.tick(); c.state.speed = 100; for (let i = 0; i < 20; i++) c.tick(50); c.state.speed = 0; c.tick(2100);
+  c.state.furn = 0x1234; c.state.sitState = 3; c.state.cam = 0; c.tick();
+  assert.ok(!c.log.events.includes("IdleForceDefaultState"), "sat in a chair since: left alone");
 });
 
 test("scrolling into first person right after an emote puts the body back to normal (2026-11-05, the owner: people floated through walls); not with a weapon out, not long after", () => {
