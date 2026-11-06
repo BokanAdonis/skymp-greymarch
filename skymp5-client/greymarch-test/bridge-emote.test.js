@@ -875,14 +875,14 @@ test("sitting down (2026-10-30): the game refuses the sitting idle away from a s
   const s = make();
   s.state.refuse = true; // GetSitting == 2: playIdle says no on open ground
   s.page({ type: "emote", id: "sit" }); s.tick();
-  assert.deepStrictEqual(s.log.idles, [], "a hidden seat first (2026-11-05): this game cannot use it, so");
-  assert.deepStrictEqual(s.log.events, ["IdleSitCrossLeggedEnter"], "the sitting event, as before");
+  assert.deepStrictEqual(s.log.idles, [0xc4ef9], "IdleSitCrossLeggedEnter tried first");
+  assert.deepStrictEqual(s.log.events, ["IdleSitCrossLeggedEnter"]);
   assert.ok(!s.log.notes.includes("You cannot do that right now"));
   assert.strictEqual(s.gm.greymarchEmoteNow.id, "sit");
   s.chopTick();
   assert.deepStrictEqual(s.log.sent.filter((m) => m.customPacketType === "greymarchChop").at(-1), { customPacketType: "greymarchChop", ref: 0, rest: true }, "resting (exhaustion.js)");
   s.key(17, true); s.tick();
-  assert.deepStrictEqual(s.log.idles, [0xc4efa], "IdleSitCrossLeggedExit tried");
+  assert.deepStrictEqual(s.log.idles, [0xc4ef9, 0xc4efa], "IdleSitCrossLeggedExit tried");
   assert.deepStrictEqual(s.log.events, ["IdleSitCrossLeggedEnter", "IdleChairExitStart"], "then its own event");
   assert.ok(!s.gm.greymarchEmoteNow);
   const l = make();
@@ -1014,35 +1014,6 @@ test("off the invisible chair (2026-11-05, the owner: still floating after the r
   const h = make(); // an emote ended by moving, in third person: nothing (only first person needs it)
   h.page({ type: "emote", id: "hey" }); h.tick(); h.state.speed = 100; for (let i = 0; i < 20; i++) h.tick(50); h.state.speed = 0; h.tick(2100); h.tick(400);
   assert.strictEqual(h.log.movedTo, undefined);
-});
-
-test("the wheel's sitting uses a real hidden seat (2026-11-05, the owner: the game still thought them seated after standing up, so they floated): placed facing their way, used once its 3D is in, stood up from with the exit idle, taken away after", () => {
-  const s = make(); s.state.no3d = true;
-  s.page({ type: "emote", id: "sit" }); s.tick();
-  const g = s.log.ghosts[0];
-  assert.strictEqual(g.base.id, emotes.SEAT_MARKERS.sit, "SitCrossLeggedMarkerNoSandbox placed");
-  assert.deepStrictEqual(s.log.events, [], "no sitting event: the seat does it");
-  g.activate = (who) => { g.usedBy = who; s.state.furn = g.id; };
-  s.state.no3d = false; s.tick(); assert.ok(g.usedBy, "used once its 3D is in");
-  s.tick(); assert.strictEqual(s.gm.greymarchSeat.state, "sat");
-  s.tick(1000); assert.strictEqual(s.gm.greymarchEmoteNow.id, "sit", "still sitting");
-  s.key(17, true); s.tick(); s.key(17, false);
-  assert.deepStrictEqual(s.log.idles, [0xc4efa], "stood up from the seat with the exit idle");
-  assert.ok(!s.log.events.includes("IdleChairExitStart") && !s.log.events.includes("IdleSitCrossLeggedEnter"));
-  s.state.furn = 0; s.tick(2100);
-  assert.ok(!s.log.events.includes("IdleForceDefaultState"), "a real seat needs no reset");
-  assert.strictEqual(g.gone, false, "the seat is still there while they get up");
-  s.tick(2100); assert.strictEqual(g.gone, true, "then taken away"); assert.strictEqual(s.gm.greymarchSeat, null);
-  const u = make(); // they get up by themselves (moving out of a seat does that)
-  u.state.no3d = true; u.page({ type: "emote", id: "sitledge" }); u.tick(); const ug = u.log.ghosts[0]; ug.activate = () => { u.state.furn = ug.id; }; u.state.no3d = false; u.tick(); u.tick(); u.tick(400);
-  assert.strictEqual(ug.base.id, emotes.SEAT_MARKERS.sitledge);
-  u.state.furn = 0; u.tick(300);
-  assert.strictEqual(u.gm.greymarchEmoteNow, null, "up: the emote is over");
-  assert.deepStrictEqual(u.log.idles, [], "nothing more played: they are up already");
-  const n = make(); n.state.no3d = true; // never taken: the old way
-  n.page({ type: "emote", id: "sit" }); n.tick(); const ng = n.log.ghosts[0]; ng.activate = () => {}; n.state.no3d = false; n.tick(); n.tick(1600);
-  assert.deepStrictEqual(n.log.events, ["IdleSitCrossLeggedEnter"], "not taken in 1.5 s: the sitting event");
-  assert.strictEqual(ng.gone, true, "and the seat taken away");
 });
 
 test("scrolling into first person right after an emote puts the body back to normal (2026-11-05, the owner: people floated through walls); not with a weapon out, not long after", () => {
