@@ -41,6 +41,7 @@ const SHAPE_SILENCE_MS = 20000; // a creature form: with no word from the server
 const POISON_GLOW_SHADER = 0x5d606; // EnchGreenFXShader (Skyrim.esm): the green glow the game puts on an enchanted weapon, for a poisoned blade (greymarchPoisonGlowTick)
 const SIT_RESET_MS = 2000; // standing up from the wheel's sitting: the body is put back to normal this long after the stand-up starts (greymarchSitResetTick)
 const WORK_SHEATHE_MS = 1500; // profession work: the kneel waits this long after the weapon is put away (the put-away animation ends first)
+const UNSTICK_AFTER_MS = 300; // after the body reset: the player is moved onto their own spot this long later (greymarchUnstickTick)
 const EMOTE_POV_WATCH_MS = 10000; // after an emote's camera lock lets go: going into first person within this long puts the body back to normal (greymarchEmotePovLock)
 const EMOTE_ONCE_POV_MS = 5000; // a one-off emote (a wave, a bow): first person stays off this long (greymarchEmotePovLock)
 const WOLF_BACK_GRACE_MS = 2000; // Z changes back, but not in the first 2 seconds after the body changed
@@ -5141,9 +5142,42 @@ export class GreymarchBridge {
             if (skip) { this.greymarchCrumb("emote: body left as it is (" + why + ": " + skip + ")"); return; }
             this.sp.Debug.sendAnimationEvent(player, "IdleForceDefaultState");
             this.greymarchCrumb("emote: body back to normal (" + why + ")");
+            this.greymarchUnstickAt = Date.now() + UNSTICK_AFTER_MS;
         } catch (err) { /* nothing else to try */ }
     }
+    // OFF THE INVISIBLE CHAIR (2026-11-05, the owner: still floating through walls in first person after standing up, with the body reset done): the wheel's
+    // sitting is the chair animation without a chair, and the game keeps the player as if seated (no collision, the camera loose from the body) after the
+    // animation is reset. Moving the player onto their own spot (as the console's "player.moveto player" does for someone stuck in an animation) sets the body
+    // and its collision afresh. UNSTICK_AFTER_MS after the reset, so the reset has played; then what the game says about the body is noted for a few seconds.
+    greymarchUnstickTick(now: number): any {
+        var tr = this.greymarchUnstickTrace;
+        if (tr && now >= tr.next) {
+            tr.next = now + 1000; tr.left--;
+            if (tr.left <= 0) this.greymarchUnstickTrace = null;
+            try { this.greymarchCrumb("unstick: " + this.greymarchBodyState(this.sp.Game.getPlayer())); } catch (e) { /* a note */ }
+        }
+        var at = this.greymarchUnstickAt;
+        if (!at || now < at) return;
+        this.greymarchUnstickAt = 0;
+        if (this.greymarchEmoteNow || this.greymarchWolfOn || this.greymarchShapeOn) return;
+        try {
+            var player = this.sp.Game.getPlayer();
+            if (this.greymarchInRealSeat(player) || player.isDead()) return;
+            var before = this.greymarchBodyState(player);
+            player.moveTo(player, 0, 0, 0, true);
+            this.greymarchCrumb("unstick: moved onto their own spot (before: " + before + ")");
+            this.greymarchUnstickTrace = { next: now + 500, left: 5 };
+        } catch (err) { this.greymarchCrumb("unstick: could not move (" + err + ")"); }
+    }
+    greymarchBodyState(player: any): string {
+        var out: string[] = [];
+        try { out.push("sit " + player.getSitState()); } catch (e) { out.push("sit ?"); }
+        try { out.push("animDriven " + player.getAnimationVariableBool("bAnimationDriven")); } catch (e) { /* not known */ }
+        try { out.push("cam " + this.sp.Game.getCameraState()); } catch (e) { /* not known */ }
+        return out.join(", ");
+    }
     greymarchSitResetTick(now: number): any {
+        this.greymarchUnstickTick(now);
         var at = this.greymarchSitResetAt;
         if (!at || now < at) return;
         this.greymarchSitResetAt = 0;
@@ -5153,6 +5187,7 @@ export class GreymarchBridge {
             if (this.greymarchInRealSeat(player) || player.isDead()) { this.greymarchCrumb("sit: body left as it is (a real seat, or dead)"); return; }
             this.sp.Debug.sendAnimationEvent(player, "IdleForceDefaultState");
             this.greymarchCrumb("sit: stood up, body back to normal");
+            this.greymarchUnstickAt = now + UNSTICK_AFTER_MS;
         } catch (err) { /* nothing else to try */ }
     }
     // IN A REAL SEAT (2026-11-05, the owner: still floating after standing up): asked of the seat itself (the chair or bench the player uses), not the game's

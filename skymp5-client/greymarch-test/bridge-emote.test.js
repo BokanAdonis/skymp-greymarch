@@ -1001,6 +1001,21 @@ test("a wheel sit leaves the game saying 'sitting' after the stand-up (2026-11-0
   assert.ok(!c.log.events.includes("IdleForceDefaultState"), "sat in a chair since: left alone");
 });
 
+test("off the invisible chair (2026-11-05, the owner: still floating after the reset): a moment after the body is put back to normal the player is moved onto their own spot; not in a real seat", () => {
+  const s = make(); s.state.refuse = true;
+  s.page({ type: "emote", id: "sit" }); s.tick(); s.key(17, true); s.tick(); s.key(17, false);
+  s.tick(2100); assert.strictEqual(s.log.events.at(-1), "IdleForceDefaultState");
+  assert.strictEqual(s.log.movedTo, undefined, "not at once: the reset plays first");
+  s.tick(400); assert.ok(s.log.movedTo, "then moved onto their own spot");
+  assert.deepStrictEqual(s.log.movedTo.slice(1), [0, 0, 0, true], "no offset, facing kept");
+  const c = make(); c.state.refuse = true;
+  c.page({ type: "emote", id: "sit" }); c.tick(); c.key(17, true); c.tick(); c.state.furn = 0x1234;
+  c.tick(2100); c.tick(400); assert.strictEqual(c.log.movedTo, undefined, "in a real seat: not moved");
+  const h = make(); // an emote ended by moving, in third person: nothing (only first person needs it)
+  h.page({ type: "emote", id: "hey" }); h.tick(); h.state.speed = 100; for (let i = 0; i < 20; i++) h.tick(50); h.state.speed = 0; h.tick(2100); h.tick(400);
+  assert.strictEqual(h.log.movedTo, undefined);
+});
+
 test("scrolling into first person right after an emote puts the body back to normal (2026-11-05, the owner: people floated through walls); not with a weapon out, not long after", () => {
   const s = make(); // third person throughout
   s.page({ type: "emote", id: "lie" }); s.tick();
