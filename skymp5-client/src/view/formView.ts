@@ -1,4 +1,4 @@
-import { Actor, ActorBase, HeadPart, Cell, Race, createText, Debug, destroyText, Form, FormType, Game, Keyword, NetImmerse, ObjectReference, once, printConsole, setTextColor, setTextPos, setTextSize, setTextString, storage, TESModPlatform, Utility, WorldSpace, worldPointToScreenPoint, writeLogs } from "skyrimPlatform";
+import { Actor, ActorBase, HeadPart, Cell, Race, createText, Debug, destroyText, Form, FormType, Game, Keyword, NetImmerse, ObjectReference, once, printConsole, setTextColor, setTextPos, setTextSize, setTextString, storage, TESModPlatform, Ui, Utility, WorldSpace, worldPointToScreenPoint, writeLogs } from "skyrimPlatform";
 import { setDefaultAnimsDisabled, applyAnimation, allowAttackAnim, gmSetCollision } from "../sync/animation";
 const GM_PUPPET_MINE_FRESH_MS = 2500; // the server's word that an animal hunts this player holds this long (it repeats it at least once a second)
 const GM_PUPPET_LOCAL_EVERY_MS = 100; // a hunting animal is moved here this often
@@ -1101,6 +1101,7 @@ export class FormView {
       const maxNicknameDrawDistance = 1000;
       const playerActor = Game.getPlayer()!;
       const isVisibleByPlayer = !model.movement?.isSneaking
+        && !FormView.gmSkyMenuOpen() // GREYMARCH: not while the map or the skills are up (the camera is in the sky there)
         && playerActor.getDistance(refr) <= maxNicknameDrawDistance
         && playerActor.hasLOS(refr)
         && !this.isSweetHidePerson(refr);
@@ -1155,6 +1156,21 @@ export class FormView {
     } else {
       this.removeNickname();
     }
+  }
+
+  // GREYMARCH: NO NAMES OVER THE MAP (2026-11-05, the owner: people near each other could see each other on the map, name and ID). The map and the skills
+  // screen move the camera up into the sky, and the floating names of the characters near the player were still drawn over them. While either is open no
+  // floating name is drawn. Asked of the game at most every 100 ms, for every character at once.
+  private static gmSkyMenuAt = 0;
+  private static gmSkyMenuWas = false;
+  static gmSkyMenuOpen(): boolean {
+    const now = Date.now();
+    if (now - FormView.gmSkyMenuAt < 100) return FormView.gmSkyMenuWas;
+    FormView.gmSkyMenuAt = now;
+    let open = false;
+    try { open = Ui.isMenuOpen("MapMenu") || Ui.isMenuOpen("StatsMenu"); } catch (e) { open = false; }
+    FormView.gmSkyMenuWas = open;
+    return open;
   }
 
   private isSweetHidePerson(refr: ObjectReference): boolean {
