@@ -2994,7 +2994,8 @@ export class GreymarchBridge {
     // CUFFS (guards.js). The server says { customPacketType: "greymarchCuffs", on, bound, gagged, cuffs } to the prisoner: the Prisoner's Cuffs it put in their inventory are
     // worn and cannot be taken off (the server puts them back if they go), the bound-hands pose plays (again every 10 seconds: other animations end it), and both stop on
     // on: false. Every game hears { customPacketType: "greymarchChains", chains: [{ from, to }], cuffed: [actor] }: other players in cuffs are posed too, and a chain is drawn
-    // on the HUD from each prisoner's hands to the hand of whoever holds the chain. Following the chain, through load doors too, is the server's work: it moves the prisoner.
+    // in the world from each prisoner's hands to the hand of whoever holds the chain. The prisoner's own game walks them behind the holder (greymarchLeashTick); through
+    // load doors, or when far behind, the server moves them.
     greymarchCuffsTick(now: number): any {
         var sp = this.sp;
         if (now >= (this.greymarchCuffsNext || 0)) {
@@ -3005,12 +3006,14 @@ export class GreymarchBridge {
                 if (want) {
                     var f = Number(want.cuffs) > 0 ? sp.Game.getFormEx(Number(want.cuffs) >>> 0) : null;
                     if (f && player.getItemCount(f) > 0 && !player.isEquipped(f)) player.equipItem(f, true, true); // preventRemoval: on until the server takes them off
+                    this.greymarchLeashTick(player, want, now);
                     if (!this.greymarchCuffsPosed || now - (this.greymarchCuffsPosedAt || 0) > 10000) {
                         if (!this.greymarchCuffsPosed) this.greymarchLog("guards: in cuffs (" + (want.bound ? "on a chain" : "walking freely") + (want.gagged ? ", gagged" : "") + ")");
                         sp.Debug.sendAnimationEvent(player, "OffsetBoundStandingStart");
                         this.greymarchCuffsPosed = true; this.greymarchCuffsPosedAt = now;
                     }
                 } else if (this.greymarchCuffsPosed) {
+                    this.greymarchLeashTick(player, null, now);
                     this.greymarchCuffsPosed = false;
                     sp.Debug.sendAnimationEvent(player, "OffsetStop");
                     this.greymarchLog("guards: the cuffs are off");
@@ -3037,15 +3040,40 @@ export class GreymarchBridge {
     // model tools/chain-link.js cuts from the ship's anchor chain: 34 units long along +Y, no collision) are placed in this game only and laid end to end, every
     // frame, from the prisoner's right hand to the holder's left hand along a sagging curve: the chain is CHAIN_SLACK longer than the gap (at least CHAIN_EXTRA),
     // so it hangs by about sqrt(3 * gap * (length - gap) / 8) in the middle. Without the record (old game files) the HUD line is drawn as before.
+    // WALKED ON THE CHAIN (2026-11-07, the owner: the prisoner was moved behind the guard again and again, which lagged players; "make it force them to walk"):
+    // while on a chain (want.bound, want.holder: the holder's actor) the prisoner's game takes the controls (setPlayerAIDriven) and keeps them about LEASH_BACK
+    // behind the holder, at a walk (a catch-up radius of 2048: SkyMP's own walk). Off the chain, uncuffed, dead or the holder not drawn here: the controls come back.
+    greymarchLeashTick(player: any, want: any, now: number): any {
+        var sp = this.sp, LEASH_BACK = 110, LEASH_NEAR = 70;
+        var holder = want && want.bound ? Number(want.holder) || 0 : 0;
+        var lead: any = null;
+        if (holder) { var lid = misc.remoteIdToLocalId(holder); if (lid) { try { lead = sp.Actor.from(sp.Game.getFormEx(lid)); } catch (e) { lead = null; } } }
+        var ok = !!lead && lead.is3DLoaded() && !player.isDead() && !this.greymarchWolfOn && !this.greymarchShapeOn;
+        if (ok) {
+            if (!this.greymarchLeashOn) { sp.Game.setPlayerAIDriven(true); this.greymarchLeashOn = true; this.greymarchLeashFor = 0; this.greymarchLog("guards: walked on the chain behind " + holder); }
+            if (this.greymarchLeashFor !== holder || now - (this.greymarchLeashAt || 0) > 4000) { // again now and then: a cell change or a reload drops the order
+                player.keepOffsetFromActor(lead, 0, -LEASH_BACK, 0, 0, 0, 0, 2048, LEASH_NEAR);
+                this.greymarchLeashFor = holder; this.greymarchLeashAt = now;
+            }
+        } else if (this.greymarchLeashOn) {
+            this.greymarchLeashOn = false; this.greymarchLeashFor = 0;
+            try { player.clearKeepOffsetFromActor(); } catch (e) { /* the controls below still come back */ }
+            sp.Game.setPlayerAIDriven(false);
+            this.greymarchLog("guards: off the chain: the controls are back");
+        }
+    }
     greymarchChain3D(now: number): boolean {
         var sp = this.sp, self = this;
-        if (this.greymarchChainBase === undefined) { try { this.greymarchChainBase = sp.Game.getFormFromFile(0x878, "GreymarchCore.esp") || null; } catch (e) { this.greymarchChainBase = null; } }
-        var base = this.greymarchChainBase;
+        // FORM IDS ONLY (2026-11-07, the owner: "replace the rope with a 3D chain"; a player's log: "Invalid _skyrimPlatform_indexInPool" on every frame after
+        // the first): a SkyrimPlatform object is good for the frame it was read in only. The record and every piece are kept as form ids and read again each frame.
+        if (this.greymarchChainBaseId === undefined) { try { var bf = sp.Game.getFormFromFile(0x878, "GreymarchCore.esp"); this.greymarchChainBaseId = bf ? bf.getFormID() >>> 0 : 0; } catch (e) { this.greymarchChainBaseId = 0; } }
+        var base = this.greymarchChainBaseId ? sp.Game.getFormEx(this.greymarchChainBaseId) : null;
+        var refAt = function (id: number) { try { var f = sp.Game.getFormEx(id >>> 0); return f ? sp.ObjectReference.from(f) : null; } catch (e) { return null; } };
         if (!base) { if (!this.greymarchChainSaid) { this.greymarchChainSaid = true; this.greymarchLog("guards: chain: no GM_PrisonerChain (0x878, GreymarchCore.esp) in this game: drawn on the HUD"); } return false; }
         // pieces that never showed (no 3D 2 s after they were placed) or a draw that keeps failing: the HUD line instead, so the chain is always seen (2026-10-27: "the chain is still invisible")
         if (this.greymarchChain3DOff) {
             var left = this.greymarchChainPools || {};
-            for (var lk in left) { for (var li = 0; li < left[lk].refs.length; li++) { try { left[lk].refs[li].disable(false); left[lk].refs[li].delete(); } catch (lErr) { /* gone */ } } }
+            for (var lk in left) { for (var li = 0; li < left[lk].refs.length; li++) { try { var lr = refAt(left[lk].refs[li]); if (lr) { lr.disable(false); lr.delete(); } } catch (lErr) { /* gone */ } } }
             this.greymarchChainPools = {};
             return false;
         }
@@ -3072,8 +3100,8 @@ export class GreymarchBridge {
                 var sig = A.concat(B).map(function (n: number) { return Math.round(n / 2); }).join(",");
                 if (!pool.checked && pool.refs.length && now - pool.made > 2000) {
                     pool.checked = true;
-                    var shown = 0; for (var c = 0; c < pool.refs.length; c++) { try { if (pool.refs[c].is3DLoaded()) shown++; } catch (cErr) { /* gone */ } }
-                    var r0 = pool.refs[0];
+                    var shown = 0; for (var c = 0; c < pool.refs.length; c++) { try { var cr = refAt(pool.refs[c]); if (cr && cr.is3DLoaded()) shown++; } catch (cErr) { /* gone */ } }
+                    var r0 = refAt(pool.refs[0]) || player;
                     this.greymarchLog("guards: chain: " + shown + " of " + pool.refs.length + " pieces have 3D after 2 s (first at " + [r0.getPositionX(), r0.getPositionY(), r0.getPositionZ()].map(function (v: number) { return Math.round(v); }).join(",") + ", prisoner hand at " + A.map(function (v: number) { return Math.round(v); }).join(",") + ")");
                     if (!shown) { this.greymarchChain3DOff = true; this.greymarchLog("guards: chain: no piece is drawn in this game: the HUD line from now on"); }
                 }
@@ -3083,24 +3111,26 @@ export class GreymarchBridge {
                 var sag = Math.sqrt(3 * gap * (length - gap) / 8);
                 var n = Math.min(MAX_PIECES, Math.max(1, Math.ceil(length / PIECE)));
                 var at = function (t: number) { return [A[0] + (B[0] - A[0]) * t, A[1] + (B[1] - A[1]) * t, A[2] + (B[2] - A[2]) * t - sag * 4 * t * (1 - t)]; };
-                while (pool.refs.length < n) { var r = player.placeAtMe(base, 1, false, false); if (!r) break; pool.refs.push(r); }
-                while (pool.refs.length > n) { var old = pool.refs.pop(); try { old.disable(false); old.delete(); } catch (dErr) { /* gone */ } }
+                while (pool.refs.length < n) { var r = player.placeAtMe(base, 1, false, false); if (!r) break; pool.refs.push(r.getFormID() >>> 0); }
+                while (pool.refs.length > n) { var old = refAt(pool.refs.pop()); try { if (old) { old.disable(false); old.delete(); } } catch (dErr) { /* gone */ } }
                 for (var k = 0; k < pool.refs.length; k++) {
                     var p0 = at(k / n), p1 = at((k + 1) / n);
                     var dx = p1[0] - p0[0], dy = p1[1] - p0[1], dz = p1[2] - p0[2];
                     var heading = Math.atan2(dx, dy) * 180 / Math.PI, pitch = -Math.atan2(dz, Math.hypot(dx, dy)) * 180 / Math.PI; // +Y of the piece along the chain (X angle: positive tips it down)
-                    pool.refs[k].setPosition(p0[0], p0[1], p0[2]);
-                    pool.refs[k].setAngle(pitch, 0, heading);
+                    var pr = refAt(pool.refs[k]);
+                    if (!pr) { pool.at = ""; continue; } // a piece went with a cell change: placed again next frame
+                    pr.setPosition(p0[0], p0[1], p0[2]);
+                    pr.setAngle(pitch, 0, heading);
                 }
             } catch (err) {
                 this.greymarchChainErrs = (this.greymarchChainErrs || 0) + 1;
                 if (this.greymarchChainErrs === 1) this.greymarchLog("guards: chain: drawing failed: " + ((err && (err as any).message) || err));
                 if (this.greymarchChainErrs >= 30) { this.greymarchChain3DOff = true; this.greymarchLog("guards: chain: drawing failed 30 times: the HUD line from now on"); }
-                if (pools[key]) { for (var x = 0; x < pools[key].refs.length; x++) { try { pools[key].refs[x].delete(); } catch (xErr) { /* gone */ } } delete pools[key]; } } // a piece went with a cell change: built again next frame
+                if (pools[key]) { for (var x = 0; x < pools[key].refs.length; x++) { try { var xr = refAt(pools[key].refs[x]); if (xr) xr.delete(); } catch (xErr) { /* gone */ } } delete pools[key]; } } // a piece went with a cell change: built again next frame
         }
         for (var key2 in pools) {
             if (seen[key2]) continue;
-            for (var j = 0; j < pools[key2].refs.length; j++) { try { pools[key2].refs[j].disable(false); pools[key2].refs[j].delete(); } catch (dErr2) { /* gone */ } }
+            for (var j = 0; j < pools[key2].refs.length; j++) { try { var jr = refAt(pools[key2].refs[j]); if (jr) { jr.disable(false); jr.delete(); } } catch (dErr2) { /* gone */ } }
             delete pools[key2];
         }
         return true;

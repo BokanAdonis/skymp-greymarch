@@ -16,6 +16,10 @@ test("pieces follow a sagging curve from the prisoner's right hand to the holder
   assert.match(src, /var A = hand\(a, "NPC R Hand \[RHnd\]"\), B = hand\(b, "NPC L Hand \[LHnd\]"\);/);
   assert.match(src, /var sag = Math\.sqrt\(3 \* gap \* \(length - gap\) \/ 8\);/);
   assert.match(src, /player\.placeAtMe\(base, 1, false, false\)/);
-  assert.match(src, /pool\.refs\[k\]\.setAngle\(pitch, 0, heading\);/);
-  assert.match(src, /pools\[key2\]\.refs\[j\]\.disable\(false\); pools\[key2\]\.refs\[j\]\.delete\(\);/);
+  assert.match(src, /pr\.setAngle\(pitch, 0, heading\);/);
+  // form ids only (2026-11-07: a SkyrimPlatform object is good for one frame; the log said Invalid _skyrimPlatform_indexInPool and the chain fell back to the HUD line)
+  assert.match(src, /pool\.refs\.push\(r\.getFormID\(\) >>> 0\)/);
+  assert.match(src, /var pr = refAt\(pool\.refs\[k\]\);/);
+  assert.doesNotMatch(src, /this\.greymarchChainBase = sp\.Game\.getFormFromFile/);
+  assert.match(src, /var jr = refAt\(pools\[key2\]\.refs\[j\]\); if \(jr\) \{ jr\.disable\(false\); jr\.delete\(\); \}/);
 });

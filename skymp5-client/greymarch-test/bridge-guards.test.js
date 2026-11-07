@@ -100,3 +100,12 @@ test("a guard's request to frisk and what the frisk found open the X menu by the
     assert.deepStrictEqual(toPage, [["event", type]]);
   }
 });
+
+test("walked on the chain (2026-11-07): the prisoner's game takes the controls and keeps them behind the holder at a walk, and gives them back", () => {
+  const src = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'src', 'greymarch', 'bridge.ts'), 'utf8');
+  assert.match(src, /player\.keepOffsetFromActor\(lead, 0, -LEASH_BACK, 0, 0, 0, 0, 2048, LEASH_NEAR\)/);
+  assert.match(src, /sp\.Game\.setPlayerAIDriven\(true\)/);
+  assert.match(src, /player\.clearKeepOffsetFromActor\(\)/);
+  assert.match(src, /sp\.Game\.setPlayerAIDriven\(false\)/);
+  assert.match(src, /this\.greymarchLeashTick\(player, null, now\)/);
+});
