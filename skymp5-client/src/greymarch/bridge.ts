@@ -584,6 +584,7 @@ export class GreymarchBridge {
         this.greymarchVitalsTick(Date.now()); // health, magicka, stamina: our glass bars instead of the game's
         this.greymarchMiniActivateTick(); // a mini game won: the thing is used again (the server lets it through)
         this.greymarchClickGuardTick(); // the click that closed a window is not a swing
+        this.greymarchMiniMoveTick(); // a mini game window open: no walking (auto-move on C took them off cliffs)
         this.greymarchMagicBlockDrive(); // NPC raise-the-dead and summons: ended at once
         this.greymarchShapeDrive(); // a creature form as an NPC: moved every frame like SkyMP moves other players; other players' creature attacks
         this.greymarchShapeTick(); // a creature form staff put the player in (a goat, a giant ...): the server decides, the body is changed here
@@ -4654,6 +4655,23 @@ export class GreymarchBridge {
             var fx = this.greymarchFxHave;
             if (!this.greymarchMealLocked && !(fx && fx.frozen)) { try { sp.Game.enablePlayerControls(false, true, false, false, false, false, false, false, 0); } catch (e) { /* the next frame */ } }
         }
+    }
+    // NO WALKING DURING A MINI GAME (2026-11-07, the owner: "when people are in a mini-game menu they cant hit C, its causing them to run away from their area or run
+    // off cliffs during mining"): C is the game's Auto-Move, and the window does not take it. While the mini game window is up the player's movement is switched
+    // off (auto-move with it; fighting stays on, so a drawn weapon stays out), and on again when it closes, unless something else of ours still holds it (a meal,
+    // a paralysing poison, the vampire's feeding, a staff freeze or noclip).
+    greymarchMiniMoveTick(): any {
+        var want = !!this.greymarchMiniOn;
+        if (want === !!this.greymarchMiniMoveLocked) return;
+        var sp = this.sp;
+        if (want) {
+            try { sp.Game.disablePlayerControls(true, false, false, false, false, false, false, false, 0); this.greymarchMiniMoveLocked = true; this.greymarchCrumb("minigame: walking off"); } catch (e) { /* tried again next frame */ }
+            return;
+        }
+        this.greymarchMiniMoveLocked = false;
+        var fx = this.greymarchFxHave;
+        if (this.greymarchMealLocked || this.greymarchPoisonParalyzedUntil || this.greymarchVampFeedLocked || (fx && (fx.frozen || fx.noclip))) return; // still held by those
+        try { sp.Game.enablePlayerControls(true, false, false, false, false, false, false, false, 0); this.greymarchCrumb("minigame: walking on"); } catch (e) { /* their own lock lets go later */ }
     }
     greymarchMiniActivateTick(): any {
         // a window kept up between logs with no next one in time: closed, so it never holds the keys for nothing
