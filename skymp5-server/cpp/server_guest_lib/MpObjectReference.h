@@ -234,6 +234,8 @@ private:
   void GivePickupItemsToActivationSource(MpObjectReference& activationSource,
                                          const espm::LookupResult& base);
   void ActivateChilds();
+  static uint32_t GetFurnitureSeats(const espm::RecordHeader* rec,
+                                    espm::CompressedFieldsCache& cache);
   bool CheckIfObjectCanStartOccupyThis(MpObjectReference& activationSource,
                                        float occupationReach);
 
@@ -257,6 +259,8 @@ private:
   MpActor* occupant = nullptr;
   std::shared_ptr<OccupantDestroyEventSink> occupantDestroySink;
   std::shared_ptr<OccupantDisableEventSink> occupantDisableSink;
+  // GREYMARCH: furniture with more than one seat (a bench, a table with benches): the people sitting besides `occupant`, by form ID, checked when used
+  std::vector<uint32_t> extraFurnOccupants;
   std::optional<std::chrono::system_clock::duration> relootTimeOverride;
   std::unique_ptr<uint8_t> chanceNoneOverride;
   bool activationBlocked = false;

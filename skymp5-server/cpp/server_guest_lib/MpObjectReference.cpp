@@ -20,12 +20,14 @@
 #include "libespm/CompressedFieldsCache.h"
 #include "libespm/Convert.h"
 #include "libespm/GroupUtils.h"
+#include "libespm/IterateFields.h"
 #include "libespm/Utils.h"
 #include "papyrus-vm/Reader.h"
 #include "papyrus-vm/Utils.h" // stricmp
 #include "papyrus-vm/VirtualMachine.h"
 #include "script_objects/EspmGameObject.h"
 #include "script_storages/IScriptStorage.h"
+#include <algorithm>
 #include <ScopedTask.h>
 #include <TimeUtils.h>
 #include <antigo/Context.h>
@@ -1544,6 +1546,41 @@ void MpObjectReference::ProcessActivateNormal(
 
     constexpr float kOccupationReach = 256.f;
 
+    // GREYMARCH: MORE THAN ONE SEAT (2026-11-07, the owner: only one person could sit at a table or on a bench). SkyMP kept one occupant per
+    // furniture, so the second person on a bench with four seats was refused. Now as many may use it as the furniture has seats (its enabled
+    // markers, MNAM); the game itself picks a free seat for each. One-seat furniture (a chair, a workbench) works as before.
+    if (this->occupant && this->occupant != &activationSource &&
+        !CheckIfObjectCanStartOccupyThis(activationSource, kOccupationReach)) {
+      auto seats = GetFurnitureSeats(base.rec, compressedFieldsCache);
+      auto ws = GetParent();
+      std::vector<uint32_t> still;
+      bool already = false;
+      for (auto id : extraFurnOccupants) {
+        auto& form = ws->LookupFormById(id);
+        auto other = form ? form->AsActor() : nullptr;
+        if (!other || other->IsDisabled() ||
+            other->GetCellOrWorld() != GetCellOrWorld() ||
+            (other->GetPos() - GetPos()).SqrLength() >
+              kOccupationReach * kOccupationReach) {
+          continue; // gone, logged off or walked away without standing up
+        }
+        if (other == actorActivator) {
+          already = true;
+        }
+        still.push_back(id);
+      }
+      extraFurnOccupants = still;
+      if (!already && 1 + extraFurnOccupants.size() < seats) {
+        spdlog::info("MpObjectReference::ProcessActivate {:x} - seat {} of "
+                     "{} for {:x}",
+                     GetFormId(), extraFurnOccupants.size() + 2, seats,
+                     activationSource.GetFormId());
+        extraFurnOccupants.push_back(activationSource.GetFormId());
+        activationSource.SendOpenContainer(GetFormId());
+      }
+      return;
+    }
+
     if (CheckIfObjectCanStartOccupyThis(activationSource, kOccupationReach)) {
       if (this->occupant) {
         this->occupant->RemoveEventSink(this->occupantDestroySink);
@@ -1599,6 +1636,13 @@ bool MpObjectReference::ProcessActivateSecond(
       this->occupant = nullptr;
       return true;
     }
+    // GREYMARCH: one of the other seats (MORE THAN ONE SEAT above): standing up frees it
+    auto it = std::find(extraFurnOccupants.begin(), extraFurnOccupants.end(),
+                        activationSource.GetFormId());
+    if (it != extraFurnOccupants.end()) {
+      extraFurnOccupants.erase(it);
+      return true;
+    }
   }
 
   return false;
@@ -1635,6 +1679,30 @@ void MpObjectReference::ActivateChilds()
       childRefr->Activate(worldState->GetFormAt<MpObjectReference>(myFormId));
     });
   }
+}
+
+// GREYMARCH: how many seats a furniture has: the enabled markers (MNAM bits 0-23); at least one
+uint32_t MpObjectReference::GetFurnitureSeats(
+  const espm::RecordHeader* rec, espm::CompressedFieldsCache& cache)
+{
+  uint32_t mnam = 0;
+  bool found = false;
+  espm::IterateFields_(
+    rec,
+    [&](const char* type, uint32_t size, const char* data) {
+      if (!found && size >= 4 && std::string(type, 4) == "MNAM") {
+        mnam = *reinterpret_cast<const uint32_t*>(data);
+        found = true;
+      }
+    },
+    cache);
+  uint32_t seats = 0;
+  for (int i = 0; i < 24; ++i) {
+    if (mnam & (1u << i)) {
+      ++seats;
+    }
+  }
+  return seats ? seats : 1;
 }
 
 bool MpObjectReference::CheckIfObjectCanStartOccupyThis(
