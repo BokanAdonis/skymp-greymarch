@@ -140,6 +140,16 @@ export const applyAnimation = (
 
   const animEventNameLowerCase = anim.animEventName.toLowerCase();
 
+  // GREYMARCH: AN EMOTE ENDS HERE TOO (2026-11-07, the owner: "some people will get stuck in an animation on other people's eyes"; the log: emotes started on a
+  // copy and their stop almost never came, SkyMP sends only the latest event). A copy given an idle is remembered with where it stood (gmCopyIdle); any
+  // stop-like event clears it. The game's update (bridge.ts greymarchCopyIdleTick) ends the idle on a copy that has walked away from that spot.
+  try {
+    const gmIdles: any = (storage as any)["gmCopyIdle"] || ((storage as any)["gmCopyIdle"] = {});
+    const gmLower = animEventNameLowerCase;
+    if (/^(idlestop|idleforcedefaultstate|offsetstop|drunkstop)$|exit|stop$/.test(gmLower)) delete gmIdles[refr.getFormID()];
+    else if (isIdle(anim.animEventName) && refr.getFormID() !== 0x14) gmIdles[refr.getFormID()] = { name: anim.animEventName, x: refr.getPositionX(), y: refr.getPositionY(), at: Date.now() };
+  } catch (gmErr) { /* only a safety net */ }
+
   if (isIdle(anim.animEventName)) {
     allowedIdles.push([refr.getFormID(), anim.animEventName]);
   }

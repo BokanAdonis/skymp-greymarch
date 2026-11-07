@@ -92,6 +92,7 @@ const DRUNK_IDLE_START = 0x0cefd0, DRUNK_IDLE_STOP = 0x0cefd1, DRUNK_IMOD = 0x0c
 // DRUNK AND HIGH (greymarchIntoxTick): the skooma screen (the Sleeping Tree sap, Skyrim.esm), the stumble, how often, the pace (%) and the stamina lost (a share of the base)
 const SEAT_TAKEN_AFTER_MS = 1500, SEAT_TAKEN_RANGE = 30; // a seat another player sits in (greymarchSeatTakenTick): looked at this long after sitting, this close counts
 const WEATHER_CHECK_MS = 2000, WEATHER_RESET_MS = 60000; // shared weather (greymarchWeatherTick): how often the sky is checked, how long a fade is left alone
+const COPY_IDLE_MOVED = 150; // a copy this far from where its emote began has walked out of it (greymarchCopyIdleTick)
 const RESTACK_AFTER_MS = 20000; // the old split stacks made one, this long after the world is up (greymarchRestackOnce)
 const INTOX_CLEAR_MS = 6000, INTOX_CLEAR_EVERY = 1000, INTOX_DRUNK_ISTATE = 15, INTOX_WALK_AGAIN_MS = 2000, INTOX_POV_BACK_MS = 700; // iState 15: the body is in the drunk walk (its behavior tags it)
 const INTOX_HIGH_IMOD = 0x0e3cbc, INTOX_STUMBLE_IDLE = 0x0138d5, INTOX_SOFT_EVERY = 1000;
@@ -587,6 +588,7 @@ export class GreymarchBridge {
         this.greymarchVitalsTick(Date.now()); // health, magicka, stamina: our glass bars instead of the game's
         this.greymarchMiniActivateTick(); // a mini game won: the thing is used again (the server lets it through)
         this.greymarchClickGuardTick(); // the click that closed a window is not a swing
+        this.greymarchCopyIdleTick(Date.now()); // another player's copy walked out of an emote whose stop never came: it is ended here
         this.greymarchMiniMoveTick(); // a mini game window open: no walking (auto-move on C took them off cliffs)
         this.greymarchMagicBlockDrive(); // NPC raise-the-dead and summons: ended at once
         this.greymarchShapeDrive(); // a creature form as an NPC: moved every frame like SkyMP moves other players; other players' creature attacks
@@ -4834,6 +4836,25 @@ export class GreymarchBridge {
         var fx = this.greymarchFxHave;
         if (this.greymarchMealLocked || this.greymarchPoisonParalyzedUntil || this.greymarchVampFeedLocked || (fx && (fx.frozen || fx.noclip))) return; // still held by those
         try { sp.Game.enablePlayerControls(true, false, false, false, false, false, false, false, 0); this.greymarchCrumb("minigame: walking on"); } catch (e) { /* their own lock lets go later */ }
+    }
+    // A COPY WALKED OUT OF ITS EMOTE (sync/animation.ts gmCopyIdle; 2026-11-07, the owner: people stuck in an animation on other people's screens): twice a second,
+    // a copy whose idle was never stopped and that is now more than COPY_IDLE_MOVED units from where it stood when it began (its player walked off, the stop was
+    // lost) gets IdleStop and IdleForceDefaultState, so it walks like everyone else; one gone from this game is forgotten.
+    greymarchCopyIdleTick(now: number): any {
+        if (now < (this.greymarchCopyIdleNext || 0)) return;
+        this.greymarchCopyIdleNext = now + 500;
+        var sp = this.sp, all: any = null; try { all = sp.storage ? (sp.storage as any)["gmCopyIdle"] : null; } catch (stErr) { all = null; }
+        if (!all) return;
+        for (var k in all) {
+            var e = all[k], ref: any = null;
+            try { ref = sp.ObjectReference.from(sp.Game.getFormEx(Number(k))); } catch (rErr) { ref = null; }
+            if (!ref) { delete all[k]; continue; }
+            var dx = 0, dy = 0; try { dx = ref.getPositionX() - e.x; dy = ref.getPositionY() - e.y; } catch (pErr) { delete all[k]; continue; }
+            if (dx * dx + dy * dy < COPY_IDLE_MOVED * COPY_IDLE_MOVED) continue;
+            delete all[k];
+            try { sp.Debug.sendAnimationEvent(ref, "IdleStop"); sp.Debug.sendAnimationEvent(ref, "IdleForceDefaultState"); } catch (sErr) { /* gone */ }
+            if ((this.greymarchCopyIdleSaid = (this.greymarchCopyIdleSaid || 0) + 1) <= 20) this.greymarchCrumb("copy idle: " + (Number(k) >>> 0).toString(16) + " walked out of " + e.name + " (its stop never came): ended here");
+        }
     }
     greymarchMiniActivateTick(): any {
         // a window kept up between logs with no next one in time: closed, so it never holds the keys for nothing
