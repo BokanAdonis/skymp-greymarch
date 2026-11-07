@@ -1,4 +1,4 @@
-import { ObjectReference, Actor, Game, FormType, TextureSet, NetImmerse } from "skyrimPlatform";
+import { ObjectReference, Actor, Game, FormType, TextureSet, NetImmerse, Ui, on } from "skyrimPlatform";
 import { Inventory, applyInventory } from "../sync/inventory";
 import { logError, logTrace } from "../logging";
 import { SetNodeScaleEntry, SetNodeTextureSetEntry } from "src/services/messages/createActorMessage";
@@ -34,7 +34,33 @@ export class ModelApplyUtils {
     }
   }
 
+  // GREYMARCH: NOT WHILE THE MAP IS OPEN (2026-11-06, a player's crash: SkyrimSE.exe+09899B6 in the world map, on a Winterhold wall the server took away
+  // as they came near, MapMenu on the stack). SkyrimSouls keeps the world running behind the map, so a reference the server switched off (or on) then
+  // lost (or got) its 3D while the map was drawing it, and the map read the gone 3D. While the map is open, the server's word is held, the latest for
+  // each reference, and applied the moment the map closes.
+  private static gmHeld = new Map<number, boolean>();
+  private static gmFlushing = false;
+  private static gmMapOpen(): boolean { try { return Ui.isMenuOpen("MapMenu"); } catch (e) { return false; } }
   static applyModelIsDisabled(refr: ObjectReference, disabled: boolean): void {
+    if (ModelApplyUtils.gmMapOpen()) {
+      ModelApplyUtils.gmHeld.set(refr.getFormID() >>> 0, disabled);
+      if (!ModelApplyUtils.gmFlushing) {
+        ModelApplyUtils.gmFlushing = true;
+        on("update", () => {
+          if (!ModelApplyUtils.gmHeld.size || ModelApplyUtils.gmMapOpen()) return;
+          const held = Array.from(ModelApplyUtils.gmHeld.entries());
+          ModelApplyUtils.gmHeld.clear();
+          for (const [id, d] of held) {
+            try { const r = ObjectReference.from(Game.getFormEx(id)); if (r) ModelApplyUtils.applyModelIsDisabledNow(r, d); } catch (e) { /* gone with its cell */ }
+          }
+        });
+      }
+      return;
+    }
+    ModelApplyUtils.gmHeld.delete(refr.getFormID() >>> 0); // a newer word than one held: this one counts
+    ModelApplyUtils.applyModelIsDisabledNow(refr, disabled);
+  }
+  private static applyModelIsDisabledNow(refr: ObjectReference, disabled: boolean): void {
     const wasDisabled: boolean = refr.isDisabled();
     if (wasDisabled == disabled) {
       return;
