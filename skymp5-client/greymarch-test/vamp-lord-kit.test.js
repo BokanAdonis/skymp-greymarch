@@ -50,3 +50,10 @@ test("a creature attack waits for its combat stance; a drawn form keeps the stan
   assert.match(src, /gait = player\.isSprinting\(\) \? "sprint" : player\.isRunning\(\) \? "run" : "walk";/);
   assert.match(src, /this\.greymarchShapePending = null; this\.greymarchShapeCombatUntil = 0;\r?\n\s+this\.greymarchShapeSpeedReset\(player\);/);
 });
+
+test("a server-set size (greymarchScale, 0.25 to 4) is put on an NPC once it is ready and again when it changes or is built again (2026-11-06, the Grand Trial's smaller Frost Giants)", () => {
+  const fv = require("node:fs").readFileSync(require("node:path").join(__dirname, "..", "src", "view", "formView.ts"), "utf8");
+  assert.match(fv, /this\.gmApplyScale\(refr, model\);/);
+  assert.match(fv, /if \(!this\.ready \|\| !\(want >= 0\.25 && want <= 4\)\) return;/);
+  assert.match(fv, /if \(this\.gmScaleHave && this\.gmScaleHave\.id === id && this\.gmScaleHave\.scale === want\) return;/);
+});

@@ -759,6 +759,9 @@ export class FormView {
     // GREYMARCH: A SERVER-DRIVEN ANIMAL (gamemode wildlifebrain.js; the server sets the custom property greymarchPuppet). The server decides where it goes and
     // when it attacks, so this game never hosts it and never lets it fight on its own: it plays the server's frames (gmPuppetMove) the way SkyMP plays another
     // player's movement (applyMovement: translateTo for the place, keepOffsetFromActor for the walk or run).
+    // GREYMARCH: A SERVER-SET SIZE (gamemode adminworld.js setScale, the custom property greymarchScale; 2026-11-06, the owner: smaller Frost Giants in the
+    // Stillborn Cave Grand Trial): a number from 0.25 to 4 is put on the NPC here once it is ready, and again whenever it changes or the NPC is built again
+    this.gmApplyScale(refr, model);
     const gmPuppet = (model as any).greymarchPuppet === true;
     // GREYMARCH: RIDING: another player on a horse here sits on it, and its own movement is not played while it does (the horse carries it)
     const gmSeated = this.gmRideStep(refr, model);
@@ -1780,6 +1783,14 @@ export class FormView {
   private gmRunPos: number[] | null = null;
   private gmRunStuck = 0;
   private gmRunNudgedAt = 0;
+  private gmScaleHave: { id: number, scale: number } | null = null; // GREYMARCH: the server-set size last put on this NPC (gmApplyScale)
+  private gmApplyScale(refr: ObjectReference, model: any): void {
+    const want = Number(model && model.greymarchScale);
+    if (!this.ready || !(want >= 0.25 && want <= 4)) return;
+    const id = refr.getFormID();
+    if (this.gmScaleHave && this.gmScaleHave.id === id && this.gmScaleHave.scale === want) return;
+    try { if (Math.abs(refr.getScale() - want) > 0.001) refr.setScale(want); this.gmScaleHave = { id, scale: want }; gmCrumb("scale " + gmHex(id) + " " + want); } catch (e) { /* the next frame */ }
+  }
   private gmHeldGear: number | null = null; // GREYMARCH: the gear change last held back (its breadcrumb)
   private gmQuiverAt = 0; // GREYMARCH: when its host last checked it has arrows for its bow (A QUIVER)
   private gmClashSaid = false; // GREYMARCH: "host clash" written down for it (NEVER BOTH)
