@@ -293,6 +293,7 @@ export class GreymarchBridge {
         if (type === "greymarchRaceMenuLook") { var rm0 = this.greymarchRmState(); rm0.want = msg.look && typeof msg.look === "object" ? msg.look : {}; rm0.tries = 0; if (Array.isArray(msg.height) && msg.height.length === 2 && msg.height[0] > 0 && msg.height[1] >= msg.height[0]) this.greymarchHeightRange = [Number(msg.height[0]), Number(msg.height[1])]; return; } // RaceMenu's extra sliders of this character, kept by the server (greymarchRaceMenuTick)
         if (type === "greymarchVampire") { this.greymarchVampWant = msg.on ? msg : null; this.greymarchVampCostTold = {}; this.greymarchHudToPage("blood", { on: !!msg.on, blood: msg.blood, empty: !!msg.empty }); return; } // a vampire's state: the blood drop and what the game applies (greymarchVampTick)
         if (type === "greymarchVampLooks") { this.greymarchVampLookList = Array.isArray(msg.vampires) ? msg.vampires : []; if (Number(msg.me) > 0) this.greymarchMeActor = Number(msg.me) >>> 0; return; } // (me: which of them is this player: the ghosts and effects packets that also say so may not have come yet, and without it the player's own eyes and fangs were never put on) // how every vampire in the world looks (eyes and fangs)
+        if (type === "greymarchIntoxNear") { this.greymarchIntoxOthers = Array.isArray(msg.actors) ? msg.actors.map(function (x: any) { return Number(x) >>> 0; }).filter(function (x: number) { return x > 0; }).slice(0, 200) : []; return; } // who is drunk or high (greymarchIntoxOthersTick)
         if (type === "greymarchIntox") { var il = msg.level === "tipsy" || msg.level === "drunk" || msg.level === "high" ? msg.level : "sober"; this.greymarchIntoxWant = il === "sober" ? null : { level: il, until: Date.now() + Math.max(1000, Math.min(30 * 60000, Number(msg.ms) || 0)) }; this.greymarchIntoxCheckAt = 0; return; } // drunk or high (greymarchIntoxTick)
         if (type === "greymarchDrunk") { this.greymarchDrunkWant = msg.on ? { until: Date.now() + Math.max(0, Number(msg.ms) || 0), at: 0 } : { off: true }; return; } // drained to death: the drunk walk after waking (greymarchDrunkTick)
         if (type === "greymarchVampFeed") { if (!msg.on && this.greymarchVampFeedHold) this.greymarchLog("vampire: the server ended the feeding" + (msg.why ? " (" + String(msg.why).slice(0, 80) + ")" : "")); this.greymarchVampFeedWant = msg.on ? { role: msg.role, partner: msg.partner, at: Date.now(), done: false } : { off: true }; return; } // the feeding scene (held until the vampire stops: greymarchVampFeedHeld)
@@ -1789,6 +1790,7 @@ export class GreymarchBridge {
         this.greymarchVampFeedHeld(player, now);
         this.greymarchDrunkTick(player, now);
         this.greymarchIntoxTick(player, now); // drunk or high: the screen, the walk, the stumbles, the pace
+        this.greymarchIntoxOthersTick(now); // other players drunk or high: their copies here keep the drunk walk
         this.greymarchVampFangsWear(now); // the worn fangs the server gave: put on (SkyMP then shows them to everyone)
         this.greymarchVampEyes(now); // every vampire's blue eyes, on this screen
     }
@@ -1951,6 +1953,33 @@ export class GreymarchBridge {
         if (lose !== had) { try { player.modActorValue("stamina", had - lose); this.greymarchIntoxStamina = lose; } catch (mErr) { /* tried again in a moment */ } }
         if (level !== was) { this.greymarchIntoxHave = level; this.greymarchLog("intox: " + was + " -> " + level + (paused ? " (paused: a beast, a creature or the drained walk)" : "") + (lose ? ", stamina -" + lose : "")); }
     }
+    // OTHER PLAYERS DRUNK, SEEN HERE (gamemode intoxication.js greymarchIntoxNear; 2026-11-07, the owner: "other players cant see my standing there drunk or walking
+    // drunk"): the drunk walk is kept by the body's iDrunkVariable, which SkyMP does not send, so a copy here left it the moment its movement started again. Twice a
+    // second, every copy the server names is given iDrunkVariable 1 and, when it is not in the drunk walk (iState 15), the DrunkStart event; one taken off the list
+    // gets 0 and DrunkStop. Not on a horse or in a seat (the walk would break the seat).
+    greymarchIntoxOthersTick(now: number): any {
+        if (now - (this.greymarchIntoxOthersAt || 0) < 500) return;
+        this.greymarchIntoxOthersAt = now;
+        var sp = this.sp, want: number[] = this.greymarchIntoxOthers || [], had: any = this.greymarchIntoxOthersOn || (this.greymarchIntoxOthersOn = {});
+        var me = this.greymarchMeActor >>> 0, keep: any = {};
+        for (var i = 0; i < want.length; i++) {
+            var id = want[i] >>> 0; if (!id || id === me) continue;
+            keep[id] = true;
+            var a: any = null; try { var lid = misc.remoteIdToLocalId(id); a = lid ? sp.Actor.from(sp.Game.getFormEx(lid)) : null; } catch (lErr) { a = null; }
+            if (!a) continue;
+            try {
+                if (!a.is3DLoaded() || a.isDead() || a.isOnMount() || a.getSitState() !== 0) continue;
+                if (a.getAnimationVariableInt("iDrunkVariable") !== 1) a.setAnimationVariableInt("iDrunkVariable", 1);
+                if (a.getAnimationVariableInt("iState") !== INTOX_DRUNK_ISTATE) sp.Debug.sendAnimationEvent(a, "DrunkStart");
+                if (!had[id]) { had[id] = true; if ((this.greymarchIntoxOthersSaid = (this.greymarchIntoxOthersSaid || 0) + 1) <= 10) this.greymarchLog("intox: " + id.toString(16) + " walks drunk here"); }
+            } catch (aErr) { /* next time */ }
+        }
+        for (var k in had) {
+            if (keep[k]) continue;
+            delete had[k];
+            try { var lid2 = misc.remoteIdToLocalId(Number(k) >>> 0); var b: any = lid2 ? sp.Actor.from(sp.Game.getFormEx(lid2)) : null; if (b) { b.setAnimationVariableInt("iDrunkVariable", 0); sp.Debug.sendAnimationEvent(b, "DrunkStop"); } } catch (bErr) { /* gone */ }
+        }
+    }
     // THE SWAY AND THE LEAN (2026-11-07, the owner: "a slight lean to the left or right when they are walking, so they cant just walk in a straight line", and the
     // screen "slightly VERY slightly wavey"). Every frame while drunk or high in first person: the view rises and dips a little (INTOX_SWAY pitch, slow), and while a
     // movement key is down the heading drifts left or right on a wandering curve (two slow waves, INTOX_SWAY lean degrees a second at most), so walking straight
@@ -1973,7 +2002,9 @@ export class GreymarchBridge {
             dz = rate * dt / 1000;
         }
         if (Math.abs(dx) < 0.0005 && Math.abs(dz) < 0.0005) return;
-        try { player.setAngle(player.getAngleX() + dx, player.getAngleY(), player.getAngleZ() + dz); } catch (aErr) { /* next frame */ }
+        // through GreymarchCamera.dll 1.16 (TurnActor, radians): Papyrus SetAngle on the player moved them there every frame, so they stuttered (the owner's clip)
+        if (this.greymarchTurnNoDll) return;
+        try { sp.callNative("GreymarchCam", "TurnActor", undefined, player, dz * Math.PI / 180, dx * Math.PI / 180); } catch (aErr) { this.greymarchTurnNoDll = true; this.greymarchLog("intox: no lean or sway (GreymarchCamera.dll 1.16 missing): " + String(aErr).slice(0, 100)); }
     }
     // a movement key down (the keys mapped to Forward, Back and the strafes; W S A D if none); not while typing in a window
     greymarchIntoxKeysDown(): boolean {
