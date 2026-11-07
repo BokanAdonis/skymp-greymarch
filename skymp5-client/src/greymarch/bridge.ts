@@ -92,7 +92,6 @@ const DRUNK_IDLE_START = 0x0cefd0, DRUNK_IDLE_STOP = 0x0cefd1, DRUNK_IMOD = 0x0c
 // DRUNK AND HIGH (greymarchIntoxTick): the skooma screen (the Sleeping Tree sap, Skyrim.esm), the stumble, how often, the pace (%) and the stamina lost (a share of the base)
 const SEAT_TAKEN_AFTER_MS = 1500, SEAT_TAKEN_RANGE = 30; // a seat another player sits in (greymarchSeatTakenTick): looked at this long after sitting, this close counts
 const WEATHER_CHECK_MS = 2000, WEATHER_RESET_MS = 60000; // shared weather (greymarchWeatherTick): how often the sky is checked, how long a fade is left alone
-const EMOTE_SPACE_NO_JUMP_MS = 700; // after Space ends an emote, no jump this long (greymarchNoJumpHook)
 const COPY_IDLE_MOVED = 150; // a copy this far from where its emote began has walked out of it (greymarchCopyIdleTick)
 const RESTACK_AFTER_MS = 20000; // the old split stacks made one, this long after the world is up (greymarchRestackOnce)
 const INTOX_CLEAR_MS = 6000, INTOX_CLEAR_EVERY = 1000, INTOX_DRUNK_ISTATE = 15, INTOX_WALK_AGAIN_MS = 2000, INTOX_POV_BACK_MS = 700; // iState 15: the body is in the drunk walk (its behavior tags it)
@@ -591,6 +590,7 @@ export class GreymarchBridge {
         this.greymarchClickGuardTick(); // the click that closed a window is not a swing
         this.greymarchCopyIdleTick(Date.now()); // another player's copy walked out of an emote whose stop never came: it is ended here
         this.greymarchMiniMoveTick(); // a mini game window open: no walking (auto-move on C took them off cliffs)
+        this.greymarchEmoteMoveTick(); // in an emote that lasts: no walking or jumping (Space ends it without a jump)
         this.greymarchMagicBlockDrive(); // NPC raise-the-dead and summons: ended at once
         this.greymarchShapeDrive(); // a creature form as an NPC: moved every frame like SkyMP moves other players; other players' creature attacks
         this.greymarchShapeTick(); // a creature form staff put the player in (a goat, a giant ...): the server decides, the body is changed here
@@ -956,7 +956,7 @@ export class GreymarchBridge {
         if (this.greymarchBuildCam && this.greymarchBuildCamKey(e)) return; // the build system's free camera has the keys it uses
         if (e.code === EMOTE_EXIT_KEY) { var xDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (e.isUp === true) xDown = false; if (xDown && !this.greymarchKeyExit && !this.greymarchChatTyping && !this.greymarchPanelHasKeys()) this.greymarchEmoteExitWanted = Date.now(); this.greymarchKeyExit = xDown; } // Backspace: out of the emote or pose (greymarchEmoteExitTick)
         if (this.greymarchEmoteOnce && (e.code === 17 || e.code === 30 || e.code === 31 || e.code === 32)) { var oDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (oDown && e.isUp !== true) this.greymarchEmoteOnce.moved = true; } // W A S D during a one-off emote (greymarchEmoteExitTick)
-        if (this.greymarchEmoteNow && this.greymarchEmoteNow.kind === "loop" && !this.greymarchEmoteNow.meal && (e.code === 17 || e.code === 30 || e.code === 31 || e.code === 32 || e.code === 57)) { var mvDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (mvDown && e.isUp !== true) { this.greymarchEmoteStopWanted = Date.now(); if (e.code === 57) { this.greymarchNoJumpUntil = Date.now() + EMOTE_SPACE_NO_JUMP_MS; this.greymarchNoJumpHook(); } } } // W A S D or Space ends an emote that lasts (greymarchEmoteTick); Space ending it is not a jump too (2026-11-07, the owner)
+        if (this.greymarchEmoteNow && this.greymarchEmoteNow.kind === "loop" && !this.greymarchEmoteNow.meal && (e.code === 17 || e.code === 30 || e.code === 31 || e.code === 32 || e.code === 57)) { var mvDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (mvDown && e.isUp !== true) this.greymarchEmoteStopWanted = Date.now(); } // W A S D or Space ends an emote that lasts (greymarchEmoteTick); no jump with it: movement is off while it lasts (greymarchEmoteMoveTick)
         if (e.code === 49) { var nDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (e.isUp === true) nDown = false; if (nDown && !this.greymarchKey49 && !this.greymarchChatTyping) this.greymarchSensesAt = Date.now(); this.greymarchKey49 = nDown; if (this.greymarchWolfPerks && this.greymarchWolfPerks.carrier) return; } // N: night eye or the scent (greymarchWolfPerksTick)
         if (e.code === 19) { var rDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (e.isUp === true) rDown = false; if (rDown && !this.greymarchKey19 && this.greymarchWolfOn && !this.greymarchChatTyping) this.greymarchWolfRoarAt = Date.now(); this.greymarchKey19 = rDown; return; } // R: the werewolf roars (greymarchWolfTick; only while changed)
         if (e.code === 44) { var zDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (e.isUp === true) zDown = false; if (zDown && !this.greymarchKey44 && !this.greymarchChatTyping) { if (this.greymarchWolfOn) this.greymarchWolfBackAt = Date.now(); else { this.greymarchWolfKeyAt = Date.now(); this.greymarchVampKeyAt = Date.now(); } } this.greymarchKey44 = zDown; return; } // Z while changed: ask the server to change back (greymarchWolfTick)
@@ -4835,7 +4835,7 @@ export class GreymarchBridge {
         }
         this.greymarchMiniMoveLocked = false;
         var fx = this.greymarchFxHave;
-        if (this.greymarchMealLocked || this.greymarchPoisonParalyzedUntil || this.greymarchVampFeedLocked || (fx && (fx.frozen || fx.noclip))) return; // still held by those
+        if (this.greymarchMealLocked || this.greymarchEmoteMoveLocked || this.greymarchPoisonParalyzedUntil || this.greymarchVampFeedLocked || (fx && (fx.frozen || fx.noclip))) return; // still held by those
         try { sp.Game.enablePlayerControls(true, false, false, false, false, false, false, false, 0); this.greymarchCrumb("minigame: walking on"); } catch (e) { /* their own lock lets go later */ }
     }
     // A COPY WALKED OUT OF ITS EMOTE (sync/animation.ts gmCopyIdle; 2026-11-07, the owner: people stuck in an animation on other people's screens): twice a second,
@@ -4858,17 +4858,19 @@ export class GreymarchBridge {
         }
     }
     // SPACE ENDS AN EMOTE, NOT A JUMP TOO (2026-11-07, the owner: "when people hit space to end an emote it doesnt cause them to jump"): the same press also
-    // reached the game as a jump. For EMOTE_SPACE_NO_JUMP_MS after Space ends one, the player's jump events are blanked (one hook, added once).
-    greymarchNoJumpHook(): any {
-        if (this.greymarchNoJumpHooked) return;
-        this.greymarchNoJumpHooked = true;
-        var self: any = this;
-        try {
-            this.sp.hooks.sendAnimationEvent.add({
-                enter: function (ctx: any) { if (Date.now() < (self.greymarchNoJumpUntil || 0) && /^jump/i.test(String(ctx.animEventName || ""))) ctx.animEventName = ""; },
-                leave: function () { /* nothing */ },
-            }, 0x14, 0x14, "*");
-        } catch (hErr) { this.greymarchLog("emote: the jump after Space cannot be held back (" + String(hErr).slice(0, 80) + ")"); }
+    // reached the game as a jump (blanking the jump's animation events did not stop it). So while an emote that lasts is on (not a meal: it has its own lock),
+    // the player's movement is switched off: the keys still reach this game, so W A S D or Space still end it, but none moves or jumps; on again the moment it
+    // ends, unless something else of ours still holds it (a meal, a mini game, a paralysing poison, the vampire's feeding, a staff freeze or noclip).
+    greymarchEmoteMoveTick(): any {
+        var cur = this.greymarchEmoteNow;
+        var want = !!cur && cur.kind === "loop" && !cur.meal && !this.greymarchWolfOn && !this.greymarchShapeOn;
+        if (want === !!this.greymarchEmoteMoveLocked) return;
+        var sp = this.sp;
+        if (want) { try { sp.Game.disablePlayerControls(true, false, false, false, false, false, false, false, 0); this.greymarchEmoteMoveLocked = true; } catch (e) { /* tried again next frame */ } return; }
+        this.greymarchEmoteMoveLocked = false;
+        var fx = this.greymarchFxHave;
+        if (this.greymarchMealLocked || this.greymarchMiniMoveLocked || this.greymarchPoisonParalyzedUntil || this.greymarchVampFeedLocked || (fx && (fx.frozen || fx.noclip))) return; // still held by those
+        try { sp.Game.enablePlayerControls(true, false, false, false, false, false, false, false, 0); } catch (e) { /* their own lock lets go later */ }
     }
     greymarchMiniActivateTick(): any {
         // a window kept up between logs with no next one in time: closed, so it never holds the keys for nothing
