@@ -251,6 +251,9 @@ export class AuthService extends ClientListener {
       case 'greymarchVampFeed':
       case 'greymarchDrunk': // drained to death by a vampire: the drunk walk after waking (2026-11-03)
       case 'greymarchIntox': // drunk or high from drinks and skooma (2026-11-07)
+      case 'greymarchWolfPerks': // a carrier's perks (werewolf.js perksOf; was dropped here until 2026-11-07, so the perks never arrived)
+      case 'greymarchWolfScent': // the werewolf's scent (werewolf.js; was dropped here until 2026-11-07)
+      case 'greymarchCircle': // a Circle spell someone cast nearby (circles.js; was dropped here until 2026-11-07, so others never saw the ring)
       case 'greymarchVampMist':
       case 'greymarchVampLord':
       case 'greymarchVampMenuReply':
