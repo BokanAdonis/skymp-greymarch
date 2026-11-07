@@ -6423,7 +6423,7 @@ export class GreymarchBridge {
             if (!looked[id]) { looked[id] = 1; this.greymarchCrumb("door name: first look-up of " + Number(id).toString(16)); } // once per door, not every pass
             try { o = sp.ObjectReference.from(sp.Game.getFormEx(local)); } catch (e0) { o = null; }
             var isDoor = false;
-            try { isDoor = !!o && (o.getFormID() >>> 0) === (local >>> 0) && !!o.getBaseObject() && o.getBaseObject().getType() === DOOR_FORM_TYPE && o.is3DLoaded(); } catch (eD) { isDoor = false; }
+            try { var bt = o && o.getBaseObject() ? o.getBaseObject().getType() : -1; isDoor = !!o && (o.getFormID() >>> 0) === (local >>> 0) && (bt === DOOR_FORM_TYPE || bt === 28) && o.is3DLoaded(); } catch (eD) { isDoor = false; } // 28: a container: a named barrel or chest (gamemode property.js Name Storage, 2026-11-07)
             if (o && !isDoor) continue; // not a loaded door with that id (yet): tried again on a later pass
             if (!o) {
                 if (!this.greymarchDoorMiss) this.greymarchDoorMiss = {};
