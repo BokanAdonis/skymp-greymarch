@@ -384,7 +384,14 @@ void MpObjectReference::VisitProperties(CreateActorMessage& message,
     message.props.isDead = true;
   }
 
-  if (mode == VisitPropertiesMode::All && !GetInventory().IsEmpty()) {
+  // GREYMARCH (2026-11-02): an EMPTY container the server has taken charge of (baseContainerAdded: the gamemode emptied it, or players took
+  // everything) is sent too, as an empty list. Left out, the player's game kept the chest's own contents from the plugin: a dungeon chest emptied
+  // by loot.js still showed its Iron Arrows, every take was refused ("0 present") and the arrows stayed in that game only, as many as wanted.
+  // A container whose contents were never set stays left out (its game's own items are what the server adds the first time it is opened).
+  const bool emptyButOurs = IsEspmForm() && !AsActor() &&
+    ChangeForm().baseContainerAdded && GetBaseType() == "CONT";
+  if (mode == VisitPropertiesMode::All &&
+      (!GetInventory().IsEmpty() || emptyButOurs)) {
     message.props.inventory = GetInventory();
   }
 
