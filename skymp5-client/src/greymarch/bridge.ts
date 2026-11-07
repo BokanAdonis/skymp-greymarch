@@ -89,6 +89,7 @@ const WOLF_ROAR_SOUND = 0x101008, BEAR_ROAR_SOUND = 0x0f95bb; // NPCWerewolfShou
 // both put on again every DRUNK_AGAIN_MS (a jump, a fight or a load ends the walk)
 const DRUNK_IDLE_START = 0x0cefd0, DRUNK_IDLE_STOP = 0x0cefd1, DRUNK_IMOD = 0x0c9cc5, DRUNK_AGAIN_MS = 10000;
 // DRUNK AND HIGH (greymarchIntoxTick): the skooma screen (the Sleeping Tree sap, Skyrim.esm), the stumble, how often, the pace (%) and the stamina lost (a share of the base)
+const INTOX_CLEAR_MS = 6000, INTOX_CLEAR_EVERY = 1000;
 const INTOX_HIGH_IMOD = 0x0e3cbc, INTOX_STUMBLE_IDLE = 0x0138d5, INTOX_TIPSY_PULSE = 4500, INTOX_TIPSY_STRENGTH = 0.35;
 const INTOX_STUMBLE: { [k: string]: number } = { drunk: 40000, high: 20000 };
 const INTOX_SPEED: { [k: string]: number } = { tipsy: 95, drunk: 85, high: 80 };
@@ -1861,8 +1862,18 @@ export class GreymarchBridge {
         var held = show === "drunk" || show === "high";
         // the screen
         if (show !== (this.greymarchIntoxScreen || "sober")) {
-            if (this.greymarchIntoxScreen === "drunk" || this.greymarchIntoxScreen === "high") { try { sp.ImageSpaceModifier.removeCrossFade(1.5); } catch (rErr) { /* it fades by itself */ } }
+            if (this.greymarchIntoxScreen && this.greymarchIntoxScreen !== "sober") this.greymarchIntoxClearUntil = now + INTOX_CLEAR_MS; // the old screen off: cleared again and again for a while (below)
             this.greymarchIntoxScreen = show; this.greymarchIntoxScreenAt = 0;
+        }
+        // CLEARING THE SCREEN (2026-11-07, the owner: "the vision doesnt go back to normal after becoming sober"; one removeCrossFade did not take): every
+        // INTOX_CLEAR_EVERY ms for INTOX_CLEAR_MS both screens are taken off by name (remove) and any crossfade with it, while no screen is wanted
+        if (show === "sober" && now < (this.greymarchIntoxClearUntil || 0) && now - (this.greymarchIntoxClearAt || 0) >= INTOX_CLEAR_EVERY) {
+            this.greymarchIntoxClearAt = now;
+            var why = "";
+            try { var dm = sp.ImageSpaceModifier.from(sp.Game.getFormFromFile(DRUNK_IMOD, "BSHeartland.esm")); if (dm) dm.remove(); } catch (e1) { why += " drunk: " + String(e1).slice(0, 80); }
+            try { var hm = sp.ImageSpaceModifier.from(sp.Game.getFormEx(INTOX_HIGH_IMOD)); if (hm) hm.remove(); } catch (e2) { why += " high: " + String(e2).slice(0, 80); }
+            try { sp.ImageSpaceModifier.removeCrossFade(1.0); } catch (e3) { why += " crossfade: " + String(e3).slice(0, 80); }
+            if (why && (this.greymarchIntoxClearLogged = (this.greymarchIntoxClearLogged || 0) + 1) <= 3) this.greymarchLog("intox: clearing the screen failed:" + why);
         }
         if (show !== "sober" && now - (this.greymarchIntoxScreenAt || 0) >= (show === "tipsy" ? INTOX_TIPSY_PULSE : DRUNK_AGAIN_MS)) {
             this.greymarchIntoxScreenAt = now;
