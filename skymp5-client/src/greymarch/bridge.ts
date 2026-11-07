@@ -1845,10 +1845,10 @@ export class GreymarchBridge {
     // DRUNK AND HIGH (gamemode intoxication.js; 2026-11-07, the owner: "visual effects and like stumbling animations"; levels, a strong skooma high, some downsides).
     // The server says { greymarchIntox level, ms } when the level changes; this game shows it until then (ms is only the safety stop: the server says "sober"):
     //   tipsy  the drunk screen in soft pulses (INTOX_TIPSY_PULSE), walking at INTOX_SPEED.tipsy %
-    //   drunk  the drunk screen held, the game's drunk walk, a stumble every INTOX_STUMBLE.drunk ms or so, walking at INTOX_SPEED.drunk %, INTOX_STAMINA.drunk of the stamina gone
-    //   high   the Sleeping Tree sap's screen held (Skyrim.esm 0E3CBC), the drunk walk, stumbles more often, slower still, more stamina gone
+    //   drunk  the drunk screen held, a stumble every INTOX_STUMBLE.drunk ms or so, walking at INTOX_SPEED.drunk %, INTOX_STAMINA.drunk of the stamina gone
+    //   high   the Sleeping Tree sap's screen held (Skyrim.esm 0E3CBC), stumbles more often, slower still, more stamina gone
     // A stumble (the game's own stagger, StaggerStart 0138D5, small) never comes in a fight, with a weapon out, swimming, riding, sitting, in a menu or mid emote.
-    // A beast form, a creature's body or the vampire's drained walk (greymarchDrunkTick) pauses the screen, the walk and the pace; the stamina stays down.
+    // A beast form, a creature's body or the vampire's drained walk (greymarchDrunkTick) pauses the screen and the pace; the stamina stays down.
     greymarchIntoxTick(player: any, now: number): any {
         var sp = this.sp, w = this.greymarchIntoxWant;
         var level = w && now < w.until ? w.level : "sober";
@@ -1871,17 +1871,10 @@ export class GreymarchBridge {
                 if (imod) { if (show === "tipsy") imod.apply(INTOX_TIPSY_STRENGTH); else imod.applyCrossFade(1.5); }
             } catch (iErr) { /* the screen is a nicety */ }
         }
-        // the walk, and the stumbles
+        // the stumbles
         var calm = true;
         try { calm = !player.isInCombat() && !player.isWeaponDrawn() && !player.isSwimming() && !player.isOnMount() && player.getSitState() === 0 && !this.greymarchEmoteNow && !sp.Ui.isMenuOpen("InventoryMenu") && !sp.Ui.isMenuOpen("Dialogue Menu"); } catch (cErr) { calm = false; }
-        if (held && calm && now - (this.greymarchIntoxWalkAt || 0) >= DRUNK_AGAIN_MS) {
-            this.greymarchIntoxWalkAt = now;
-            try { var start = sp.Idle.from(sp.Game.getFormEx(DRUNK_IDLE_START)); if (start) player.playIdle(start); this.greymarchIntoxWalking = true; } catch (wErr) { /* tried again in a moment */ }
-        }
-        if (!held && this.greymarchIntoxWalking) {
-            this.greymarchIntoxWalking = false; this.greymarchIntoxWalkAt = 0;
-            try { var stop = sp.Idle.from(sp.Game.getFormEx(DRUNK_IDLE_STOP)); if (stop) player.playIdle(stop); } catch (sErr) { /* the walk ends with the next idle */ }
-        }
+        // no drunk walk (IdleDrunkStart): made for NPCs, on a player in third person it took the movement away (the owner, 2026-11-07: "I cant move my character")
         if (held && !this.greymarchIntoxStumbleAt) this.greymarchIntoxStumbleAt = now + INTOX_STUMBLE[show] * (0.5 + Math.random());
         if (!held) this.greymarchIntoxStumbleAt = 0;
         else if (now >= this.greymarchIntoxStumbleAt) {
@@ -1891,7 +1884,6 @@ export class GreymarchBridge {
                     try { player.setAnimationVariableFloat("staggerMagnitude", 0.25); } catch (vErr) { /* the stagger's own size */ }
                     var st = sp.Idle.from(sp.Game.getFormEx(INTOX_STUMBLE_IDLE)); var ok = !!st && !!player.playIdle(st);
                     if (!ok) sp.Debug.sendAnimationEvent(player, "staggerStart");
-                    this.greymarchIntoxWalkAt = now - DRUNK_AGAIN_MS + 2500; // the drunk walk again once the stumble is over
                     if ((this.greymarchIntoxStumbles = (this.greymarchIntoxStumbles || 0) + 1) <= 5) this.greymarchLog("intox: a stumble (" + show + ")");
                 } catch (stErr) { /* no stumble this time */ }
             }
