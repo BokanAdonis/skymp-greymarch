@@ -4624,12 +4624,30 @@ export class GreymarchBridge {
     // held the mouse closes, the game gets the mouse back with that same click still to come, and takes it for a swing. So for CLICK_GUARD_MS after a window
     // closes, the player's fighting controls (attack, draw a weapon) are switched off, from the update phase, and then on again unless something else of
     // ours holds them (a meal being eaten, a staff freeze).
-    greymarchClickGuard(): any { this.greymarchClickGuardUntil = Date.now() + CLICK_GUARD_MS; this.greymarchClickGuardWanted = true; }
+    greymarchClickGuard(): any { this.greymarchClickGuardUntil = Date.now() + CLICK_GUARD_MS; this.greymarchClickGuardWanted = true; try { this.greymarchClickGuardWhy = String((new Error().stack || "").split(/\r?\n/)[2] || "").trim().slice(0, 80); } catch (wErr) { this.greymarchClickGuardWhy = ""; } }
+    // the swing held back while the weapon is out: the player's attack events are blanked until greymarchClickGuardSwingUntil (one hook, added once)
+    greymarchClickGuardSwingHook(): any {
+        if (this.greymarchClickGuardHooked) return;
+        this.greymarchClickGuardHooked = true;
+        var self: any = this;
+        try {
+            this.sp.hooks.sendAnimationEvent.add({
+                enter: function (ctx: any) { if (Date.now() < (self.greymarchClickGuardSwingUntil || 0) && /^(attack|bowAttack|BowDraw|SpellCast|MLh_|MRh_|Ready)/i.test(String(ctx.animEventName || ""))) ctx.animEventName = ""; },
+                leave: function () { /* nothing */ },
+            }, 0x14, 0x14, "*");
+        } catch (hErr) { this.greymarchLog("click guard: the swing cannot be held back (" + String(hErr).slice(0, 80) + ")"); }
+    }
     greymarchClickGuardTick(): any {
         var sp = this.sp, now = Date.now();
         if (this.greymarchClickGuardWanted && !this.greymarchClickGuardOn) {
             this.greymarchClickGuardWanted = false;
-            try { sp.Game.disablePlayerControls(false, true, false, false, false, false, false, false, 0); this.greymarchClickGuardOn = true; } catch (e) { /* no guard this time */ }
+            // A DRAWN WEAPON STAYS OUT (2026-11-07, the owner: the weapon was put away after looting and I want it to stay out): the game puts a drawn weapon away
+            // the moment fighting is switched off, with no animation. With the weapon out, fighting stays on and only the swing is held back (greymarchClickGuardSwing:
+            // the attack events are blanked for CLICK_GUARD_MS); with it away, fighting is switched off as before (the click must not draw it).
+            var gDrawn = false; try { gDrawn = !!sp.Game.getPlayer().isWeaponDrawn(); } catch (gErr) { gDrawn = false; }
+            if ((this.greymarchClickGuardSaid = (this.greymarchClickGuardSaid || 0) + 1) <= 20) this.greymarchLog("click guard: a window closed (" + (this.greymarchClickGuardWhy || "?") + "), weapon " + (gDrawn ? "out: only the swing held back" : "away: fighting off " + CLICK_GUARD_MS + " ms"));
+            if (gDrawn) { this.greymarchClickGuardSwingUntil = this.greymarchClickGuardUntil; this.greymarchClickGuardSwingHook(); }
+            else { try { sp.Game.disablePlayerControls(false, true, false, false, false, false, false, false, 0); this.greymarchClickGuardOn = true; } catch (e) { /* no guard this time */ } }
         }
         if (this.greymarchClickGuardOn && now >= (this.greymarchClickGuardUntil || 0)) {
             this.greymarchClickGuardOn = false; this.greymarchClickGuardWanted = false;
