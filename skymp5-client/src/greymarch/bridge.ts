@@ -89,7 +89,7 @@ const WOLF_ROAR_SOUND = 0x101008, BEAR_ROAR_SOUND = 0x0f95bb; // NPCWerewolfShou
 // both put on again every DRUNK_AGAIN_MS (a jump, a fight or a load ends the walk)
 const DRUNK_IDLE_START = 0x0cefd0, DRUNK_IDLE_STOP = 0x0cefd1, DRUNK_IMOD = 0x0c9cc5, DRUNK_AGAIN_MS = 10000;
 // DRUNK AND HIGH (greymarchIntoxTick): the skooma screen (the Sleeping Tree sap, Skyrim.esm), the stumble, how often, the pace (%) and the stamina lost (a share of the base)
-const INTOX_CLEAR_MS = 6000, INTOX_CLEAR_EVERY = 1000;
+const INTOX_CLEAR_MS = 6000, INTOX_CLEAR_EVERY = 1000, INTOX_DRUNK_ISTATE = 15, INTOX_WALK_AGAIN_MS = 2000, INTOX_POV_BACK_MS = 700; // iState 15: the body is in the drunk walk (its behavior tags it)
 const INTOX_HIGH_IMOD = 0x0e3cbc, INTOX_STUMBLE_IDLE = 0x0138d5, INTOX_TIPSY_PULSE = 4500, INTOX_TIPSY_STRENGTH = 0.35;
 const INTOX_STUMBLE: { [k: string]: number } = { drunk: 40000, high: 20000 };
 const INTOX_SPEED: { [k: string]: number } = { tipsy: 95, drunk: 85, high: 80 };
@@ -1845,12 +1845,13 @@ export class GreymarchBridge {
     // DRUNK AND HIGH (gamemode intoxication.js; 2026-11-07, the owner: "visual effects and like stumbling animations"; levels, a strong skooma high, some downsides).
     // The server says { greymarchIntox level, ms } when the level changes; this game shows it until then (ms is only the safety stop: the server says "sober"):
     //   tipsy  the drunk screen in soft pulses (INTOX_TIPSY_PULSE), walking at INTOX_SPEED.tipsy %
-    //   drunk  the drunk screen held, a stumble every INTOX_STUMBLE.drunk ms or so, walking at INTOX_SPEED.drunk %, INTOX_STAMINA.drunk of the stamina gone
-    //   high   the Sleeping Tree sap's screen held (Skyrim.esm 0E3CBC), stumbles more often, slower still, more stamina gone
+    //   drunk  the drunk screen held, the drunk walk in first person (others see it), a stumble every INTOX_STUMBLE.drunk ms or so, walking at INTOX_SPEED.drunk %, INTOX_STAMINA.drunk of the stamina gone
+    //   high   the Sleeping Tree sap's screen held (Skyrim.esm 0E3CBC), the drunk walk, stumbles more often, slower still, more stamina gone
     // A stumble (the game's own stagger, StaggerStart 0138D5, small) never comes in a fight, with a weapon out, swimming, riding, sitting, in a menu or mid emote.
     // A beast form, a creature's body or the vampire's drained walk (greymarchDrunkTick) pauses the screen and the pace; the stamina stays down.
     greymarchIntoxTick(player: any, now: number): any {
         var sp = this.sp, w = this.greymarchIntoxWant;
+        if (this.greymarchIntoxWalking) this.greymarchIntoxPovKeys(player);
         var level = w && now < w.until ? w.level : "sober";
         if (w && level === "sober") this.greymarchIntoxWant = null;
         if (now < (this.greymarchIntoxCheckAt || 0) && level === this.greymarchIntoxHave) return;
@@ -1884,7 +1885,30 @@ export class GreymarchBridge {
         // the stumbles
         var calm = true;
         try { calm = !player.isInCombat() && !player.isWeaponDrawn() && !player.isSwimming() && !player.isOnMount() && player.getSitState() === 0 && !this.greymarchEmoteNow && !sp.Ui.isMenuOpen("InventoryMenu") && !sp.Ui.isMenuOpen("Dialogue Menu"); } catch (cErr) { calm = false; }
-        // no drunk walk (IdleDrunkStart): made for NPCs, on a player in third person it took the movement away (the owner, 2026-11-07: "I cant move my character")
+        // THE DRUNK WALK, SEEN BY OTHERS (2026-11-07, the owner: "could we do it in first person? ... if others can see the walk and the player can see a swaying screen"):
+        // the game's drunk walk (IdleDrunkStart) is made for NPCs: in third person it takes a player's movement away (the engine reads no keys while the body is in
+        // it, iState 15), in first person the player walks as usual. So while drunk or high the camera is held in first person, and the body does the drunk walk,
+        // which SkyMP shows to everyone like an emote (their game moves this character like an NPC, and an NPC can walk drunk). Put on again whenever the body has
+        // left it (a jump, a stumble, a load) and is calm; IdleDrunkStop when it is over. The meal's own third person (greymarchEmotePovLock) goes first.
+        var walkWanted = held && calm && !this.greymarchEmotePovLocked;
+        if (walkWanted) {
+            // standing still, third person is fine (2026-11-07, the owner: "they can go into third person when they stand still and when they move put them back
+            // into first person"): greymarchIntoxPovKeys, every frame, puts them in first person the moment a movement key is down
+            var ist = -1; try { ist = player.getAnimationVariableInt("iState"); } catch (isErr) { ist = -1; }
+            if (ist !== INTOX_DRUNK_ISTATE && now - (this.greymarchIntoxWalkAt || 0) >= INTOX_WALK_AGAIN_MS) {
+                this.greymarchIntoxWalkAt = now;
+                var wok = false;
+                try { var start = sp.Idle.from(sp.Game.getFormEx(DRUNK_IDLE_START)); wok = !!start && !!player.playIdle(start); } catch (wErr) { wok = false; }
+                if (wok) this.greymarchIntoxWalking = true;
+                if ((this.greymarchIntoxWalkSaid = (this.greymarchIntoxWalkSaid || 0) + 1) <= 5) this.greymarchLog("intox: the drunk walk " + (wok ? "on" : "refused"));
+            }
+        }
+        if (!held && this.greymarchIntoxWalking) {
+            this.greymarchIntoxWalking = false; this.greymarchIntoxWalkAt = 0;
+            if (this.greymarchIntoxPovAuto) { this.greymarchIntoxPovAuto = false; try { sp.Game.forceThirdPerson(); } catch (tpErr) { /* their camera */ } } // first person only because of the walk: back to third
+            try { var stop = sp.Idle.from(sp.Game.getFormEx(DRUNK_IDLE_STOP)); if (stop) player.playIdle(stop); } catch (sErr) { /* the walk ends with the next idle */ }
+            this.greymarchLog("intox: the drunk walk off");
+        }
         if (held && !this.greymarchIntoxStumbleAt) this.greymarchIntoxStumbleAt = now + INTOX_STUMBLE[show] * (0.5 + Math.random());
         if (!held) this.greymarchIntoxStumbleAt = 0;
         else if (now >= this.greymarchIntoxStumbleAt) {
@@ -1894,6 +1918,7 @@ export class GreymarchBridge {
                     try { player.setAnimationVariableFloat("staggerMagnitude", 0.25); } catch (vErr) { /* the stagger's own size */ }
                     var st = sp.Idle.from(sp.Game.getFormEx(INTOX_STUMBLE_IDLE)); var ok = !!st && !!player.playIdle(st);
                     if (!ok) sp.Debug.sendAnimationEvent(player, "staggerStart");
+                    this.greymarchIntoxWalkAt = now - INTOX_WALK_AGAIN_MS + 2500; // the drunk walk again once the stumble is over
                     if ((this.greymarchIntoxStumbles = (this.greymarchIntoxStumbles || 0) + 1) <= 5) this.greymarchLog("intox: a stumble (" + show + ")");
                 } catch (stErr) { /* no stumble this time */ }
             }
@@ -1915,6 +1940,35 @@ export class GreymarchBridge {
         var had = this.greymarchIntoxStamina || 0;
         if (lose !== had) { try { player.modActorValue("stamina", had - lose); this.greymarchIntoxStamina = lose; } catch (mErr) { /* tried again in a moment */ } }
         if (level !== was) { this.greymarchIntoxHave = level; this.greymarchLog("intox: " + was + " -> " + level + (paused ? " (paused: a beast, a creature or the drained walk)" : "") + (lose ? ", stamina -" + lose : "")); }
+    }
+    // in the drunk walk and in third person: a movement key down puts them in first person at once (in third person the drunk walk would hold them in place)
+    greymarchIntoxPovKeys(player: any): any {
+        var sp = this.sp, input = sp.Input;
+        if (!input || typeof input.isKeyPressed !== "function" || this.greymarchEmotePovLocked) return;
+        var cam = -1; try { cam = Number(sp.Game.getCameraState()); } catch (camErr) { return; }
+        if (cam === -1) return;
+        if (cam !== 0 && this.greymarchIntoxPovAuto) this.greymarchIntoxPovAuto = false; // they are in third person again (by us or by their own wheel)
+        if (cam === 0 && !this.greymarchIntoxPovAuto) return; // first person by their own choice: theirs
+        try { if (sp.browser && sp.browser.isFocused && sp.browser.isFocused()) return; } catch (fErr) { /* no browser: keys count */ } // typing in chat is not walking
+        try { if (sp.Ui.isMenuOpen("Console") || sp.Ui.isMenuOpen("InventoryMenu") || sp.Ui.isMenuOpen("MapMenu")) return; } catch (mErr) { /* keys count */ }
+        var keys = this.greymarchIntoxMoveKeys;
+        if (!keys) {
+            keys = [];
+            var names = ["Forward", "Back", "Strafe Left", "Strafe Right"], fallback = [0x11, 0x1f, 0x1e, 0x20];
+            for (var i = 0; i < names.length; i++) { var k = 0; try { k = Number(input.getMappedKey(names[i], 0)) || 0; } catch (kErr) { k = 0; } keys.push(k > 0 && k < 0xff ? k : fallback[i]); }
+            this.greymarchIntoxMoveKeys = keys;
+        }
+        var down = false, now = Date.now();
+        for (var j = 0; j < keys.length && !down; j++) { try { down = !!input.isKeyPressed(keys[j]); } catch (dErr) { down = false; } }
+        if (down) this.greymarchIntoxMovedAt = now;
+        if (cam === 0) { // we put them in first person to walk: back to third once they have stopped (2026-11-07, the owner)
+            if (!down && now - (this.greymarchIntoxMovedAt || 0) >= INTOX_POV_BACK_MS) { this.greymarchIntoxPovAuto = false; try { sp.Game.forceThirdPerson(); } catch (tpErr) { /* next frame */ } }
+            return;
+        }
+        if (!down) return;
+        this.greymarchIntoxPovAuto = true;
+        try { sp.Game.forceFirstPerson(); } catch (fpErr) { /* next frame */ }
+        if ((this.greymarchIntoxPovSaid = (this.greymarchIntoxPovSaid || 0) + 1) <= 3) this.greymarchLog("intox: moving in the drunk walk: first person (camera was " + cam + ")");
     }
     greymarchVampFeedHeld(player: any, now: number): any {
         var sp = this.sp, h = this.greymarchVampFeedHold; if (!h) return;
