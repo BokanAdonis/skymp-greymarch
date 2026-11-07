@@ -90,7 +90,9 @@ const WOLF_ROAR_SOUND = 0x101008, BEAR_ROAR_SOUND = 0x0f95bb; // NPCWerewolfShou
 const DRUNK_IDLE_START = 0x0cefd0, DRUNK_IDLE_STOP = 0x0cefd1, DRUNK_IMOD = 0x0c9cc5, DRUNK_AGAIN_MS = 10000;
 // DRUNK AND HIGH (greymarchIntoxTick): the skooma screen (the Sleeping Tree sap, Skyrim.esm), the stumble, how often, the pace (%) and the stamina lost (a share of the base)
 const INTOX_CLEAR_MS = 6000, INTOX_CLEAR_EVERY = 1000, INTOX_DRUNK_ISTATE = 15, INTOX_WALK_AGAIN_MS = 2000, INTOX_POV_BACK_MS = 700; // iState 15: the body is in the drunk walk (its behavior tags it)
-const INTOX_HIGH_IMOD = 0x0e3cbc, INTOX_STUMBLE_IDLE = 0x0138d5, INTOX_TIPSY_PULSE = 4500, INTOX_TIPSY_STRENGTH = 0.35;
+const INTOX_HIGH_IMOD = 0x0e3cbc, INTOX_STUMBLE_IDLE = 0x0138d5, INTOX_SOFT_EVERY = 1000;
+const INTOX_SOFT: { [k: string]: number } = { tipsy: 0.15, drunk: 0.3 }; // the drunk screen's strength, replayed every second
+const INTOX_SWAY: { [k: string]: { pitch: number; pitchPeriod: number; lean: number } } = { drunk: { pitch: 0.5, pitchPeriod: 4.2, lean: 7 }, high: { pitch: 0.9, pitchPeriod: 3.4, lean: 11 } }; // degrees, seconds, degrees a second
 const INTOX_STUMBLE: { [k: string]: number } = { drunk: 40000, high: 20000 };
 const INTOX_SPEED: { [k: string]: number } = { tipsy: 95, drunk: 85, high: 80 };
 const INTOX_WALK_ONLY: { [k: string]: number } = { walk: 1, run: 0.33, sprint: 0.22 }; // drunk or high: a run or a sprint goes at walking pace
@@ -1845,7 +1847,7 @@ export class GreymarchBridge {
     }
     // DRUNK AND HIGH (gamemode intoxication.js; 2026-11-07, the owner: "visual effects and like stumbling animations"; levels, a strong skooma high, some downsides).
     // The server says { greymarchIntox level, ms } when the level changes; this game shows it until then (ms is only the safety stop: the server says "sober"):
-    //   tipsy  the drunk screen in soft pulses (INTOX_TIPSY_PULSE), walking at INTOX_SPEED.tipsy %
+    //   tipsy  the drunk screen, very light (INTOX_SOFT), walking at INTOX_SPEED.tipsy %
     //   drunk  the drunk screen held, the drunk walk in first person (others see it), a stumble every INTOX_STUMBLE.drunk ms or so, walking at INTOX_SPEED.drunk %, INTOX_STAMINA.drunk of the stamina gone
     //   high   the Sleeping Tree sap's screen held (Skyrim.esm 0E3CBC), the drunk walk, stumbles more often, slower still, more stamina gone
     // A stumble (the game's own stagger, StaggerStart 0138D5, small) never comes in a fight, with a weapon out, swimming, riding, sitting, in a menu or mid emote.
@@ -1853,6 +1855,7 @@ export class GreymarchBridge {
     greymarchIntoxTick(player: any, now: number): any {
         var sp = this.sp, w = this.greymarchIntoxWant;
         if (this.greymarchIntoxWalking) this.greymarchIntoxPovKeys(player);
+        if (this.greymarchIntoxScreen === "drunk" || this.greymarchIntoxScreen === "high") this.greymarchIntoxSway(player, now); else this.greymarchIntoxSwayAt = 0; // every frame: the sway and the lean
         var level = w && now < w.until ? w.level : "sober";
         if (w && level === "sober") this.greymarchIntoxWant = null;
         if (now < (this.greymarchIntoxCheckAt || 0) && level === this.greymarchIntoxHave) return;
@@ -1876,11 +1879,13 @@ export class GreymarchBridge {
             try { sp.ImageSpaceModifier.removeCrossFade(1.0); } catch (e3) { why += " crossfade: " + String(e3).slice(0, 80); }
             if (why && (this.greymarchIntoxClearLogged = (this.greymarchIntoxClearLogged || 0) + 1) <= 3) this.greymarchLog("intox: clearing the screen failed:" + why);
         }
-        if (show !== "sober" && now - (this.greymarchIntoxScreenAt || 0) >= (show === "tipsy" ? INTOX_TIPSY_PULSE : DRUNK_AGAIN_MS)) {
+        if (show !== "sober" && now - (this.greymarchIntoxScreenAt || 0) >= (show === "high" ? DRUNK_AGAIN_MS : INTOX_SOFT_EVERY)) {
             this.greymarchIntoxScreenAt = now;
             try {
                 var imod = show === "high" ? sp.ImageSpaceModifier.from(sp.Game.getFormEx(INTOX_HIGH_IMOD)) : sp.ImageSpaceModifier.from(sp.Game.getFormFromFile(DRUNK_IMOD, "BSHeartland.esm"));
-                if (imod) { if (show === "tipsy") imod.apply(INTOX_TIPSY_STRENGTH); else imod.applyCrossFade(1.5); }
+                // LESS BLURRY (2026-11-07, the owner): tipsy and drunk replay the drunk screen every INTOX_SOFT_EVERY ms at a low strength; it starts at its
+                // strongest and fades over 5 s, so a replay each second keeps it light and steady (held, it was too blurry); the skooma screen is held
+                if (imod) { if (show === "high") imod.applyCrossFade(1.5); else imod.apply(INTOX_SOFT[show] || 0.2); }
             } catch (iErr) { /* the screen is a nicety */ }
         }
         // the stumbles
@@ -1945,6 +1950,45 @@ export class GreymarchBridge {
         var had = this.greymarchIntoxStamina || 0;
         if (lose !== had) { try { player.modActorValue("stamina", had - lose); this.greymarchIntoxStamina = lose; } catch (mErr) { /* tried again in a moment */ } }
         if (level !== was) { this.greymarchIntoxHave = level; this.greymarchLog("intox: " + was + " -> " + level + (paused ? " (paused: a beast, a creature or the drained walk)" : "") + (lose ? ", stamina -" + lose : "")); }
+    }
+    // THE SWAY AND THE LEAN (2026-11-07, the owner: "a slight lean to the left or right when they are walking, so they cant just walk in a straight line", and the
+    // screen "slightly VERY slightly wavey"). Every frame while drunk or high in first person: the view rises and dips a little (INTOX_SWAY pitch, slow), and while a
+    // movement key is down the heading drifts left or right on a wandering curve (two slow waves, INTOX_SWAY lean degrees a second at most), so walking straight
+    // takes steering. Only the change since the last frame is added, so the mouse still looks around as usual. Not in a menu, on a horse, or mid emote.
+    greymarchIntoxSway(player: any, now: number): any {
+        var sp = this.sp, show = this.greymarchIntoxScreen, cfg = INTOX_SWAY[show || ""];
+        var last = this.greymarchIntoxSwayAt || 0; this.greymarchIntoxSwayAt = now;
+        if (!cfg || !last) { this.greymarchIntoxPitch = 0; return; }
+        var dt = Math.min(100, now - last); if (dt <= 0) return;
+        try {
+            if (Number(sp.Game.getCameraState()) !== 0) { this.greymarchIntoxPitch = 0; return; }
+            if (this.greymarchEmotePovLocked || this.greymarchEmoteNow || player.isOnMount() || sp.Ui.isMenuOpen("InventoryMenu") || sp.Ui.isMenuOpen("MapMenu") || sp.Ui.isMenuOpen("Dialogue Menu") || sp.Ui.isMenuOpen("Console")) return;
+        } catch (cErr) { return; }
+        var t = now / 1000;
+        var pitch = cfg.pitch * Math.sin(t * 2 * Math.PI / cfg.pitchPeriod);
+        var dx = pitch - (this.greymarchIntoxPitch || 0); this.greymarchIntoxPitch = pitch;
+        var dz = 0;
+        if (this.greymarchIntoxKeysDown()) { // walking
+            var rate = cfg.lean * (0.65 * Math.sin(t * 2 * Math.PI / 7.3) + 0.35 * Math.sin(t * 2 * Math.PI / 2.9 + 1.7));
+            dz = rate * dt / 1000;
+        }
+        if (Math.abs(dx) < 0.0005 && Math.abs(dz) < 0.0005) return;
+        try { player.setAngle(player.getAngleX() + dx, player.getAngleY(), player.getAngleZ() + dz); } catch (aErr) { /* next frame */ }
+    }
+    // a movement key down (the keys mapped to Forward, Back and the strafes; W S A D if none); not while typing in a window
+    greymarchIntoxKeysDown(): boolean {
+        var sp = this.sp, input = sp.Input;
+        if (!input || typeof input.isKeyPressed !== "function") return false;
+        try { if (sp.browser && sp.browser.isFocused && sp.browser.isFocused()) return false; } catch (fErr) { /* keys count */ }
+        var keys = this.greymarchIntoxMoveKeys;
+        if (!keys) {
+            keys = [];
+            var names = ["Forward", "Back", "Strafe Left", "Strafe Right"], fallback = [0x11, 0x1f, 0x1e, 0x20];
+            for (var i = 0; i < names.length; i++) { var k = 0; try { k = Number(input.getMappedKey(names[i], 0)) || 0; } catch (kErr) { k = 0; } keys.push(k > 0 && k < 0xff ? k : fallback[i]); }
+            this.greymarchIntoxMoveKeys = keys;
+        }
+        for (var j = 0; j < keys.length; j++) { try { if (input.isKeyPressed(keys[j])) return true; } catch (dErr) { /* next key */ } }
+        return false;
     }
     // in the drunk walk and in third person: a movement key down puts them in first person at once (in third person the drunk walk would hold them in place)
     greymarchIntoxPovKeys(player: any): any {
