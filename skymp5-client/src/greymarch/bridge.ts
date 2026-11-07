@@ -595,6 +595,7 @@ export class GreymarchBridge {
         this.greymarchRaceMenuQuestsTick(Date.now()); // RaceMenu's own quests started if SkyMP's load left them off (the Body Scales tab, Height)
         this.greymarchRaceMenuTick(Date.now()); // RaceMenu's extra sliders: sent when the race menu closes, put back after a relog (racemenuLook.ts)
         this.greymarchRaceMenuCopiesTick(Date.now()); // and put on the other players' copies (OTHERS SEE THEM)
+        this.greymarchRaceMenuHeightsTick(Date.now()); // their Height on at once, the moment a copy is drawn, and kept right (greymarchRaceMenuHeightsTick)
         this.greymarchDressTick(Date.now()); // a mask hides the beard (and, through the ticks above, a hood the big ears)
         this.greymarchStackNote(Date.now()); // an item in two stacks: what differs between them, to the log (2026-11-06)
         this.greymarchRestackOnce(Date.now()); // the old split stacks of plain items (hides, leather, ingredients) made one again, once a session
@@ -2503,13 +2504,15 @@ export class GreymarchBridge {
             try {
                 var local = misc.remoteIdToLocalId(c.actor);
                 var ac = local ? sp.Actor.from(sp.Game.getFormEx(local)) : null;
+                if ((local >>> 0) !== (c.local || 0)) { c.local = local >>> 0; c.loadedSince = 0; c.done = null; c.tries = 0; c.retryAt = 0; } // SkyMP made a new copy of them: done afresh
                 if (!ac || !ac.is3DLoaded() || ac.isDisabled()) { c.loadedSince = 0; c.done = null; continue; }
                 if (!c.loadedSince) c.loadedSince = now;
                 if (now - c.loadedSince < 4000 || did) continue;
                 var cwant = rmMod.dressLook(c.want, this.greymarchHeadwear(ac).hood); // a hood worn: the big-ear sliders at 0 (DRESSED, racemenuLook.ts)
                 var key = JSON.stringify(cwant);
                 if (c.lastKey !== key) { c.lastKey = key; c.tries = 0; } // the hood went on or came off: tried afresh
-                if (c.done === key || c.tries >= 3) continue;
+                if (c.done === key) continue;
+                if (c.tries >= 3) { if (!c.retryAt) c.retryAt = now + 30000; if (now < c.retryAt) continue; c.tries = 0; c.retryAt = 0; } // three tries failed: again in 30 s, never given up
                 var race = ac.getRace(), rname = race ? String(race.getName() || "") : "";
                 if (/were|vampire lord|beast/i.test(rname)) continue; // a creature form: not the character's own body
                 if (!this.greymarchPresetIo()) continue;
@@ -2531,6 +2534,52 @@ export class GreymarchBridge {
                 this.greymarchRmCopyLog(c.actor, "the sliders could not be put on the copy (try " + c.tries + " of 3): " + err);
             }
         }
+    }
+    // THEIR HEIGHT AT ONCE (2026-11-07, the owner: "Heights aren't saving for some people ... make it more consistent so people always load the correct height when
+    // they first draw someone's character"). The whole look waits 4 s and one copy a second (above), so in a crowd someone stood at the race's own height for a
+    // while, and a copy SkyMP made again kept the old one's "done". The Height alone is cheap: the moment a copy is drawn its skeleton's scale is read and,
+    // when it is not the kept Height, set straight on (NiOverride, RaceMenu's own key), then read again every 2 s while it stays drawn, so a rebuild, a race
+    // change back from a form or a load that dropped it is put right within 2 s. Four copies looked at every quarter second; never a werewolf or a creature body.
+    greymarchRaceMenuHeightsTick(now: number): any {
+        var copies = this.greymarchRmCopies;
+        if (!copies || now < (this.greymarchRmHeightsNext || 0)) return;
+        this.greymarchRmHeightsNext = now + 250;
+        var sp = this.sp, budget = 4;
+        for (var k in copies) {
+            if (budget <= 0) break;
+            var c = copies[k];
+            if (now < (c.hNext || 0)) continue;
+            budget--;
+            c.hNext = now + 2000;
+            try {
+                var local = misc.remoteIdToLocalId(c.actor);
+                var ac = local ? sp.Actor.from(sp.Game.getFormEx(local)) : null;
+                if (!ac || !ac.is3DLoaded() || ac.isDisabled()) { c.hNext = now + 250; continue; } // not drawn yet: looked at again in a quarter second, so the first draw gets it
+                var race = ac.getRace(), rname = race ? String(race.getName() || "") : "";
+                if (/were|vampire lord|beast/i.test(rname)) continue;
+                var want = Math.round(rmMod.heightOfLook(c.want) * 1000) / 1000;
+                var female = this.greymarchHeightFemale(ac);
+                var cur = this.greymarchHeightNow(ac, female);
+                if (Math.abs(cur - want) < 0.002) continue;
+                this.greymarchHeightPut(ac, female, want, false);
+                c.hNext = now + 1000; // read back soon: a load that was still going on can drop it
+                var after = this.greymarchHeightNow(ac, female);
+                this.greymarchRmCopyLog(c.actor, "Height " + cur + " -> " + want + " (the skeleton reads " + after + ")");
+            } catch (err) {
+                this.greymarchRmCopyLog(c.actor, "the Height could not be put on the copy: " + err);
+            }
+        }
+    }
+    // The Height on a skeleton: RaceMenu's scale on the NPC node (third person; the player's own first person too), 1 taking it off.
+    greymarchHeightPut(actor: any, female: boolean, v: number, firstPerson: boolean): any {
+        var sp = this.sp, step = (what: string, run: () => any) => this.greymarchHeightStep(what, run);
+        var sides = firstPerson ? [false, true] : [false];
+        sides.forEach((fp) => {
+            var who = fp ? " (first person)" : "";
+            if (v === 1) step("NiOverride.RemoveNodeTransformScale" + who, () => sp.callNative("NiOverride", "RemoveNodeTransformScale", undefined, actor, fp, female, "NPC", "RSMPlugin"));
+            else step("NiOverride.AddNodeTransformScale" + who, () => sp.callNative("NiOverride", "AddNodeTransformScale", undefined, actor, fp, female, "NPC", "RSMPlugin", v));
+            step("NiOverride.UpdateNodeTransform" + who, () => sp.callNative("NiOverride", "UpdateNodeTransform", undefined, actor, fp, female, "NPC"));
+        });
     }
     greymarchRmCopyLog(actor: number, text: string): any {
         this.greymarchRmCopyLogs = (this.greymarchRmCopyLogs || 0) + 1;

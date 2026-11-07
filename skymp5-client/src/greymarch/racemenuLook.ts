@@ -97,3 +97,21 @@ export function keepEarsUnderHood(saved: any, kept: any): any {
     out.morphs.custom = custom;
     return out;
 }
+
+// THE HEIGHT IN A KEPT LOOK (2026-11-07, the owner: heights not always right when someone's character is first drawn): RaceMenu's Height is a scale on the
+// skeleton's NPC node under its key RSMPlugin (NiOverride value 20), third person; 1 when the look keeps none. The same reading as gamemode raceheights.js heightOf.
+export const HEIGHT_NODE = "NPC";
+export const HEIGHT_KEY = "RSMPlugin";
+export function heightOfLook(look: any): number {
+    var ts: any[] = look && Array.isArray(look.transforms) ? look.transforms : [];
+    for (var i = 0; i < ts.length; i++) {
+        var t = ts[i];
+        if (!t || t.node !== HEIGHT_NODE || t.firstPerson) continue;
+        var keys: any[] = Array.isArray(t.keys) ? t.keys : [];
+        for (var j = 0; j < keys.length; j++) {
+            if (!keys[j] || keys[j].name !== HEIGHT_KEY || !Array.isArray(keys[j].values)) continue;
+            for (var v = 0; v < keys[j].values.length; v++) { var x = keys[j].values[v]; if (x && x.key === 20 && typeof x.data === "number" && x.data > 0) return x.data; }
+        }
+    }
+    return 1;
+}

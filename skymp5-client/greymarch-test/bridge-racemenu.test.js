@@ -232,3 +232,42 @@ test("others see them (2026-11-02, the owner): another player's kept sliders are
   for (let i = 13; i < 20; i++) s.gm.greymarchRaceMenuCopiesTick(200000 + i * 1000);
   assert.strictEqual(copyLoads(), 2, "again after a rebuild");
 });
+
+test("their height at once (2026-11-07, the owner: heights not always right on first draw): set the moment the copy is drawn, read again every 2 s, put right after a rebuild; a new copy is done afresh", () => {
+  const s = make();
+  const copy = { loaded: false, id: 0x42, scale: 0, sets: [] };
+  const copyActor = { is3DLoaded: () => copy.loaded, isDisabled: () => false, getRace: () => ({ getName: () => "Nord" }), getBaseObject: () => "base" };
+  s.sp.Actor = { from: (f) => (f === copy ? copyActor : null) };
+  s.sp.ActorBase = { from: () => ({ getSex: () => 0 }) };
+  s.sp.Game.getFormEx = (id) => (id === copy.id ? copy : null);
+  s.sp.callNative = (cls, fn, self, actor, fp, female, node, key, v) => {
+    assert.strictEqual(cls, "NiOverride");
+    assert.strictEqual(actor, copyActor);
+    if (fn === "GetNodeTransformScale") return copy.scale;
+    if (fn === "AddNodeTransformScale") { assert.strictEqual(fp, false); copy.sets.push(v); copy.scale = v; return; }
+    if (fn === "RemoveNodeTransformScale") { copy.sets.push(1); copy.scale = 0; return; }
+    if (fn === "UpdateNodeTransform") return;
+    throw new Error("unexpected " + fn);
+  };
+  s.gm.greymarchRmCopies = null;
+  s.say({ customPacketType: "greymarchRaceMenuLookOf", actorId: 0x42, look: { transforms: MINE.transforms } });
+  let t = 300000;
+  const tick = (ms) => { for (let e = t + ms; t < e; t += 250) s.gm.greymarchRaceMenuHeightsTick(t); };
+  tick(1000);
+  assert.deepStrictEqual(copy.sets, [], "nothing before it is drawn");
+  copy.loaded = true; tick(250);
+  assert.deepStrictEqual(copy.sets, [1.1], "drawn: the Height goes on within a quarter second, no 4 s wait");
+  tick(5000);
+  assert.deepStrictEqual(copy.sets, [1.1], "right: left alone");
+  copy.scale = 0; tick(2250);
+  assert.deepStrictEqual(copy.sets, [1.1, 1.1], "lost (a rebuild, a load): put back within 2 s");
+  s.say({ customPacketType: "greymarchRaceMenuLookOf", actorId: 0x42, look: {} });
+  tick(500);
+  assert.deepStrictEqual(copy.sets, [1.1, 1.1, 1], "no Height kept any more: taken off");
+  copy.scale = 0; copy.sets = [];
+  s.sp.ActorBase = { from: () => ({ getSex: () => 0 }) };
+  copyActor.getRace = () => ({ getName: () => "WerewolfBeastRace" });
+  s.say({ customPacketType: "greymarchRaceMenuLookOf", actorId: 0x42, look: { transforms: MINE.transforms } });
+  tick(3000);
+  assert.deepStrictEqual(copy.sets, [], "never on a werewolf body");
+});
