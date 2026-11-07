@@ -299,7 +299,7 @@ export class GreymarchBridge {
         if (type === "greymarchVampLooks") { this.greymarchVampLookList = Array.isArray(msg.vampires) ? msg.vampires : []; if (Number(msg.me) > 0) this.greymarchMeActor = Number(msg.me) >>> 0; return; } // (me: which of them is this player: the ghosts and effects packets that also say so may not have come yet, and without it the player's own eyes and fangs were never put on) // how every vampire in the world looks (eyes and fangs)
         if (type === "greymarchIntoxNear") { this.greymarchIntoxOthers = Array.isArray(msg.actors) ? msg.actors.map(function (x: any) { return Number(x) >>> 0; }).filter(function (x: number) { return x > 0; }).slice(0, 200) : []; return; } // who is drunk or high (greymarchIntoxOthersTick)
         if (type === "greymarchIntox") { var il = msg.level === "tipsy" || msg.level === "drunk" || msg.level === "high" ? msg.level : "sober"; this.greymarchIntoxWant = il === "sober" ? null : { level: il, until: Date.now() + Math.max(1000, Math.min(30 * 60000, Number(msg.ms) || 0)) }; this.greymarchIntoxCheckAt = 0; return; } // drunk or high (greymarchIntoxTick)
-        if (type === "greymarchWeather") { var wxId = Number(msg.id) >>> 0; this.greymarchWeatherWant = { id: wxId, fast: !!msg.fast }; this.greymarchWeatherCheckAt = 0; if (msg.fast || (this.greymarchWeatherSet && this.greymarchWeatherSet !== wxId)) this.greymarchWeatherSetAt = 0; return; } // the hold's weather (greymarchWeatherTick)
+        if (type === "greymarchWeather") { var wxId = Number(msg.id) >>> 0; this.greymarchWeatherWant = { id: wxId, fast: !!msg.fast, file: typeof msg.file === "string" && msg.file.length < 80 ? msg.file : null }; this.greymarchWeatherCheckAt = 0; if (msg.fast || (this.greymarchWeatherSet && this.greymarchWeatherSet !== wxId)) this.greymarchWeatherSetAt = 0; return; } // the hold's weather (greymarchWeatherTick)
         if (type === "greymarchDrunk") { this.greymarchDrunkWant = msg.on ? { until: Date.now() + Math.max(0, Number(msg.ms) || 0), at: 0 } : { off: true }; return; } // drained to death: the drunk walk after waking (greymarchDrunkTick)
         if (type === "greymarchVampFeed") { if (!msg.on && this.greymarchVampFeedHold) this.greymarchLog("vampire: the server ended the feeding" + (msg.why ? " (" + String(msg.why).slice(0, 80) + ")" : "")); this.greymarchVampFeedWant = msg.on ? { role: msg.role, partner: msg.partner, at: Date.now(), done: false } : { off: true }; return; } // the feeding scene (held until the vampire stops: greymarchVampFeedHeld)
         if (type === "greymarchVampMist") { if (!msg.on) this.greymarchVampMistEnd = true; return; } // Mist Form refused or over: the game's own mist is ended
@@ -1871,6 +1871,11 @@ export class GreymarchBridge {
         try {
             var cell = player.getParentCell();
             if (!cell || cell.isInterior()) return;
+            if (w.file) { // a weather of another plugin (the red sun: Dawnguard.esm; the blood moon: GreymarchWorld.esp): its ID in this game's load order
+                var wf: any = null; try { wf = sp.Game.getFormFromFile(w.id, w.file); } catch (fErr) { wf = null; }
+                if (!wf) { this.greymarchLog("weather: " + w.id.toString(16) + " is not in " + w.file + " here"); this.greymarchWeatherWant = null; return; }
+                w.id = wf.getFormID() >>> 0; w.file = null;
+            }
             if (!w.id) { if (this.greymarchWeatherSet) { sp.Weather.releaseOverride(); this.greymarchWeatherSet = 0; this.greymarchLog("weather: back to the game's own"); } return; }
             var cur = sp.Weather.getCurrentWeather(), curId = cur ? (cur.getFormID() >>> 0) : 0;
             if (curId === w.id && this.greymarchWeatherSet === w.id) return;
