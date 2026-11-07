@@ -93,6 +93,7 @@ const INTOX_CLEAR_MS = 6000, INTOX_CLEAR_EVERY = 1000, INTOX_DRUNK_ISTATE = 15, 
 const INTOX_HIGH_IMOD = 0x0e3cbc, INTOX_STUMBLE_IDLE = 0x0138d5, INTOX_TIPSY_PULSE = 4500, INTOX_TIPSY_STRENGTH = 0.35;
 const INTOX_STUMBLE: { [k: string]: number } = { drunk: 40000, high: 20000 };
 const INTOX_SPEED: { [k: string]: number } = { tipsy: 95, drunk: 85, high: 80 };
+const INTOX_WALK_ONLY: { [k: string]: number } = { walk: 1, run: 0.33, sprint: 0.22 }; // drunk or high: a run or a sprint goes at walking pace
 const INTOX_STAMINA: { [k: string]: number } = { drunk: 0.2, high: 0.3 };
 // THE HELD FEEDING LOOP (2026-11-03, the owner: "It's still not locking into the animation"; the game log showed the bite play once, then the replay 6 s later
 // refused 4 times while both stood): the standing feed is one paired bite of about 5 s. It is now played again the moment it ends (bIsSynced off, checked every
@@ -1927,7 +1928,11 @@ export class GreymarchBridge {
         var staff = (this.greymarchFxHave && this.greymarchFxHave.speed) || 100;
         var pace = INTOX_SPEED[show] || 0;
         if (pace) {
-            var pct = Math.round(staff * pace / 100), cur = -1;
+            // DRUNK OR HIGH: A WALK ONLY (2026-11-07, the owner: "they can only slow walk, so they cant sprint or jog"): running or sprinting covers no more ground than
+            // walking (INTOX_WALK_ONLY: the share of the pace a run or a sprint gets, a person's run is about three times a walk, a sprint about four and a half)
+            var gait = "walk";
+            if (held) { try { gait = player.isSprinting() ? "sprint" : player.isRunning() ? "run" : "walk"; } catch (gaErr) { gait = "walk"; } }
+            var pct = Math.round(staff * pace / 100 * (INTOX_WALK_ONLY[gait] || 1)), cur = -1;
             try { cur = player.getActorValue("SpeedMult"); } catch (gErr) { cur = -1; }
             if (cur !== pct) { try { player.setActorValue("SpeedMult", pct); player.modActorValue("CarryWeight", 0.1); player.modActorValue("CarryWeight", -0.1); this.greymarchIntoxPace = pct; } catch (pErr) { /* tried again in a moment */ } }
         } else if (this.greymarchIntoxPace !== undefined) {
