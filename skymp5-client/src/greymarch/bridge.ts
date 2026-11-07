@@ -45,6 +45,7 @@ const POISON_GLOW_SHADER = 0x5d606; // EnchGreenFXShader (Skyrim.esm): the green
 const SIT_RESET_MS = 2000; // standing up from the wheel's sitting: the body is put back to normal this long after the stand-up starts (greymarchSitResetTick)
 const WORK_SHEATHE_MS = 1500; // profession work: the kneel waits this long after the weapon is put away (the put-away animation ends first)
 const EMOTE_POV_WATCH_MS = 10000; // after an emote's camera lock lets go: going into first person within this long puts the body back to normal (greymarchEmotePovLock)
+const EMOTE_EXIT_KEY = 14, EMOTE_ONCE_MOVE_AFTER_MS = 400; // Backspace: out of any emote or pose (greymarchEmoteExitTick); a one-off emote is cut short by moving this long after it starts
 const EMOTE_ONCE_POV_MS = 5000; // a one-off emote (a wave, a bow): first person stays off this long (greymarchEmotePovLock)
 const WOLF_BACK_GRACE_MS = 2000; // Z changes back, but not in the first 2 seconds after the body changed
 const STANDUP_FALLBACK_MS = 1500; // greymarchStandUp: still in the furniture this long after the get-up animation was asked for, the player is snapped to standing
@@ -944,6 +945,8 @@ export class GreymarchBridge {
     greymarchKey(e: any): any {
         if (e && e.code === ESC_KEY && e.device !== undefined && e.device !== 0) return; // code 1 from the mouse is its right button, not Esc (2026-11-05: right click opened the pause menu); only the keyboard's Esc counts
         if (this.greymarchBuildCam && this.greymarchBuildCamKey(e)) return; // the build system's free camera has the keys it uses
+        if (e.code === EMOTE_EXIT_KEY) { var xDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (e.isUp === true) xDown = false; if (xDown && !this.greymarchKeyExit && !this.greymarchChatTyping && !this.greymarchPanelHasKeys()) this.greymarchEmoteExitWanted = Date.now(); this.greymarchKeyExit = xDown; } // Backspace: out of the emote or pose (greymarchEmoteExitTick)
+        if (this.greymarchEmoteOnce && (e.code === 17 || e.code === 30 || e.code === 31 || e.code === 32)) { var oDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (oDown && e.isUp !== true) this.greymarchEmoteOnce.moved = true; } // W A S D during a one-off emote (greymarchEmoteExitTick)
         if (this.greymarchEmoteNow && this.greymarchEmoteNow.kind === "loop" && !this.greymarchEmoteNow.meal && (e.code === 17 || e.code === 30 || e.code === 31 || e.code === 32 || e.code === 57)) { var mvDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (mvDown && e.isUp !== true) this.greymarchEmoteStopWanted = Date.now(); } // W A S D or Space ends an emote that lasts (greymarchEmoteTick)
         if (e.code === 49) { var nDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (e.isUp === true) nDown = false; if (nDown && !this.greymarchKey49 && !this.greymarchChatTyping) this.greymarchSensesAt = Date.now(); this.greymarchKey49 = nDown; if (this.greymarchWolfPerks && this.greymarchWolfPerks.carrier) return; } // N: night eye or the scent (greymarchWolfPerksTick)
         if (e.code === 19) { var rDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (e.isUp === true) rDown = false; if (rDown && !this.greymarchKey19 && this.greymarchWolfOn && !this.greymarchChatTyping) this.greymarchWolfRoarAt = Date.now(); this.greymarchKey19 = rDown; return; } // R: the werewolf roars (greymarchWolfTick; only while changed)
@@ -5348,6 +5351,7 @@ export class GreymarchBridge {
             }
         }
         this.greymarchSitResetTick(now);
+        this.greymarchEmoteExitTick(now); // Backspace, and moving during a one-off emote
         this.greymarchPoisonTick(now);
         this.greymarchPoisonGlowTick(now);
         this.greymarchEmotePovLock(!!this.greymarchEmoteNow || now < (this.greymarchEmotePovUntil || 0) || !!this.greymarchMiniOn || !!this.greymarchForgeAnim || !!this.greymarchForgeOn || now - (this.greymarchWorkStartAt || -1e12) < 1500 || !!this.greymarchSitResetAt, now); // standing up from sitting: third person until the body is back to normal, THEN first person (2026-11-02, the owner: going back to first person mid stand-up made them fall and float) // a meal too, and profession work (2026-11-02, the owner)
@@ -5627,8 +5631,34 @@ export class GreymarchBridge {
             }
         }
     }
+    // OUT OF AN EMOTE (2026-11-07, the owner: "an exit animation key or something so players arent sliding around in there animations and have to jump to fix it").
+    //   Backspace during an emote that lasts (a sit, a lean, a dance): its own stop, the getting-up animation, as Stop on the wheel.
+    //   Backspace with no emote on (a one-off still playing, a pose the game kept after a server emote, a mini game or a missed stop): the body straight back
+    //   to normal (IdleForceDefaultState, what a jump did; SkyMP passes it on, so others see them stand too). Not in a meal, a feeding, a beast, a real seat
+    //   (the game's own E gets up from those), dead, or with the build camera on.
+    //   A one-off emote (a wave, a bow) used to go on playing while they walked, sliding: moving with W A S D, or at walking speed, cuts it short the same way.
     // the body back to its normal state (the game's IdleForceDefaultState; SkyMP passes it to the other games): not while an emote or a meal is on, a weapon is
     // out (drawing it already ended the pose), they sit in a real seat, or are dead or a beast
+    greymarchEmoteExitTick(now: number): any {
+        var once = this.greymarchEmoteOnce;
+        if (once && now >= once.until) once = this.greymarchEmoteOnce = null;
+        var exit = this.greymarchEmoteExitWanted || 0;
+        this.greymarchEmoteExitWanted = 0;
+        if (exit && now - exit > 1000) exit = 0;
+        if (once && !exit && now - once.at >= EMOTE_ONCE_MOVE_AFTER_MS && now >= (this.greymarchEmoteOnceCheckAt || 0)) {
+            this.greymarchEmoteOnceCheckAt = now + 150;
+            var moving = !!once.moved; if (!moving) { try { moving = this.sp.Game.getPlayer().getAnimationVariableFloat("Speed") > 30; } catch (e) { moving = false; } }
+            if (moving) { this.greymarchEmoteOnce = null; this.greymarchBodyReset("moved during " + once.id); return; }
+        }
+        if (!exit) return;
+        if (this.greymarchWolfOn || this.greymarchShapeOn || this.greymarchVampFeedHold || this.greymarchBuildCam) return;
+        var cur = this.greymarchEmoteNow;
+        if (cur && cur.meal) { this.greymarchEmoteSay("Finish eating first"); return; }
+        if (cur) { this.greymarchEmoteEnd("Backspace"); return; }
+        this.greymarchEmoteOnce = null;
+        this.greymarchSitResetAt = 0;
+        this.greymarchBodyReset("Backspace");
+    }
     greymarchBodyReset(why: string): any {
         if (this.greymarchEmoteNow || this.greymarchWolfOn || this.greymarchShapeOn) return;
         try {
@@ -5677,6 +5707,8 @@ export class GreymarchBridge {
         if (!ok) { this.greymarchEmoteSay("You cannot do that right now"); return; }
         this.greymarchEmoteNow = em.kind === "once" ? null : { id: em.id, kind: em.kind, stop: em.stop || emoteMod.IDLE_STOP, stopEvent: em.stopEvent, at: Date.now() };
         if (em.kind === "once") this.greymarchEmotePovUntil = Date.now() + EMOTE_ONCE_POV_MS; // a one-off emote plays for a few seconds: first person stays off meanwhile
+        this.greymarchEmoteOnce = em.kind === "once" ? { id: em.id, at: Date.now(), until: Date.now() + EMOTE_ONCE_POV_MS, moved: false } : null; // moving cuts it short (greymarchEmoteExitTick)
+        if (!this.greymarchEmoteExitHinted && em.kind !== "once") { this.greymarchEmoteExitHinted = true; this.greymarchEmoteSay("Backspace stops an emote"); } // said once a session
     }
     // ---- FACES (the wheel's Face group). The face is put on the player's own body here and reported to the server, which passes it to everyone else (gamemode faces.js);
     // the faces of other players come back as { customPacketType: "greymarchFaceOf", actor, face } and are put on the characters this game draws. The game can drop a face
