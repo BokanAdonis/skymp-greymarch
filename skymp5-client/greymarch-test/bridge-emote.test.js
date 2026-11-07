@@ -959,17 +959,17 @@ test("a poison put on the weapon in hand is reported to the server (2026-11-03: 
   assert.strictEqual(s.log.sent.filter((m) => m.customPacketType === "greymarchPoisonApplied").length, 1, "a poisoned weapon in the pack is not in hand");
 });
 
-test("a poisoned blade glows (2026-11-03): the server's list goes to GreymarchCam.SetWeaponGlow on the weapon, again when it is drawn or put away and every 5 s, off when the poison is used", () => {
+test("a poisoned blade glows (2026-11-03): the server's list goes to GreymarchCam.SetWeaponGlow on the weapon, again when it is drawn or put away (not every 5 s: its sound played each time, 2026-11-07), off when the poison is used", () => {
   const OTHER = 0xff000777;
   const s = make({ others: { [OTHER]: 0xff000abc } });
   const glows = () => (s.log.natives || []).filter((n) => n[1] === "SetWeaponGlow");
   s.say({ customPacketType: "greymarchPoisoned", actors: [OTHER] }); s.tick(600);
   assert.strictEqual(glows().length, 1, "another player's blade glows in this game");
   s.tick(600); assert.strictEqual(glows().length, 1, "not asked again at once");
-  s.tick(5000); assert.strictEqual(glows().length, 2, "asked again after 5 s (a body drawn again loses it)");
+  s.tick(5000); assert.strictEqual(glows().length, 1, "not again after 5 s either (the hum played each time)");
   s.say({ customPacketType: "greymarchPoisoned", actors: [] }); s.tick(600);
-  assert.strictEqual(glows().length, 3, "taken off");
-  s.tick(600); s.tick(5000); assert.strictEqual(glows().length, 3, "nothing more");
+  assert.strictEqual(glows().length, 2, "taken off");
+  s.tick(600); s.tick(5000); assert.strictEqual(glows().length, 2, "nothing more");
 });
 
 test("getting up from lying down or wounded in first person: back to first person only 2 seconds after it ends (2026-11-03: someone floated again)", () => {

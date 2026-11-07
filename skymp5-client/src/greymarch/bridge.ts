@@ -5819,16 +5819,32 @@ export class GreymarchBridge {
             if (!local) continue;
             var a: any = null; try { a = sp.Actor.from(sp.Game.getFormEx(local)); } catch (e) { a = null; }
             if (!a) continue;
+            // THE GLOW WITHOUT THE HUM (2026-11-07, the owner: "you can forever hear it"): the shader plays the enchanted weapon's sound (MAGEnchantedUnsheatheOther) each
+            // time it is put on, and it was put on again every 5 s. Now only when the weapon is drawn or put away, or the body is drawn again (it was not loaded: the
+            // glow went with its 3D). This player's own blade with no poison on it any more glows no longer, whatever the list says (the server's word may lag).
+            if (local === 0x14 && !this.greymarchPoisonOnBlade()) continue;
             var drawn = false; try { drawn = !!a.isWeaponDrawn(); } catch (e) { drawn = false; }
+            var loaded3d = true; try { loaded3d = typeof a.is3DLoaded === "function" ? !!a.is3DLoaded() : true; } catch (e) { loaded3d = false; }
             still[local] = true;
             var was = shown[local];
-            if (!was || was.drawn !== drawn || now - was.at >= 5000) { call(a, true); shown[local] = { drawn: drawn, at: now }; }
+            if (!loaded3d) { if (was) was.lost = true; continue; }
+            if (!was || was.drawn !== drawn || was.lost) { call(a, true); shown[local] = { drawn: drawn, at: now }; }
         }
         for (var k in shown) {
             if (still[k]) continue;
             delete shown[k];
             try { var b = sp.Actor.from(sp.Game.getFormEx(Number(k))); if (b) call(b, false); } catch (e) { /* gone */ }
         }
+    }
+    // a poison on this player's weapon in hand (looked at at most twice a second)
+    greymarchPoisonOnBlade(): boolean {
+        var now = Date.now();
+        if (now - (this.greymarchPoisonBladeAt || 0) < 500) return !!this.greymarchPoisonBladeHas;
+        this.greymarchPoisonBladeAt = now;
+        var has = false;
+        try { var en = invMod.getInventory(this.sp.Game.getPlayer()).entries; for (var i = 0; i < en.length; i++) { var e = en[i]; if (e.poisonId && (e.worn || e.wornLeft)) { has = true; break; } } } catch (err) { has = !!this.greymarchPoisonBladeHas; }
+        this.greymarchPoisonBladeHas = has;
+        return has;
     }
     greymarchPoisonTick(now: number): any {
         var sp = this.sp;
