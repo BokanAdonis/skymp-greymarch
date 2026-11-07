@@ -578,6 +578,7 @@ export class GreymarchBridge {
         this.greymarchRaceMenuTick(Date.now()); // RaceMenu's extra sliders: sent when the race menu closes, put back after a relog (racemenuLook.ts)
         this.greymarchRaceMenuCopiesTick(Date.now()); // and put on the other players' copies (OTHERS SEE THEM)
         this.greymarchDressTick(Date.now()); // a mask hides the beard (and, through the ticks above, a hood the big ears)
+        this.greymarchStackNote(Date.now()); // an item in two stacks: what differs between them, to the log (2026-11-06)
         try { this.greymarchWolfPerksTick(); } catch (pkErr) { /* next frame */ } // a carrier's perks, night eye and the scent
         this.greymarchWolfTick(); // the werewolf form: the game's Beast Form power is the trigger, the server decides, the change is done here
         if (this.greymarchWolfOn || this.greymarchWolfLungeClick) { try { var gmLungeP = this.sp.Game.getPlayer(); if (gmLungeP) this.greymarchWolfLungeTick(gmLungeP, Date.now()); } catch (lgErr) { /* next frame */ } } // the lunge, every frame (the wolf tick runs every 250 ms)
@@ -2659,6 +2660,29 @@ export class GreymarchBridge {
         ac.changeHeadPart(back);
         if (id === 0x14) { try { ac.regenerateHead(); } catch (e) { /* drawn at the next update */ } }
         if ((this.greymarchSwapSaid = (this.greymarchSwapSaid || 0) + 1) <= 30) this.greymarchCrumb("beard " + id.toString(16) + ": " + (s.orig >>> 0).toString(16) + " put back");
+    }
+    // TWO STACKS OF ONE ITEM (2026-11-06, the owner: "79 leather and then 2 leather"): every 10 s the pack is looked at, and an item that is there in more than
+    // one stack (not counting what is worn) is written to the log once, each stack's own data side by side, so what keeps them apart can be seen. The server
+    // now merges stacks that differ only in empty fields (gamemode stacks.js); this says what is left.
+    greymarchStackNote(now: number): any {
+        if (now < (this.greymarchStackNext || 0)) return;
+        this.greymarchStackNext = now + 10000;
+        var said = this.greymarchStackSaid || (this.greymarchStackSaid = {});
+        if (Object.keys(said).length >= 20) return;
+        try {
+            var entries = invMod.getInventory(this.sp.Game.getPlayer()).entries || [];
+            var by: any = {};
+            entries.forEach(function (e: any) { if (!e || e.worn || e.wornLeft) return; var k = String(e.baseId >>> 0); (by[k] = by[k] || []).push(e); });
+            for (var k in by) {
+                if (by[k].length < 2) continue;
+                var shapes = by[k].map(function (e: any) { var o: any = {}; Object.keys(e).sort().forEach(function (f) { if (f !== "count") o[f] = e[f]; }); return JSON.stringify(o) + " x" + e.count; });
+                var sig = k + "|" + shapes.map(function (x: string) { return x.replace(/ x\d+$/, ""); }).join("|");
+                if (said[sig]) continue;
+                said[sig] = true;
+                var name = ""; try { var f = this.sp.Game.getFormEx(Number(k)); name = f ? String(f.getName() || "") : ""; } catch (e2) { name = ""; }
+                this.greymarchLog("stacks: " + (name || "?") + " [" + Number(k).toString(16) + "] in " + by[k].length + " stacks: " + shapes.join("  /  "));
+            }
+        } catch (e) { /* looked at again in 10 s */ }
     }
     greymarchDressTick(now: number): any {
         var gl: any = Function("return this")();
