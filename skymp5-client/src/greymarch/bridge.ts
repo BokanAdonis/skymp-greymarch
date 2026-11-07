@@ -89,6 +89,7 @@ const WOLF_ROAR_SOUND = 0x101008, BEAR_ROAR_SOUND = 0x0f95bb; // NPCWerewolfShou
 // both put on again every DRUNK_AGAIN_MS (a jump, a fight or a load ends the walk)
 const DRUNK_IDLE_START = 0x0cefd0, DRUNK_IDLE_STOP = 0x0cefd1, DRUNK_IMOD = 0x0c9cc5, DRUNK_AGAIN_MS = 10000;
 // DRUNK AND HIGH (greymarchIntoxTick): the skooma screen (the Sleeping Tree sap, Skyrim.esm), the stumble, how often, the pace (%) and the stamina lost (a share of the base)
+const WEATHER_CHECK_MS = 2000, WEATHER_RESET_MS = 60000; // shared weather (greymarchWeatherTick): how often the sky is checked, how long a fade is left alone
 const INTOX_CLEAR_MS = 6000, INTOX_CLEAR_EVERY = 1000, INTOX_DRUNK_ISTATE = 15, INTOX_WALK_AGAIN_MS = 2000, INTOX_POV_BACK_MS = 700; // iState 15: the body is in the drunk walk (its behavior tags it)
 const INTOX_HIGH_IMOD = 0x0e3cbc, INTOX_STUMBLE_IDLE = 0x0138d5, INTOX_SOFT_EVERY = 1000;
 const INTOX_SOFT: { [k: string]: number } = { tipsy: 0.15, drunk: 0.3 }; // the drunk screen's strength, replayed every second
@@ -295,6 +296,7 @@ export class GreymarchBridge {
         if (type === "greymarchVampLooks") { this.greymarchVampLookList = Array.isArray(msg.vampires) ? msg.vampires : []; if (Number(msg.me) > 0) this.greymarchMeActor = Number(msg.me) >>> 0; return; } // (me: which of them is this player: the ghosts and effects packets that also say so may not have come yet, and without it the player's own eyes and fangs were never put on) // how every vampire in the world looks (eyes and fangs)
         if (type === "greymarchIntoxNear") { this.greymarchIntoxOthers = Array.isArray(msg.actors) ? msg.actors.map(function (x: any) { return Number(x) >>> 0; }).filter(function (x: number) { return x > 0; }).slice(0, 200) : []; return; } // who is drunk or high (greymarchIntoxOthersTick)
         if (type === "greymarchIntox") { var il = msg.level === "tipsy" || msg.level === "drunk" || msg.level === "high" ? msg.level : "sober"; this.greymarchIntoxWant = il === "sober" ? null : { level: il, until: Date.now() + Math.max(1000, Math.min(30 * 60000, Number(msg.ms) || 0)) }; this.greymarchIntoxCheckAt = 0; return; } // drunk or high (greymarchIntoxTick)
+        if (type === "greymarchWeather") { var wxId = Number(msg.id) >>> 0; this.greymarchWeatherWant = { id: wxId, fast: !!msg.fast }; this.greymarchWeatherCheckAt = 0; if (msg.fast || (this.greymarchWeatherSet && this.greymarchWeatherSet !== wxId)) this.greymarchWeatherSetAt = 0; return; } // the hold's weather (greymarchWeatherTick)
         if (type === "greymarchDrunk") { this.greymarchDrunkWant = msg.on ? { until: Date.now() + Math.max(0, Number(msg.ms) || 0), at: 0 } : { off: true }; return; } // drained to death: the drunk walk after waking (greymarchDrunkTick)
         if (type === "greymarchVampFeed") { if (!msg.on && this.greymarchVampFeedHold) this.greymarchLog("vampire: the server ended the feeding" + (msg.why ? " (" + String(msg.why).slice(0, 80) + ")" : "")); this.greymarchVampFeedWant = msg.on ? { role: msg.role, partner: msg.partner, at: Date.now(), done: false } : { off: true }; return; } // the feeding scene (held until the vampire stops: greymarchVampFeedHeld)
         if (type === "greymarchVampMist") { if (!msg.on) this.greymarchVampMistEnd = true; return; } // Mist Form refused or over: the game's own mist is ended
@@ -1791,6 +1793,7 @@ export class GreymarchBridge {
         this.greymarchDrunkTick(player, now);
         this.greymarchIntoxTick(player, now); // drunk or high: the screen, the walk, the stumbles, the pace
         this.greymarchIntoxOthersTick(now); // other players drunk or high: their copies here keep the drunk walk
+        this.greymarchWeatherTick(player, now); // the hold's weather the server picked (greymarch weather.js)
         this.greymarchVampFangsWear(now); // the worn fangs the server gave: put on (SkyMP then shows them to everyone)
         this.greymarchVampEyes(now); // every vampire's blue eyes, on this screen
     }
@@ -1846,6 +1849,28 @@ export class GreymarchBridge {
         // no drunk walk any more (2026-11-07, the owner: IdleDrunkStart took the movement away from a player in third person): the swaying screen only
         try { if (imod) imod.applyCrossFade(1.0); } catch (aErr) { /* tried again in a moment */ }
         if (!this.greymarchDrunkOn) { this.greymarchDrunkOn = true; this.greymarchLog("drunk: on for " + Math.round((d.until - now) / 1000) + " s (screen " + (imod ? "on" : "missing") + ")"); }
+    }
+    // SHARED WEATHER (gamemode weather.js; 2026-11-07, the owner: "sync weather for all people"): the server picks the weather of each hold and says
+    // { greymarchWeather id, fast } to every player in it; this game holds that weather (setActive with the override, so the game's own climate does not
+    // roll another one). fast = a login or a new hold: no slow fade. id 0 = no weather from the server here (a world it has none for): the game's own again.
+    // Indoors nothing is touched; the override waits for the next time outside. Checked every WEATHER_CHECK_MS; set again only if the sky drifted for WEATHER_RESET_MS.
+    greymarchWeatherTick(player: any, now: number): any {
+        var w = this.greymarchWeatherWant;
+        if (!w || now < (this.greymarchWeatherCheckAt || 0)) return;
+        this.greymarchWeatherCheckAt = now + WEATHER_CHECK_MS;
+        var sp = this.sp;
+        try {
+            var cell = player.getParentCell();
+            if (!cell || cell.isInterior()) return;
+            if (!w.id) { if (this.greymarchWeatherSet) { sp.Weather.releaseOverride(); this.greymarchWeatherSet = 0; this.greymarchLog("weather: back to the game's own"); } return; }
+            var cur = sp.Weather.getCurrentWeather(), curId = cur ? (cur.getFormID() >>> 0) : 0;
+            if (curId === w.id && this.greymarchWeatherSet === w.id) return;
+            if (this.greymarchWeatherSet === w.id && now - (this.greymarchWeatherSetAt || 0) < WEATHER_RESET_MS) return; // still fading in
+            var wx = sp.Weather.from(sp.Game.getFormEx(w.id));
+            if (!wx) { this.greymarchLog("weather: " + w.id.toString(16) + " is not a weather here"); this.greymarchWeatherWant = null; return; }
+            if (w.fast) wx.forceActive(true); else wx.setActive(true, false);
+            this.greymarchWeatherSet = w.id; this.greymarchWeatherSetAt = now; w.fast = false;
+        } catch (e) { /* tried again in a moment */ }
     }
     // DRUNK AND HIGH (gamemode intoxication.js; 2026-11-07, the owner: "visual effects and like stumbling animations"; levels, a strong skooma high, some downsides).
     // The server says { greymarchIntox level, ms } when the level changes; this game shows it until then (ms is only the safety stop: the server says "sober"):
