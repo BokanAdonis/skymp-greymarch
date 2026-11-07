@@ -90,6 +90,7 @@ const WOLF_ROAR_SOUND = 0x101008, BEAR_ROAR_SOUND = 0x0f95bb; // NPCWerewolfShou
 // both put on again every DRUNK_AGAIN_MS (a jump, a fight or a load ends the walk)
 const DRUNK_IDLE_START = 0x0cefd0, DRUNK_IDLE_STOP = 0x0cefd1, DRUNK_IMOD = 0x0c9cc5, DRUNK_AGAIN_MS = 10000;
 // DRUNK AND HIGH (greymarchIntoxTick): the skooma screen (the Sleeping Tree sap, Skyrim.esm), the stumble, how often, the pace (%) and the stamina lost (a share of the base)
+const SEAT_TAKEN_AFTER_MS = 1500, SEAT_TAKEN_RANGE = 30; // a seat another player sits in (greymarchSeatTakenTick): looked at this long after sitting, this close counts
 const WEATHER_CHECK_MS = 2000, WEATHER_RESET_MS = 60000; // shared weather (greymarchWeatherTick): how often the sky is checked, how long a fade is left alone
 const INTOX_CLEAR_MS = 6000, INTOX_CLEAR_EVERY = 1000, INTOX_DRUNK_ISTATE = 15, INTOX_WALK_AGAIN_MS = 2000, INTOX_POV_BACK_MS = 700; // iState 15: the body is in the drunk walk (its behavior tags it)
 const INTOX_HIGH_IMOD = 0x0e3cbc, INTOX_STUMBLE_IDLE = 0x0138d5, INTOX_SOFT_EVERY = 1000;
@@ -569,6 +570,7 @@ export class GreymarchBridge {
         this.greymarchHungerDrive(); // hunger: the stagger, regeneration off while starving
         this.greymarchParalyzeDrive(); // a paralysis spell from another player or an NPC
         this.greymarchNoticeTick(); // plain notices from the server, the game's own top-left message
+        this.greymarchSeatTakenTick(Date.now()); // a seat another player already sits in: up again (before the stand-up job, which does it)
         this.greymarchStandUpTick(Date.now()); // the server asked the player to get up from their furniture (the end of a won mining game)
         this.greymarchBuildAngleTick(); // a piece a GM placed was turned: this game turns its copy
         this.greymarchBuildCamTick(Date.now()); // the build system's free camera: the preview where the camera looks
@@ -3633,6 +3635,35 @@ export class GreymarchBridge {
     //   1. the behaviour graph's own furniture exit (IdleFurnitureExit): the get-up animation, and SkyMP passes it to the other games.
     //   2. still in the same furniture STANDUP_FALLBACK_MS later: IdleForceDefaultState (a snap to standing, never a stagger).
     // The furniture is never activated again: that activation would go to the server (it could start mining again). Each step is logged ("standup: ...").
+    // ONE PERSON PER SEAT (2026-11-07, the owner: two-person benches fitted only one, and no one may take the same spot). The server now lets a bench or a table
+    // take as many people as it has seats (MpObjectReference GetFurnitureSeats), and this game picks the seat. Other players are only copies here, not in
+    // the seat themselves, so the game could pick one a copy sits in: SEAT_TAKEN_AFTER_MS after sitting down (when the body is on the seat) the characters in
+    // this cell are looked at once, and one within SEAT_TAKEN_RANGE of the player means the seat was taken: up again (the stand-up job below), with a notice.
+    greymarchSeatTakenTick(now: number): any {
+        if (now < (this.greymarchSeatCheckAt || 0)) return;
+        this.greymarchSeatCheckAt = now + 250;
+        var sp = this.sp, player: any = null, furn: any = null;
+        try { player = sp.Game.getPlayer(); furn = player ? player.getFurnitureReference() : null; } catch (e) { furn = null; }
+        var id = furn ? (furn.getFormID() >>> 0) : 0;
+        if (id !== (this.greymarchSeatFurn || 0)) { this.greymarchSeatFurn = id; this.greymarchSeatSince = now; this.greymarchSeatChecked = false; return; }
+        if (!id || this.greymarchSeatChecked || now - (this.greymarchSeatSince || 0) < SEAT_TAKEN_AFTER_MS) return;
+        this.greymarchSeatChecked = true;
+        try {
+            var cell = player.getParentCell(), n = cell ? Math.min(cell.getNumRefs(62), 400) : 0, me = [player.getPositionX(), player.getPositionY(), player.getPositionZ()];
+            for (var i = 0; i < n; i++) {
+                var r = cell.getNthRef(i, 62);
+                if (!r || (r.getFormID() >>> 0) === 0x14 || (r.getFormID() >>> 0) < 0xff000000) continue; // only the copies of other players and SkyMP's own characters
+                var a = sp.Actor.from(r);
+                if (!a || a.isDead()) continue;
+                var dx = r.getPositionX() - me[0], dy = r.getPositionY() - me[1], dz = r.getPositionZ() - me[2];
+                if (dx * dx + dy * dy + dz * dz > SEAT_TAKEN_RANGE * SEAT_TAKEN_RANGE) continue;
+                this.greymarchLog("seat: " + (r.getFormID() >>> 0).toString(16) + " already sits in this seat of " + id.toString(16) + ": up again");
+                this.greymarchEmoteSay("Someone is already sitting there");
+                this.greymarchStandUpWanted = now;
+                return;
+            }
+        } catch (err) { /* left seated */ }
+    }
     greymarchStandUpTick(now: number): any {
         var sp = this.sp;
         var at = this.greymarchStandUpWanted || 0;
