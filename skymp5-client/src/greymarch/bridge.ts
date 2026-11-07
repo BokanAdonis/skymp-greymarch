@@ -35,6 +35,9 @@ const DOOR_FORM_TYPE = 29; // FormType.Door
 const TGM_CARRY = 100000; // staff TGM: carry weight added while it is on (no carry limit, like the console's tgm), taken off again when it is switched off
 const WOLF_KEY_WAIT_MS = 600; // Z with Beast Form equipped: how long the game gets to cast it before the press itself is reported (greymarchWolfTick)
 const SHAPE_REST_MS = 800, SHAPE_POWER_REST_MS = 1600; // a creature's attacks: the rest after a normal and after a power attack (the server allows the same pace)
+const SHAPE_STANCE_WAIT_MS = 1500; // a creature attack asked for out of its combat stance waits this long at most for the stance (greymarchShapeAttackTick)
+// the hidden body's pace per gait in percent, from the server (shapeshift.js FORMS speed); null: as it is
+function shapeSpeedOf(v: any): any { if (!v || typeof v !== "object") return null; var o: any = {}, any = false; ["walk", "run", "sprint"].forEach(function (k) { var n = Number(v[k]); if (n >= 25 && n <= 300) { o[k] = n; any = true; } }); return any ? o : null; }
 const SHAPE_LAND_MS = 450; // a creature's swing is reported this long after it starts (about when it lands)
 const SHAPE_NPC_READY_MS = 8000; // a creature NPC that is not ready this long after it was placed is placed again
 const SHAPE_SILENCE_MS = 20000; // a creature form: with no word from the server for this long the player changes back by themselves (the server repeats "on" every 5 seconds)
@@ -2934,7 +2937,7 @@ export class GreymarchBridge {
             if (!was || was.race !== race) this.greymarchLog("shape: the server says " + (msg.name || "a creature") + " (race " + race.toString(16) + ")");
             var at = msg.attacks && typeof msg.attacks === "object" ? msg.attacks : {};
             var names = function (l: any) { return Array.isArray(l) ? l.filter(function (x: any) { return typeof x === "string" && x.length > 0 && x.length < 64; }) : []; };
-            this.greymarchShapeWant = { race: race, back: Number(msg.back) >>> 0, name: String(msg.name || ""), normal: names(at.normal), power: names(at.power), mode: msg.mode === "race" ? "race" : "npc", menus: msg.menus === true, weapon: Number(msg.weapon) >>> 0 }; // weapon: the form's own (a giant's club, a skeleton's sword; greymarchShapeArmTick)
+            this.greymarchShapeWant = { race: race, back: Number(msg.back) >>> 0, name: String(msg.name || ""), normal: names(at.normal), power: names(at.power), mode: msg.mode === "race" ? "race" : "npc", menus: msg.menus === true, weapon: Number(msg.weapon) >>> 0, drawn: msg.drawn === true, speed: shapeSpeedOf(msg.speed) }; // drawn: always in its combat stance (the giant: its club attacks and its run need it); speed: the hidden body's pace per gait (greymarchShapeSpeedTick); weapon: the form's own (a giant's club, a skeleton's sword; greymarchShapeArmTick)
             this.greymarchShapeWordAt = Date.now();
         } else {
             if (this.greymarchShapeWant || this.greymarchShapeOn) this.greymarchLog("shape: the server says change back");
@@ -2943,6 +2946,30 @@ export class GreymarchBridge {
             this.greymarchShapeWear = Array.isArray(msg.wear) ? msg.wear.map(function (x: any) { return Number(x) >>> 0; }).filter(function (x: number) { return x > 0; }) : [];
         }
     }
+    // THE CREATURE'S PACE (2026-11-06, the owner: the giant "slides and glitches out a little bit while running"). The creature shown in the player's place is moved to where
+    // the hidden person is, so when the person covers ground faster than the creature's legs do, it slides (a giant out of combat only walks, 62 units a second; a person
+    // runs 370). The server gives the hidden body's pace per gait in percent (shapeshift.js FORMS speed), so walk, run and sprint cover what the creature's animation covers.
+    // The game takes a new SpeedMult when the carried weight changes, so it is nudged. Staff speed (greymarchEffects) is multiplied in.
+    greymarchShapeSpeedTick(player: any, want: any): any {
+        var sp = want && want.speed;
+        if (!sp) { this.greymarchShapeSpeedReset(player); return; }
+        var gait = "walk";
+        try { gait = player.isSprinting() ? "sprint" : player.isRunning() ? "run" : "walk"; } catch (gErr) { gait = "walk"; }
+        var staff = (this.greymarchFxHave && this.greymarchFxHave.speed) || 100;
+        var pct = Math.round((sp[gait] || 100) * staff / 100);
+        if (this.greymarchShapeSpeedHave === pct) return;
+        try {
+            player.setActorValue("SpeedMult", pct);
+            player.modActorValue("CarryWeight", 0.1); player.modActorValue("CarryWeight", -0.1);
+            if (this.greymarchShapeSpeedHave === undefined) this.greymarchLog("shape: the body's pace follows the creature (" + gait + " " + pct + "%)");
+            this.greymarchShapeSpeedHave = pct;
+        } catch (sErr) { /* tried again next time */ }
+    }
+    greymarchShapeSpeedReset(player: any): any {
+        if (this.greymarchShapeSpeedHave === undefined) return;
+        this.greymarchShapeSpeedHave = undefined;
+        try { var staff = (this.greymarchFxHave && this.greymarchFxHave.speed) || 100; player.setActorValue("SpeedMult", staff); player.modActorValue("CarryWeight", 0.1); player.modActorValue("CarryWeight", -0.1); } catch (sErr) { /* the next staff speed change puts it right */ }
+    }
     // A mouse button while a creature (greymarchKey): left = a normal attack, right = a power attack. Played in greymarchShapeTick (Skyrim calls only work in the update phase).
     greymarchShapeButton(power: boolean): any {
         if (!this.greymarchShapeOn || this.greymarchChatTyping || this.greymarchAdminOn || this.greymarchMenuOn) return;
@@ -2950,7 +2977,7 @@ export class GreymarchBridge {
     }
     greymarchShapeTick(): any {
         var now = Date.now();
-        if (now < (this.greymarchShapeNext || 0) && !this.greymarchShapeSwing && !this.greymarchShapeReport) return;
+        if (now < (this.greymarchShapeNext || 0) && !this.greymarchShapeSwing && !this.greymarchShapeReport && !this.greymarchShapePending) return;
         this.greymarchShapeNext = now + 250;
         try {
             var sp = this.sp;
@@ -2973,6 +3000,8 @@ export class GreymarchBridge {
                     var pup = this.greymarchShapePuppet; // no NPC (its first placing failed) or one that never got ready (its spawn steps failed): placed again, at most every 3 seconds
                     if ((!pup || (!pup.ready && now - pup.at > SHAPE_NPC_READY_MS)) && now - (this.greymarchShapeRemakeAt || 0) > 3000) { this.greymarchShapeRemakeAt = now; this.greymarchShapeRemake(pup ? "the NPC never got ready" : "there was no NPC"); }
                     this.greymarchShapeArmTick(want); // the creature shown here holds the form's weapon too
+                    if (want.drawn) { this.greymarchShapeCombatUntil = now + 6000; try { (sp.storage as any)["greymarchShapeCombatUntil"] = now + 6000; } catch (dErr) { /* the stance is set on the NPC here anyway */ } } // its combat stance all the time, here and in everyone's game
+                    this.greymarchShapeSpeedTick(player, want);
                 }
                 else if (raceId !== want.race && now - (this.greymarchShapeFixAt || 0) > 3000) { // something put another race back (a respawn, the game itself)
                     this.greymarchShapeFixAt = now;
@@ -3017,11 +3046,23 @@ export class GreymarchBridge {
                 var body = this.greymarchShapeModeOn === "npc" ? this.greymarchShapePuppetActor() : player; // the creature NPC (mode "npc"), or the player's own body (mode "race")
                 if (body) {
                     if (this.greymarchShapeModeOn === "npc") { this.greymarchShapeCombatUntil = now + 6000; try { (sp.storage as any)["greymarchShapeCombatUntil"] = now + 6000; } catch (dErr) { /* the stance is set on the NPC here anyway */ } } // combat stance: here (greymarchShapeDrive) and, through the movement this game sends (sendInputsService.ts sendMovement), in everyone's game; the hidden person never draws (SHAPE_NO_FISTS)
-                    sp.Debug.sendAnimationEvent(body, ev);
                     this.greymarchShapeLastSwing = { at: now, power: power };
-                    this.greymarchShapeReport = { at: now + SHAPE_LAND_MS, power: power, ev: ev };
+                    // NOT BEFORE THE STANCE (2026-11-06, the owner: "the Giant still does not swing the club"): an attack event sent while the creature is still out of its combat
+                    // stance is dropped by its behavior graph, and the stance was only asked for in this same frame. It waits for the stance (SHAPE_STANCE_WAIT_MS at most)
+                    var drawnNow = false; try { drawnNow = this.greymarchShapeModeOn !== "npc" || !!body.isWeaponDrawn(); } catch (wErr) { drawnNow = true; }
+                    if (drawnNow) { sp.Debug.sendAnimationEvent(body, ev); this.greymarchShapeReport = { at: now + SHAPE_LAND_MS, power: power, ev: ev }; }
+                    else this.greymarchShapePending = { ev: ev, power: power, until: now + SHAPE_STANCE_WAIT_MS };
                 }
                 if (!this.greymarchShapeSwingLogged) { this.greymarchShapeSwingLogged = true; this.greymarchLog("shape: first attack (" + ev + ")"); }
+            }
+        }
+        var pend = this.greymarchShapePending;
+        if (pend) {
+            var pb = this.greymarchShapeModeOn === "npc" ? this.greymarchShapePuppetActor() : player, ready = false;
+            try { ready = !pb || !!pb.isWeaponDrawn(); } catch (rErr) { ready = true; }
+            if (ready || now >= pend.until) {
+                this.greymarchShapePending = null;
+                if (pb) { sp.Debug.sendAnimationEvent(pb, pend.ev); this.greymarchShapeReport = { at: now + SHAPE_LAND_MS, power: pend.power, ev: pend.ev }; this.greymarchShapeLastSwing = { at: now, power: pend.power }; }
             }
         }
         var rep = this.greymarchShapeReport;
@@ -3459,7 +3500,8 @@ export class GreymarchBridge {
         var sp = this.sp;
         var step = "start";
         this.greymarchShapeOn = 0; this.greymarchShapeModeOn = null;
-        this.greymarchShapeSwing = null; this.greymarchShapeReport = null; this.greymarchShapeCombatUntil = 0;
+        this.greymarchShapeSwing = null; this.greymarchShapeReport = null; this.greymarchShapePending = null; this.greymarchShapeCombatUntil = 0;
+        this.greymarchShapeSpeedReset(player);
         try { (sp.storage as any)["greymarchShapeOn"] = false; (sp.storage as any)["greymarchShapeNpc"] = false; (sp.storage as any)["greymarchShapeCombatUntil"] = 0; } catch (stErr) { /* nothing was set */ }
         try {
             step = "npc"; this.greymarchShapePuppetRemove();

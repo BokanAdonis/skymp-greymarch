@@ -38,7 +38,15 @@ test("no armor but the robes and the fangs; never the body's own skin", () => {
 });
 
 test("the menus stay for a form that says so (the Lord); beast form for every other form, in both modes", () => {
-  assert.match(src, /mode: msg\.mode === "race" \? "race" : "npc", menus: msg\.menus === true, weapon: Number\(msg\.weapon\) >>> 0 \};/);
+  assert.match(src, /mode: msg\.mode === "race" \? "race" : "npc", menus: msg\.menus === true, weapon: Number\(msg\.weapon\) >>> 0, drawn: msg\.drawn === true, speed: shapeSpeedOf\(msg\.speed\) \};/);
   const n = (src.match(/step = "beast form"; if \(!want\.menus\) sp\.Game\.setBeastForm\(true\);/g) || []).length;
   assert.strictEqual(n, 2, "npc and race mode");
+});
+
+test("a creature attack waits for its combat stance; a drawn form keeps the stance; the hidden body's pace follows the creature's gait (2026-11-06, the giant)", () => {
+  assert.match(src, /else this\.greymarchShapePending = \{ ev: ev, power: power, until: now \+ SHAPE_STANCE_WAIT_MS \};/);
+  assert.match(src, /if \(ready \|\| now >= pend\.until\)/);
+  assert.match(src, /if \(want\.drawn\) \{ this\.greymarchShapeCombatUntil = now \+ 6000;/);
+  assert.match(src, /gait = player\.isSprinting\(\) \? "sprint" : player\.isRunning\(\) \? "run" : "walk";/);
+  assert.match(src, /this\.greymarchShapePending = null; this\.greymarchShapeCombatUntil = 0;\r?\n\s+this\.greymarchShapeSpeedReset\(player\);/);
 });
