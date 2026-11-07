@@ -86,7 +86,7 @@ test("equipment keeps the old way (nothing is taken off a body); plain items kee
   assert.deepStrictEqual(s.calls.map((c) => [c.count, c.health]), [[-1, 1.2]], "a weapon: only the one that differs, as before");
   s = setup([{ baseId: GOLD, countDelta: 50, extendDataList: [] }]);
   s.inv.applyInventory(s.refr, { entries: [{ baseId: GOLD, count: 40 }] }, false, true);
-  assert.deepStrictEqual(s.calls.map((c) => [c.baseId, c.count, c.name]), [[GOLD, -10, "Gold"]], "plain gold: only the difference, as before");
+  assert.deepStrictEqual(s.calls.map((c) => [c.baseId, c.count, c.name]), [[GOLD, -10, ""]], "plain gold: only the difference, with no name of its own (2026-11-07: given its own name as a custom name, it went into a stack of its own)");
   s = setup([paper("Guard Report GR-0001", 1.02), paper("Guard Report GR-0002", 1.02001)]);
   s.inv.applyInventory(s.refr, { entries: [{ baseId: PAPER, count: 1, name: "Guard Report GR-0002", health: 1.02001 }] }, true, true);
   assert.deepStrictEqual(s.calls.map((c) => [c.count, c.name]), [[-1, "Guard Report GR-0001"]], "with crash protection one change at a time, as before");

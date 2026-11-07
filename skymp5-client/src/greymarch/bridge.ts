@@ -92,6 +92,7 @@ const DRUNK_IDLE_START = 0x0cefd0, DRUNK_IDLE_STOP = 0x0cefd1, DRUNK_IMOD = 0x0c
 // DRUNK AND HIGH (greymarchIntoxTick): the skooma screen (the Sleeping Tree sap, Skyrim.esm), the stumble, how often, the pace (%) and the stamina lost (a share of the base)
 const SEAT_TAKEN_AFTER_MS = 1500, SEAT_TAKEN_RANGE = 30; // a seat another player sits in (greymarchSeatTakenTick): looked at this long after sitting, this close counts
 const WEATHER_CHECK_MS = 2000, WEATHER_RESET_MS = 60000; // shared weather (greymarchWeatherTick): how often the sky is checked, how long a fade is left alone
+const RESTACK_AFTER_MS = 20000; // the old split stacks made one, this long after the world is up (greymarchRestackOnce)
 const INTOX_CLEAR_MS = 6000, INTOX_CLEAR_EVERY = 1000, INTOX_DRUNK_ISTATE = 15, INTOX_WALK_AGAIN_MS = 2000, INTOX_POV_BACK_MS = 700; // iState 15: the body is in the drunk walk (its behavior tags it)
 const INTOX_HIGH_IMOD = 0x0e3cbc, INTOX_STUMBLE_IDLE = 0x0138d5, INTOX_SOFT_EVERY = 1000;
 const INTOX_SOFT: { [k: string]: number } = { tipsy: 0.15, drunk: 0.3 }; // the drunk screen's strength, replayed every second
@@ -596,6 +597,7 @@ export class GreymarchBridge {
         this.greymarchRaceMenuCopiesTick(Date.now()); // and put on the other players' copies (OTHERS SEE THEM)
         this.greymarchDressTick(Date.now()); // a mask hides the beard (and, through the ticks above, a hood the big ears)
         this.greymarchStackNote(Date.now()); // an item in two stacks: what differs between them, to the log (2026-11-06)
+        this.greymarchRestackOnce(Date.now()); // the old split stacks of plain items (hides, leather, ingredients) made one again, once a session
         try { this.greymarchWolfPerksTick(); } catch (pkErr) { /* next frame */ } // a carrier's perks, night eye and the scent
         this.greymarchWolfTick(); // the werewolf form: the game's Beast Form power is the trigger, the server decides, the change is done here
         if (this.greymarchWolfOn || this.greymarchWolfLungeClick) { try { var gmLungeP = this.sp.Game.getPlayer(); if (gmLungeP) this.greymarchWolfLungeTick(gmLungeP, Date.now()); } catch (lgErr) { /* next frame */ } } // the lunge, every frame (the wolf tick runs every 250 ms)
@@ -2929,6 +2931,32 @@ export class GreymarchBridge {
                 this.greymarchLog("stacks: " + (name || "?") + " [" + Number(k).toString(16) + "] in " + by[k].length + " stacks: " + shapes.join("  /  "));
             }
         } catch (e) { /* looked at again in 10 s */ }
+    }
+    // ONE STACK AGAIN (2026-11-07, the owner's screenshot: Bear Pelt and Bear Pelt (2), Leather and Leather (47)): items the server added used to come in with their
+    // own name as a custom name (sync/inventory.ts, fixed the same day), so Skyrim kept them in a stack apart from the same item picked up in the game; SkyMP reads
+    // both as one. Once a session, RESTACK_AFTER_MS after the world is up and with no menu open, every plain misc item and ingredient in the pack (nothing of its
+    // own: no name, condition, enchantment or poison; not worn) is taken out and put back in one go as a plain stack. The count stays what the server has.
+    greymarchRestackOnce(now: number): any {
+        if (this.greymarchRestackDone) return;
+        if (!this.greymarchRestackAt) { this.greymarchRestackAt = now + RESTACK_AFTER_MS; return; }
+        if (now < this.greymarchRestackAt || this.greymarchScreenUp || this.greymarchInMenu()) return;
+        this.greymarchRestackDone = true;
+        var sp = this.sp, n = 0;
+        try {
+            var player = sp.Game.getPlayer(); if (!player) return;
+            var entries = invMod.getInventory(player).entries || [];
+            for (var i = 0; i < entries.length; i++) {
+                var e: any = entries[i];
+                if (!e || !(e.count > 0) || e.worn || e.wornLeft || invMod.hasExtras(e)) continue;
+                var f = sp.Game.getFormEx(e.baseId >>> 0); if (!f) continue;
+                var t = f.getType(); if (t !== 32 && t !== 30) continue; // 32 misc item, 30 ingredient
+                if ((e.baseId >>> 0) === 0xf) continue; // gold stays as it is
+                sp.TESModPlatform.addItemEx(player, f, -e.count, 1, null, 0, false, 0, "", 0, null, 0);
+                sp.TESModPlatform.addItemEx(player, f, e.count, 1, null, 0, false, 0, "", 0, null, 0);
+                n++;
+            }
+        } catch (err) { this.greymarchLog("restack: stopped: " + String(err).slice(0, 120)); }
+        this.greymarchLog("restack: " + n + " plain items put back as one stack each");
     }
     greymarchDressTick(now: number): any {
         var gl: any = Function("return this")();

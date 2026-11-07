@@ -353,7 +353,7 @@ const resetBase = (refr: ObjectReference): void => {
 };
 
 // misc items, books and notes: nothing anyone wears (see applyInventory)
-const isLooseItem = (baseId: number): boolean => {
+export const isLooseItem = (baseId: number): boolean => {
   const f = Game.getFormEx(baseId);
   if (!f) {
     return false;
@@ -541,7 +541,9 @@ export const applyInventory = (
         e.maxCharge ? e.maxCharge : 0,
         !!e.removeEnchantmentOnUnequip,
         e.chargePercent ? e.chargePercent : 0,
-        plainRemoval.has(e) ? "" : e.name ? cropName(e.name) : f.getName(), // "": no extra list, so Skyrim removes that many of the base, whichever they are
+        // "": no extra list. A removal of extras (whichever they are), and since 2026-11-07 any item with nothing of its own (the owner: "79 leather and then
+        // 2 leather"): given its own name as a custom name it went into a stack of its own, apart from the same item picked up in the game
+        plainRemoval.has(e) ? "" : e.name && e.name !== f.getName() ? cropName(e.name) : hasExtras(e) ? f.getName() : "",
         e.soul ? e.soul : 0,
         e.poisonId ? Potion.from(Game.getFormEx(e.poisonId)) : null,
         e.poisonCount ? e.poisonCount : 0
