@@ -1,5 +1,6 @@
 #include "savefile/SFStructure.h"
 
+#include <algorithm>
 #include <cstring>
 #include <stdexcept>
 
@@ -9,13 +10,8 @@ SaveFile_::RefID SaveFile_::RefID::CreateRefId(SaveFile& parentSaveFile,
   RefID res;
 
   const auto countWas = parentSaveFile.formIDArrayCount;
-  const size_t n = countWas + 1;
-  uint32_t* newFormIDArray = new uint32_t[n];
 
-  memcpy(newFormIDArray, parentSaveFile.formIDArray.data(), countWas);
-  newFormIDArray[countWas] = formId;
-
-  parentSaveFile.formIDArray = { newFormIDArray, newFormIDArray + n };
+  parentSaveFile.formIDArray.push_back(formId);
   parentSaveFile.formIDArrayCount = countWas + 1;
 
   // fix offset
@@ -85,6 +81,28 @@ void SaveFile_::SaveFile::OverwritePluginInfo(
 {
   uint32_t oldSize = this->pluginInfoSize;
 
+  // 0xFF (created) and 0xFE (light) are not indices in this list
+  constexpr uint32_t kMaxPlugins = 0xFE;
+  std::vector<uint32_t> newIndexByOld(this->pluginInfo.pluginsName.size(),
+                                      kMaxPlugins);
+  for (size_t i = 0; i < newIndexByOld.size(); ++i) {
+    auto it = std::find(newPluginNames.begin(), newPluginNames.end(),
+                        this->pluginInfo.pluginsName[i]);
+    auto newIndex = static_cast<uint32_t>(it - newPluginNames.begin());
+    if (it != newPluginNames.end() && newIndex < kMaxPlugins) {
+      newIndexByOld[i] = newIndex;
+    }
+  }
+  for (auto& formId : this->formIDArray) {
+    const uint32_t oldIndex = formId >> 24;
+    if (oldIndex >= newIndexByOld.size()) {
+      continue;
+    }
+    const uint32_t newIndex = newIndexByOld[oldIndex];
+    formId =
+      newIndex == kMaxPlugins ? 0 : (newIndex << 24) | (formId & 0x00FFFFFF);
+  }
+
   this->pluginInfoSize = 1;
   this->pluginInfo.numPlugins = 0;
   this->pluginInfo.pluginsName.clear();
@@ -104,4 +122,42 @@ void SaveFile_::SaveFile::OverwritePluginInfo(
   this->fileLocationTable.globalDataTable2Offset += addSize;
   this->fileLocationTable.changeFormsOffset += addSize;
   this->fileLocationTable.globalDataTable3Offset += addSize;
+}
+
+size_t SaveFile_::ChangeForm::GetSizeInFile() const
+{
+  // the same choice as Reader::FillChangeForm and Writer::CreateSaveFile
+  size_t lengthSize = 1;
+  if (type > 0x7F) {
+    lengthSize = 4;
+  } else if (type > 0x3F) {
+    lengthSize = 2;
+  }
+  return 3 + 4 + 1 + 1 + 2 * lengthSize + length1;
+}
+
+size_t SaveFile_::SaveFile::RemoveChangeFormsExceptPlayer()
+{
+  uint32_t removedBytes = 0;
+  auto newEnd = std::remove_if(
+    changeForms.begin(), changeForms.end(), [&](ChangeForm& form) {
+      bool isPlayer = form.Is_ACHR_Type() && form.formID.IsPlayerID();
+      bool isPlayerBase = form.Is_NPC_Type() && form.formID.IsPlayerBaseID();
+      if (isPlayer || isPlayerBase) {
+        return false;
+      }
+      removedBytes += static_cast<uint32_t>(form.GetSizeInFile());
+      return true;
+    });
+  const auto removed = static_cast<size_t>(changeForms.end() - newEnd);
+  changeForms.erase(newEnd, changeForms.end());
+
+  // Change forms come right before globalDataTable3, then formIDArray, then
+  // unknownTable3
+  fileLocationTable.changeFormCount =
+    static_cast<uint32_t>(changeForms.size());
+  fileLocationTable.globalDataTable3Offset -= removedBytes;
+  fileLocationTable.formIDArrayCountOffset -= removedBytes;
+  fileLocationTable.unknownTable3Offset -= removedBytes;
+  return removed;
 }

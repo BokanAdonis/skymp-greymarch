@@ -31,7 +31,7 @@ if(BUILD_UNIT_TESTS AND NOT EMSCRIPTEN)
   find_package(Catch2 CONFIG REQUIRED)
   target_link_libraries(unit PRIVATE Catch2::Catch2)
 
-  target_link_libraries(unit PUBLIC server_guest_lib espm)
+  target_link_libraries(unit PUBLIC server_guest_lib espm savefile)
   if(TARGET platform_lib)
     target_link_libraries(unit PUBLIC platform_lib)
   endif()
@@ -52,6 +52,7 @@ if(BUILD_UNIT_TESTS AND NOT EMSCRIPTEN)
     SKYRIM_DIR=\"${SKYRIM_DIR}\"
     UNIT_DATA_DIR=\"${UNIT_DATA_DIR}\"
     DIST_DIR=\"${CMAKE_BINARY_DIR}/dist\"
+    TEMPLATE_ESS_PATH=\"${CMAKE_SOURCE_DIR}/skyrim-platform/src/platform_se/skyrim_platform/assets/template.ess\"
   )
 
   if(WIN32)
