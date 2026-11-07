@@ -88,6 +88,11 @@ const WOLF_ROAR_SOUND = 0x101008, BEAR_ROAR_SOUND = 0x0f95bb; // NPCWerewolfShou
 // the game's own drunk walk (IdleDrunkStart, Skyrim.esm 0CEFD0; IdleDrunkStop 0CEFD1 ends it) and a swimming screen (BSHeartland's CYRWE14RevelerDrunkImod 0C9CC5),
 // both put on again every DRUNK_AGAIN_MS (a jump, a fight or a load ends the walk)
 const DRUNK_IDLE_START = 0x0cefd0, DRUNK_IDLE_STOP = 0x0cefd1, DRUNK_IMOD = 0x0c9cc5, DRUNK_AGAIN_MS = 10000;
+// DRUNK AND HIGH (greymarchIntoxTick): the skooma screen (the Sleeping Tree sap, Skyrim.esm), the stumble, how often, the pace (%) and the stamina lost (a share of the base)
+const INTOX_HIGH_IMOD = 0x0e3cbc, INTOX_STUMBLE_IDLE = 0x0138d5, INTOX_TIPSY_PULSE = 4500, INTOX_TIPSY_STRENGTH = 0.35;
+const INTOX_STUMBLE: { [k: string]: number } = { drunk: 40000, high: 20000 };
+const INTOX_SPEED: { [k: string]: number } = { tipsy: 95, drunk: 85, high: 80 };
+const INTOX_STAMINA: { [k: string]: number } = { drunk: 0.2, high: 0.3 };
 // THE HELD FEEDING LOOP (2026-11-03, the owner: "It's still not locking into the animation"; the game log showed the bite play once, then the replay 6 s later
 // refused 4 times while both stood): the standing feed is one paired bite of about 5 s. It is now played again the moment it ends (bIsSynced off, checked every
 // frame once FEED_MIN_MS have passed; at FEED_REPLAY_MS at the latest), and a refusal puts BOTH bodies back to the default pose (the bitten one was left in the
@@ -284,6 +289,7 @@ export class GreymarchBridge {
         if (type === "greymarchRaceMenuLook") { var rm0 = this.greymarchRmState(); rm0.want = msg.look && typeof msg.look === "object" ? msg.look : {}; rm0.tries = 0; if (Array.isArray(msg.height) && msg.height.length === 2 && msg.height[0] > 0 && msg.height[1] >= msg.height[0]) this.greymarchHeightRange = [Number(msg.height[0]), Number(msg.height[1])]; return; } // RaceMenu's extra sliders of this character, kept by the server (greymarchRaceMenuTick)
         if (type === "greymarchVampire") { this.greymarchVampWant = msg.on ? msg : null; this.greymarchVampCostTold = {}; this.greymarchHudToPage("blood", { on: !!msg.on, blood: msg.blood, empty: !!msg.empty }); return; } // a vampire's state: the blood drop and what the game applies (greymarchVampTick)
         if (type === "greymarchVampLooks") { this.greymarchVampLookList = Array.isArray(msg.vampires) ? msg.vampires : []; if (Number(msg.me) > 0) this.greymarchMeActor = Number(msg.me) >>> 0; return; } // (me: which of them is this player: the ghosts and effects packets that also say so may not have come yet, and without it the player's own eyes and fangs were never put on) // how every vampire in the world looks (eyes and fangs)
+        if (type === "greymarchIntox") { var il = msg.level === "tipsy" || msg.level === "drunk" || msg.level === "high" ? msg.level : "sober"; this.greymarchIntoxWant = il === "sober" ? null : { level: il, until: Date.now() + Math.max(1000, Math.min(30 * 60000, Number(msg.ms) || 0)) }; this.greymarchIntoxCheckAt = 0; return; } // drunk or high (greymarchIntoxTick)
         if (type === "greymarchDrunk") { this.greymarchDrunkWant = msg.on ? { until: Date.now() + Math.max(0, Number(msg.ms) || 0), at: 0 } : { off: true }; return; } // drained to death: the drunk walk after waking (greymarchDrunkTick)
         if (type === "greymarchVampFeed") { if (!msg.on && this.greymarchVampFeedHold) this.greymarchLog("vampire: the server ended the feeding" + (msg.why ? " (" + String(msg.why).slice(0, 80) + ")" : "")); this.greymarchVampFeedWant = msg.on ? { role: msg.role, partner: msg.partner, at: Date.now(), done: false } : { off: true }; return; } // the feeding scene (held until the vampire stops: greymarchVampFeedHeld)
         if (type === "greymarchVampMist") { if (!msg.on) this.greymarchVampMistEnd = true; return; } // Mist Form refused or over: the game's own mist is ended
@@ -1778,6 +1784,7 @@ export class GreymarchBridge {
         }
         this.greymarchVampFeedHeld(player, now);
         this.greymarchDrunkTick(player, now);
+        this.greymarchIntoxTick(player, now); // drunk or high: the screen, the walk, the stumbles, the pace
         this.greymarchVampFangsWear(now); // the worn fangs the server gave: put on (SkyMP then shows them to everyone)
         this.greymarchVampEyes(now); // every vampire's blue eyes, on this screen
     }
@@ -1834,6 +1841,78 @@ export class GreymarchBridge {
         try { var start = sp.Idle.from(sp.Game.getFormEx(DRUNK_IDLE_START)); if (start) played = !!player.playIdle(start); } catch (pErr) { played = false; }
         try { if (imod) imod.applyCrossFade(1.0); } catch (aErr) { /* the walk alone */ }
         if (!this.greymarchDrunkOn) { this.greymarchDrunkOn = true; this.greymarchLog("drunk: on for " + Math.round((d.until - now) / 1000) + " s (walk " + (played ? "played" : "refused") + ", screen " + (imod ? "on" : "missing") + ")"); }
+    }
+    // DRUNK AND HIGH (gamemode intoxication.js; 2026-11-07, the owner: "visual effects and like stumbling animations"; levels, a strong skooma high, some downsides).
+    // The server says { greymarchIntox level, ms } when the level changes; this game shows it until then (ms is only the safety stop: the server says "sober"):
+    //   tipsy  the drunk screen in soft pulses (INTOX_TIPSY_PULSE), walking at INTOX_SPEED.tipsy %
+    //   drunk  the drunk screen held, the game's drunk walk, a stumble every INTOX_STUMBLE.drunk ms or so, walking at INTOX_SPEED.drunk %, INTOX_STAMINA.drunk of the stamina gone
+    //   high   the Sleeping Tree sap's screen held (Skyrim.esm 0E3CBC), the drunk walk, stumbles more often, slower still, more stamina gone
+    // A stumble (the game's own stagger, StaggerStart 0138D5, small) never comes in a fight, with a weapon out, swimming, riding, sitting, in a menu or mid emote.
+    // A beast form, a creature's body or the vampire's drained walk (greymarchDrunkTick) pauses the screen, the walk and the pace; the stamina stays down.
+    greymarchIntoxTick(player: any, now: number): any {
+        var sp = this.sp, w = this.greymarchIntoxWant;
+        var level = w && now < w.until ? w.level : "sober";
+        if (w && level === "sober") this.greymarchIntoxWant = null;
+        if (now < (this.greymarchIntoxCheckAt || 0) && level === this.greymarchIntoxHave) return;
+        this.greymarchIntoxCheckAt = now + 250;
+        var was = this.greymarchIntoxHave || "sober";
+        var paused = !!(this.greymarchWolfOn || this.greymarchShapeOn || this.greymarchShapeWant || this.greymarchVampFeedHold || this.greymarchDrunkWant || this.greymarchDrunkOn);
+        var show = paused ? "sober" : level;
+        var held = show === "drunk" || show === "high";
+        // the screen
+        if (show !== (this.greymarchIntoxScreen || "sober")) {
+            if (this.greymarchIntoxScreen === "drunk" || this.greymarchIntoxScreen === "high") { try { sp.ImageSpaceModifier.removeCrossFade(1.5); } catch (rErr) { /* it fades by itself */ } }
+            this.greymarchIntoxScreen = show; this.greymarchIntoxScreenAt = 0;
+        }
+        if (show !== "sober" && now - (this.greymarchIntoxScreenAt || 0) >= (show === "tipsy" ? INTOX_TIPSY_PULSE : DRUNK_AGAIN_MS)) {
+            this.greymarchIntoxScreenAt = now;
+            try {
+                var imod = show === "high" ? sp.ImageSpaceModifier.from(sp.Game.getFormEx(INTOX_HIGH_IMOD)) : sp.ImageSpaceModifier.from(sp.Game.getFormFromFile(DRUNK_IMOD, "BSHeartland.esm"));
+                if (imod) { if (show === "tipsy") imod.apply(INTOX_TIPSY_STRENGTH); else imod.applyCrossFade(1.5); }
+            } catch (iErr) { /* the screen is a nicety */ }
+        }
+        // the walk, and the stumbles
+        var calm = true;
+        try { calm = !player.isInCombat() && !player.isWeaponDrawn() && !player.isSwimming() && !player.isOnMount() && player.getSitState() === 0 && !this.greymarchEmoteNow && !sp.Ui.isMenuOpen("InventoryMenu") && !sp.Ui.isMenuOpen("Dialogue Menu"); } catch (cErr) { calm = false; }
+        if (held && calm && now - (this.greymarchIntoxWalkAt || 0) >= DRUNK_AGAIN_MS) {
+            this.greymarchIntoxWalkAt = now;
+            try { var start = sp.Idle.from(sp.Game.getFormEx(DRUNK_IDLE_START)); if (start) player.playIdle(start); this.greymarchIntoxWalking = true; } catch (wErr) { /* tried again in a moment */ }
+        }
+        if (!held && this.greymarchIntoxWalking) {
+            this.greymarchIntoxWalking = false; this.greymarchIntoxWalkAt = 0;
+            try { var stop = sp.Idle.from(sp.Game.getFormEx(DRUNK_IDLE_STOP)); if (stop) player.playIdle(stop); } catch (sErr) { /* the walk ends with the next idle */ }
+        }
+        if (held && !this.greymarchIntoxStumbleAt) this.greymarchIntoxStumbleAt = now + INTOX_STUMBLE[show] * (0.5 + Math.random());
+        if (!held) this.greymarchIntoxStumbleAt = 0;
+        else if (now >= this.greymarchIntoxStumbleAt) {
+            this.greymarchIntoxStumbleAt = now + INTOX_STUMBLE[show] * (0.5 + Math.random());
+            if (calm) {
+                try {
+                    try { player.setAnimationVariableFloat("staggerMagnitude", 0.25); } catch (vErr) { /* the stagger's own size */ }
+                    var st = sp.Idle.from(sp.Game.getFormEx(INTOX_STUMBLE_IDLE)); var ok = !!st && !!player.playIdle(st);
+                    if (!ok) sp.Debug.sendAnimationEvent(player, "staggerStart");
+                    this.greymarchIntoxWalkAt = now - DRUNK_AGAIN_MS + 2500; // the drunk walk again once the stumble is over
+                    if ((this.greymarchIntoxStumbles = (this.greymarchIntoxStumbles || 0) + 1) <= 5) this.greymarchLog("intox: a stumble (" + show + ")");
+                } catch (stErr) { /* no stumble this time */ }
+            }
+        }
+        // the pace (staff speed multiplied in; a creature's body sets its own: greymarchShapeSpeedTick)
+        var staff = (this.greymarchFxHave && this.greymarchFxHave.speed) || 100;
+        var pace = INTOX_SPEED[show] || 0;
+        if (pace) {
+            var pct = Math.round(staff * pace / 100), cur = -1;
+            try { cur = player.getActorValue("SpeedMult"); } catch (gErr) { cur = -1; }
+            if (cur !== pct) { try { player.setActorValue("SpeedMult", pct); player.modActorValue("CarryWeight", 0.1); player.modActorValue("CarryWeight", -0.1); this.greymarchIntoxPace = pct; } catch (pErr) { /* tried again in a moment */ } }
+        } else if (this.greymarchIntoxPace !== undefined) {
+            this.greymarchIntoxPace = undefined;
+            if (!this.greymarchShapeOn && !this.greymarchShapeWant) { try { player.setActorValue("SpeedMult", staff); player.modActorValue("CarryWeight", 0.1); player.modActorValue("CarryWeight", -0.1); } catch (pErr) { /* the next speed change puts it right */ } }
+        }
+        // the stamina (by the level itself: a pause leaves it down)
+        var lose = 0;
+        if (INTOX_STAMINA[level]) { try { lose = Math.round(player.getBaseActorValue("stamina") * INTOX_STAMINA[level]); } catch (bErr) { lose = this.greymarchIntoxStamina || 0; } }
+        var had = this.greymarchIntoxStamina || 0;
+        if (lose !== had) { try { player.modActorValue("stamina", had - lose); this.greymarchIntoxStamina = lose; } catch (mErr) { /* tried again in a moment */ } }
+        if (level !== was) { this.greymarchIntoxHave = level; this.greymarchLog("intox: " + was + " -> " + level + (paused ? " (paused: a beast, a creature or the drained walk)" : "") + (lose ? ", stamina -" + lose : "")); }
     }
     greymarchVampFeedHeld(player: any, now: number): any {
         var sp = this.sp, h = this.greymarchVampFeedHold; if (!h) return;
