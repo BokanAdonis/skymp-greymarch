@@ -1830,18 +1830,17 @@ export class GreymarchBridge {
             this.greymarchDrunkWant = null;
             if (!this.greymarchDrunkOn) return;
             this.greymarchDrunkOn = false;
-            try { var stop = sp.Idle.from(sp.Game.getFormEx(DRUNK_IDLE_STOP)); if (stop) player.playIdle(stop); } catch (sErr) { /* the walk ends with the next idle */ }
-            try { if (imod) sp.ImageSpaceModifier.removeCrossFade(1.0); } catch (rErr) { /* it fades by itself */ }
+            try { if (imod) sp.ImageSpaceModifier.removeCrossFade(1.0); } catch (rErr) { /* cleared again below */ }
+            this.greymarchIntoxClearUntil = now + INTOX_CLEAR_MS; // and cleared again and again for a while (greymarchIntoxTick: one removeCrossFade did not always take)
             this.greymarchLog("drunk: over");
             return;
         }
         if (now - d.at < DRUNK_AGAIN_MS) return;
         d.at = now;
         if (this.greymarchWolfOn || this.greymarchShapeOn || this.greymarchVampFeedHold) return; // a beast's body or the feeding: the walk waits
-        var played = false;
-        try { var start = sp.Idle.from(sp.Game.getFormEx(DRUNK_IDLE_START)); if (start) played = !!player.playIdle(start); } catch (pErr) { played = false; }
-        try { if (imod) imod.applyCrossFade(1.0); } catch (aErr) { /* the walk alone */ }
-        if (!this.greymarchDrunkOn) { this.greymarchDrunkOn = true; this.greymarchLog("drunk: on for " + Math.round((d.until - now) / 1000) + " s (walk " + (played ? "played" : "refused") + ", screen " + (imod ? "on" : "missing") + ")"); }
+        // no drunk walk any more (2026-11-07, the owner: IdleDrunkStart took the movement away from a player in third person): the swaying screen only
+        try { if (imod) imod.applyCrossFade(1.0); } catch (aErr) { /* tried again in a moment */ }
+        if (!this.greymarchDrunkOn) { this.greymarchDrunkOn = true; this.greymarchLog("drunk: on for " + Math.round((d.until - now) / 1000) + " s (screen " + (imod ? "on" : "missing") + ")"); }
     }
     // DRUNK AND HIGH (gamemode intoxication.js; 2026-11-07, the owner: "visual effects and like stumbling animations"; levels, a strong skooma high, some downsides).
     // The server says { greymarchIntox level, ms } when the level changes; this game shows it until then (ms is only the safety stop: the server says "sober"):

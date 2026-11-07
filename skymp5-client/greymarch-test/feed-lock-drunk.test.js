@@ -46,22 +46,20 @@ test("the feeding locks walking, fighting, sneaking and using things for both; t
   } finally { s.done(); }
 });
 
-test("drained to death: the drunk walk and the swimming screen for the server's time, put on again every 10 s, then the walk is stopped and the screen fades", () => {
+test("drained to death: the swimming screen for the server's time, put on again every 10 s, then it fades; no drunk walk (it took the movement away in third person, 2026-11-07)", () => {
   const s = make();
   try {
     s.say({ customPacketType: "greymarchDrunk", on: true, ms: 25000 });
     s.tick();
-    assert.deepStrictEqual(s.log.idles, [0x0cefd0], "IdleDrunkStart");
+    assert.deepStrictEqual(s.log.idles, [], "no IdleDrunkStart");
     assert.deepStrictEqual(s.log.imod, [["apply", 0x0c9cc5, 1]], "BSHeartland's drunk screen");
     s.tick(5000);
-    assert.strictEqual(s.log.idles.length, 1, "not again before 10 s");
+    assert.strictEqual(s.log.imod.length, 1, "not again before 10 s");
     s.tick(5100);
-    assert.strictEqual(s.log.idles.length, 2, "again after 10 s (a jump or a fight ends the walk)");
+    assert.strictEqual(s.log.imod.length, 2, "again after 10 s");
     s.tick(15000);
-    assert.deepStrictEqual(s.log.idles.slice(-1), [0x0cefd1], "IdleDrunkStop when the time is up");
-    assert.deepStrictEqual(s.log.imod.slice(-1), [["remove", 1]]);
+    assert.deepStrictEqual(s.log.imod.slice(-1), [["remove", 1]], "the screen fades when the time is up");
+    assert.deepStrictEqual(s.log.idles, [], "no drunk walk to stop");
     assert.ok(s.log.lines.some((l) => /drunk: on for 25 s/.test(l)) && s.log.lines.some((l) => /drunk: over/.test(l)));
-    s.say({ customPacketType: "greymarchDrunk", on: false }); s.tick();
-    assert.deepStrictEqual(s.log.idles.slice(-1), [0x0cefd1], "nothing more to stop");
   } finally { s.done(); }
 });
