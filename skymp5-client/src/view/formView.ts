@@ -1751,6 +1751,14 @@ export class FormView {
       const others = this.gmOtherPlayers(myPlace, placeOf);
       if (!others.length) return "";
       const remoteId = this.remoteRefrId as number;
+      // GREYMARCH: A SUMMON STAYS WITH ITS CASTER (gamemode summons.js; 2026-11-07, the owner: a summon was hostile to someone they were not fighting). Another player's
+      // summon run here (this game asked for it before it knew whose it was) is let go at once, so its caster's game runs it; this player's own is never handed to a
+      // closer player and never made to engage another player (it fights only with its caster, as their teammate).
+      { let gmOwner = 0, gmMe = 0; try { const gmSo: any = (storage as any)["gmSummonOwner"]; gmOwner = gmSo ? Number(gmSo[remoteId >>> 0]) >>> 0 : 0; gmMe = Number((storage as any)["gmMeActor"]) >>> 0; } catch (e) { gmOwner = 0; }
+        if (gmOwner) {
+          if (gmOwner !== gmMe) { storage["hosted"] = withoutHosted(storage["hosted"], remoteId); markReleased(remoteId, Date.now()); gmCrumb("summon " + gmHex(remoteId) + ": another player's, let go to its caster's game"); return "released"; }
+          return "";
+        } }
       const dMe = npc.getDistance(me);
       const dist = others.map((o) => npc.getDistance(o));
       if (shouldRelease(dMe, dist)) {
