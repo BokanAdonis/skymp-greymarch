@@ -596,7 +596,7 @@ export class FormView {
         if (!refr) { unprotect(); return; }
         // ITS MOVES STOPPED FIRST (2026-10-30, crash: a wildlife Deer deleted while a movement order SkyMP gave it was still queued, MovementControllerNPC
         // reading the deleted actor, IMovementMessageInterface): the translateTo and keepOffsetFromActor orders are cancelled before it is disabled and deleted
-        try { const gmMover = Actor.from(refr); if (gmMover) { gmMover.stopTranslation(); gmMover.clearKeepOffsetFromActor(); try { gmMover.enableAI(false); } catch (ai) { /* none */ } } } catch (e) { /* it was not moving */ } // and its AI off (2026-11-07: a deleted NPC's movement still being worked on crashed a game)
+        try { const gmMover = Actor.from(refr); if (gmMover) { gmMover.stopTranslation(); gmMover.clearKeepOffsetFromActor(); } } catch (e) { /* it was not moving */ }
         refr.disable(false).then(() => {
           const gone = ObjectReference.from(Game.getFormEx(refrId));
           if (gone) gone.delete();
