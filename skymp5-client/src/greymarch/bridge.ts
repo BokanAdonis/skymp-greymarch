@@ -961,7 +961,7 @@ export class GreymarchBridge {
         if (e && e.device === 1 && (e.code === 0 || e.code === 1)) { var me: any = {}; for (var k in e) me[k] = e[k]; me.code = 256 + e.code; var bv = function (v: any) { try { return typeof v === "function" ? !!v.call(e) : v; } catch (bvErr) { return false; } }; me.isDown = bv(e.isDown); me.isUp = bv(e.isUp); me.isPressed = bv(e.isPressed); e = me; }
         // HOTKEY 1, WRITTEN DOWN (2026-11-08, the owner: pressing 1 in the Favorites menu does nothing): a number key 1-8 pressed in the Favorites menu, and what
         // the game reports it as (keyboard 2-9; device, code)
-        if (e && e.code >= 2 && e.code <= 9) { try { var nDown2 = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (nDown2 && e.isUp !== true && this.sp.Ui.isMenuOpen("FavoritesMenu")) this.greymarchLog("favorites: key " + (e.code - 1) + " pressed in the Favorites menu (device " + e.device + ", code " + e.code + ")"); } catch (fkErr) { /* only a log line */ } }
+        if (e && e.code >= 2 && e.code <= 9) { try { var nDown2 = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); var nWas = !!this["greymarchFavNum" + e.code]; this["greymarchFavNum" + e.code] = nDown2 && e.isUp !== true; if (nDown2 && e.isUp !== true && !nWas && this.sp.Ui.isMenuOpen("FavoritesMenu")) { this.greymarchLog("favorites: key " + (e.code - 1) + " pressed in the Favorites menu (device " + e.device + ", code " + e.code + ")"); this.greymarchFavScanSlot = e.code - 2; } } catch (fkErr) { /* only a log line */ } }
         if (e && e.code === ESC_KEY && e.device !== undefined && e.device !== 0) return; // code 1 from the mouse is its right button, not Esc (2026-11-05: right click opened the pause menu); only the keyboard's Esc counts
         if (this.greymarchBuildCam && this.greymarchBuildCamKey(e)) return; // the build system's free camera has the keys it uses
         if (e.code === EMOTE_EXIT_KEY) { var xDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (e.isUp === true) xDown = false; if (xDown && !this.greymarchKeyExit && !this.greymarchChatTyping && !this.greymarchPanelHasKeys()) this.greymarchEmoteExitWanted = Date.now(); this.greymarchKeyExit = xDown; } // Backspace: out of the emote or pose (greymarchEmoteExitTick)
@@ -2287,6 +2287,20 @@ export class GreymarchBridge {
         catch (e) { if (!this.greymarchFavNoDll) { this.greymarchFavNoDll = true; this.greymarchLog("favorites: GreymarchCam." + fn + " is not there (GreymarchCamera.dll older than 1.6?): favorites are kept but not put back"); } return -2; }
     }
     greymarchFavTick(now: number): any {
+        // WHO HOLDS THAT SLOT (2026-11-08, the owner: pressing 1 in the Favorites menu does nothing, 2-8 work, and no favorite shows a 1): after a number key in the
+        // Favorites menu, every item carried and every spell known that holds that hotkey slot is written down, shown in the list (a favorite) or not
+        if (this.greymarchFavScanSlot !== undefined && this.greymarchFavScanSlot !== null) {
+            var slot = this.greymarchFavScanSlot; this.greymarchFavScanSlot = null;
+            try {
+                var pl = this.sp.Game.getPlayer(); var holders: string[] = []; var seenF: any = {};
+                var check = (form: any, kind: string) => { if (!form) return; var id = form.getFormID() >>> 0; if (seenF[id]) return; seenF[id] = true; var k = this.greymarchFavCall("GetHotkey", form); if (k !== slot) return; var fav = false; try { fav = this.sp.Game.isObjectFavorited(form); } catch (fe) { fav = false; } holders.push(kind + " " + (form.getName() || "?") + " [" + id.toString(16) + "]" + (fav ? "" : " (NOT a favorite)")); };
+                var ni = pl.getNumItems(); for (var a = 0; a < ni; a++) check(pl.getNthForm(a), "item");
+                var ns = pl.getSpellCount(); for (var b = 0; b < ns; b++) check(pl.getNthSpell(b), "spell");
+                var pb = this.sp.ActorBase.from(pl.getBaseObject()); var nb = pb ? pb.getSpellCount() : 0; for (var c = 0; c < nb; c++) check(pb!.getNthSpell(c), "spell");
+                check(pl.getEquippedShout(), "shout");
+                this.greymarchLog("favorites: hotkey " + (slot + 1) + " is held by " + (holders.length ? holders.join(", ") : "nothing carried or known"));
+            } catch (scErr) { this.greymarchLog("favorites: the hotkey " + (slot + 1) + " look failed: " + scErr); }
+        }
         var st = this.greymarchFavState; if (!st) return;
         var sp = this.sp;
         // a menu where the player changes favorites: open since the last look? (a favorite lost with none open was taken by the game: SkyMP rebuilding the inventory)
