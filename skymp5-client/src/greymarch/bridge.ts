@@ -2340,7 +2340,8 @@ export class GreymarchBridge {
                     var paths = ["_root.MenuHolder.Menu_mc.itemList.selectedEntry.formId", "_root.Menu_mc.itemList.selectedEntry.formId"];
                     // EXACT (2026-11-08, the owner: "it just unfavorites the item I did have"; the log: the robes 10cc43c0 read as 10cc43e0): GetFloat rounds an id
                     // to a 32-bit float; GetInt gives it exactly (an id past 0x7fffffff comes back negative: >>> 0 puts it right)
-                    for (var pi = 0; pi < paths.length && !selId; pi++) { try { var v = Number(this.sp.Ui.getInt("FavoritesMenu", paths[pi])); if (isFinite(v) && v !== 0) selId = v >>> 0; } catch (uiErr) { /* the other path */ } }
+                    var listPath = "";
+                    for (var pi = 0; pi < paths.length && !selId; pi++) { try { var v = Number(this.sp.Ui.getInt("FavoritesMenu", paths[pi])); if (isFinite(v) && v !== 0) { selId = v >>> 0; listPath = paths[pi].replace(".selectedEntry.formId", ""); } } catch (uiErr) { /* the other path */ } }
                     var selForm = selId ? this.sp.Game.getFormEx(selId) : null;
                     // ONLY ONE OF THEIRS: SetHotkey takes the slot from whatever had it before it looks for the new one, so a form they do not carry or know is never sent
                     var mineSel = false; try { var plS = this.sp.Game.getPlayer(); var tS = selForm ? selForm.getType() : 0; mineSel = !!selForm && (tS === 119 ? true : tS === 22 ? plS.hasSpell(selForm) : plS.getItemCount(selForm) > 0); } catch (msErr) { mineSel = false; }
@@ -2350,7 +2351,23 @@ export class GreymarchBridge {
                         this.greymarchLog("favorites: hotkey 1 given to " + (selForm.getName() || selId.toString(16)) + " by hand (the menu did not) -> " + put);
                         // SHOWN AT ONCE (2026-11-08, the owner: "make it happen without having to close the favorite menu to refresh it"): the menu draws its list when
                         // it opens, so it is closed and opened again (GreymarchCamera.dll CloseMenu, OpenMenu) a moment later, with the 1 on the new entry
-                        if (put === 1) { try { this.sp.callNative("GreymarchCam", "CloseMenu", undefined, "FavoritesMenu"); this.greymarchFavReopenAt = Date.now() + 150; } catch (rmErr) { /* they reopen it themselves */ } }
+                        // IN PLACE, THE MENU STAYS OPEN (2026-11-08, the owner: "can we just keep it open fully?"): SkyUI's list (FavoritesMenu.swf ItemList) keeps each
+                        // entry's hotkey in its "hotkey" field and redraws on requestUpdate: the entry that showed 1 is cleared, the selected one gets 1, the list redraws.
+                        // Read back: if the list did not take it, the menu is closed and opened again as before
+                        if (put === 1) {
+                            var ui = this.sp.Ui, M = "FavoritesMenu", done = false;
+                            try {
+                                if (listPath) {
+                                    var len = Number(ui.getInt(M, listPath + "._entryList.length")) || 0;
+                                    for (var ei = 0; ei < len && ei < 400; ei++) { var eh = Number(ui.getInt(M, listPath + "._entryList." + ei + ".hotkey")); if (eh === 0 && (Number(ui.getInt(M, listPath + "._entryList." + ei + ".formId")) >>> 0) !== selId) ui.setInt(M, listPath + "._entryList." + ei + ".hotkey", -1); }
+                                    ui.setInt(M, listPath + ".selectedEntry.hotkey", 0);
+                                    ui.invokeBool(M, listPath + ".requestUpdate", true);
+                                    done = Number(ui.getInt(M, listPath + ".selectedEntry.hotkey")) === 0;
+                                    this.greymarchLog("favorites: the menu's list updated in place (" + len + " entries) -> " + (done ? "the 1 shows" : "not taken"));
+                                }
+                            } catch (ipErr) { done = false; this.greymarchLog("favorites: the menu's list could not be updated in place: " + ipErr); }
+                            if (!done) { try { this.sp.callNative("GreymarchCam", "CloseMenu", undefined, M); this.greymarchFavReopenAt = Date.now() + 150; } catch (rmErr) { /* they reopen it themselves */ } }
+                        }
                     }
                     else this.greymarchLog("favorites: hotkey 1: the entry selected in the menu could not be read (" + selId.toString(16) + ")");
                 }
