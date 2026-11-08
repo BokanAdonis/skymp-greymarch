@@ -323,3 +323,10 @@ test("the mouse buttons reach the creature attacks: device 1 code 0 / 1 read as 
   assert.match(src, /if \(e && e\.device === 1 && \(e\.code === 0 \|\| e\.code === 1\)\) \{ var me: any = \{\};/);
   assert.ok(src.indexOf("me.code = 256 + e.code") < src.indexOf("if (e && e.code === ESC_KEY && e.device !== undefined && e.device !== 0) return;"), "before the Esc line, which took the right button");
 });
+
+test("a form's camera height raises the game's third-person camera in race mode and is put back after (2026-11-08, the owner: as a Gargoyle the camera sat on the ground)", () => {
+  assert.match(src, /camZ: Math\.max\(0, Math\.min\(400, Number\(msg\.camZ\) \|\| 0\)\)/);
+  assert.match(src, /this\.greymarchShapeCam\(want\.camZ \|\| 0\);/);
+  assert.match(src, /this\.greymarchShapeOn = 0;\s*this\.greymarchShapeCam\(0\);/);
+  assert.match(src, /var sp = this\.sp, keys = \["fOverShoulderPosZ:Camera", "fOverShoulderCombatPosZ:Camera"\];/);
+});

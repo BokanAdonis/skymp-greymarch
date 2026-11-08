@@ -3354,7 +3354,7 @@ export class GreymarchBridge {
             if (!was || was.race !== race) this.greymarchLog("shape: the server says " + (msg.name || "a creature") + " (race " + race.toString(16) + ")");
             var at = msg.attacks && typeof msg.attacks === "object" ? msg.attacks : {};
             var names = function (l: any) { return Array.isArray(l) ? l.filter(function (x: any) { return typeof x === "string" && x.length > 0 && x.length < 64; }) : []; };
-            this.greymarchShapeWant = { race: race, back: Number(msg.back) >>> 0, name: String(msg.name || ""), normal: names(at.normal), power: names(at.power), mode: msg.mode === "race" ? "race" : "npc", menus: msg.menus === true, weapon: Number(msg.weapon) >>> 0, drawn: msg.drawn === true, speed: shapeSpeedOf(msg.speed) }; // drawn: always in its combat stance (the giant: its club attacks and its run need it); speed: the hidden body's pace per gait (greymarchShapeSpeedTick); weapon: the form's own (a giant's club, a skeleton's sword; greymarchShapeArmTick)
+            this.greymarchShapeWant = { race: race, back: Number(msg.back) >>> 0, name: String(msg.name || ""), normal: names(at.normal), power: names(at.power), mode: msg.mode === "race" ? "race" : "npc", menus: msg.menus === true, weapon: Number(msg.weapon) >>> 0, drawn: msg.drawn === true, speed: shapeSpeedOf(msg.speed), camZ: Math.max(0, Math.min(400, Number(msg.camZ) || 0)) }; // drawn: always in its combat stance (the giant: its club attacks and its run need it); speed: the hidden body's pace per gait (greymarchShapeSpeedTick); weapon: the form's own (a giant's club, a skeleton's sword; greymarchShapeArmTick)
             this.greymarchShapeWordAt = Date.now();
         } else {
             if (this.greymarchShapeWant || this.greymarchShapeOn) this.greymarchLog("shape: the server says change back");
@@ -4185,6 +4185,7 @@ export class GreymarchBridge {
             }
             step = "race"; player.setRace(r); // ONE real race change (remoteServer.ts no longer writes a creature race into the character first)
             step = "animation"; sp.Debug.sendAnimationEvent(player, "IdleForceDefaultState"); // start the new animation set from its idle
+            step = "camera height"; this.greymarchShapeCam(want.camZ || 0); // a skeleton with no third-person camera point (greymarchShapeCam)
             this.greymarchShapeOn = want.race;
             var got = player.getRace();
             this.greymarchLog("shape: became " + (want.name || "a creature") + " (race now " + (got ? got.getFormID().toString(16) : "none") + ", will change back to " + (this.greymarchShapeBackRace || 0).toString(16) + ", " + want.normal.length + " attacks, " + want.power.length + " power attacks)");
@@ -4217,10 +4218,29 @@ export class GreymarchBridge {
         sp.TESModPlatform.resizeHeadpartsArray(base, parts.length);
         parts.forEach(function (hp: any, i: number) { base.setNthHeadPart(hp, i); });
     }
+    // THE CAMERA'S HEIGHT IN A FORM (2026-11-08, the owner: as a Gargoyle in race mode "I am looking from the ground"): a creature skeleton with no third-person camera
+    // point puts the camera at its feet. The server gives such a form a height (camZ); the game's own third-person heights are raised by it while in the form, and the
+    // ones from before put back when it ends (or the form changes)
+    greymarchShapeCam(camZ: number): any {
+        var sp = this.sp, keys = ["fOverShoulderPosZ:Camera", "fOverShoulderCombatPosZ:Camera"];
+        var was = this.greymarchShapeCamWas;
+        if (camZ > 0) {
+            if (this.greymarchShapeCamZ === camZ) return;
+            if (!was) { was = this.greymarchShapeCamWas = {}; for (var i = 0; i < keys.length; i++) { try { was[keys[i]] = sp.Utility.getINIFloat(keys[i]); } catch (gErr) { was[keys[i]] = 0; } } }
+            for (var j = 0; j < keys.length; j++) { try { sp.Utility.setINIFloat(keys[j], (was[keys[j]] || 0) + camZ); } catch (sErr) { /* the camera stays where it is */ } }
+            this.greymarchShapeCamZ = camZ;
+            this.greymarchLog("shape: the camera raised by " + camZ);
+        } else if (was) {
+            for (var k = 0; k < keys.length; k++) { try { sp.Utility.setINIFloat(keys[k], was[keys[k]] || 0); } catch (rErr) { /* as it is */ } }
+            this.greymarchShapeCamWas = null; this.greymarchShapeCamZ = 0;
+            this.greymarchLog("shape: the camera height put back");
+        }
+    }
     greymarchShapeUnbecome(player: any, raceId: number): any {
         var sp = this.sp;
         var step = "start";
         this.greymarchShapeOn = 0;
+        this.greymarchShapeCam(0);
         this.greymarchShapeSwing = null; this.greymarchShapeReport = null;
         try { (sp.storage as any)["greymarchShapeOn"] = false; } catch (stErr) { /* nothing was set */ }
         try {
