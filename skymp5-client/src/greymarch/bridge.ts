@@ -3698,8 +3698,24 @@ export class GreymarchBridge {
                 // DefaultPredatorPackage, which roams and hunts and ran them 900 away within 5 s of a follow). A summon on any package but DefaultMasterPackage
                 // (0x3EAB9) is given the follow every second while it is behind, and walked to its caster (PathToReference) once it is past 400
                 var pkId = 0; try { var pk0 = a.getCurrentPackage(); pkId = pk0 ? pk0.getFormID() >>> 0 : 0; } catch (pk0Err) { pkId = 0; }
-                var roamer = !!pkId && pkId !== 0x3eab9;
-                var again = roamer ? 1000 : 5000, behind = roamer ? 400 : 450;
+                var roamers = this.greymarchSummonRoamer || (this.greymarchSummonRoamer = {});
+                if (pkId && pkId !== 0x3eab9 && !roamers[s.actor]) { roamers[s.actor] = true; try { a.clearKeepOffsetFromActor(); } catch (rcErr) { /* none on it */ } } // kept: on its walk to its caster its package is another one for a while
+                var roamer = !!roamers[s.actor];
+                // WALKED, NOT FOLLOWING (2026-11-08, the owner: "they still wander"; the log: the hound moved off at walking pace, 768 then 1295 away): the follow
+                // and its package looked at again every second ended its walk to its caster each time. A roamer gets no follow: once it is past 400 it is walked
+                // to its caster (PathToReference), and nothing else is done to it until that walk ends (or 15 s pass)
+                if (roamer) {
+                    var rpaths = this.greymarchSummonPathing || (this.greymarchSummonPathing = {});
+                    if (far > 400 && (!rpaths[s.actor] || now - rpaths[s.actor] > 15000)) {
+                        rpaths[s.actor] = now; var rid = s.actor;
+                        try { var rpr: any = a.pathToReference(player, 1.0); if (rpr && rpr.then) rpr.then(function () { rpaths[rid] = 0; }, function () { rpaths[rid] = 0; }); } catch (rpErr) { this.greymarchLog("summon: " + (s.actor >>> 0).toString(16) + " could not be walked to its caster: " + rpErr); }
+                        var rlogs = this.greymarchSummonFollowLog || (this.greymarchSummonFollowLog = {});
+                        if (now - (rlogs[s.actor] || 0) > 5000) { rlogs[s.actor] = now; this.greymarchLog("summon: " + (s.actor >>> 0).toString(16) + " (a roamer, package " + (pkId ? pkId.toString(16) : "none") + ") " + Math.round(far) + " away: walked to its caster"); }
+                    }
+                    made[s.actor] = "follow";
+                    continue;
+                }
+                var again = 5000, behind = 450;
                 if ((made[s.actor] !== "follow") || (far > behind && now - (fat[s.actor] || 0) > again)) {
                     var lps = this.greymarchSummonLastPos || (this.greymarchSummonLastPos = {});
                     var fpos = [a.getPositionX(), a.getPositionY()], lp = lps[s.actor];

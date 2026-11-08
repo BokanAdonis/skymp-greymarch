@@ -80,8 +80,10 @@ test("a hosted NPC's follow is not cleared every frame when it is this player's 
   assert.match(fv, /if \(!gmIsOwnSummon\(remoteId\)\) ac\.clearKeepOffsetFromActor\(\);/);
 });
 
-test("a roaming summon (the predator package) is kept up every second and walked to its caster (2026-11-08, the owner: Spectral Bears and Wolves and Death Hounds did not follow)", () => {
-  assert.match(src, /var roamer = !!pkId && pkId !== 0x3eab9;/);
-  assert.match(src, /var again = roamer \? 1000 : 5000, behind = roamer \? 400 : 450;/);
-  assert.match(src, /if \(stuck && now - \(paths\[s\.actor\] \|\| 0\) > 4000\)/);
+test("a roaming summon (the predator package) is walked to its caster and left on that walk (2026-11-08, the owner: Spectral Bears and Wolves and Death Hounds did not follow, then still wandered)", () => {
+  assert.match(src, /if \(pkId && pkId !== 0x3eab9 && !roamers\[s\.actor\]\) \{ roamers\[s\.actor\] = true; try \{ a\.clearKeepOffsetFromActor\(\);/);
+  assert.match(src, /if \(far > 400 && \(!rpaths\[s\.actor\] \|\| now - rpaths\[s\.actor\] > 15000\)\)/);
+  assert.match(src, /var rpr: any = a\.pathToReference\(player, 1\.0\);/);
+  // no follow and no package look for a roamer: they ended its walk every second
+  assert.match(src, /made\[s\.actor\] = "follow";\s*continue;\s*\}/);
 });
