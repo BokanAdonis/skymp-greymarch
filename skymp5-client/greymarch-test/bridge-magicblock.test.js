@@ -64,3 +64,8 @@ test("this player's own summon is never pulled out of its idle or furniture and 
   assert.match(fv, /if \(!gmOwnSummon && gmSitNow - this\.gmSitWakeAt >= GM_SIT_WAKE_MS\)/);
   assert.match(fv, /if \(!gmOwnSummon && gmINow - this\.gmIdleWakeAt >= GM_SIT_WAKE_MS\)/);
 });
+
+test("a summon that does not follow is written down and walked to its caster (2026-11-08, the owner: the summons still did not follow)", () => {
+  assert.match(src, /a\.keepOffsetFromActor\(player, -90, -140, 0, 0, 0, 0, 350, 120\); a\.evaluatePackage\(\);/);
+  assert.match(src, /if \(stuck\) \{ try \{ var pr: any = a\.pathToReference\(player, 1\.0\);/);
+});

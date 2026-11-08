@@ -3685,7 +3685,18 @@ export class GreymarchBridge {
                 var far = 0; try { far = a.getDistance(player); } catch (dsErr) { far = 0; }
                 if (far > 4000) { try { a.moveTo(player, -120, -160, 0, true); this.greymarchLog("summon: " + (s.actor >>> 0).toString(16) + " was " + Math.round(far) + " away: brought to its caster"); } catch (mvErr) { /* it walks */ } }
                 var fat = this.greymarchSummonFollowAt || (this.greymarchSummonFollowAt = {});
-                if (made[s.actor] !== "follow" || (far > 300 && now - (fat[s.actor] || 0) > 5000)) { a.keepOffsetFromActor(player, -90, -140, 0, 0, 0, 0, 350, 120); made[s.actor] = "follow"; fat[s.actor] = now; }
+                // STILL NOT FOLLOWING (2026-11-08, the owner: "the summons still don't follow me"; the breadcrumbs: hosted here, no fight, and it stood on the same
+                // spot while its caster walked off): each follow is written down (and an error with it), its AI looks at its package again after it, and one
+                // that has not moved since the last follow while it is behind is walked to its caster (PathToReference)
+                if (made[s.actor] !== "follow" || (far > 300 && now - (fat[s.actor] || 0) > 5000)) {
+                    var lps = this.greymarchSummonLastPos || (this.greymarchSummonLastPos = {});
+                    var fpos = [a.getPositionX(), a.getPositionY()], lp = lps[s.actor];
+                    var stuck = !!lp && made[s.actor] === "follow" && far > 300 && Math.hypot(fpos[0] - lp[0], fpos[1] - lp[1]) < 30;
+                    try { a.keepOffsetFromActor(player, -90, -140, 0, 0, 0, 0, 350, 120); a.evaluatePackage(); } catch (kErr) { this.greymarchLog("summon: " + (s.actor >>> 0).toString(16) + " could not be told to follow: " + kErr); }
+                    if (stuck) { try { var pr: any = a.pathToReference(player, 1.0); if (pr && pr.then) pr.then(function () { /* there */ }, function () { /* tried again in 5 s */ }); } catch (pErr) { this.greymarchLog("summon: " + (s.actor >>> 0).toString(16) + " could not be walked to its caster: " + pErr); } }
+                    this.greymarchLog("summon: " + (s.actor >>> 0).toString(16) + " follows (" + Math.round(far) + " away" + (stuck ? ", it had not moved: walked to its caster" : "") + ", package " + (function () { try { var pk = a.getCurrentPackage(); return pk ? (pk.getFormID() >>> 0).toString(16) : "none"; } catch (pkErr) { return "?"; } })() + ")");
+                    lps[s.actor] = fpos; made[s.actor] = "follow"; fat[s.actor] = now;
+                }
             } catch (e) { /* tried again in a second */ }
         }
     }
