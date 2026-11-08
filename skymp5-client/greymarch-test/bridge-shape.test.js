@@ -318,3 +318,8 @@ test("a creature form's first clicks and attacks are written down (2026-11-08, t
   assert.match(src, /this\.greymarchShapeDiag\("after " \+ chk\.ev \+ ": swinging " \+ atk \+ ", stance " \+ drw\);/);
   assert.match(src, /this\.greymarchShapeDiagN = 0;/);
 });
+
+test("the mouse buttons reach the creature attacks: device 1 code 0 / 1 read as 256 / 257, before the Esc line (2026-11-08, the owner: as a Gargoyle attacks did not work)", () => {
+  assert.match(src, /if \(e && e\.device === 1 && \(e\.code === 0 \|\| e\.code === 1\)\) \{ var me: any = \{\};/);
+  assert.ok(src.indexOf("me.code = 256 + e.code") < src.indexOf("if (e && e.code === ESC_KEY && e.device !== undefined && e.device !== 0) return;"), "before the Esc line, which took the right button");
+});

@@ -955,6 +955,10 @@ export class GreymarchBridge {
     }
     // F7 opens the panel (the page itself closes it with F7 or Escape). Escape also closes it from here, because the game un-focuses the browser on Escape.
     greymarchKey(e: any): any {
+        // THE MOUSE BUTTONS AS 256 AND 257 (2026-11-08, the owner: as a Gargoyle "attacks didn't work"; the log: no click ever reached greymarchShapeButton). The game
+        // gives the mouse's buttons as device 1 (Mouse) with code 0 (left) and 1 (right), not the DirectInput 256 / 257 the creature attacks and the werewolf lunge
+        // wait for below, and the right button was also taken by the Esc line. They are read here as 256 (left) and 257 (right), so both reach that line
+        if (e && e.device === 1 && (e.code === 0 || e.code === 1)) { var me: any = {}; for (var k in e) me[k] = e[k]; me.code = 256 + e.code; var bv = function (v: any) { try { return typeof v === "function" ? !!v.call(e) : v; } catch (bvErr) { return false; } }; me.isDown = bv(e.isDown); me.isUp = bv(e.isUp); me.isPressed = bv(e.isPressed); e = me; }
         if (e && e.code === ESC_KEY && e.device !== undefined && e.device !== 0) return; // code 1 from the mouse is its right button, not Esc (2026-11-05: right click opened the pause menu); only the keyboard's Esc counts
         if (this.greymarchBuildCam && this.greymarchBuildCamKey(e)) return; // the build system's free camera has the keys it uses
         if (e.code === EMOTE_EXIT_KEY) { var xDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (e.isUp === true) xDown = false; if (xDown && !this.greymarchKeyExit && !this.greymarchChatTyping && !this.greymarchPanelHasKeys()) this.greymarchEmoteExitWanted = Date.now(); this.greymarchKeyExit = xDown; } // Backspace: out of the emote or pose (greymarchEmoteExitTick)
