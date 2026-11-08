@@ -2312,6 +2312,12 @@ export class GreymarchBridge {
                 }
             } catch (u1Err) { this.greymarchLog("favorites: key 1 could not use its favorite: " + u1Err); }
         }
+        // the Favorites menu opened again after hotkey 1 was given by hand (below), once it has closed
+        if (this.greymarchFavReopenAt && now >= this.greymarchFavReopenAt) {
+            var openNow = false; try { openNow = this.sp.Ui.isMenuOpen("FavoritesMenu"); } catch (oErr) { openNow = false; }
+            if (!openNow) { this.greymarchFavReopenAt = 0; try { this.sp.callNative("GreymarchCam", "OpenMenu", undefined, "FavoritesMenu"); } catch (opErr) { /* they open it themselves */ } }
+            else if (now - this.greymarchFavReopenAt > 2000) this.greymarchFavReopenAt = 0; // it never closed: left as it is
+        }
         // WHO HOLDS THAT SLOT (2026-11-08, the owner: pressing 1 in the Favorites menu does nothing, 2-8 work, and no favorite shows a 1): after a number key in the
         // Favorites menu, every item carried and every spell known that holds that hotkey slot is written down, shown in the list (a favorite) or not
         if (this.greymarchFavScanSlot !== undefined && this.greymarchFavScanSlot !== null) {
@@ -2339,7 +2345,13 @@ export class GreymarchBridge {
                     // ONLY ONE OF THEIRS: SetHotkey takes the slot from whatever had it before it looks for the new one, so a form they do not carry or know is never sent
                     var mineSel = false; try { var plS = this.sp.Game.getPlayer(); var tS = selForm ? selForm.getType() : 0; mineSel = !!selForm && (tS === 119 ? true : tS === 22 ? plS.hasSpell(selForm) : plS.getItemCount(selForm) > 0); } catch (msErr) { mineSel = false; }
                     if (selForm && !mineSel) { this.greymarchLog("favorites: hotkey 1: the selected entry " + selId.toString(16) + " is not one of theirs: nothing changed"); selForm = null; selId = 0; }
-                    if (selForm) { var put = this.greymarchFavCall("SetHotkey", selForm, 0); this.greymarchLog("favorites: hotkey 1 given to " + (selForm.getName() || selId.toString(16)) + " by hand (the menu did not) -> " + put + "; reopen the menu to see the 1"); }
+                    if (selForm) {
+                        var put = this.greymarchFavCall("SetHotkey", selForm, 0);
+                        this.greymarchLog("favorites: hotkey 1 given to " + (selForm.getName() || selId.toString(16)) + " by hand (the menu did not) -> " + put);
+                        // SHOWN AT ONCE (2026-11-08, the owner: "make it happen without having to close the favorite menu to refresh it"): the menu draws its list when
+                        // it opens, so it is closed and opened again (GreymarchCamera.dll CloseMenu, OpenMenu) a moment later, with the 1 on the new entry
+                        if (put === 1) { try { this.sp.callNative("GreymarchCam", "CloseMenu", undefined, "FavoritesMenu"); this.greymarchFavReopenAt = Date.now() + 150; } catch (rmErr) { /* they reopen it themselves */ } }
+                    }
                     else this.greymarchLog("favorites: hotkey 1: the entry selected in the menu could not be read (" + selId.toString(16) + ")");
                 }
             } catch (scErr) { this.greymarchLog("favorites: the hotkey " + (slot + 1) + " look failed: " + scErr); }
