@@ -44,7 +44,7 @@ test("the menus stay for a form that says so (the Lord); beast form for every ot
 });
 
 test("a creature attack waits for its combat stance; a drawn form keeps the stance; the hidden body's pace follows the creature's gait (2026-11-06, the giant)", () => {
-  assert.match(src, /else this\.greymarchShapePending = \{ ev: ev, power: power, until: now \+ SHAPE_STANCE_WAIT_MS \};/);
+  assert.match(src, /else \{ this\.greymarchShapePending = \{ ev: ev, power: power, until: now \+ SHAPE_STANCE_WAIT_MS \};/);
   assert.match(src, /if \(ready \|\| now >= pend\.until\)/);
   assert.match(src, /if \(want\.drawn\) \{ this\.greymarchShapeCombatUntil = now \+ 6000;/);
   assert.match(src, /gait = player\.isSprinting\(\) \? "sprint" : player\.isRunning\(\) \? "run" : "walk";/);

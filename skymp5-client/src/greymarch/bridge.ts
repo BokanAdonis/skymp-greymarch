@@ -3384,8 +3384,19 @@ export class GreymarchBridge {
         try { var staff = (this.greymarchFxHave && this.greymarchFxHave.speed) || 100; player.setActorValue("SpeedMult", staff); player.modActorValue("CarryWeight", 0.1); player.modActorValue("CarryWeight", -0.1); } catch (sErr) { /* the next staff speed change puts it right */ }
     }
     // A mouse button while a creature (greymarchKey): left = a normal attack, right = a power attack. Played in greymarchShapeTick (Skyrim calls only work in the update phase).
+    // WHERE AN ATTACK STOPS (2026-11-08, the owner: as a Gargoyle "you don't do any of the gargoyle's attacks"; the log had no attack line at all): the first
+    // 15 clicks of a form are written down (taken or why not), and so is each attack sent and whether its body was swinging a moment later
+    greymarchShapeDiag(text: string): any {
+        var n = this.greymarchShapeDiagN || 0;
+        if (n >= 15) return;
+        this.greymarchShapeDiagN = n + 1;
+        this.greymarchLog("shape: " + text);
+    }
     greymarchShapeButton(power: boolean): any {
-        if (!this.greymarchShapeOn || this.greymarchChatTyping || this.greymarchAdminOn || this.greymarchMenuOn) return;
+        if (!this.greymarchShapeOn) return;
+        var why = this.greymarchChatTyping ? "the chat is open" : this.greymarchAdminOn ? "the staff panel is open" : this.greymarchMenuOn ? "a menu is open" : "";
+        if (why) { this.greymarchShapeDiag((power ? "right" : "left") + " click not taken: " + why); return; }
+        this.greymarchShapeDiag((power ? "right" : "left") + " click taken");
         this.greymarchShapeSwing = { power: power, at: Date.now() };
     }
     greymarchShapeTick(): any {
@@ -3463,11 +3474,19 @@ export class GreymarchBridge {
                     // NOT BEFORE THE STANCE (2026-11-06, the owner: "the Giant still does not swing the club"): an attack event sent while the creature is still out of its combat
                     // stance is dropped by its behavior graph, and the stance was only asked for in this same frame. It waits for the stance (SHAPE_STANCE_WAIT_MS at most)
                     var drawnNow = false; try { drawnNow = this.greymarchShapeModeOn !== "npc" || !!body.isWeaponDrawn(); } catch (wErr) { drawnNow = true; }
-                    if (drawnNow) { sp.Debug.sendAnimationEvent(body, ev); this.greymarchShapeReport = { at: now + SHAPE_LAND_MS, power: power, ev: ev }; }
-                    else this.greymarchShapePending = { ev: ev, power: power, until: now + SHAPE_STANCE_WAIT_MS };
-                }
+                    if (drawnNow) { var okNow = sp.Debug.sendAnimationEvent(body, ev); this.greymarchShapeReport = { at: now + SHAPE_LAND_MS, power: power, ev: ev }; this.greymarchShapeDiag("attack " + ev + " sent, in its stance" + (okNow === false ? ", the graph refused it" : "")); this.greymarchShapeAtkCheck = { at: now + 400, ev: ev }; }
+                    else { this.greymarchShapePending = { ev: ev, power: power, until: now + SHAPE_STANCE_WAIT_MS }; this.greymarchShapeDiag("attack " + ev + " waits for its stance"); }
+                } else this.greymarchShapeDiag("attack " + ev + " not sent: no creature NPC");
                 if (!this.greymarchShapeSwingLogged) { this.greymarchShapeSwingLogged = true; this.greymarchLog("shape: first attack (" + ev + ")"); }
-            }
+            } else this.greymarchShapeDiag("click dropped: " + (inMenu ? "in a menu" : now - swing.at >= 1000 ? "too late" : "still resting from the last attack"));
+        }
+        var chk = this.greymarchShapeAtkCheck;
+        if (chk && now >= chk.at) {
+            this.greymarchShapeAtkCheck = null;
+            var cb = this.greymarchShapeModeOn === "npc" ? this.greymarchShapePuppetActor() : player;
+            var atk = "?"; try { atk = cb && cb.getAnimationVariableBool("IsAttacking") ? "yes" : "no"; } catch (atErr) { atk = "?"; }
+            var drw = "?"; try { drw = cb && cb.isWeaponDrawn() ? "yes" : "no"; } catch (drErr) { drw = "?"; }
+            this.greymarchShapeDiag("after " + chk.ev + ": swinging " + atk + ", stance " + drw);
         }
         var pend = this.greymarchShapePending;
         if (pend) {
@@ -3475,7 +3494,7 @@ export class GreymarchBridge {
             try { ready = !pb || !!pb.isWeaponDrawn(); } catch (rErr) { ready = true; }
             if (ready || now >= pend.until) {
                 this.greymarchShapePending = null;
-                if (pb) { sp.Debug.sendAnimationEvent(pb, pend.ev); this.greymarchShapeReport = { at: now + SHAPE_LAND_MS, power: pend.power, ev: pend.ev }; this.greymarchShapeLastSwing = { at: now, power: pend.power }; }
+                if (pb) { var okP = sp.Debug.sendAnimationEvent(pb, pend.ev); this.greymarchShapeReport = { at: now + SHAPE_LAND_MS, power: pend.power, ev: pend.ev }; this.greymarchShapeLastSwing = { at: now, power: pend.power }; this.greymarchShapeDiag("attack " + pend.ev + " sent " + (ready ? "once in its stance" : "without its stance (waited too long)") + (okP === false ? ", the graph refused it" : "")); this.greymarchShapeAtkCheck = { at: now + 400, ev: pend.ev }; }
             }
         }
         var rep = this.greymarchShapeReport;
@@ -3507,6 +3526,7 @@ export class GreymarchBridge {
                 try { (sp.storage as any)["greymarchShapeNpc"] = true; } catch (stErr) { /* animation.ts then sends the hidden body's animations as before */ }
             }
             step = "invisible"; player.setAlpha(0, false);
+            this.greymarchShapeDiagN = 0; // a new form: its first clicks are written down again (greymarchShapeDiag)
             step = "npc"; this.greymarchShapePuppetRemove();
             this.greymarchShapePuppetMake(player, want);
             this.greymarchShapeOn = want.race;

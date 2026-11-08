@@ -311,3 +311,10 @@ test("NPC mode: walking and running aim the creature straight ahead at the same 
   st.drive();
   assert.deepStrictEqual(st.log.offsets, [], "standing: SkyMP's own call is kept");
 });
+
+test("a creature form's first clicks and attacks are written down (2026-11-08, the owner: the Gargoyle did none of its attacks and the log had no attack line)", () => {
+  assert.match(src, /greymarchShapeDiag\(text: string\): any \{/);
+  assert.match(src, /this\.greymarchShapeDiag\(\(power \? "right" : "left"\) \+ " click taken"\);/);
+  assert.match(src, /this\.greymarchShapeDiag\("after " \+ chk\.ev \+ ": swinging " \+ atk \+ ", stance " \+ drw\);/);
+  assert.match(src, /this\.greymarchShapeDiagN = 0;/);
+});
