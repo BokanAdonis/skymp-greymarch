@@ -38,7 +38,7 @@ test("no armor but the robes and the fangs; never the body's own skin", () => {
 });
 
 test("the menus stay for a form that says so (the Lord); beast form for every other form, in both modes", () => {
-  assert.match(src, /mode: msg\.mode === "race" \? "race" : "npc", menus: msg\.menus === true, weapon: Number\(msg\.weapon\) >>> 0, drawn: msg\.drawn === true, speed: shapeSpeedOf\(msg\.speed\) \};/);
+  assert.match(src, /mode: msg\.mode === "race" \? "race" : "npc", menus: msg\.menus === true, weapon: Number\(msg\.weapon\) >>> 0, drawn: msg\.drawn === true, speed: shapeSpeedOf\(msg\.speed\), camZ: /);
   const n = (src.match(/step = "beast form"; if \(!want\.menus\) sp\.Game\.setBeastForm\(true\);/g) || []).length;
   assert.strictEqual(n, 2, "npc and race mode");
 });
