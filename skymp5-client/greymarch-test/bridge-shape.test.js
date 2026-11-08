@@ -335,3 +335,8 @@ test("in race mode the camera is pointed at the new body again after the change 
   assert.match(src, /this\.greymarchShapeCamRefresh = \[cnow \+ 600, cnow \+ 1800\];/);
   assert.match(src, /sp\.Game\.setCameraTarget\(player\); sp\.Game\.forceFirstPerson\(\);/);
 });
+
+
+test("first person comes back after a forge or station only once its exit has played (2026-11-08, the owner: through walls out of the Karthwasten forge in first person)", () => {
+  assert.match(src, /\|\| !!this\.greymarchSitResetAt \|\| !!this\.greymarchForgeAnimSafety, now\);/);
+});
