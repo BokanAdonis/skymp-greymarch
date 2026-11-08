@@ -28,3 +28,9 @@ test("a summon of this player's that summons or raises the dead (2026-11-07, the
   assert.match(src, /a\.addSpell\(o\.spells\[k\], false\)/);
   assert.match(src, /parent: Number\(x && x\.parent\) >>> 0/);
 });
+
+test("another player's summon (2026-11-07, the owner: the gargoyles were still hostile): this game's copy is out of its factions, unaggressive and kept out of fights", () => {
+  assert.match(src, /if \(\(s\.owner >>> 0\) !== me\) \{/);
+  assert.match(src, /a\.removeFromAllFactions\(\); a\.setActorValue\("Aggression", 0\); a\.stopCombat\(\);/);
+  assert.match(src, /if \(a\.isInCombat\(\)\) a\.stopCombat\(\);/);
+});

@@ -3624,9 +3624,21 @@ export class GreymarchBridge {
         var player: any = null; try { player = sp.Game.getPlayer(); } catch (e) { return; }
         var made = this.greymarchSummonMade || (this.greymarchSummonMade = {});
         for (var i = 0; i < list.length; i++) {
-            var s = list[i]; if ((s.owner >>> 0) !== me) continue;
+            var s = list[i];
             var a: any = null; try { var lid = misc.remoteIdToLocalId(s.actor >>> 0); a = lid ? sp.Actor.from(sp.Game.getFormEx(lid)) : null; } catch (e) { a = null; }
             if (!a) continue;
+            // ANOTHER PLAYER'S SUMMON (2026-11-07, the owner: the gargoyles were still hostile). Its caster's game runs it, but this game's copy of it was the
+            // creature's own self (a gargoyle in the creature and vampire factions, aggressive): it went for this player here. Here it is a copy that only
+            // plays what its caster's game does: out of its factions, unaggressive, never in a fight of its own (its attacks reach this game from that game)
+            if ((s.owner >>> 0) !== me) {
+                try {
+                    if (!a.is3DLoaded() || a.isDead()) continue;
+                    if (made[s.actor] !== "other") { made[s.actor] = "other"; a.removeFromAllFactions(); a.setActorValue("Aggression", 0); a.stopCombat(); this.greymarchLog("summon: " + (s.actor >>> 0).toString(16) + " is another player's (a copy, kept out of fights here)"); }
+                    if (a.getActorValue("Aggression") !== 0) a.setActorValue("Aggression", 0);
+                    if (a.isInCombat()) a.stopCombat();
+                } catch (oErr) { /* tried again in a second */ }
+                continue;
+            }
             try {
                 if (!a.is3DLoaded() || a.isDead()) continue;
                 if (!made[s.actor]) { made[s.actor] = true; a.setPlayerTeammate(true, true); a.setRelationshipRank(player, 3); a.setActorValue("Aggression", 0); a.stopCombat(); /* unaggressive (2026-11-07, the owner: it was hostile to someone I was not fighting): it fights only with its caster, when they fight */ this.greymarchLog("summon: " + (s.actor >>> 0).toString(16) + " is this player's (a teammate)"); }
