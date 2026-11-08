@@ -269,7 +269,7 @@ export class GreymarchBridge {
         if (type === "greymarchBuildAngle") { if (Number(msg.id) > 0 && typeof msg.z === "number" && isFinite(msg.z)) (this.greymarchBuildAngleQueue || (this.greymarchBuildAngleQueue = [])).push({ id: Number(msg.id) >>> 0, z: Number(msg.z) }); return; } // a piece a GM placed was turned (gamemode buildsys.js): SkyMP's SetAngle reaches only the server's copy, so this game turns its own (greymarchBuildAngleTick)
         if (type === "greymarchParalyze") { var ps = Number(msg.seconds); if (ps > 0 && ps <= 60) { this.greymarchParalyzeUntil = Math.max(this.greymarchParalyzeUntil || 0, Date.now() + ps * 1000); this.greymarchParalyzeStart = true; } return; } // a paralysis spell hit this player (our server build: OnSpellHit); greymarchParalyzeDrive
         if (type === "greymarchStagger") { if (Number(msg.actor) > 0) (this.greymarchStaggerQueue || (this.greymarchStaggerQueue = [])).push({ actor: Number(msg.actor), self: msg.self === true }); return; } // a starving character staggers (gamemode hunger.js; played in greymarchHungerDrive, for everyone near)
-        if (type === "greymarchSummons") { if (Number(msg.me) > 0) this.greymarchMeActor = Number(msg.me) >>> 0; this.greymarchSummonList = Array.isArray(msg.list) ? msg.list.slice(0, 200).map(function (x: any) { return { actor: Number(x && x.actor) >>> 0, owner: Number(x && x.owner) >>> 0 }; }).filter(function (x: any) { return x.actor > 0; }) : []; var so: any = {}; this.greymarchSummonList.forEach(function (x: any) { so[x.actor] = x.owner; }); try { (this.sp.storage as any)["gmSummonOwner"] = so; (this.sp.storage as any)["gmMeActor"] = this.greymarchMeActor >>> 0; } catch (stErr) { /* hosting as before */ } return; } // whose summon is whose (greymarchSummonTick, formView.ts)
+        if (type === "greymarchSummons") { if (Number(msg.me) > 0) this.greymarchMeActor = Number(msg.me) >>> 0; this.greymarchSummonList = Array.isArray(msg.list) ? msg.list.slice(0, 200).map(function (x: any) { return { actor: Number(x && x.actor) >>> 0, owner: Number(x && x.owner) >>> 0, parent: Number(x && x.parent) >>> 0 }; }).filter(function (x: any) { return x.actor > 0; }) : []; var so: any = {}; this.greymarchSummonList.forEach(function (x: any) { so[x.actor] = x.owner; }); try { (this.sp.storage as any)["gmSummonOwner"] = so; (this.sp.storage as any)["gmMeActor"] = this.greymarchMeActor >>> 0; } catch (stErr) { /* hosting as before */ } return; } // whose summon is whose (greymarchSummonTick, formView.ts)
         if (type === "greymarchMagicBlock") { var mb: any = {}; if (Array.isArray(msg.effects)) for (var mi = 0; mi < msg.effects.length && mi < 5000; mi++) mb[Number(msg.effects[mi]) >>> 0] = true; this.greymarchMagicBlock = mb; var sfx: any = null; if (Array.isArray(msg.summons) && msg.summons.length) { sfx = {}; for (var si = 0; si < msg.summons.length && si < 5000; si++) sfx[Number(msg.summons[si]) >>> 0] = true; } this.greymarchSummonFx = sfx; return; } // the raise-the-dead and summon effects to end when an NPC casts them (gamemode magicblock.js)
         if (type === "greymarchHunger") { this.greymarchHudToPage("hunger", { stage: String(msg.stage || "fed") }); return; } // the hunger bowl on the HUD (right, level with the voice display; gamemode hunger.js)
         if (type === "greymarchEnergy") { this.greymarchHudToPage("energy", { v: Number(msg.v), state: String(msg.state || "") }); return; } // the energy bar on the HUD, always on screen above the hunger bowl (gamemode exhaustion.js)
@@ -3631,10 +3631,38 @@ export class GreymarchBridge {
                 if (!a.is3DLoaded() || a.isDead()) continue;
                 if (!made[s.actor]) { made[s.actor] = true; a.setPlayerTeammate(true, true); a.setRelationshipRank(player, 3); a.setActorValue("Aggression", 0); a.stopCombat(); /* unaggressive (2026-11-07, the owner: it was hostile to someone I was not fighting): it fights only with its caster, when they fight */ this.greymarchLog("summon: " + (s.actor >>> 0).toString(16) + " is this player's (a teammate)"); }
                 try { if (a.getActorValue("Aggression") !== 0) a.setActorValue("Aggression", 0); } catch (agErr) { /* as it was */ } // kept unaggressive (the game can put it back)
+                // its summoning spell back once what it called is gone (greymarchSummonMagic)
+                var off = this.greymarchSummonSpellsOff, o = off ? off[s.actor] : null;
+                if (o && now - o.at > 15000 && !list.some(function (x: any) { return x.parent === (s.actor >>> 0); })) { for (var k = 0; k < o.spells.length; k++) { try { a.addSpell(o.spells[k], false); } catch (adErr) { /* it fights on without it */ } } delete off[s.actor]; this.greymarchLog("summon: " + (s.actor >>> 0).toString(16) + " can summon again"); }
                 if (a.isInCombat()) { if (made[s.actor] === "follow") { a.clearKeepOffsetFromActor(); made[s.actor] = true; } continue; }
                 if (made[s.actor] !== "follow") { a.keepOffsetFromActor(player, -90, -140, 0, 0, 0, 0, 350, 120); made[s.actor] = "follow"; }
             } catch (e) { /* tried again in a second */ }
         }
+    }
+    // A SUMMON OF THIS PLAYER'S RAISING THE DEAD OR SUMMONING (2026-11-07, the owner: the Lord of Bindings only tried to spawn something, the Nether Lich only
+    // raised the dead). Its effect was ended (above) and it cast again and again, nothing else. A summon: the server is told and places the creature beside it
+    // for everyone (gamemode summons.js, a summon's own summons); either way the spell is taken from it here so it uses its other magic and its weapon. A
+    // summoning spell is given back once the creatures it called are gone (greymarchSummonTick); raising the dead stays taken (one game only, never shown).
+    greymarchSummonMagic(caster: any, remote: number, effect: number, entry: any): any {
+        var sp = this.sp, now = Date.now();
+        var isSummon = !!(this.greymarchSummonFx && this.greymarchSummonFx[effect >>> 0]);
+        if (isSummon && !entry.parent) {
+            var said = this.greymarchMinionSaid || (this.greymarchMinionSaid = {});
+            if (!said[remote] || now - said[remote] > 1000) {
+                said[remote] = now;
+                var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchSummon", effect: effect >>> 0, by: remote >>> 0 }) };
+                this.controller.emitter.emit("sendMessage", { message: message, reliability: "reliable" });
+                this.greymarchLog("summon: " + remote.toString(16) + " summoned (" + (effect >>> 0).toString(16) + "), the server places it");
+            }
+        }
+        var taken: any[] = [];
+        var look = function (s: any) { try { if (!s) return; var n = s.getNumEffects(); for (var k = 0; k < n; k++) { var m = s.getNthEffectMagicEffect(k); if (m && (m.getFormID() >>> 0) === (effect >>> 0)) { taken.push(s); return; } } } catch (e) { /* not this one */ } };
+        try { var na = caster.getSpellCount(); for (var a = 0; a < na; a++) look(caster.getNthSpell(a)); } catch (e) { /* none of its own */ }
+        try { var base = sp.ActorBase.from(caster.getBaseObject()); var nb = base ? base.getSpellCount() : 0; for (var b = 0; b < nb; b++) look(base!.getNthSpell(b)); } catch (e) { /* none from its record */ }
+        for (var t = 0; t < taken.length; t++) { try { caster.removeSpell(taken[t]); } catch (e) { /* it may cast it again */ } }
+        if (!taken.length) return;
+        this.greymarchLog("summon: " + remote.toString(16) + " can no longer cast " + taken.map(function (s: any) { try { return s.getName() || (s.getFormID() >>> 0).toString(16); } catch (e) { return "?"; } }).join(", ") + (isSummon ? " while what it called is out" : ""));
+        if (isSummon) { var off = this.greymarchSummonSpellsOff || (this.greymarchSummonSpellsOff = {}); var o = off[remote] || (off[remote] = { spells: [], at: 0 }); o.spells = o.spells.concat(taken); o.at = now; }
     }
     greymarchMagicBlockDrive(): any {
         var q = this.greymarchMagicBlockQueue;
@@ -3648,6 +3676,9 @@ export class GreymarchBridge {
                 var baseId = base ? base.getFormID() >>> 0 : 0;
                 if (!baseId || baseId >= 0xff000000) continue; // a player (their copy here) or unknown: left alone
                 q[i].active.dispel();
+                var remote = q[i].caster >= 0xff000000 ? misc.localIdToRemoteId(q[i].caster) >>> 0 : 0;
+                var mine = remote ? (this.greymarchSummonList || []).find((x: any) => x.actor === remote && x.owner === (this.greymarchMeActor >>> 0)) : null;
+                if (mine && caster) this.greymarchSummonMagic(caster, remote, q[i].effect, mine);
                 this.greymarchCrumb("magic block: ended effect " + q[i].effect.toString(16) + " of NPC " + q[i].caster.toString(16));
             } catch (dErr) { /* it ended by itself */ }
         }

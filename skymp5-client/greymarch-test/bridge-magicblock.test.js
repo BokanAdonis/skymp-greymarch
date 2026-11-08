@@ -20,3 +20,11 @@ test("a listed effect is queued from the game event and ended in the update, onl
   assert.match(src, /if \(!baseId \|\| baseId >= 0xff000000\) continue;/);
   assert.match(src, /q\[i\]\.active\.dispel\(\);/);
 });
+
+test("a summon of this player's that summons or raises the dead (2026-11-07, the owner: the Lord of Bindings only tried to spawn something): the server is told, the spell is taken from it, a summoning spell given back later", () => {
+  assert.match(src, /if \(mine && caster\) this\.greymarchSummonMagic\(caster, remote, q\[i\]\.effect, mine\);/);
+  assert.match(src, /customPacketType: "greymarchSummon", effect: effect >>> 0, by: remote >>> 0/);
+  assert.match(src, /caster\.removeSpell\(taken\[t\]\)/);
+  assert.match(src, /a\.addSpell\(o\.spells\[k\], false\)/);
+  assert.match(src, /parent: Number\(x && x\.parent\) >>> 0/);
+});
