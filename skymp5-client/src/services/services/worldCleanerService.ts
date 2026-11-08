@@ -30,14 +30,24 @@ export class WorldCleanerService extends ClientListener {
     this.initialCellOrWorld = ObjectReferenceEx.getWorldOrCell(player);
   }
 
+  // GREYMARCH: SEVERAL PICKS A FRAME (2026-11-08, the owner: "I am getting NPCs popping up in whiterun still", his own game with the fixed client; the log had
+  // only cows, chickens, rabbits, mudcrabs and players from the server, so the NPCs seen were the game's own farmers and townsfolk waiting their turn). The
+  // cleaner looked at ONE random actor a frame, and every pick that landed on a server creature, another player's character, a body or one already disabled
+  // was a lost frame; with the server's wildlife and herds around a town most picks were lost and a farmer could stand there for many seconds. Up to 24
+  // picks a frame now, stopping after 4 actors acted on; the 1 s wait before a delete stays (the crash fix), and one waiting for its delete is not picked again.
   private onUpdate() {
-    this.processOneActor();
+    for (let i = 0, acted = 0; i < 24 && acted < 4; ++i) {
+      const r = this.processOneActor();
+      if (r === null) break;
+      if (r) ++acted;
+    }
   }
 
-  private processOneActor() {
+  // null: no actor near; false: looked at, nothing to do; true: acted on
+  private processOneActor(): boolean | null {
     const pc = this.sp.Game.getPlayer();
     if (pc === null) {
-      return;
+      return null;
     }
 
     const actor = this.sp.Game.findRandomActor(
@@ -47,18 +57,18 @@ export class WorldCleanerService extends ClientListener {
       8192
     );
     if (actor === null) {
-      return;
+      return null;
     }
 
     const actorId = actor.getFormID();
 
     const currentProtection = this.protection.get(actorId) || 0;
     if (currentProtection > 0) {
-      return;
+      return false;
     }
 
-    if (actorId === 0x14 || actor.isDisabled() || actor.isDeleted()) {
-      return;
+    if (actorId === 0x14 || this.pending.has(actorId) || actor.isDisabled() || actor.isDeleted()) {
+      return false;
     }
 
     if (this.isActorInDialogue(actor)) {
@@ -66,13 +76,13 @@ export class WorldCleanerService extends ClientListener {
       // https://github.com/skyrim-multiplayer/issue-tracker/issues/13
       actor.setPosition(0, 0, 0);
       actor.disableNoWait(true); // Seems to not crash
-      return;
+      return true;
     }
 
     // Keep vanila pre-placed bodies, but delete player bodies
     if (actor.isDead() && actorId < 0xff000000) {
       actor.blockActivation(true);
-      return;
+      return false;
     }
 
     const pos = ObjectReferenceEx.getPos(actor);
@@ -86,14 +96,14 @@ export class WorldCleanerService extends ClientListener {
       if (this.initialPos && ObjectReferenceEx.getDistanceNoZ(pos, this.initialPos) < 4096) {
         if (cellOrWorld === this.initialCellOrWorld) {
           if (this.isActorInDialogue(actor)) {
-            return;
+            return false;
           }
           logTrace(this, `Deleting chicken anomaly`, actorId.toString(16));
           actor.killSilent(null);
           actor.blockActivation(true);
           actor.disableNoWait(false);
           actor.setAlpha(0, false);
-          return;
+          return true;
         }
       }
     }
@@ -108,15 +118,18 @@ export class WorldCleanerService extends ClientListener {
     // the cleaner skips an NPC once it reads as disabled, so those stayed for good. The AI is not switched off here (a disable is not held back by it).
     try { actor.stopCombat(); } catch (e) { /* not fighting */ }
     try { actor.stopTranslation(); actor.clearKeepOffsetFromActor(); } catch (e) { /* not moving */ }
+    this.pending.add(actorId);
     actor.disable(false).then(() => {
       return this.sp.Utility.wait(1).then(() => {
+        this.pending.delete(actorId);
         const ac = this.sp.Actor.from(this.sp.Game.getFormEx(actorId));
         if (!ac || this.isActorInDialogue(ac) || !ac.isDisabled()) {
           return;
         }
         ac.delete();
       });
-    });
+    }).catch(() => { this.pending.delete(actorId); });
+    return true;
   }
 
   private isActorInDialogue(ac: Actor) {
@@ -124,6 +137,7 @@ export class WorldCleanerService extends ClientListener {
   }
 
   private protection = new Map<number, number>();
+  private pending = new Set<number>(); // disabled, its delete still to come
   private initialPos?: NiPoint3;
   private initialCellOrWorld?: number;
 }
