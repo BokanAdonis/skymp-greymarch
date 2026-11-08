@@ -205,6 +205,7 @@ export class GreymarchBridge {
         try { this.controller.on("magicEffectApply", (e: any) => { try { if (e && e.effect && e.activeEffect && this.greymarchMagicBlock && this.greymarchMagicBlock[e.effect.getFormID() >>> 0]) (this.greymarchMagicBlockQueue || (this.greymarchMagicBlockQueue = [])).push({ active: e.activeEffect, effect: e.effect.getFormID() >>> 0, caster: e.caster ? e.caster.getFormID() >>> 0 : 0 }); } catch (x) { /* not ours */ } }); } catch (mbErr) { /* no effect events: NPC raise-the-dead and summons are not stopped */ } // an NPC raising the dead or summoning (gamemode magicblock.js): ended in greymarchMagicBlockDrive
         try { this.controller.on("magicEffectApply", (e: any) => { try { if (e && e.effect && e.effect.getFormID() === 0x92c45 && e.target && e.target.getFormID() === 0x14) this.greymarchWolfSignal("magicEffectApply"); } catch (x) { /* not ours */ } }); } catch (maErr) { /* the other signals still see it */ }
         try { this.controller.on("spellCast", (e: any) => { try { if (e && e.spell && e.caster && e.caster.getFormID() === 0x14) { var castId = e.spell.getFormID(); if (castId === this.greymarchVampForm("lord") || castId === this.greymarchVampForm("mist")) this.greymarchVampSignalFirst("cast", castId); else this.greymarchVampSignal("cast", castId); } } catch (x) { /* not ours */ } }); } catch (vcErr) { /* no cast events: the powers are not reported */ } // a vampire's Mist Form or Vampire Lord (greymarchVampTick)
+        try { this.controller.on("spellCast", (e: any) => { try { if (e && e.spell && e.caster && e.caster.getFormID() === 0x14) this.greymarchSummonCast(e.spell); } catch (x) { /* not a summon */ } }); } catch (scErr) { /* no cast events: summons stay in this game */ } // a summon spell: the server places it (greymarchSummonCast)
         try { this.controller.on("spellCast", (e: any) => { try { if (e && e.spell && e.caster && e.caster.getFormID() === 0x14) this.greymarchCastSend(e.spell.getFormID()); } catch (x) { /* not ours */ } }); } catch (hcErr) { /* no cast events: healing spells are not reported */ } // every cast of the player's own spells goes to the server, which applies the healing ones (healing.js); it never applies spell effects itself
         try { this.controller.on("magicEffectApply", (e: any) => { try { if (e && e.effect && e.target && e.target.getFormID() === 0x14) { var fxId = e.effect.getFormID(); if (fxId === this.greymarchVampForm("potionFx")) this.greymarchVampSignalFirst("effect", fxId); else this.greymarchVampSignal("effect", fxId); } } catch (x) { /* not ours */ } }); } catch (veErr) { /* no effect events: a Potion of Blood is not reported */ } // a Potion of Blood drunk
         try { this.controller.on("equip", (e: any) => { try { if (e && e.baseObj && e.actor && e.actor.getFormID() === 0x14) { var eqId = e.baseObj.getFormID(); if (eqId === this.greymarchVampForm("potion")) this.greymarchVampSignalFirst("equip", eqId); else this.greymarchVampSignal("equip", eqId); this.greymarchConsumeNote(e.baseObj); } } catch (x) { /* not ours */ } }); } catch (vqErr) { /* the effect event still sees it */ } // a potion is "equipped" when it is drunk
@@ -268,7 +269,8 @@ export class GreymarchBridge {
         if (type === "greymarchBuildAngle") { if (Number(msg.id) > 0 && typeof msg.z === "number" && isFinite(msg.z)) (this.greymarchBuildAngleQueue || (this.greymarchBuildAngleQueue = [])).push({ id: Number(msg.id) >>> 0, z: Number(msg.z) }); return; } // a piece a GM placed was turned (gamemode buildsys.js): SkyMP's SetAngle reaches only the server's copy, so this game turns its own (greymarchBuildAngleTick)
         if (type === "greymarchParalyze") { var ps = Number(msg.seconds); if (ps > 0 && ps <= 60) { this.greymarchParalyzeUntil = Math.max(this.greymarchParalyzeUntil || 0, Date.now() + ps * 1000); this.greymarchParalyzeStart = true; } return; } // a paralysis spell hit this player (our server build: OnSpellHit); greymarchParalyzeDrive
         if (type === "greymarchStagger") { if (Number(msg.actor) > 0) (this.greymarchStaggerQueue || (this.greymarchStaggerQueue = [])).push({ actor: Number(msg.actor), self: msg.self === true }); return; } // a starving character staggers (gamemode hunger.js; played in greymarchHungerDrive, for everyone near)
-        if (type === "greymarchMagicBlock") { var mb: any = {}; if (Array.isArray(msg.effects)) for (var mi = 0; mi < msg.effects.length && mi < 5000; mi++) mb[Number(msg.effects[mi]) >>> 0] = true; this.greymarchMagicBlock = mb; return; } // the raise-the-dead and summon effects to end when an NPC casts them (gamemode magicblock.js)
+        if (type === "greymarchSummons") { if (Number(msg.me) > 0) this.greymarchMeActor = Number(msg.me) >>> 0; this.greymarchSummonList = Array.isArray(msg.list) ? msg.list.slice(0, 200).map(function (x: any) { return { actor: Number(x && x.actor) >>> 0, owner: Number(x && x.owner) >>> 0 }; }).filter(function (x: any) { return x.actor > 0; }) : []; var so: any = {}; this.greymarchSummonList.forEach(function (x: any) { so[x.actor] = x.owner; }); try { (this.sp.storage as any)["gmSummonOwner"] = so; (this.sp.storage as any)["gmMeActor"] = this.greymarchMeActor >>> 0; } catch (stErr) { /* hosting as before */ } return; } // whose summon is whose (greymarchSummonTick, formView.ts)
+        if (type === "greymarchMagicBlock") { var mb: any = {}; if (Array.isArray(msg.effects)) for (var mi = 0; mi < msg.effects.length && mi < 5000; mi++) mb[Number(msg.effects[mi]) >>> 0] = true; this.greymarchMagicBlock = mb; var sfx: any = null; if (Array.isArray(msg.summons) && msg.summons.length) { sfx = {}; for (var si = 0; si < msg.summons.length && si < 5000; si++) sfx[Number(msg.summons[si]) >>> 0] = true; } this.greymarchSummonFx = sfx; return; } // the raise-the-dead and summon effects to end when an NPC casts them (gamemode magicblock.js)
         if (type === "greymarchHunger") { this.greymarchHudToPage("hunger", { stage: String(msg.stage || "fed") }); return; } // the hunger bowl on the HUD (right, level with the voice display; gamemode hunger.js)
         if (type === "greymarchEnergy") { this.greymarchHudToPage("energy", { v: Number(msg.v), state: String(msg.state || "") }); return; } // the energy bar on the HUD, always on screen above the hunger bowl (gamemode exhaustion.js)
         if (type === "greymarchFoodFx") { var ffUntil = Date.now() + Math.max(0, Math.min(30 * 60000, Number(msg.ms) || 0)), ffGroup = msg.group === "drink" ? "drink" : "meal", ffAll = this.greymarchFoodFxUntil || (this.greymarchFoodFxUntil = {}); if (ffUntil > (ffAll[ffGroup] || 0)) ffAll[ffGroup] = ffUntil; return; } // the server kept a food's effects back: how long its block has left (greymarchFoodFxNote)
@@ -592,6 +594,7 @@ export class GreymarchBridge {
         this.greymarchMiniMoveTick(); // a mini game window open: no walking (auto-move on C took them off cliffs)
         this.greymarchEmoteMoveTick(); // in an emote that lasts: no walking or jumping (Space ends it without a jump)
         this.greymarchMagicBlockDrive(); // NPC raise-the-dead and summons: ended at once
+        this.greymarchSummonTick(Date.now()); // this player's summons: teammates that follow
         this.greymarchShapeDrive(); // a creature form as an NPC: moved every frame like SkyMP moves other players; other players' creature attacks
         this.greymarchShapeTick(); // a creature form staff put the player in (a goat, a giant ...): the server decides, the body is changed here
         this.greymarchHeightFrame(Date.now()); // the Height slider on the Body tab: what the race menu asked for (greymarchHeightModEvent)
@@ -3594,13 +3597,51 @@ export class GreymarchBridge {
     // Reanimate raised a corpse in one game only (the server still has it dead) and a conjurer's atronach existed in one game only; a skeleton mage's Reanimate
     // Corpse came one second before a crash on test (2026-10-22). Such an effect is ended the frame after it starts when an NPC cast it: the caster's base is a
     // real record of the plugins (another player's copy has a base made at runtime, 0xFF...; this player is 0x14), so players keep their own summons.
+    // SUMMONS EVERYONE SEES (gamemode summons.js; 2026-11-07, the owner: every summon spell, a summon fights like its caster could). The server says which magic
+    // effects summon (greymarchMagicBlock summons: a server without summons.js says none, and then a player's summon stays as it was, in their game only).
+    // This player casting a spell with one: the server is told (greymarchSummon), places the creature for everyone, and says whose it is (greymarchSummons);
+    // this game's own copy of the summon is ended (greymarchMagicBlockDrive). A summon of this player's that this game runs: a teammate (it fights with them,
+    // and so against whoever they fight), kept close while it is not fighting (KeepOffsetFromActor behind them); another player's summon is never taken over
+    // here (formView.ts tryHostIfNeed, the owner map in storage).
+    greymarchSummonCast(spell: any): any {
+        var fx = this.greymarchSummonFx;
+        if (!fx || !spell) return;
+        var has = false;
+        try { var n = spell.getNumEffects(); for (var i = 0; i < n && !has; i++) { var me = spell.getNthEffectMagicEffect(i); if (me && fx[me.getFormID() >>> 0]) has = true; } } catch (e) { has = false; }
+        if (!has) return;
+        var id = spell.getFormID() >>> 0, now = Date.now();
+        if (this.greymarchSummonSent && this.greymarchSummonSent.id === id && now - this.greymarchSummonSent.at < 800) return; // one cast, one summon
+        this.greymarchSummonSent = { id: id, at: now };
+        var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchSummon", spell: id }) };
+        this.controller.emitter.emit("sendMessage", { message: message, reliability: "reliable" });
+        this.greymarchLog("summon: " + id.toString(16) + " cast, the server places it");
+    }
+    greymarchSummonTick(now: number): any {
+        if (now < (this.greymarchSummonAt || 0)) return;
+        this.greymarchSummonAt = now + 1000;
+        var list: any[] = this.greymarchSummonList || [], me = this.greymarchMeActor >>> 0, sp = this.sp;
+        if (!list.length || !me) return;
+        var player: any = null; try { player = sp.Game.getPlayer(); } catch (e) { return; }
+        var made = this.greymarchSummonMade || (this.greymarchSummonMade = {});
+        for (var i = 0; i < list.length; i++) {
+            var s = list[i]; if ((s.owner >>> 0) !== me) continue;
+            var a: any = null; try { var lid = misc.remoteIdToLocalId(s.actor >>> 0); a = lid ? sp.Actor.from(sp.Game.getFormEx(lid)) : null; } catch (e) { a = null; }
+            if (!a) continue;
+            try {
+                if (!a.is3DLoaded() || a.isDead()) continue;
+                if (!made[s.actor]) { made[s.actor] = true; a.setPlayerTeammate(true, true); a.setRelationshipRank(player, 3); a.stopCombat(); this.greymarchLog("summon: " + (s.actor >>> 0).toString(16) + " is this player's (a teammate)"); }
+                if (a.isInCombat()) { if (made[s.actor] === "follow") { a.clearKeepOffsetFromActor(); made[s.actor] = true; } continue; }
+                if (made[s.actor] !== "follow") { a.keepOffsetFromActor(player, -90, -140, 0, 0, 0, 0, 350, 120); made[s.actor] = "follow"; }
+            } catch (e) { /* tried again in a second */ }
+        }
+    }
     greymarchMagicBlockDrive(): any {
         var q = this.greymarchMagicBlockQueue;
         if (!q || !q.length) return;
         this.greymarchMagicBlockQueue = [];
         for (var i = 0; i < q.length && i < 32; i++) {
             try {
-                if (q[i].caster === 0x14) continue;
+                if (q[i].caster === 0x14) { if (this.greymarchSummonFx && this.greymarchSummonFx[q[i].effect]) { q[i].active.dispel(); this.greymarchCrumb("summon: this game's own copy of " + q[i].effect.toString(16) + " ended (the server places it)"); } continue; }
                 var caster = this.sp.Actor.from(this.sp.Game.getFormEx(q[i].caster));
                 var base = caster ? caster.getLeveledActorBase() || caster.getBaseObject() : null;
                 var baseId = base ? base.getFormID() >>> 0 : 0;

@@ -1827,6 +1827,7 @@ export class FormView {
   private tryHostIfNeed(ac: Actor, remoteId: number) {
     if (riddenByOther(ridersMap(), remoteId)) return false; // GREYMARCH: another player rides it
     if (isReleased(remoteId, Date.now())) return false; // GREYMARCH: this game handed it to a closer player a moment ago (greymarch/npcHosting.ts)
+    try { const gmSo: any = (storage as any)["gmSummonOwner"]; const gmMe = Number((storage as any)["gmMeActor"]) >>> 0; const gmOw = gmSo ? Number(gmSo[remoteId >>> 0]) >>> 0 : 0; if (gmOw && gmOw !== gmMe) return false; } catch (e) { /* hosting as before */ } // GREYMARCH: another player's summon is run by their game (gamemode summons.js)
     const last = lastTryHost[remoteId];
     if (!last || Date.now() - last >= 1000) {
       lastTryHost[remoteId] = Date.now();

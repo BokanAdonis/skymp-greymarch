@@ -15,7 +15,8 @@ test("greymarchMagicBlock is let through and kept as a set of effect IDs", () =>
 test("a listed effect is queued from the game event and ended in the update, only when an NPC (a real base record) cast it", () => {
   assert.match(src, /this\.controller\.on\("magicEffectApply", \(e: any\) => \{ try \{ if \(e && e\.effect && e\.activeEffect && this\.greymarchMagicBlock && this\.greymarchMagicBlock\[e\.effect\.getFormID\(\) >>> 0\]\)/);
   assert.match(src, /this\.greymarchMagicBlockDrive\(\); \/\/ NPC raise-the-dead/);
-  assert.match(src, /if \(q\[i\]\.caster === 0x14\) continue;/);
+  // the player's own effect: left alone, unless it is a summon and the server places summons (2026-11-07, gamemode summons.js)
+  assert.match(src, /if \(q\[i\]\.caster === 0x14\) \{ if \(this\.greymarchSummonFx && this\.greymarchSummonFx\[q\[i\]\.effect\]\) \{ q\[i\]\.active\.dispel\(\);[^\n]*\} continue; \}/);
   assert.match(src, /if \(!baseId \|\| baseId >= 0xff000000\) continue;/);
   assert.match(src, /q\[i\]\.active\.dispel\(\);/);
 });
