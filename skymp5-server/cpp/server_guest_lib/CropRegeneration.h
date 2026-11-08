@@ -18,8 +18,12 @@ float CropMagickaRegeneration(float newAttributeValue,
 float CropStaminaRegeneration(float newAttributeValue,
                               float secondsAfterLastRegen, MpActor* actor);
 
+// GREYMARCH: a gap between a player's reports of up to 10 seconds counts as
+// it is, a longer one as 10 (it was: over 2 seconds counted as 1, so a game
+// that sent nothing while casting or drinking had most of what it regenerated
+// taken back, and the bar dropped)
 float CropPeriodAfterLastRegen(float secondsAfterLastRegen,
-                               float maxValidPeriod = 2.0f,
-                               float defaultPeriod = 1.0f);
+                               float maxValidPeriod = 10.0f,
+                               float defaultPeriod = 10.0f);
 
 float CropValue(float value, float min = 0.f, float max = 1.0f);
