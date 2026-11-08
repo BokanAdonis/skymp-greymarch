@@ -3690,13 +3690,15 @@ export class GreymarchBridge {
                 // that has not moved since the last follow while it is behind is walked to its caster (PathToReference)
                 // LIKE A FOLLOWER, NOT GLUED (2026-11-08, the owner's clip: "they are following me kind of weird, it's like they are glued to me"): the follow held
                 // it on one spot at the caster's shoulder all the time. Now it is given only when the caster is 450 away (about 6 m), it trails further back,
-                // and once it is within 260 the follow is taken off so it stands and looks about by itself; the walk to its caster only when well behind
-                if (made[s.actor] === "follow" && far < 260) { try { a.clearKeepOffsetFromActor(); } catch (clErr) { /* the next second */ } made[s.actor] = true; }
-                else if ((made[s.actor] !== "follow" && far > 450) || (made[s.actor] === "follow" && far > 450 && now - (fat[s.actor] || 0) > 5000)) {
+                // and the walk to its caster only when well behind.
+                // NEVER TAKEN OFF (2026-11-08, the owner: "when I stand still it will try to walk away and then sling shot back"): taken off within 260, its own
+                // package walked it back towards where it was made, and at 450 the follow pulled it back again. The follow stays on; its follow radius (400)
+                // lets it stand where it is while it is that near its place behind the caster
+                if ((made[s.actor] !== "follow") || (far > 450 && now - (fat[s.actor] || 0) > 5000)) {
                     var lps = this.greymarchSummonLastPos || (this.greymarchSummonLastPos = {});
                     var fpos = [a.getPositionX(), a.getPositionY()], lp = lps[s.actor];
                     var stuck = !!lp && made[s.actor] === "follow" && far > 700 && Math.hypot(fpos[0] - lp[0], fpos[1] - lp[1]) < 30;
-                    try { a.keepOffsetFromActor(player, -110, -260, 0, 0, 0, 0, 700, 300); a.evaluatePackage(); } catch (kErr) { this.greymarchLog("summon: " + (s.actor >>> 0).toString(16) + " could not be told to follow: " + kErr); }
+                    try { a.keepOffsetFromActor(player, -110, -260, 0, 0, 0, 0, 700, 400); a.evaluatePackage(); } catch (kErr) { this.greymarchLog("summon: " + (s.actor >>> 0).toString(16) + " could not be told to follow: " + kErr); }
                     if (stuck) { try { var pr: any = a.pathToReference(player, 1.0); if (pr && pr.then) pr.then(function () { /* there */ }, function () { /* tried again in 5 s */ }); } catch (pErr) { this.greymarchLog("summon: " + (s.actor >>> 0).toString(16) + " could not be walked to its caster: " + pErr); } }
                     this.greymarchLog("summon: " + (s.actor >>> 0).toString(16) + " follows (" + Math.round(far) + " away" + (stuck ? ", it had not moved: walked to its caster" : "") + ", package " + (function () { try { var pk = a.getCurrentPackage(); return pk ? (pk.getFormID() >>> 0).toString(16) : "none"; } catch (pkErr) { return "?"; } })() + ")");
                     lps[s.actor] = fpos; made[s.actor] = "follow"; fat[s.actor] = now;

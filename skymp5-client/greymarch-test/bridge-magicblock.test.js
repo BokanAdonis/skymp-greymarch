@@ -67,8 +67,9 @@ test("this player's own summon is never pulled out of its idle or furniture and 
 
 test("a summon that does not follow is written down and walked to its caster (2026-11-08, the owner: the summons still did not follow)", () => {
   // trailing further back, let go once close (2026-11-08, the owner's clip: glued to them)
-  assert.match(src, /a\.keepOffsetFromActor\(player, -110, -260, 0, 0, 0, 0, 700, 300\); a\.evaluatePackage\(\);/);
-  assert.match(src, /if \(made\[s\.actor\] === "follow" && far < 260\) \{ try \{ a\.clearKeepOffsetFromActor\(\);/);
+  assert.match(src, /a\.keepOffsetFromActor\(player, -110, -260, 0, 0, 0, 0, 700, 400\); a\.evaluatePackage\(\);/);
+  // never taken off when close (2026-11-08, the owner: it walked away and slung back)
+  assert.doesNotMatch(src, /far < 260\) \{ try \{ a\.clearKeepOffsetFromActor/);
   assert.match(src, /if \(stuck\) \{ try \{ var pr: any = a\.pathToReference\(player, 1\.0\);/);
 });
 
