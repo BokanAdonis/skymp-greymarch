@@ -5978,9 +5978,12 @@ export class GreymarchBridge {
             if (id === "potion") {
                 var fid = baseObj.getFormID() >>> 0;
                 var blood = 0; try { blood = this.greymarchVampForm("potion") >>> 0; } catch (bErr) { blood = 0; }
-                if (blood && fid === blood) return; // the Potion of Blood is the vampire code's
-                if (this.greymarchPotionServerDrink(fid)) return; // the server drinking it after the swig: no animation, its effect stays
-                this.greymarchPotionFirstDrink(pot, fid);
+                // the Potion of Blood is the vampire code's (the server heals from its own eat event, gamemode vampire.js drinkPotion): no delay and no undo here,
+                // but it still plays the swig like every potion (2026-11-08, the owner: "make sure drinking a potion of blood triggers the animation")
+                if (!(blood && fid === blood)) {
+                    if (this.greymarchPotionServerDrink(fid)) return; // the server drinking it after the swig: no animation, its effect stays
+                    this.greymarchPotionFirstDrink(pot, fid);
+                }
             }
             if (id) { var cq = this.greymarchConsumeQueue || (this.greymarchConsumeQueue = []); if (cq.length < 5) cq.push({ id: id, at: Date.now() }); } // in turn: a meal never replaces the one playing
             if (id === "bread" || id === "mug") this.greymarchConsumeCloseMenu(); // food or a drink: the inventory closes so the meal is seen (a potion leaves it open: several in a row)
