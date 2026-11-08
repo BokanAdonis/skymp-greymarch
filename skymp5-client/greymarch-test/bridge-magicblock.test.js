@@ -69,3 +69,10 @@ test("a summon that does not follow is written down and walked to its caster (20
   assert.match(src, /a\.keepOffsetFromActor\(player, -90, -140, 0, 0, 0, 0, 350, 120\); a\.evaluatePackage\(\);/);
   assert.match(src, /if \(stuck\) \{ try \{ var pr: any = a\.pathToReference\(player, 1\.0\);/);
 });
+
+test("a hosted NPC's follow is not cleared every frame when it is this player's own summon (2026-11-08, the owner: the summons still did not follow)", () => {
+  const fv = fs.readFileSync(path.join(__dirname, "..", "src", "view", "formView.ts"), "utf8");
+  assert.match(fv, /const gmIsOwnSummon = \(remoteId: any\): boolean =>/);
+  assert.match(fv, /if \(alreadyHosted && !gmIsOwnSummon\(this\.remoteRefrId\)\) \{\s*Actor\.from\(refr\)\?\.clearKeepOffsetFromActor\(\);/);
+  assert.match(fv, /if \(!gmIsOwnSummon\(remoteId\)\) ac\.clearKeepOffsetFromActor\(\);/);
+});

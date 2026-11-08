@@ -136,6 +136,10 @@ const gmNoCloakModIndex = (): number | null => {
 };
 export const gmCrumb = (text: string): void => { try { writeLogs("greymarch-crumbs", ((Date.now() - gmCrumbStart) / 1000).toFixed(1) + "s " + text); } catch (e) { /* a breadcrumb is a nicety */ } };
 const gmHex = (n: any): string => (Number(n) >>> 0).toString(16);
+// a summon of this player's (gamemode summons.js: the owner map bridge.ts keeps in storage)
+const gmIsOwnSummon = (remoteId: any): boolean => {
+  try { const so: any = (storage as any)["gmSummonOwner"]; const ow = so && remoteId ? Number(so[Number(remoteId) >>> 0]) >>> 0 : 0; return !!ow && ow === (Number((storage as any)["gmMeActor"]) >>> 0); } catch (e) { return false; }
+};
 // GREYMARCH: WHY A PLAYER'S COPY IS BUILT AGAIN (2026-11-02, the owner: hits went straight through a player in an enchanted cape; the attacker's log showed that
 // player's copy removed and spawned again every 3-8 s). Each rebuild says why: their cell changed, their look changed (and which parts), the copy was gone or got
 // a new base, or the movement code asked for it. Diagnostics only.
@@ -730,7 +734,10 @@ export class FormView {
     // when another game runs it; without them it moved untied from the ground
     setDefaultAnimsDisabled(this.refrId, alreadyHosted || gmMyMount ? false : true);
 
-    if (alreadyHosted) {
+    // GREYMARCH: A SUMMON OF THIS PLAYER'S KEEPS ITS FOLLOW (gamemode summons.js; 2026-11-08, the owner: "the summons still don't follow me"). A hosted NPC's
+    // KeepOffsetFromActor is cleared here every frame (SkyMP uses it to play the server's movement on another game's copy), so the follow bridge.ts gives
+    // this player's own summon lasted one frame and it stood where it appeared
+    if (alreadyHosted && !gmIsOwnSummon(this.remoteRefrId)) {
       Actor.from(refr)?.clearKeepOffsetFromActor();
     }
     // GREYMARCH: STUCK MOVES (greymarch/npcHosting.ts): an NPC this game has just become the host of is taken out of any move SkyMP gave it while it played the
@@ -896,7 +903,7 @@ export class FormView {
         } else {
           const remoteId = this.remoteRefrId;
           if (ac && remoteId && ac.is3DLoaded()) {
-            ac.clearKeepOffsetFromActor();
+            if (!gmIsOwnSummon(remoteId)) ac.clearKeepOffsetFromActor(); // not this player's own summon's follow (above)
 
             // TODO: make host service
             const hosted = storage['hosted'];
