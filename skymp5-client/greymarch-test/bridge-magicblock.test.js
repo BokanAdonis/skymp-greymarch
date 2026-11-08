@@ -45,3 +45,9 @@ test("this player's summons take up their fights (2026-11-07, the owner: when I 
   assert.match(src, /var other = t === 0x14 \? e\.aggressor : g === 0x14 \? e\.target : null;/);
   assert.match(src, /a\.startCombat\(fa\);/);
 });
+
+test("a summon of this player's gets the F7 Summons health and damage here (2026-11-07, the owner: the balancing still did not work)", () => {
+  assert.match(src, /health: Number\(x && x\.health\) \|\| 0, damage: Number\(x && x\.damage\) \|\| 0/);
+  assert.match(src, /a\.setActorValue\("Health", s\.health > 0 \? s\.health : st\.hp\);/);
+  assert.match(src, /a\.setActorValue\("AttackDamageMult",/);
+});

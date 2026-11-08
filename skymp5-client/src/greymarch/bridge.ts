@@ -269,7 +269,7 @@ export class GreymarchBridge {
         if (type === "greymarchBuildAngle") { if (Number(msg.id) > 0 && typeof msg.z === "number" && isFinite(msg.z)) (this.greymarchBuildAngleQueue || (this.greymarchBuildAngleQueue = [])).push({ id: Number(msg.id) >>> 0, z: Number(msg.z) }); return; } // a piece a GM placed was turned (gamemode buildsys.js): SkyMP's SetAngle reaches only the server's copy, so this game turns its own (greymarchBuildAngleTick)
         if (type === "greymarchParalyze") { var ps = Number(msg.seconds); if (ps > 0 && ps <= 60) { this.greymarchParalyzeUntil = Math.max(this.greymarchParalyzeUntil || 0, Date.now() + ps * 1000); this.greymarchParalyzeStart = true; } return; } // a paralysis spell hit this player (our server build: OnSpellHit); greymarchParalyzeDrive
         if (type === "greymarchStagger") { if (Number(msg.actor) > 0) (this.greymarchStaggerQueue || (this.greymarchStaggerQueue = [])).push({ actor: Number(msg.actor), self: msg.self === true }); return; } // a starving character staggers (gamemode hunger.js; played in greymarchHungerDrive, for everyone near)
-        if (type === "greymarchSummons") { if (Number(msg.me) > 0) this.greymarchMeActor = Number(msg.me) >>> 0; this.greymarchSummonList = Array.isArray(msg.list) ? msg.list.slice(0, 200).map(function (x: any) { return { actor: Number(x && x.actor) >>> 0, owner: Number(x && x.owner) >>> 0, parent: Number(x && x.parent) >>> 0 }; }).filter(function (x: any) { return x.actor > 0; }) : []; var so: any = {}; this.greymarchSummonList.forEach(function (x: any) { so[x.actor] = x.owner; }); try { (this.sp.storage as any)["gmSummonOwner"] = so; (this.sp.storage as any)["gmMeActor"] = this.greymarchMeActor >>> 0; } catch (stErr) { /* hosting as before */ } return; } // whose summon is whose (greymarchSummonTick, formView.ts)
+        if (type === "greymarchSummons") { if (Number(msg.me) > 0) this.greymarchMeActor = Number(msg.me) >>> 0; this.greymarchSummonList = Array.isArray(msg.list) ? msg.list.slice(0, 200).map(function (x: any) { return { actor: Number(x && x.actor) >>> 0, owner: Number(x && x.owner) >>> 0, parent: Number(x && x.parent) >>> 0, health: Number(x && x.health) || 0, damage: Number(x && x.damage) || 0 }; }).filter(function (x: any) { return x.actor > 0; }) : []; var so: any = {}; this.greymarchSummonList.forEach(function (x: any) { so[x.actor] = x.owner; }); try { (this.sp.storage as any)["gmSummonOwner"] = so; (this.sp.storage as any)["gmMeActor"] = this.greymarchMeActor >>> 0; } catch (stErr) { /* hosting as before */ } return; } // whose summon is whose (greymarchSummonTick, formView.ts)
         if (type === "greymarchMagicBlock") { var mb: any = {}; if (Array.isArray(msg.effects)) for (var mi = 0; mi < msg.effects.length && mi < 5000; mi++) mb[Number(msg.effects[mi]) >>> 0] = true; this.greymarchMagicBlock = mb; var sfx: any = null; if (Array.isArray(msg.summons) && msg.summons.length) { sfx = {}; for (var si = 0; si < msg.summons.length && si < 5000; si++) sfx[Number(msg.summons[si]) >>> 0] = true; } this.greymarchSummonFx = sfx; return; } // the raise-the-dead and summon effects to end when an NPC casts them (gamemode magicblock.js)
         if (type === "greymarchHunger") { this.greymarchHudToPage("hunger", { stage: String(msg.stage || "fed") }); return; } // the hunger bowl on the HUD (right, level with the voice display; gamemode hunger.js)
         if (type === "greymarchEnergy") { this.greymarchHudToPage("energy", { v: Number(msg.v), state: String(msg.state || "") }); return; } // the energy bar on the HUD, always on screen above the hunger bowl (gamemode exhaustion.js)
@@ -3646,6 +3646,20 @@ export class GreymarchBridge {
                 // its summoning spell back once what it called is gone (greymarchSummonMagic)
                 var off = this.greymarchSummonSpellsOff, o = off ? off[s.actor] : null;
                 if (o && now - o.at > 15000 && !list.some(function (x: any) { return x.parent === (s.actor >>> 0); })) { for (var k = 0; k < o.spells.length; k++) { try { a.addSpell(o.spells[k], false); } catch (adErr) { /* it fights on without it */ } } delete off[s.actor]; this.greymarchLog("summon: " + (s.actor >>> 0).toString(16) + " can summon again"); }
+                // ITS HEALTH AND DAMAGE (2026-11-07, the owner: "the balancing still didn't work"): the server's health counts only for the hits it works out (a
+                // player's); a fight with an NPC is worked out here, where the summon had its own small health and an NPC killed it in one hit. The F7 Summons row's
+                // health (its base Health here) and damage (AttackDamageMult, its weapon hits) are put on it; with none sent, its own are put back
+                try {
+                    var sts = this.greymarchSummonStats || (this.greymarchSummonStats = {});
+                    var st = sts[s.actor] || (sts[s.actor] = { key: "", hp: a.getBaseActorValue("Health"), dm: a.getBaseActorValue("AttackDamageMult") });
+                    var key = (s.health || 0) + ":" + (s.damage || 1);
+                    if (st.key !== key) {
+                        st.key = key;
+                        a.setActorValue("Health", s.health > 0 ? s.health : st.hp);
+                        a.setActorValue("AttackDamageMult", (st.dm > 0 ? st.dm : 1) * (s.damage > 0 ? s.damage : 1));
+                        this.greymarchLog("summon: " + (s.actor >>> 0).toString(16) + " health " + (s.health > 0 ? s.health : "its own (" + st.hp + ")") + ", damage x" + (s.damage > 0 ? s.damage : 1));
+                    }
+                } catch (stErr) { /* tried again in a second */ }
                 // this player's foe (greymarchSummonHit): set on it while it lives, for 30 s after the last hit
                 var fo = this.greymarchSummonFoe;
                 if (fo && now < fo.until) {
