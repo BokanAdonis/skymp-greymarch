@@ -1675,9 +1675,14 @@ export class FormView {
       // EVERY PLAYER COUNTS (2026-11-03, the owner: two bounty outlaws in their camp's animations would not fight while two players tested): the players near are
       // this game's and every other player's character loaded here, since the host may be someone else's game than the one that walks up
       const gmPlayers: Actor[] = [me, ...this.gmOtherPlayers(myPlace, placeOf)];
+      // A SUMMON OF THIS PLAYER'S (gamemode summons.js; 2026-11-07, the owner: "the summons still don't follow me"; the breadcrumbs: "idle ...: not fighting
+      // with 14 (me): out of its idle, sent at them" every 2 s). A gargoyle or a skeleton is hostile to players by its factions, so these two steps sent this
+      // player's own summon at them (into a fight with its caster, ended by bridge.ts) instead of letting it follow; never for a summon of this player's
+      let gmOwnSummon = false;
+      try { const gmSo: any = (storage as any)["gmSummonOwner"]; const gmOw = gmSo ? Number(gmSo[(this.remoteRefrId as number) >>> 0]) >>> 0 : 0; gmOwnSummon = !!gmOw && gmOw === (Number((storage as any)["gmMeActor"]) >>> 0); } catch (e) { gmOwnSummon = false; }
       {
         const gmSitNow = Date.now();
-        if (gmSitNow - this.gmSitWakeAt >= GM_SIT_WAKE_MS) {
+        if (!gmOwnSummon && gmSitNow - this.gmSitWakeAt >= GM_SIT_WAKE_MS) {
           let gmSitting = 0; try { gmSitting = npc.getSitState(); } catch (e) { gmSitting = 0; }
           let gmMounted = false; try { gmMounted = npc.isOnMount(); } catch (e) { gmMounted = false; } // a rider is not in furniture
           if (gmSitting !== 0 && !gmMounted && !npc.isDead()) {
@@ -1701,7 +1706,7 @@ export class FormView {
       // Breadcrumbs: "idle"
       {
         const gmINow = Date.now();
-        if (gmINow - this.gmIdleWakeAt >= GM_SIT_WAKE_MS) {
+        if (!gmOwnSummon && gmINow - this.gmIdleWakeAt >= GM_SIT_WAKE_MS) {
           let gmCalm = false; try { gmCalm = npc.getCombatState() === 0 && npc.getSitState() === 0 && !npc.isOnMount(); } catch (e) { gmCalm = false; }
           const gmFoe = gmCalm ? this.gmNearestFoe(npc, gmPlayers, GM_SIT_NEAR) : null;
           let gmSees = false; try { gmSees = !!gmFoe && (gmFoe.d <= GM_IDLE_SURE || gmFoe.foe.isDetectedBy(npc)); } catch (e) { gmSees = false; }

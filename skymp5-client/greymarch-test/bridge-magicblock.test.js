@@ -57,3 +57,10 @@ test("a summon of this player's never fights them and keeps up (2026-11-07, the 
   assert.match(src, /if \(far > 4000\) \{ try \{ a\.moveTo\(player,/);
   assert.match(src, /far > 300 && now - \(fat\[s\.actor\] \|\| 0\) > 5000/);
 });
+
+test("this player's own summon is never pulled out of its idle or furniture and sent at a player (2026-11-07, the owner: the summons still did not follow)", () => {
+  const fv = fs.readFileSync(path.join(__dirname, "..", "src", "view", "formView.ts"), "utf8");
+  assert.match(fv, /let gmOwnSummon = false;/);
+  assert.match(fv, /if \(!gmOwnSummon && gmSitNow - this\.gmSitWakeAt >= GM_SIT_WAKE_MS\)/);
+  assert.match(fv, /if \(!gmOwnSummon && gmINow - this\.gmIdleWakeAt >= GM_SIT_WAKE_MS\)/);
+});
