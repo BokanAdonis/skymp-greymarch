@@ -959,6 +959,9 @@ export class GreymarchBridge {
         // gives the mouse's buttons as device 1 (Mouse) with code 0 (left) and 1 (right), not the DirectInput 256 / 257 the creature attacks and the werewolf lunge
         // wait for below, and the right button was also taken by the Esc line. They are read here as 256 (left) and 257 (right), so both reach that line
         if (e && e.device === 1 && (e.code === 0 || e.code === 1)) { var me: any = {}; for (var k in e) me[k] = e[k]; me.code = 256 + e.code; var bv = function (v: any) { try { return typeof v === "function" ? !!v.call(e) : v; } catch (bvErr) { return false; } }; me.isDown = bv(e.isDown); me.isUp = bv(e.isUp); me.isPressed = bv(e.isPressed); e = me; }
+        // HOTKEY 1, WRITTEN DOWN (2026-11-08, the owner: pressing 1 in the Favorites menu does nothing): a number key 1-8 pressed in the Favorites menu, and what
+        // the game reports it as (keyboard 2-9; device, code)
+        if (e && e.code >= 2 && e.code <= 9) { try { var nDown2 = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (nDown2 && e.isUp !== true && this.sp.Ui.isMenuOpen("FavoritesMenu")) this.greymarchLog("favorites: key " + (e.code - 1) + " pressed in the Favorites menu (device " + e.device + ", code " + e.code + ")"); } catch (fkErr) { /* only a log line */ } }
         if (e && e.code === ESC_KEY && e.device !== undefined && e.device !== 0) return; // code 1 from the mouse is its right button, not Esc (2026-11-05: right click opened the pause menu); only the keyboard's Esc counts
         if (this.greymarchBuildCam && this.greymarchBuildCamKey(e)) return; // the build system's free camera has the keys it uses
         if (e.code === EMOTE_EXIT_KEY) { var xDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (e.isUp === true) xDown = false; if (xDown && !this.greymarchKeyExit && !this.greymarchChatTyping && !this.greymarchPanelHasKeys()) this.greymarchEmoteExitWanted = Date.now(); this.greymarchKeyExit = xDown; } // Backspace: out of the emote or pose (greymarchEmoteExitTick)
@@ -2341,7 +2344,10 @@ export class GreymarchBridge {
                 if (mine) { delete st.want[key2]; continue; } // taken off by the player
                 if (putBack(form2, k2)) putAgain++;
             } else if (now2[f] !== k2) {
-                if (mine) st.want[key2] = now2[f]; else if (k2 >= 0) this.greymarchFavCall("SetHotkey", sp.Game.getFormEx(f), k2);
+                // HOTKEY 1, WRITTEN DOWN (2026-11-08, the owner: "I still can't assign a hotkey to 1", pressing 1 does nothing): every hotkey change taken or undone here
+                var nm2 = ""; try { var fm2 = sp.Game.getFormEx(f); nm2 = fm2 ? String(fm2.getName() || "") : ""; } catch (nmErr) { nm2 = ""; }
+                if (mine) { this.greymarchLog("favorites: " + (nm2 || f.toString(16)) + " hotkey " + (k2 >= 0 ? k2 + 1 : "none") + " -> " + (now2[f] >= 0 ? now2[f] + 1 : "none") + " (the player's, a menu was open)"); st.want[key2] = now2[f]; }
+                else if (k2 >= 0) { this.greymarchLog("favorites: " + (nm2 || f.toString(16)) + " hotkey " + (now2[f] >= 0 ? now2[f] + 1 : "none") + " put back to " + (k2 + 1) + " (no menu was open)"); this.greymarchFavCall("SetHotkey", sp.Game.getFormEx(f), k2); }
             }
         }
         for (var key3 in now2) if (st.want[key3] === undefined) st.want[key3] = now2[key3];
