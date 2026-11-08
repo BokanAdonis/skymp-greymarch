@@ -961,7 +961,7 @@ export class GreymarchBridge {
         if (e && e.device === 1 && (e.code === 0 || e.code === 1)) { var me: any = {}; for (var k in e) me[k] = e[k]; me.code = 256 + e.code; var bv = function (v: any) { try { return typeof v === "function" ? !!v.call(e) : v; } catch (bvErr) { return false; } }; me.isDown = bv(e.isDown); me.isUp = bv(e.isUp); me.isPressed = bv(e.isPressed); e = me; }
         // HOTKEY 1, WRITTEN DOWN (2026-11-08, the owner: pressing 1 in the Favorites menu does nothing): a number key 1-8 pressed in the Favorites menu, and what
         // the game reports it as (keyboard 2-9; device, code)
-        if (e && e.code >= 2 && e.code <= 9) { try { var nDown2 = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); var nWas = !!this["greymarchFavNum" + e.code]; this["greymarchFavNum" + e.code] = nDown2 && e.isUp !== true; var inFav = false; try { inFav = this.sp.Ui.isMenuOpen("FavoritesMenu"); } catch (ifErr) { inFav = false; } if (nDown2 && e.isUp !== true && !nWas && (e.code <= 3 || inFav)) { var uev = ""; try { uev = String(e.userEventName || ""); } catch (ueErr) { uev = "?"; } this.greymarchLog("favorites: key " + (e.code - 1) + " pressed " + (inFav ? "in the Favorites menu" : "in the world") + " (device " + e.device + ", code " + e.code + ", the game's action: " + (uev || "none") + ")"); if (inFav) this.greymarchFavScanSlot = e.code - 2; } } catch (fkErr) { /* only a log line */ } }
+        if (e && e.code >= 2 && e.code <= 9) { try { var nDown2 = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); var nWas = !!this["greymarchFavNum" + e.code]; this["greymarchFavNum" + e.code] = nDown2 && e.isUp !== true; var inFav = false; try { inFav = this.sp.Ui.isMenuOpen("FavoritesMenu"); } catch (ifErr) { inFav = false; } if (nDown2 && e.isUp !== true && !nWas && (e.code <= 3 || inFav)) { var uev = ""; try { uev = String(e.userEventName || ""); } catch (ueErr) { uev = "?"; } this.greymarchLog("favorites: key " + (e.code - 1) + " pressed " + (inFav ? "in the Favorites menu" : "in the world") + " (device " + e.device + ", code " + e.code + ", the game's action: " + (uev || "none") + ")"); if (inFav) this.greymarchFavScanSlot = e.code - 2; else if (e.code === 2 && !uev && !this.greymarchChatTyping) this.greymarchHotkey1Use = Date.now(); } } catch (fkErr) { /* only a log line */ } } // key 1 with no game action, in the world: its favorite is used here (greymarchFavTick)
         if (e && e.code === ESC_KEY && e.device !== undefined && e.device !== 0) return; // code 1 from the mouse is its right button, not Esc (2026-11-05: right click opened the pause menu); only the keyboard's Esc counts
         if (this.greymarchBuildCam && this.greymarchBuildCamKey(e)) return; // the build system's free camera has the keys it uses
         if (e.code === EMOTE_EXIT_KEY) { var xDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (e.isUp === true) xDown = false; if (xDown && !this.greymarchKeyExit && !this.greymarchChatTyping && !this.greymarchPanelHasKeys()) this.greymarchEmoteExitWanted = Date.now(); this.greymarchKeyExit = xDown; } // Backspace: out of the emote or pose (greymarchEmoteExitTick)
@@ -2287,6 +2287,31 @@ export class GreymarchBridge {
         catch (e) { if (!this.greymarchFavNoDll) { this.greymarchFavNoDll = true; this.greymarchLog("favorites: GreymarchCam." + fn + " is not there (GreymarchCamera.dll older than 1.6?): favorites are kept but not put back"); } return -2; }
     }
     greymarchFavTick(now: number): any {
+        // KEY 1 IN THE WORLD (2026-11-08, the owner: the item put on hotkey 1 did nothing when 1 was pressed; the log: key 1 comes with no game action, where key 2
+        // is "Hotkey2", so the game never uses hotkey 1): the favorite on slot 1 is used here, as the game does for 2-8: a spell or power to the right hand (a power
+        // to the voice), a shout to the voice, an item put on, or taken off when it is already on. Not with a game menu or a Greymarch window open
+        var use1 = this.greymarchHotkey1Use; this.greymarchHotkey1Use = 0;
+        if (use1 && now - use1 < 1000) {
+            try {
+                var sp1 = this.sp; var inMenu1 = false; try { inMenu1 = !!sp1.Utility.isInMenuMode(); } catch (mmErr) { inMenu1 = false; }
+                var busy1 = inMenu1 || this.greymarchAdminOn || this.greymarchMenuOn || this.greymarchForgeOn || this.greymarchCraftOn || this.greymarchMiniOn || this.greymarchShapeOn || this.greymarchWolfOn;
+                if (!busy1) {
+                    var p1 = sp1.Game.getPlayer(); var hold1: any = null;
+                    var look1 = (form: any) => { if (!hold1 && form && this.greymarchFavCall("GetHotkey", form) === 0) hold1 = form; };
+                    var n1 = p1.getNumItems(); for (var i1 = 0; i1 < n1 && !hold1; i1++) look1(p1.getNthForm(i1));
+                    var s1 = p1.getSpellCount(); for (var j1 = 0; j1 < s1 && !hold1; j1++) look1(p1.getNthSpell(j1));
+                    var b1 = sp1.ActorBase.from(p1.getBaseObject()); var bn1 = b1 ? b1.getSpellCount() : 0; for (var k1 = 0; k1 < bn1 && !hold1; k1++) look1(b1!.getNthSpell(k1));
+                    if (!hold1) { var shout1 = p1.getEquippedShout(); look1(shout1); }
+                    if (!hold1) this.greymarchLog("favorites: key 1 in the world, nothing on hotkey 1");
+                    else {
+                        var t1 = hold1.getType(), nm1 = hold1.getName() || (hold1.getFormID() >>> 0).toString(16);
+                        if (t1 === 119) { p1.equipShout(sp1.Shout.from(hold1)); this.greymarchLog("favorites: key 1: shout " + nm1); }
+                        else if (t1 === 22) { var spl = sp1.Spell.from(hold1); var power = false; try { power = spl!.getEquipType() && (spl!.getEquipType()!.getFormID() >>> 0) === 0x25bee; } catch (etErr) { power = false; } p1.equipSpell(spl, power ? 2 : 1); this.greymarchLog("favorites: key 1: " + (power ? "power " : "spell ") + nm1); }
+                        else { var worn1 = false; try { worn1 = p1.isEquipped(hold1); } catch (weErr) { worn1 = false; } if (worn1) p1.unequipItem(hold1, false, true); else p1.equipItem(hold1, false, true); this.greymarchLog("favorites: key 1: " + (worn1 ? "took off " : "put on ") + nm1); }
+                    }
+                }
+            } catch (u1Err) { this.greymarchLog("favorites: key 1 could not use its favorite: " + u1Err); }
+        }
         // WHO HOLDS THAT SLOT (2026-11-08, the owner: pressing 1 in the Favorites menu does nothing, 2-8 work, and no favorite shows a 1): after a number key in the
         // Favorites menu, every item carried and every spell known that holds that hotkey slot is written down, shown in the list (a favorite) or not
         if (this.greymarchFavScanSlot !== undefined && this.greymarchFavScanSlot !== null) {
@@ -2302,7 +2327,9 @@ export class GreymarchBridge {
                 // KEY 1 DONE HERE (2026-11-08, the owner: 1 did nothing in the Favorites menu while 2-8 worked; the log: slot 1 held by nothing, key 1 arriving): the menu
                 // itself never gives slot 1 (SkyUI / Skyrim Souls, not ours). Key 1 pressed and slot 1 still free a moment later: the entry selected in the menu gets it
                 // through GreymarchCamera.dll's SetHotkey, as the menu would have done; the favorites keeper then keeps it (a menu was open)
-                if (slot === 0 && !holders.length) {
+                // ALWAYS, NOT ONLY WHEN FREE (2026-11-08, the owner: "I also can't switch it now"; the log: key 1 has no game action at all, "none", where key 2 is
+                // Hotkey2): the game never answers key 1, so every press of it in the menu moves slot 1 to the selected entry (SetHotkey takes it from whatever had it)
+                if (slot === 0) {
                     var selId = 0;
                     var paths = ["_root.MenuHolder.Menu_mc.itemList.selectedEntry.formId", "_root.Menu_mc.itemList.selectedEntry.formId"];
                     for (var pi = 0; pi < paths.length && !selId; pi++) { try { var v = Number(this.sp.Ui.getFloat("FavoritesMenu", paths[pi])); if (isFinite(v) && v !== 0) selId = v >>> 0; } catch (uiErr) { /* the other path */ } }
