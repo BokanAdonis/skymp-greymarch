@@ -56,15 +56,29 @@ export class WorldCleanerService extends ClientListener {
     if (!pc) return;
     let cell: any = null, n = 0;
     try { cell = pc.getParentCell(); n = cell ? Math.min(cell.getNumRefs(62), 600) : 0; } catch (e) { return; } // 62: placed characters
-    const seen: string[] = [];
-    let found = 0;
+    const seen: string[] = [], ghostNames: string[] = [];
+    let found = 0, ghosts = 0;
     for (let i = 0; i < n; ++i) {
       let ac: Actor | null = null;
       try { ac = this.sp.Actor.from(cell.getNthRef(i, 62)); } catch (e) { ac = null; }
       if (!ac) continue;
       let id = 0, disabled = true;
       try { id = ac.getFormID() >>> 0; disabled = ac.isDisabled(); } catch (e) { continue; }
-      if (id === 0x14 || disabled || this.pending.has(id)) continue;
+      if (id === 0x14 || this.pending.has(id)) continue;
+      if (disabled) {
+        // OFF BUT STILL DRAWN (2026-11-08: Whiterun guards seen while the sweep found no NPC up in the cell): an NPC whose Disable set the flag but kept its
+        // 3D stays on screen, and everything here skips what reads as disabled. Such a one is made invisible, can't be used and is deleted again.
+        let drawn = false;
+        try { drawn = ac.is3DLoaded(); } catch (e) { drawn = false; }
+        if (!drawn || (this.protection.get(id) || 0) > 0 || this.ghosted.has(id)) continue;
+        this.ghosted.add(id);
+        ghosts++;
+        try { ac.setAlpha(0, false); } catch (e) { /* none */ }
+        try { ac.blockActivation(true); } catch (e) { /* none */ }
+        try { if (!this.isActorInDialogue(ac)) ac.delete(); } catch (e) { /* none */ }
+        if (ghostNames.length < 6) { let name = ""; try { name = ac.getDisplayName(); } catch (e) { name = ""; } ghostNames.push(id.toString(16) + " " + name); }
+        continue;
+      }
       found++;
       let why = "";
       if ((this.protection.get(id) || 0) > 0) why = "kept (the server's)";
@@ -72,9 +86,12 @@ export class WorldCleanerService extends ClientListener {
       else { const r = this.consider(ac); why = r ? "cleaned now" : "left"; if (r) this.stats.swept++; }
       if (seen.length < 6) { let name = ""; try { name = ac.getDisplayName() || (ac.getBaseObject() ? (ac.getBaseObject() as any).getName() : ""); } catch (e) { name = ""; } seen.push(id.toString(16) + " " + name + ": " + why); }
     }
-    if (found && this.logsLeft > 0) {
+    this.stats.ghosts += ghosts;
+    const quiet = !found && !ghosts && now - this.saidAt < 30000;
+    if (!quiet && this.logsLeft > 0) {
       this.logsLeft--;
-      try { this.sp.writeLogs("greymarch", "[" + new Date().toISOString().substr(11, 12) + "] cleaner: cell " + ((cell.getFormID() >>> 0).toString(16)) + " has " + found + " NPCs up of " + n + " placed: " + seen.join("; ") + " | picks: " + this.stats.picks + " (none " + this.stats.none + ", the server's " + this.stats.prot + ", off " + this.stats.off + ", cleaned " + this.stats.cleaned + "), cleaned by the sweep " + this.stats.swept); } catch (e) { /* no log */ }
+      this.saidAt = now;
+      try { this.sp.writeLogs("greymarch", "[" + new Date().toISOString().substr(11, 12) + "] cleaner: cell " + ((cell.getFormID() >>> 0).toString(16)) + " has " + found + " NPCs up of " + n + " placed: " + seen.join("; ") + (ghosts ? " | " + ghosts + " off but still drawn, hidden and deleted: " + ghostNames.join("; ") : "") + " | picks: " + this.stats.picks + " (none " + this.stats.none + ", the server's " + this.stats.prot + ", off " + this.stats.off + ", cleaned " + this.stats.cleaned + "), cleaned by the sweep " + this.stats.swept + ", off but drawn " + this.stats.ghosts); } catch (e) { /* no log */ }
     }
   }
 
@@ -109,8 +126,21 @@ export class WorldCleanerService extends ClientListener {
       return false;
     }
 
-    if (actorId === 0x14 || this.pending.has(actorId) || actor.isDisabled() || actor.isDeleted()) {
+    if (actorId === 0x14 || this.pending.has(actorId)) {
       this.stats.off++;
+      return false;
+    }
+    if (actor.isDisabled() || actor.isDeleted()) {
+      this.stats.off++;
+      let drawn = false;
+      try { drawn = actor.is3DLoaded(); } catch (e) { drawn = false; }
+      if (drawn && !this.ghosted.has(actorId)) { // off but still drawn (see sweepCell): hidden, can't be used, deleted again
+        this.ghosted.add(actorId);
+        this.stats.ghosts++;
+        try { actor.setAlpha(0, false); } catch (e) { /* none */ }
+        try { actor.blockActivation(true); } catch (e) { /* none */ }
+        try { if (!this.isActorInDialogue(actor)) actor.delete(); } catch (e) { /* none */ }
+      }
       return false;
     }
 
@@ -183,7 +213,9 @@ export class WorldCleanerService extends ClientListener {
   private pending = new Set<number>(); // disabled, its delete still to come
   private sweptAt = 0;
   private logsLeft = 60;
-  private stats = { picks: 0, none: 0, prot: 0, off: 0, cleaned: 0, swept: 0 };
+  private stats = { picks: 0, none: 0, prot: 0, off: 0, cleaned: 0, swept: 0, ghosts: 0 };
+  private saidAt = 0;
+  private ghosted = new Set<number>(); // off but drawn ones already hidden
   private initialPos?: NiPoint3;
   private initialCellOrWorld?: number;
 }
