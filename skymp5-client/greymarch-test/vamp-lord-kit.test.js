@@ -44,8 +44,11 @@ test("the menus stay for a form that says so (the Lord); beast form for every ot
 });
 
 test("a creature attack waits for its combat stance; a drawn form keeps the stance; the hidden body's pace follows the creature's gait (2026-11-06, the giant)", () => {
-  assert.match(src, /else \{ this\.greymarchShapePending = \{ ev: ev, power: power, until: now \+ SHAPE_STANCE_WAIT_MS \};/);
-  assert.match(src, /if \(ready \|\| now >= pend\.until\)/);
+  assert.match(src, /else if \(!this\.greymarchShapePending\) \{ this\.greymarchShapePending = \{ ev: ev, power: power, until: now \+ SHAPE_STANCE_WAIT_MS \};/);
+  assert.match(src, /if \(\(ready && !\(pend\.after && now < pend\.after\)\) \|\| now >= pend\.until\)/);
+  // a form's own stance event first (2026-11-08, the Gargoyle: combatIdleStart), its attack a quarter second later
+  assert.match(src, /if \(want\.stance && now - \(this\.greymarchShapeStanceAt \|\| 0\) > 4000\) \{ try \{ sp\.Debug\.sendAnimationEvent\(body, want\.stance\);/);
+  assert.match(src, /after: now \+ 250 \}/);
   assert.match(src, /if \(want\.drawn\) \{ this\.greymarchShapeCombatUntil = now \+ 6000;/);
   assert.match(src, /gait = player\.isSprinting\(\) \? "sprint" : player\.isRunning\(\) \? "run" : "walk";/);
   assert.match(src, /this\.greymarchShapePending = null; this\.greymarchShapeCombatUntil = 0;\r?\n\s+this\.greymarchShapeSpeedReset\(player\);/);

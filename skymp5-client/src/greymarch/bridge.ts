@@ -3354,7 +3354,7 @@ export class GreymarchBridge {
             if (!was || was.race !== race) this.greymarchLog("shape: the server says " + (msg.name || "a creature") + " (race " + race.toString(16) + ")");
             var at = msg.attacks && typeof msg.attacks === "object" ? msg.attacks : {};
             var names = function (l: any) { return Array.isArray(l) ? l.filter(function (x: any) { return typeof x === "string" && x.length > 0 && x.length < 64; }) : []; };
-            this.greymarchShapeWant = { race: race, back: Number(msg.back) >>> 0, name: String(msg.name || ""), normal: names(at.normal), power: names(at.power), mode: msg.mode === "race" ? "race" : "npc", menus: msg.menus === true, weapon: Number(msg.weapon) >>> 0, drawn: msg.drawn === true, speed: shapeSpeedOf(msg.speed), camZ: Math.max(0, Math.min(400, Number(msg.camZ) || 0)) }; // drawn: always in its combat stance (the giant: its club attacks and its run need it); speed: the hidden body's pace per gait (greymarchShapeSpeedTick); weapon: the form's own (a giant's club, a skeleton's sword; greymarchShapeArmTick)
+            this.greymarchShapeWant = { race: race, back: Number(msg.back) >>> 0, name: String(msg.name || ""), normal: names(at.normal), power: names(at.power), mode: msg.mode === "race" ? "race" : "npc", menus: msg.menus === true, weapon: Number(msg.weapon) >>> 0, drawn: msg.drawn === true, speed: shapeSpeedOf(msg.speed), camZ: Math.max(0, Math.min(400, Number(msg.camZ) || 0)), stance: typeof msg.stance === "string" && /^[A-Za-z_]{1,40}$/.test(msg.stance) ? msg.stance : "" }; // drawn: always in its combat stance (the giant: its club attacks and its run need it); speed: the hidden body's pace per gait (greymarchShapeSpeedTick); weapon: the form's own (a giant's club, a skeleton's sword; greymarchShapeArmTick)
             this.greymarchShapeWordAt = Date.now();
         } else {
             if (this.greymarchShapeWant || this.greymarchShapeOn) this.greymarchLog("shape: the server says change back");
@@ -3483,8 +3483,13 @@ export class GreymarchBridge {
                     // NOT BEFORE THE STANCE (2026-11-06, the owner: "the Giant still does not swing the club"): an attack event sent while the creature is still out of its combat
                     // stance is dropped by its behavior graph, and the stance was only asked for in this same frame. It waits for the stance (SHAPE_STANCE_WAIT_MS at most)
                     var drawnNow = false; try { drawnNow = this.greymarchShapeModeOn !== "npc" || !!body.isWeaponDrawn(); } catch (wErr) { drawnNow = true; }
+                    // ITS OWN STANCE EVENT FIRST (2026-11-08, the owner: the Gargoyle never swung; every attack was sent "in its stance"): its graph starts an attack only
+                    // from its combat-ready state, entered on its own event (want.stance: combatIdleStart), which the drawn check does not show. That event is sent
+                    // first (at most every 4 s) and the attack a quarter second later
+                    if (want.stance && now - (this.greymarchShapeStanceAt || 0) > 4000) { try { sp.Debug.sendAnimationEvent(body, want.stance); } catch (stErr) { /* the attack still goes */ } this.greymarchShapeStanceAt = now; this.greymarchShapePending = { ev: ev, power: power, until: now + SHAPE_STANCE_WAIT_MS, after: now + 250 }; this.greymarchShapeDiag("stance event " + want.stance + " sent before " + ev); drawnNow = false; }
+                    else if (want.stance) this.greymarchShapeStanceAt = now;
                     if (drawnNow) { var okNow = sp.Debug.sendAnimationEvent(body, ev); this.greymarchShapeReport = { at: now + SHAPE_LAND_MS, power: power, ev: ev }; this.greymarchShapeDiag("attack " + ev + " sent, in its stance" + (okNow === false ? ", the graph refused it" : "")); this.greymarchShapeAtkCheck = { at: now + 400, ev: ev }; }
-                    else { this.greymarchShapePending = { ev: ev, power: power, until: now + SHAPE_STANCE_WAIT_MS }; this.greymarchShapeDiag("attack " + ev + " waits for its stance"); }
+                    else if (!this.greymarchShapePending) { this.greymarchShapePending = { ev: ev, power: power, until: now + SHAPE_STANCE_WAIT_MS }; this.greymarchShapeDiag("attack " + ev + " waits for its stance"); }
                 } else this.greymarchShapeDiag("attack " + ev + " not sent: no creature NPC");
                 if (!this.greymarchShapeSwingLogged) { this.greymarchShapeSwingLogged = true; this.greymarchLog("shape: first attack (" + ev + ")"); }
             } else this.greymarchShapeDiag("click dropped: " + (inMenu ? "in a menu" : now - swing.at >= 1000 ? "too late" : "still resting from the last attack"));
@@ -3501,7 +3506,7 @@ export class GreymarchBridge {
         if (pend) {
             var pb = this.greymarchShapeModeOn === "npc" ? this.greymarchShapePuppetActor() : player, ready = false;
             try { ready = !pb || !!pb.isWeaponDrawn(); } catch (rErr) { ready = true; }
-            if (ready || now >= pend.until) {
+            if ((ready && !(pend.after && now < pend.after)) || now >= pend.until) {
                 this.greymarchShapePending = null;
                 if (pb) { var okP = sp.Debug.sendAnimationEvent(pb, pend.ev); this.greymarchShapeReport = { at: now + SHAPE_LAND_MS, power: pend.power, ev: pend.ev }; this.greymarchShapeLastSwing = { at: now, power: pend.power }; this.greymarchShapeDiag("attack " + pend.ev + " sent " + (ready ? "once in its stance" : "without its stance (waited too long)") + (okP === false ? ", the graph refused it" : "")); this.greymarchShapeAtkCheck = { at: now + 400, ev: pend.ev }; }
             }
