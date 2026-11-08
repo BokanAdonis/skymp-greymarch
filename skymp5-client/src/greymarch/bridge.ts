@@ -2299,6 +2299,17 @@ export class GreymarchBridge {
                 var pb = this.sp.ActorBase.from(pl.getBaseObject()); var nb = pb ? pb.getSpellCount() : 0; for (var c = 0; c < nb; c++) check(pb!.getNthSpell(c), "spell");
                 check(pl.getEquippedShout(), "shout");
                 this.greymarchLog("favorites: hotkey " + (slot + 1) + " is held by " + (holders.length ? holders.join(", ") : "nothing carried or known"));
+                // KEY 1 DONE HERE (2026-11-08, the owner: 1 did nothing in the Favorites menu while 2-8 worked; the log: slot 1 held by nothing, key 1 arriving): the menu
+                // itself never gives slot 1 (SkyUI / Skyrim Souls, not ours). Key 1 pressed and slot 1 still free a moment later: the entry selected in the menu gets it
+                // through GreymarchCamera.dll's SetHotkey, as the menu would have done; the favorites keeper then keeps it (a menu was open)
+                if (slot === 0 && !holders.length) {
+                    var selId = 0;
+                    var paths = ["_root.MenuHolder.Menu_mc.itemList.selectedEntry.formId", "_root.Menu_mc.itemList.selectedEntry.formId"];
+                    for (var pi = 0; pi < paths.length && !selId; pi++) { try { var v = Number(this.sp.Ui.getFloat("FavoritesMenu", paths[pi])); if (isFinite(v) && v !== 0) selId = v >>> 0; } catch (uiErr) { /* the other path */ } }
+                    var selForm = selId ? this.sp.Game.getFormEx(selId) : null;
+                    if (selForm) { var put = this.greymarchFavCall("SetHotkey", selForm, 0); this.greymarchLog("favorites: hotkey 1 given to " + (selForm.getName() || selId.toString(16)) + " by hand (the menu did not) -> " + put + "; reopen the menu to see the 1"); }
+                    else this.greymarchLog("favorites: hotkey 1: the entry selected in the menu could not be read (" + selId.toString(16) + ")");
+                }
             } catch (scErr) { this.greymarchLog("favorites: the hotkey " + (slot + 1) + " look failed: " + scErr); }
         }
         var st = this.greymarchFavState; if (!st) return;
