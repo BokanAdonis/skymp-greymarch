@@ -3676,8 +3676,16 @@ export class GreymarchBridge {
                     var line = "fight " + (a.isInCombat() ? "yes" : "no") + (tg ? " at " + ((tg.getFormID() >>> 0) === 0x14 ? "me" : (tg.getFormID() >>> 0).toString(16)) : "") + ", right " + (wr ? wr.getName() : "nothing") + ", left " + (wl ? wl.getName() : "nothing") + ", race " + (rc ? rc.getName() : "?") + ", drawn " + a.isWeaponDrawn();
                     if (diag[s.actor] !== line) { diag[s.actor] = line; this.greymarchLog("summon: " + (s.actor >>> 0).toString(16) + " " + line); }
                 } catch (dgErr) { /* only a log line */ }
+                // NEVER AT ITS CASTER, AND IT KEEPS UP (2026-11-07, the owner: "when I walk, the summons don't follow me"; the log: they were often in a fight
+                // with their own caster, and a summon in a fight does not follow). A fight with this player is ended at once; the follow is given again every
+                // 5 s while it is behind (the game can drop it), and one far behind (a run, a door) is brought to this player
+                var ctm = a.getCombatTarget();
+                if (a.isInCombat() && ctm && (ctm.getFormID() >>> 0) === 0x14) { a.stopCombat(); try { a.stopCombatAlarm(); } catch (alErr) { /* stopped anyway */ } this.greymarchLog("summon: " + (s.actor >>> 0).toString(16) + " was in a fight with its caster: ended"); }
                 if (a.isInCombat()) { if (made[s.actor] === "follow") { a.clearKeepOffsetFromActor(); made[s.actor] = true; } continue; }
-                if (made[s.actor] !== "follow") { a.keepOffsetFromActor(player, -90, -140, 0, 0, 0, 0, 350, 120); made[s.actor] = "follow"; }
+                var far = 0; try { far = a.getDistance(player); } catch (dsErr) { far = 0; }
+                if (far > 4000) { try { a.moveTo(player, -120, -160, 0, true); this.greymarchLog("summon: " + (s.actor >>> 0).toString(16) + " was " + Math.round(far) + " away: brought to its caster"); } catch (mvErr) { /* it walks */ } }
+                var fat = this.greymarchSummonFollowAt || (this.greymarchSummonFollowAt = {});
+                if (made[s.actor] !== "follow" || (far > 300 && now - (fat[s.actor] || 0) > 5000)) { a.keepOffsetFromActor(player, -90, -140, 0, 0, 0, 0, 350, 120); made[s.actor] = "follow"; fat[s.actor] = now; }
             } catch (e) { /* tried again in a second */ }
         }
     }

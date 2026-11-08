@@ -51,3 +51,9 @@ test("a summon of this player's gets the F7 Summons health and damage here (2026
   assert.match(src, /a\.setActorValue\("Health", s\.health > 0 \? s\.health : st\.hp\);/);
   assert.match(src, /a\.setActorValue\("AttackDamageMult",/);
 });
+
+test("a summon of this player's never fights them and keeps up (2026-11-07, the owner: when I walk the summons do not follow me)", () => {
+  assert.match(src, /if \(a\.isInCombat\(\) && ctm && \(ctm\.getFormID\(\) >>> 0\) === 0x14\) \{ a\.stopCombat\(\);/);
+  assert.match(src, /if \(far > 4000\) \{ try \{ a\.moveTo\(player,/);
+  assert.match(src, /far > 300 && now - \(fat\[s\.actor\] \|\| 0\) > 5000/);
+});
