@@ -348,7 +348,7 @@ export class GreymarchBridge {
         if (type === "greymarchMenuEvent" && msg.type === "body" && Number(msg.looking) > 0 && !this.greymarchMenuOn) { this.greymarchMenuShow({ mode: "open", looking: Number(msg.looking) }); return; } // E on the body of a dead wild animal (gamemode wildlifesystem.js): the menu opens on it to take what is on it
         if (type === "greymarchMenuEvent") { if ((msg.type === "trade_invite" || msg.type === "trade" || msg.type === "feed_invite" || msg.type === "frisk_invite" || msg.type === "guard_view") && !this.greymarchMenuOn) this.greymarchMenuShow({ mode: "invite", looking: 0 }); /* a trade, a vampire's request to feed, a guard's request to frisk or what the frisk found opens the menu by itself */ this.greymarchMenuToPage("event", msg); return; }
         if (type === "greymarchFx") { this.greymarchFxWant = { noclip: !!msg.noclip, speed: Number(msg.speed) || 100, frozen: !!msg.frozen, god: !!msg.god, tgm: !!msg.tgm }; if (msg.me) this.greymarchMeActor = msg.me; return; }
-        if (type === "greymarchGhosts") { this.greymarchGhostList = Array.isArray(msg.ghosts) ? msg.ghosts : []; if (msg.me) this.greymarchMeActor = msg.me; this.greymarchOthers = Array.isArray(msg.others) ? msg.others : []; if (msg.stats !== undefined) this.greymarchStatsWant = msg.stats && typeof msg.stats === "object" ? msg.stats : null; var inv = Array.isArray(msg.invisible) ? msg.invisible : []; this.greymarchInvisList = inv; var invMap = {}; for (var q = 0; q < inv.length; q++) if (inv[q] !== msg.me) invMap[inv[q]] = true; try { Function("return this")().__gmInvisible = invMap; } catch (gErr) { /* names stay visible */ } var dis = Array.isArray(msg.disguised) ? msg.disguised : []; var disMap = {}; for (var dq = 0; dq < dis.length; dq++) if (dis[dq] !== msg.me) disMap[dis[dq]] = true; try { Function("return this")().__gmDisguised = disMap; } catch (gErr2) { /* names stay visible */ } return; }
+        if (type === "greymarchGhosts") { this.greymarchGhostList = Array.isArray(msg.ghosts) ? msg.ghosts : []; if (msg.me) this.greymarchMeActor = msg.me; this.greymarchOthers = Array.isArray(msg.others) ? msg.others : []; if (msg.stats !== undefined) this.greymarchStatsWant = msg.stats && typeof msg.stats === "object" ? msg.stats : null; var inv = Array.isArray(msg.invisible) ? msg.invisible : []; this.greymarchInvisList = inv; this.greymarchFaintList = Array.isArray(msg.faint) ? msg.faint : []; var invMap = {}; for (var q = 0; q < inv.length; q++) if (inv[q] !== msg.me) invMap[inv[q]] = true; try { Function("return this")().__gmInvisible = invMap; } catch (gErr) { /* names stay visible */ } var dis = Array.isArray(msg.disguised) ? msg.disguised : []; var disMap = {}; for (var dq = 0; dq < dis.length; dq++) if (dis[dq] !== msg.me) disMap[dis[dq]] = true; try { Function("return this")().__gmDisguised = disMap; } catch (gErr2) { /* names stay visible */ } return; }
         this.sp.printConsole("[greymarch] got " + type + (msg.characters ? " with " + msg.characters.length + " character(s)" : ""));
         if (type === "greymarchHold") {
             // Select before the world (bodyHold.ts): keep our body until a character is chosen, and tell the server, so it binds the chosen body even when it is the one we stand in
@@ -4453,7 +4453,7 @@ export class GreymarchBridge {
                 }
             }
             this.greymarchNoHostApply(now, player, !!have.god);
-            this.greymarchGhostApply(now, ghosts || []); this.greymarchNamesApply(now); this.greymarchInvisApply(now); this.greymarchNoTalkApply(now); this.greymarchSeenLog(now); this.greymarchStatsApply(player); this.greymarchCombatApply(player); this.greymarchPerksApply(now, player); this.greymarchFastDrawApply(now, player);
+            this.greymarchGhostApply(now, ghosts || []); this.greymarchNamesApply(now); this.greymarchInvisApply(now); this.greymarchFaintApply(now); this.greymarchNoTalkApply(now); this.greymarchSeenLog(now); this.greymarchStatsApply(player); this.greymarchCombatApply(player); this.greymarchPerksApply(now, player); this.greymarchFastDrawApply(now, player);
         } catch (err) {
             if (!this.greymarchFxErr) { this.greymarchFxErr = true; this.greymarchLog("staff effects error (shown once): " + err); }
         }
@@ -4750,6 +4750,34 @@ export class GreymarchBridge {
         var ok = false, why = "";
         try { ok = !!this.sp.callNative("GreymarchCam", "SetFootstepsMuted", undefined, actor, muted); } catch (e) { why = String(e); }
         if (!this.greymarchMuteFeetLogged) { this.greymarchMuteFeetLogged = true; this.greymarchLog("invisible footsteps: " + (ok ? "muted (GreymarchCamera)" : "not muted (" + (why || "refused") + ")")); }
+    }
+    // INVISIBLE GMs SEEN BY STAFF (2026-11-08, the owner: other GMs see an invisible GM as a see-through person). Only a staff member's game is sent them
+    // (gamemode admin.js greymarchGhosts.faint; our server build keeps them out of players' games altogether). Drawn at FAINT_ALPHA, replayed every 2 s like
+    // the invisible ones (a body built again would be solid), solid again when they show.
+    greymarchFaintApply(now: any): any {
+        var sp = this.sp, FAINT_ALPHA = 0.35;
+        var list = this.greymarchFaintList || [];
+        var applied = this.greymarchFaintApplied || (this.greymarchFaintApplied = {});
+        var seen: any = {};
+        for (var i = 0; i < list.length; i++) {
+            if (!!this.greymarchMeActor && list[i] === this.greymarchMeActor) continue;
+            var localId = misc.remoteIdToLocalId(list[i]);
+            if (!localId) continue;
+            seen[localId] = true;
+            var cur = applied[localId];
+            if (cur && now - cur < 2000) continue;
+            var actor: any = null; try { actor = sp.Actor.from(sp.Game.getFormEx(localId)); } catch (e1) { actor = null; }
+            if (!actor) continue;
+            try { actor.setAlpha(FAINT_ALPHA, false); } catch (aErr) { continue; }
+            if (!cur) this.greymarchLog("staff: an invisible GM drawn see-through: " + localId.toString(16));
+            applied[localId] = now;
+        }
+        for (var key in applied) {
+            if (seen[key]) continue;
+            delete applied[key];
+            var gone: any = null; try { gone = sp.Actor.from(sp.Game.getFormEx(Number(key))); } catch (e2) { gone = null; }
+            if (gone) { try { gone.setAlpha(1, false); } catch (e3) { /* gone */ } } // (one gone invisible to everyone is set to 0 again by greymarchInvisApply)
+        }
     }
     greymarchInvisApply(now: any): any {
         var sp = this.sp;
