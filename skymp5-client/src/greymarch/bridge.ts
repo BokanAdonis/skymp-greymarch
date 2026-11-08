@@ -3646,6 +3646,15 @@ export class GreymarchBridge {
                 // its summoning spell back once what it called is gone (greymarchSummonMagic)
                 var off = this.greymarchSummonSpellsOff, o = off ? off[s.actor] : null;
                 if (o && now - o.at > 15000 && !list.some(function (x: any) { return x.parent === (s.actor >>> 0); })) { for (var k = 0; k < o.spells.length; k++) { try { a.addSpell(o.spells[k], false); } catch (adErr) { /* it fights on without it */ } } delete off[s.actor]; this.greymarchLog("summon: " + (s.actor >>> 0).toString(16) + " can summon again"); }
+                // this player's foe (greymarchSummonHit): set on it while it lives, for 30 s after the last hit
+                var fo = this.greymarchSummonFoe;
+                if (fo && now < fo.until) {
+                    try {
+                        var fa = sp.Actor.from(sp.Game.getFormEx(fo.id));
+                        if (!fa || fa.isDead()) this.greymarchSummonFoe = null;
+                        else { var ct = a.getCombatTarget(); if (!a.isInCombat() || !ct || (ct.getFormID() >>> 0) !== fo.id) { if (made[s.actor] === "follow") { a.clearKeepOffsetFromActor(); made[s.actor] = true; } a.startCombat(fa); } }
+                    } catch (foErr) { /* tried again in a second */ }
+                } else if (fo) this.greymarchSummonFoe = null;
                 // WHAT IT IS DOING (2026-11-07, the owner: Herne did not use his bow, the totems did not fight): a line when its state changes
                 try {
                     var diag = this.greymarchSummonDiag || (this.greymarchSummonDiag = {});
@@ -4587,7 +4596,29 @@ export class GreymarchBridge {
         } catch (err) { /* a lost frame: the next one comes within a second */ }
     }
     // Combat history: this game reports the hits it is part of (it hit someone, or was hit). The server only records a hit between two players when BOTH games report it.
+    // THIS PLAYER'S SUMMONS TAKE UP THEIR FIGHTS (2026-11-07, the owner: "when I got hit they didn't get marked as hostile"). Another player is a copy here that
+    // is never in a fight with this player as the game sees it, so a teammate never came to help, and a summon starts no fight of its own (unaggressive).
+    // Whoever hits this player, or is hit by them, is their summons' foe for 30 s after the last hit: each of them is set on it now and again in greymarchSummonTick.
+    greymarchSummonHit(e: any): any {
+        try {
+            var list: any[] = this.greymarchSummonList || [], me = this.greymarchMeActor >>> 0;
+            if (!list.length || !me || !e || !e.target || !e.aggressor) return;
+            var t = e.target.getFormID() >>> 0, g = e.aggressor.getFormID() >>> 0;
+            var other = t === 0x14 ? e.aggressor : g === 0x14 ? e.target : null;
+            if (!other) return;
+            var oid = other.getFormID() >>> 0;
+            if (oid === 0x14) return;
+            var oremote = oid >= 0xff000000 ? misc.localIdToRemoteId(oid) >>> 0 : 0;
+            if (oremote && list.some(function (x: any) { return x.actor === oremote && x.owner === me; })) return; // its own summon
+            var foe = this.sp.Actor.from(other);
+            if (!foe || foe.isDead()) return;
+            var was = this.greymarchSummonFoe;
+            this.greymarchSummonFoe = { id: oid, until: Date.now() + 30000 };
+            if (!was || was.id !== oid) { this.greymarchLog("summon: " + (t === 0x14 ? "hit by " : "hit ") + oid.toString(16) + ": this player's summons fight it"); this.greymarchSummonAt = 0; }
+        } catch (err) { /* the next hit */ }
+    }
     greymarchHit(e: any): any {
+        this.greymarchSummonHit(e);
         try {
             var now = Date.now();
             if (this.greymarchWolfLungeWatch && e.aggressor && e.target) { try { if (e.aggressor.getFormID() === this.sp.Game.getPlayer().getFormID()) { this.greymarchLog("wolf lunge: hit " + (e.target.getFormID() >>> 0).toString(16) + " " + (now - this.greymarchWolfLungeWatch) + " ms after the leap"); this.greymarchWolfLungeWatch = 0; } } catch (lwErr) { /* the log is a nicety */ } }

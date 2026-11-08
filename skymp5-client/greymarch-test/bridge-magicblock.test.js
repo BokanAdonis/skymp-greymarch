@@ -39,3 +39,9 @@ test("a summon's summon spell is seen at the cast too (2026-11-07, the test: the
   assert.match(src, /else if \(e && e\.spell && e\.caster\) this\.greymarchSummonCastBy\(e\.caster, e\.spell\);/);
   assert.match(src, /if \(caster\) this\.greymarchSummonMagic\(caster, remote, effect, entry\);/);
 });
+
+test("this player's summons take up their fights (2026-11-07, the owner: when I got hit they did not get marked as hostile)", () => {
+  assert.match(src, /greymarchHit\(e: any\): any \{\s*this\.greymarchSummonHit\(e\);/);
+  assert.match(src, /var other = t === 0x14 \? e\.aggressor : g === 0x14 \? e\.target : null;/);
+  assert.match(src, /a\.startCombat\(fa\);/);
+});
