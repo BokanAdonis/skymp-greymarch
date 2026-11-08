@@ -67,11 +67,20 @@ export class SendInputsService extends ClientListener {
             this.gmEquipCrumb("equip", event);
         }
 
+        // GREYMARCH (2026-11-08, the owner: health "randomly drops by like 10, then goes back to normal" after eating something that heals): the game heals at
+        // once; when its health report reached the server before the eat did, the server took the heal back as too much regeneration and gave it again a moment
+        // later when the eat came. A potion, food or ingredient now holds the health report back a moment (as casting does), and its eat is sent reliably (lost,
+        // the server never gave its heal or filled hunger).
+        const eaten = type === FormType.Potion || type === FormType.Ingredient;
+        if (eaten) {
+            this.gmEatHoldUntil = Date.now() + 1500;
+        }
+
         // Send OnEquip for any equips including spell tomes, potions, ingredients
         // Otherwise, the server won't trigger spell learn, potion drink, ingredient eat and Papyrus scripts
         this.controller.emitter.emit("sendMessage", {
             message: { t: MsgType.OnEquip, baseId: event.baseObj.getFormID() },
-            reliability: "unreliable"
+            reliability: eaten ? "reliable" : "unreliable"
         });
     }
 
@@ -189,6 +198,11 @@ export class SendInputsService extends ClientListener {
             currentTime - this.prevCastingDetectedTime < 500 &&
             av.health > 0 // don't delay death actor value update
         ) {
+            return;
+        }
+
+        // GREYMARCH: just ate or drank: the server hears of it first (onEquip)
+        if (currentTime < this.gmEatHoldUntil && av.health > 0) {
             return;
         }
 
@@ -359,4 +373,5 @@ export class SendInputsService extends ClientListener {
     private prevValues: ActorValues = { health: 0, stamina: 0, magicka: 0 };
     private prevActorValuesUpdateTime = 0;
     private prevCastingDetectedTime = 0;
+    private gmEatHoldUntil = 0;
 }
