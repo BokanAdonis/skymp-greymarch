@@ -38,8 +38,43 @@ export class WorldCleanerService extends ClientListener {
   private onUpdate() {
     for (let i = 0, acted = 0; i < 24 && acted < 4; ++i) {
       const r = this.processOneActor();
-      if (r === null) break;
+      if (r === null) { this.stats.none++; break; }
       if (r) ++acted;
+    }
+    this.sweepCell();
+  }
+
+  // GREYMARCH: THE CELL SWEPT TOO, AND WHAT IS LEFT WRITTEN DOWN (2026-11-08, the owner: "I'm seeing A LOT of NPCs still, No base game NPCs should bleed
+  // through", with the faster picks). The random pick only finds actors the game is processing up close, so every 2 s every NPC placed in the player's own
+  // cell is looked at too and cleaned the same way. Each sweep that finds one still standing writes it to greymarch-logs.txt ("cleaner:"), with why it was
+  // left or that it was cleaned now, and the pick totals, so the next report says which NPCs survive and why (at most LOG_LINES lines a session).
+  private sweepCell() {
+    const now = Date.now();
+    if (now - this.sweptAt < 2000) return;
+    this.sweptAt = now;
+    const pc = this.sp.Game.getPlayer();
+    if (!pc) return;
+    let cell: any = null, n = 0;
+    try { cell = pc.getParentCell(); n = cell ? Math.min(cell.getNumRefs(62), 600) : 0; } catch (e) { return; } // 62: placed characters
+    const seen: string[] = [];
+    let found = 0;
+    for (let i = 0; i < n; ++i) {
+      let ac: Actor | null = null;
+      try { ac = this.sp.Actor.from(cell.getNthRef(i, 62)); } catch (e) { ac = null; }
+      if (!ac) continue;
+      let id = 0, disabled = true;
+      try { id = ac.getFormID() >>> 0; disabled = ac.isDisabled(); } catch (e) { continue; }
+      if (id === 0x14 || disabled || this.pending.has(id)) continue;
+      found++;
+      let why = "";
+      if ((this.protection.get(id) || 0) > 0) why = "kept (the server's)";
+      else if (ac.isDead() && id < 0xff000000) why = "kept (a placed body)";
+      else { const r = this.consider(ac); why = r ? "cleaned now" : "left"; if (r) this.stats.swept++; }
+      if (seen.length < 6) { let name = ""; try { name = ac.getDisplayName() || (ac.getBaseObject() ? (ac.getBaseObject() as any).getName() : ""); } catch (e) { name = ""; } seen.push(id.toString(16) + " " + name + ": " + why); }
+    }
+    if (found && this.logsLeft > 0) {
+      this.logsLeft--;
+      try { this.sp.writeLogs("greymarch", "[" + new Date().toISOString().substr(11, 12) + "] cleaner: cell " + ((cell.getFormID() >>> 0).toString(16)) + " has " + found + " NPCs up of " + n + " placed: " + seen.join("; ") + " | picks: " + this.stats.picks + " (none " + this.stats.none + ", the server's " + this.stats.prot + ", off " + this.stats.off + ", cleaned " + this.stats.cleaned + "), cleaned by the sweep " + this.stats.swept); } catch (e) { /* no log */ }
     }
   }
 
@@ -59,15 +94,23 @@ export class WorldCleanerService extends ClientListener {
     if (actor === null) {
       return null;
     }
+    this.stats.picks++;
+    const r = this.consider(actor);
+    if (r) this.stats.cleaned++;
+    return r;
+  }
 
+  private consider(actor: Actor): boolean {
     const actorId = actor.getFormID();
 
     const currentProtection = this.protection.get(actorId) || 0;
     if (currentProtection > 0) {
+      this.stats.prot++;
       return false;
     }
 
     if (actorId === 0x14 || this.pending.has(actorId) || actor.isDisabled() || actor.isDeleted()) {
+      this.stats.off++;
       return false;
     }
 
@@ -138,6 +181,9 @@ export class WorldCleanerService extends ClientListener {
 
   private protection = new Map<number, number>();
   private pending = new Set<number>(); // disabled, its delete still to come
+  private sweptAt = 0;
+  private logsLeft = 60;
+  private stats = { picks: 0, none: 0, prot: 0, off: 0, cleaned: 0, swept: 0 };
   private initialPos?: NiPoint3;
   private initialCellOrWorld?: number;
 }
