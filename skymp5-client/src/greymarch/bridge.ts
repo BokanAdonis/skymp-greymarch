@@ -81,6 +81,7 @@ const WOLF_HOWL_SHOUT = 0x0ce218;
 // the outro, its sounds); the scent is the werewolf's own Detect Life vision (DetectLifeWerewolfVision raises DetectLifeRange: the engine shows the living through
 // walls within it) for the time the server gives, with the Detect Life image space.
 const NIGHT_EYE_IMOD = 0x06b108, NIGHT_EYE_INTRO = 0x06b10a, NIGHT_EYE_OUTRO = 0x06b10b, NIGHT_EYE_ON_SOUND = 0x07c723, NIGHT_EYE_OFF_SOUND = 0x07c722; // Skyrim.esm
+const REST_HEAL_REGEN = 50; // percent on HealRateMult out of combat (greymarchRestRegenTick)
 const SCENT_IMOD = 0x02fb1d; // DetectLifeImod, Skyrim.esm
 const WOLF_HOWL_IDLE = 0x0cdd9f; // the idle HowlStart (Skyrim.esm), WerewolfBehavior.hkx, needs isHowling == 0: played on other players' werewolves (greymarchWolfHowlOther)
 const WOLF_ROAR_SOUND = 0x101008, BEAR_ROAR_SOUND = 0x0f95bb; // NPCWerewolfShout (the werewolf's howl) and NPCBearAggroWarning01 (a bear's warning roar), Skyrim.esm
@@ -606,6 +607,7 @@ export class GreymarchBridge {
         this.greymarchStackNote(Date.now()); // an item in two stacks: what differs between them, to the log (2026-11-06)
         this.greymarchRestackOnce(Date.now()); // the old split stacks of plain items (hides, leather, ingredients) made one again, once a session
         try { this.greymarchWolfPerksTick(); } catch (pkErr) { /* next frame */ } // a carrier's perks, night eye and the scent
+        try { this.greymarchRestRegenTick(); } catch (rrErr) { /* next frame */ } // faster health regeneration out of combat
         this.greymarchWolfTick(); // the werewolf form: the game's Beast Form power is the trigger, the server decides, the change is done here
         if (this.greymarchWolfOn || this.greymarchWolfLungeClick) { try { var gmLungeP = this.sp.Game.getPlayer(); if (gmLungeP) this.greymarchWolfLungeTick(gmLungeP, Date.now()); } catch (lgErr) { /* next frame */ } } // the lunge, every frame (the wolf tick runs every 250 ms)
         this.greymarchSpellCostTick(); // the Spells balance tab's costs on the spell records (GreymarchCamera.dll 1.5)
@@ -6384,6 +6386,21 @@ export class GreymarchBridge {
         (this.greymarchWolfOtherRelease || (this.greymarchWolfOtherRelease = {}))[localId] = now + 200;
         (this.greymarchWolfHowlCheck || (this.greymarchWolfHowlCheck = {}))[localId] = { at: now + 400, before: howlingBefore, viaIdle: viaIdle };
         return true;
+    }
+    // FASTER HEALTH REGENERATION OUT OF COMBAT (2026-11-08, the owner: "if they aren't in combat they have a slightly faster regen"; chosen: +50%, health only):
+    // HealRateMult +REST_HEAL_REGEN while not in combat and alive, taken off again in combat. Moved by what is wanted minus what this added (as the carrier's perks),
+    // so nothing else's changes are touched. The server's regeneration limit always leaves room for it (gamemode consumeheal.js, TUNE.outOfCombat).
+    greymarchRestRegenTick(): any {
+        var player = this.sp.Game.getPlayer();
+        if (!player) return;
+        var inCombat = false; try { inCombat = !!player.isInCombat(); } catch (cErr) { inCombat = false; }
+        var dead = false; try { dead = !!player.isDead(); } catch (dErr) { dead = false; }
+        var want = !inCombat && !dead ? REST_HEAL_REGEN : 0;
+        var had = this.greymarchRestRegenAdded || 0;
+        if (want === had) return;
+        try { player.modActorValue("HealRateMult", want - had); } catch (mErr) { this.greymarchLog("rest regen: could not be set: " + mErr); return; }
+        this.greymarchRestRegenAdded = want;
+        if (!this.greymarchRestRegenLogged) { this.greymarchRestRegenLogged = true; this.greymarchLog("rest regen: +" + REST_HEAL_REGEN + "% health regeneration out of combat"); }
     }
     // a carrier's perks (see NIGHT_EYE_IMOD): the actor values are moved by what is wanted minus what this already added, so nothing else's changes are touched
     greymarchWolfPerksTick(): any {
