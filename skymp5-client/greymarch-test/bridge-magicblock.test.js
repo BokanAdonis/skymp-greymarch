@@ -55,7 +55,7 @@ test("a summon of this player's gets the F7 Summons health and damage here (2026
 test("a summon of this player's never fights them and keeps up (2026-11-07, the owner: when I walk the summons do not follow me)", () => {
   assert.match(src, /if \(a\.isInCombat\(\) && ctm && \(ctm\.getFormID\(\) >>> 0\) === 0x14\) \{ a\.stopCombat\(\);/);
   assert.match(src, /if \(far > 4000\) \{ try \{ a\.moveTo\(player,/);
-  assert.match(src, /far > 300 && now - \(fat\[s\.actor\] \|\| 0\) > 5000/);
+  assert.match(src, /far > 450 && now - \(fat\[s\.actor\] \|\| 0\) > 5000/);
 });
 
 test("this player's own summon is never pulled out of its idle or furniture and sent at a player (2026-11-07, the owner: the summons still did not follow)", () => {
@@ -66,7 +66,9 @@ test("this player's own summon is never pulled out of its idle or furniture and 
 });
 
 test("a summon that does not follow is written down and walked to its caster (2026-11-08, the owner: the summons still did not follow)", () => {
-  assert.match(src, /a\.keepOffsetFromActor\(player, -90, -140, 0, 0, 0, 0, 350, 120\); a\.evaluatePackage\(\);/);
+  // trailing further back, let go once close (2026-11-08, the owner's clip: glued to them)
+  assert.match(src, /a\.keepOffsetFromActor\(player, -110, -260, 0, 0, 0, 0, 700, 300\); a\.evaluatePackage\(\);/);
+  assert.match(src, /if \(made\[s\.actor\] === "follow" && far < 260\) \{ try \{ a\.clearKeepOffsetFromActor\(\);/);
   assert.match(src, /if \(stuck\) \{ try \{ var pr: any = a\.pathToReference\(player, 1\.0\);/);
 });
 
