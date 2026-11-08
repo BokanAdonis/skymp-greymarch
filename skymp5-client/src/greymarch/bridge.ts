@@ -3629,7 +3629,8 @@ export class GreymarchBridge {
             if (!a) continue;
             try {
                 if (!a.is3DLoaded() || a.isDead()) continue;
-                if (!made[s.actor]) { made[s.actor] = true; a.setPlayerTeammate(true, true); a.setRelationshipRank(player, 3); a.stopCombat(); this.greymarchLog("summon: " + (s.actor >>> 0).toString(16) + " is this player's (a teammate)"); }
+                if (!made[s.actor]) { made[s.actor] = true; a.setPlayerTeammate(true, true); a.setRelationshipRank(player, 3); a.setActorValue("Aggression", 0); a.stopCombat(); /* unaggressive (2026-11-07, the owner: it was hostile to someone I was not fighting): it fights only with its caster, when they fight */ this.greymarchLog("summon: " + (s.actor >>> 0).toString(16) + " is this player's (a teammate)"); }
+                try { if (a.getActorValue("Aggression") !== 0) a.setActorValue("Aggression", 0); } catch (agErr) { /* as it was */ } // kept unaggressive (the game can put it back)
                 if (a.isInCombat()) { if (made[s.actor] === "follow") { a.clearKeepOffsetFromActor(); made[s.actor] = true; } continue; }
                 if (made[s.actor] !== "follow") { a.keepOffsetFromActor(player, -90, -140, 0, 0, 0, 0, 350, 120); made[s.actor] = "follow"; }
             } catch (e) { /* tried again in a second */ }
