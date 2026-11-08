@@ -205,7 +205,7 @@ export class GreymarchBridge {
         try { this.controller.on("magicEffectApply", (e: any) => { try { if (e && e.effect && e.activeEffect && this.greymarchMagicBlock && this.greymarchMagicBlock[e.effect.getFormID() >>> 0]) (this.greymarchMagicBlockQueue || (this.greymarchMagicBlockQueue = [])).push({ active: e.activeEffect, effect: e.effect.getFormID() >>> 0, caster: e.caster ? e.caster.getFormID() >>> 0 : 0 }); } catch (x) { /* not ours */ } }); } catch (mbErr) { /* no effect events: NPC raise-the-dead and summons are not stopped */ } // an NPC raising the dead or summoning (gamemode magicblock.js): ended in greymarchMagicBlockDrive
         try { this.controller.on("magicEffectApply", (e: any) => { try { if (e && e.effect && e.effect.getFormID() === 0x92c45 && e.target && e.target.getFormID() === 0x14) this.greymarchWolfSignal("magicEffectApply"); } catch (x) { /* not ours */ } }); } catch (maErr) { /* the other signals still see it */ }
         try { this.controller.on("spellCast", (e: any) => { try { if (e && e.spell && e.caster && e.caster.getFormID() === 0x14) { var castId = e.spell.getFormID(); if (castId === this.greymarchVampForm("lord") || castId === this.greymarchVampForm("mist")) this.greymarchVampSignalFirst("cast", castId); else this.greymarchVampSignal("cast", castId); } } catch (x) { /* not ours */ } }); } catch (vcErr) { /* no cast events: the powers are not reported */ } // a vampire's Mist Form or Vampire Lord (greymarchVampTick)
-        try { this.controller.on("spellCast", (e: any) => { try { if (e && e.spell && e.caster && e.caster.getFormID() === 0x14) this.greymarchSummonCast(e.spell); } catch (x) { /* not a summon */ } }); } catch (scErr) { /* no cast events: summons stay in this game */ } // a summon spell: the server places it (greymarchSummonCast)
+        try { this.controller.on("spellCast", (e: any) => { try { if (e && e.spell && e.caster && e.caster.getFormID() === 0x14) this.greymarchSummonCast(e.spell); else if (e && e.spell && e.caster) this.greymarchSummonCastBy(e.caster, e.spell); } catch (x) { /* not a summon */ } }); } catch (scErr) { /* no cast events: summons stay in this game */ } // a summon spell: the server places it (greymarchSummonCast)
         try { this.controller.on("spellCast", (e: any) => { try { if (e && e.spell && e.caster && e.caster.getFormID() === 0x14) this.greymarchCastSend(e.spell.getFormID()); } catch (x) { /* not ours */ } }); } catch (hcErr) { /* no cast events: healing spells are not reported */ } // every cast of the player's own spells goes to the server, which applies the healing ones (healing.js); it never applies spell effects itself
         try { this.controller.on("magicEffectApply", (e: any) => { try { if (e && e.effect && e.target && e.target.getFormID() === 0x14) { var fxId = e.effect.getFormID(); if (fxId === this.greymarchVampForm("potionFx")) this.greymarchVampSignalFirst("effect", fxId); else this.greymarchVampSignal("effect", fxId); } } catch (x) { /* not ours */ } }); } catch (veErr) { /* no effect events: a Potion of Blood is not reported */ } // a Potion of Blood drunk
         try { this.controller.on("equip", (e: any) => { try { if (e && e.baseObj && e.actor && e.actor.getFormID() === 0x14) { var eqId = e.baseObj.getFormID(); if (eqId === this.greymarchVampForm("potion")) this.greymarchVampSignalFirst("equip", eqId); else this.greymarchVampSignal("equip", eqId); this.greymarchConsumeNote(e.baseObj); } } catch (x) { /* not ours */ } }); } catch (vqErr) { /* the effect event still sees it */ } // a potion is "equipped" when it is drunk
@@ -3646,6 +3646,13 @@ export class GreymarchBridge {
                 // its summoning spell back once what it called is gone (greymarchSummonMagic)
                 var off = this.greymarchSummonSpellsOff, o = off ? off[s.actor] : null;
                 if (o && now - o.at > 15000 && !list.some(function (x: any) { return x.parent === (s.actor >>> 0); })) { for (var k = 0; k < o.spells.length; k++) { try { a.addSpell(o.spells[k], false); } catch (adErr) { /* it fights on without it */ } } delete off[s.actor]; this.greymarchLog("summon: " + (s.actor >>> 0).toString(16) + " can summon again"); }
+                // WHAT IT IS DOING (2026-11-07, the owner: Herne did not use his bow, the totems did not fight): a line when its state changes
+                try {
+                    var diag = this.greymarchSummonDiag || (this.greymarchSummonDiag = {});
+                    var wr = a.getEquippedWeapon(false), wl = a.getEquippedWeapon(true), tg = a.getCombatTarget(), rc = a.getRace();
+                    var line = "fight " + (a.isInCombat() ? "yes" : "no") + (tg ? " at " + ((tg.getFormID() >>> 0) === 0x14 ? "me" : (tg.getFormID() >>> 0).toString(16)) : "") + ", right " + (wr ? wr.getName() : "nothing") + ", left " + (wl ? wl.getName() : "nothing") + ", race " + (rc ? rc.getName() : "?") + ", drawn " + a.isWeaponDrawn();
+                    if (diag[s.actor] !== line) { diag[s.actor] = line; this.greymarchLog("summon: " + (s.actor >>> 0).toString(16) + " " + line); }
+                } catch (dgErr) { /* only a log line */ }
                 if (a.isInCombat()) { if (made[s.actor] === "follow") { a.clearKeepOffsetFromActor(); made[s.actor] = true; } continue; }
                 if (made[s.actor] !== "follow") { a.keepOffsetFromActor(player, -90, -140, 0, 0, 0, 0, 350, 120); made[s.actor] = "follow"; }
             } catch (e) { /* tried again in a second */ }
@@ -3655,6 +3662,22 @@ export class GreymarchBridge {
     // raised the dead). Its effect was ended (above) and it cast again and again, nothing else. A summon: the server is told and places the creature beside it
     // for everyone (gamemode summons.js, a summon's own summons); either way the spell is taken from it here so it uses its other magic and its weapon. A
     // summoning spell is given back once the creatures it called are gone (greymarchSummonTick); raising the dead stays taken (one game only, never shown).
+    // ...seen at the cast (2026-11-07, the test: the Lord of Bindings cast Conjure Bound Churl again and again and its effect never landed, so the effect
+    // event above never saw it): a summon of this player's casting a spell with a summon or raise-the-dead effect
+    greymarchSummonCastBy(casterRef: any, spell: any): any {
+        var block = this.greymarchMagicBlock, list: any[] = this.greymarchSummonList || [];
+        if (!block || !list.length) return;
+        var local = casterRef.getFormID() >>> 0;
+        if (local < 0xff000000) return;
+        var remote = misc.localIdToRemoteId(local) >>> 0;
+        var entry = remote ? list.find((x: any) => x.actor === remote && x.owner === (this.greymarchMeActor >>> 0)) : null;
+        if (!entry) return;
+        var effect = 0;
+        try { var n = spell.getNumEffects(); for (var i = 0; i < n && !effect; i++) { var m = spell.getNthEffectMagicEffect(i); if (m && block[m.getFormID() >>> 0]) effect = m.getFormID() >>> 0; } } catch (e) { effect = 0; }
+        if (!effect) return;
+        var caster = this.sp.Actor.from(casterRef);
+        if (caster) this.greymarchSummonMagic(caster, remote, effect, entry);
+    }
     greymarchSummonMagic(caster: any, remote: number, effect: number, entry: any): any {
         var sp = this.sp, now = Date.now();
         var isSummon = !!(this.greymarchSummonFx && this.greymarchSummonFx[effect >>> 0]);

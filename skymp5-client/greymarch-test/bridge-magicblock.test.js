@@ -34,3 +34,8 @@ test("another player's summon (2026-11-07, the owner: the gargoyles were still h
   assert.match(src, /a\.removeFromAllFactions\(\); a\.setActorValue\("Aggression", 0\); a\.stopCombat\(\);/);
   assert.match(src, /if \(a\.isInCombat\(\)\) a\.stopCombat\(\);/);
 });
+
+test("a summon's summon spell is seen at the cast too (2026-11-07, the test: the Lord of Bindings' Bound Churl effect never landed)", () => {
+  assert.match(src, /else if \(e && e\.spell && e\.caster\) this\.greymarchSummonCastBy\(e\.caster, e\.spell\);/);
+  assert.match(src, /if \(caster\) this\.greymarchSummonMagic\(caster, remote, effect, entry\);/);
+});
