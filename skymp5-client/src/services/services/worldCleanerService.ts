@@ -181,26 +181,16 @@ export class WorldCleanerService extends ClientListener {
       }
     }
 
-    // GREYMARCH: STOPPED BEFORE IT GOES, DELETED A SECOND LATER (2026-11-07, a player's crash 25 s after loading in: a Bandit Hedge Wizard of BSHeartland,
-    // deleted and in no cell, read by the movement code, MovementControllerNPC / IMovementMessageInterface). The cleaner disabled a hostile NPC already on
-    // its way to the player and deleted it a frame later, its movement still being worked on: now its combat and moves are stopped first and the delete
-    // waits a second after the disable.
-    // EVERY NPC IS STILL DELETED, PLACED ONES TOO (2026-11-08, the owner: "NPCs have started bleeding through into the game", guards and farmers seen on
-    // live; a player's screenshot of Markarth's guards on the stairs): for a few hours placed NPCs were only disabled and their AI switched off first,
-    // and a disabled-only NPC is not always gone (SkyMP's cleaner deletes because some actors keep their 3D after Disable, the chicken anomaly above), and
-    // the cleaner skips an NPC once it reads as disabled, so those stayed for good. The AI is not switched off here (a disable is not held back by it).
-    try { actor.stopCombat(); } catch (e) { /* not fighting */ }
-    try { actor.stopTranslation(); actor.clearKeepOffsetFromActor(); } catch (e) { /* not moving */ }
+    // GREYMARCH (2026-11-08, the owner: "completely remove what I did"): the crash fix of 2026-11-07 (combat and moves stopped first, the delete a second
+    // after the disable) is taken out; the NPC is deleted as SkyMP did it, once its disable is done
     this.pending.add(actorId);
     actor.disable(false).then(() => {
-      return this.sp.Utility.wait(1).then(() => {
-        this.pending.delete(actorId);
-        const ac = this.sp.Actor.from(this.sp.Game.getFormEx(actorId));
-        if (!ac || this.isActorInDialogue(ac) || !ac.isDisabled()) {
-          return;
-        }
-        ac.delete();
-      });
+      this.pending.delete(actorId);
+      const ac = this.sp.Actor.from(this.sp.Game.getFormEx(actorId));
+      if (!ac || this.isActorInDialogue(ac)) {
+        return;
+      }
+      ac.delete();
     }).catch(() => { this.pending.delete(actorId); });
     return true;
   }
