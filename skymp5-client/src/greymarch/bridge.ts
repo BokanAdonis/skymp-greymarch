@@ -2332,8 +2332,13 @@ export class GreymarchBridge {
                 if (slot === 0) {
                     var selId = 0;
                     var paths = ["_root.MenuHolder.Menu_mc.itemList.selectedEntry.formId", "_root.Menu_mc.itemList.selectedEntry.formId"];
-                    for (var pi = 0; pi < paths.length && !selId; pi++) { try { var v = Number(this.sp.Ui.getFloat("FavoritesMenu", paths[pi])); if (isFinite(v) && v !== 0) selId = v >>> 0; } catch (uiErr) { /* the other path */ } }
+                    // EXACT (2026-11-08, the owner: "it just unfavorites the item I did have"; the log: the robes 10cc43c0 read as 10cc43e0): GetFloat rounds an id
+                    // to a 32-bit float; GetInt gives it exactly (an id past 0x7fffffff comes back negative: >>> 0 puts it right)
+                    for (var pi = 0; pi < paths.length && !selId; pi++) { try { var v = Number(this.sp.Ui.getInt("FavoritesMenu", paths[pi])); if (isFinite(v) && v !== 0) selId = v >>> 0; } catch (uiErr) { /* the other path */ } }
                     var selForm = selId ? this.sp.Game.getFormEx(selId) : null;
+                    // ONLY ONE OF THEIRS: SetHotkey takes the slot from whatever had it before it looks for the new one, so a form they do not carry or know is never sent
+                    var mineSel = false; try { var plS = this.sp.Game.getPlayer(); var tS = selForm ? selForm.getType() : 0; mineSel = !!selForm && (tS === 119 ? true : tS === 22 ? plS.hasSpell(selForm) : plS.getItemCount(selForm) > 0); } catch (msErr) { mineSel = false; }
+                    if (selForm && !mineSel) { this.greymarchLog("favorites: hotkey 1: the selected entry " + selId.toString(16) + " is not one of theirs: nothing changed"); selForm = null; selId = 0; }
                     if (selForm) { var put = this.greymarchFavCall("SetHotkey", selForm, 0); this.greymarchLog("favorites: hotkey 1 given to " + (selForm.getName() || selId.toString(16)) + " by hand (the menu did not) -> " + put + "; reopen the menu to see the 1"); }
                     else this.greymarchLog("favorites: hotkey 1: the entry selected in the menu could not be read (" + selId.toString(16) + ")");
                 }
