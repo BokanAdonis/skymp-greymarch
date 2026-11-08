@@ -3694,13 +3694,21 @@ export class GreymarchBridge {
                 // NEVER TAKEN OFF (2026-11-08, the owner: "when I stand still it will try to walk away and then sling shot back"): taken off within 260, its own
                 // package walked it back towards where it was made, and at 450 the follow pulled it back again. The follow stays on; its follow radius (400)
                 // lets it stand where it is while it is that near its place behind the caster
-                if ((made[s.actor] !== "follow") || (far > 450 && now - (fat[s.actor] || 0) > 5000)) {
+                // A ROAMER (2026-11-08, the owner: the Spectral Bears and Wolves and the Death Hounds do not follow; the log: their package is the game's
+                // DefaultPredatorPackage, which roams and hunts and ran them 900 away within 5 s of a follow). A summon on any package but DefaultMasterPackage
+                // (0x3EAB9) is given the follow every second while it is behind, and walked to its caster (PathToReference) once it is past 400
+                var pkId = 0; try { var pk0 = a.getCurrentPackage(); pkId = pk0 ? pk0.getFormID() >>> 0 : 0; } catch (pk0Err) { pkId = 0; }
+                var roamer = !!pkId && pkId !== 0x3eab9;
+                var again = roamer ? 1000 : 5000, behind = roamer ? 400 : 450;
+                if ((made[s.actor] !== "follow") || (far > behind && now - (fat[s.actor] || 0) > again)) {
                     var lps = this.greymarchSummonLastPos || (this.greymarchSummonLastPos = {});
                     var fpos = [a.getPositionX(), a.getPositionY()], lp = lps[s.actor];
-                    var stuck = !!lp && made[s.actor] === "follow" && far > 700 && Math.hypot(fpos[0] - lp[0], fpos[1] - lp[1]) < 30;
+                    var stuck = (roamer && made[s.actor] === "follow" && far > 400) || (!!lp && made[s.actor] === "follow" && far > 700 && Math.hypot(fpos[0] - lp[0], fpos[1] - lp[1]) < 30);
                     try { a.keepOffsetFromActor(player, -110, -260, 0, 0, 0, 0, 700, 400); a.evaluatePackage(); } catch (kErr) { this.greymarchLog("summon: " + (s.actor >>> 0).toString(16) + " could not be told to follow: " + kErr); }
-                    if (stuck) { try { var pr: any = a.pathToReference(player, 1.0); if (pr && pr.then) pr.then(function () { /* there */ }, function () { /* tried again in 5 s */ }); } catch (pErr) { this.greymarchLog("summon: " + (s.actor >>> 0).toString(16) + " could not be walked to its caster: " + pErr); } }
-                    this.greymarchLog("summon: " + (s.actor >>> 0).toString(16) + " follows (" + Math.round(far) + " away" + (stuck ? ", it had not moved: walked to its caster" : "") + ", package " + (function () { try { var pk = a.getCurrentPackage(); return pk ? (pk.getFormID() >>> 0).toString(16) : "none"; } catch (pkErr) { return "?"; } })() + ")");
+                    var paths = this.greymarchSummonPathing || (this.greymarchSummonPathing = {});
+                    if (stuck && now - (paths[s.actor] || 0) > 4000) { paths[s.actor] = now; var sid = s.actor; try { var pr: any = a.pathToReference(player, 1.0); if (pr && pr.then) pr.then(function () { paths[sid] = 0; }, function () { paths[sid] = 0; }); } catch (pErr) { this.greymarchLog("summon: " + (s.actor >>> 0).toString(16) + " could not be walked to its caster: " + pErr); } }
+                    var logs = this.greymarchSummonFollowLog || (this.greymarchSummonFollowLog = {});
+                    if (!roamer || now - (logs[s.actor] || 0) > 5000) { logs[s.actor] = now; this.greymarchLog("summon: " + (s.actor >>> 0).toString(16) + " follows (" + Math.round(far) + " away" + (stuck ? (roamer ? ", a roamer: walked to its caster" : ", it had not moved: walked to its caster") : "") + ", package " + (pkId ? pkId.toString(16) : "none") + ")"); }
                     lps[s.actor] = fpos; made[s.actor] = "follow"; fat[s.actor] = now;
                 }
             } catch (e) { /* tried again in a second */ }

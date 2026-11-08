@@ -55,7 +55,7 @@ test("a summon of this player's gets the F7 Summons health and damage here (2026
 test("a summon of this player's never fights them and keeps up (2026-11-07, the owner: when I walk the summons do not follow me)", () => {
   assert.match(src, /if \(a\.isInCombat\(\) && ctm && \(ctm\.getFormID\(\) >>> 0\) === 0x14\) \{ a\.stopCombat\(\);/);
   assert.match(src, /if \(far > 4000\) \{ try \{ a\.moveTo\(player,/);
-  assert.match(src, /far > 450 && now - \(fat\[s\.actor\] \|\| 0\) > 5000/);
+  assert.match(src, /far > behind && now - \(fat\[s\.actor\] \|\| 0\) > again/);
 });
 
 test("this player's own summon is never pulled out of its idle or furniture and sent at a player (2026-11-07, the owner: the summons still did not follow)", () => {
@@ -70,7 +70,7 @@ test("a summon that does not follow is written down and walked to its caster (20
   assert.match(src, /a\.keepOffsetFromActor\(player, -110, -260, 0, 0, 0, 0, 700, 400\); a\.evaluatePackage\(\);/);
   // never taken off when close (2026-11-08, the owner: it walked away and slung back)
   assert.doesNotMatch(src, /far < 260\) \{ try \{ a\.clearKeepOffsetFromActor/);
-  assert.match(src, /if \(stuck\) \{ try \{ var pr: any = a\.pathToReference\(player, 1\.0\);/);
+  assert.match(src, /var pr: any = a\.pathToReference\(player, 1\.0\);/);
 });
 
 test("a hosted NPC's follow is not cleared every frame when it is this player's own summon (2026-11-08, the owner: the summons still did not follow)", () => {
@@ -78,4 +78,10 @@ test("a hosted NPC's follow is not cleared every frame when it is this player's 
   assert.match(fv, /const gmIsOwnSummon = \(remoteId: any\): boolean =>/);
   assert.match(fv, /if \(alreadyHosted && !gmIsOwnSummon\(this\.remoteRefrId\)\) \{\s*Actor\.from\(refr\)\?\.clearKeepOffsetFromActor\(\);/);
   assert.match(fv, /if \(!gmIsOwnSummon\(remoteId\)\) ac\.clearKeepOffsetFromActor\(\);/);
+});
+
+test("a roaming summon (the predator package) is kept up every second and walked to its caster (2026-11-08, the owner: Spectral Bears and Wolves and Death Hounds did not follow)", () => {
+  assert.match(src, /var roamer = !!pkId && pkId !== 0x3eab9;/);
+  assert.match(src, /var again = roamer \? 1000 : 5000, behind = roamer \? 400 : 450;/);
+  assert.match(src, /if \(stuck && now - \(paths\[s\.actor\] \|\| 0\) > 4000\)/);
 });
