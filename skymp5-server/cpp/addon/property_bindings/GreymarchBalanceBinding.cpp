@@ -92,6 +92,42 @@ void HitsToKillBinding::Set(Napi::Env, ScampServer& scampServer,
     static_cast<int>(std::clamp(std::round(hits), 0.f, 50.f)));
 }
 
+Napi::Value GreymarchHiddenBinding::Get(Napi::Env env,
+                                        ScampServer& scampServer,
+                                        uint32_t formId)
+{
+  auto& ref =
+    scampServer.GetPartOne()->worldState.GetFormAt<MpObjectReference>(formId);
+  return Napi::Boolean::New(env, ref.IsGreymarchHidden());
+}
+
+void GreymarchHiddenBinding::Set(Napi::Env, ScampServer& scampServer,
+                                 uint32_t formId, Napi::Value newValue)
+{
+  auto& ref =
+    scampServer.GetPartOne()->worldState.GetFormAt<MpObjectReference>(formId);
+  ref.SetGreymarchHidden(newValue.IsBoolean() &&
+                         newValue.As<Napi::Boolean>().Value());
+}
+
+Napi::Value GreymarchSeesHiddenBinding::Get(Napi::Env env,
+                                            ScampServer& scampServer,
+                                            uint32_t formId)
+{
+  auto& ref =
+    scampServer.GetPartOne()->worldState.GetFormAt<MpObjectReference>(formId);
+  return Napi::Boolean::New(env, ref.IsGreymarchSeesHidden());
+}
+
+void GreymarchSeesHiddenBinding::Set(Napi::Env, ScampServer& scampServer,
+                                     uint32_t formId, Napi::Value newValue)
+{
+  auto& ref =
+    scampServer.GetPartOne()->worldState.GetFormAt<MpObjectReference>(formId);
+  ref.SetGreymarchSeesHidden(newValue.IsBoolean() &&
+                             newValue.As<Napi::Boolean>().Value());
+}
+
 Napi::Value UnharmedBinding::Get(Napi::Env env, ScampServer& scampServer,
                                  uint32_t formId)
 {

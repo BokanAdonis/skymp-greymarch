@@ -166,6 +166,16 @@ public:
     const std::string& propertyName,
     const std::string& propertyValueStringified);
 
+  // GREYMARCH (2026-11-08, the owner: an invisible GM is seen only by other staff, see-through; players get no body, sound or prompt): a hidden one is
+  // never subscribed to a player who does not see hidden ones, so that player's game is never told it exists. mp.set(actorId, "greymarchHidden", bool)
+  // and mp.set(actorId, "greymarchSeesHidden", bool) (property bindings); both take effect at once.
+  void SetGreymarchHidden(bool hidden);
+  void SetGreymarchSeesHidden(bool sees);
+  bool IsGreymarchHidden() const noexcept { return greymarchHidden; }
+  bool IsGreymarchSeesHidden() const noexcept { return greymarchSeesHidden; }
+  static bool GreymarchMaySee(const MpObjectReference* emitter,
+                              const MpObjectReference* listener);
+
   static void Subscribe(MpObjectReference* emitter,
                         MpObjectReference* listener);
   static void Unsubscribe(MpObjectReference* emitter,
@@ -240,6 +250,8 @@ private:
                                        float occupationReach);
 
   bool everSubscribedOrListened = false;
+  bool greymarchHidden = false;
+  bool greymarchSeesHidden = false;
   std::unique_ptr<std::set<MpObjectReference*>> listeners;
   std::vector<MpActor*> actorListenerArray;
 

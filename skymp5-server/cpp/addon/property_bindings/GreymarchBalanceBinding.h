@@ -37,6 +37,28 @@ public:
            Napi::Value newValue) override;
 };
 
+// GREYMARCH (2026-11-08): mp.set(actorId, "greymarchHidden", true): an invisible GM, never sent to a player who does not see hidden ones (MpObjectReference).
+class GreymarchHiddenBinding : public PropertyBinding
+{
+public:
+  std::string GetPropertyName() const override { return "greymarchHidden"; }
+  Napi::Value Get(Napi::Env env, ScampServer& scampServer,
+                  uint32_t formId) override;
+  void Set(Napi::Env env, ScampServer& scampServer, uint32_t formId,
+           Napi::Value newValue) override;
+};
+
+// GREYMARCH (2026-11-08): mp.set(actorId, "greymarchSeesHidden", true): this player (staff) is sent the hidden ones near it.
+class GreymarchSeesHiddenBinding : public PropertyBinding
+{
+public:
+  std::string GetPropertyName() const override { return "greymarchSeesHidden"; }
+  Napi::Value Get(Napi::Env env, ScampServer& scampServer,
+                  uint32_t formId) override;
+  void Set(Napi::Env env, ScampServer& scampServer, uint32_t formId,
+           Napi::Value newValue) override;
+};
+
 // GREYMARCH: mp.set(actorId, "unharmed", true) makes every weapon, fist or spell hit on that actor do nothing (the milk cows).
 class UnharmedBinding : public PropertyBinding
 {

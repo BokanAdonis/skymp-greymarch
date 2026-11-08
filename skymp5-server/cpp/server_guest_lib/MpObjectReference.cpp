@@ -718,7 +718,10 @@ void MpObjectReference::ForceSubscriptionsUpdate()
     // Note: Self-subscription is OK this check is performed as we don't want
     // to self-subscribe twice! We have already been subscribed to self in
     // the last line of code
-    if (this != listener)
+    // GREYMARCH: a hidden one is never in a player's listeners, so it comes back in toAdd: the other way is only made when it is not there already
+    if (this != listener &&
+        !(greymarchHidden && listener->listeners &&
+          listener->listeners->count(this)))
       Subscribe(listener, this);
   }
 
@@ -985,6 +988,10 @@ void MpObjectReference::Subscribe(MpObjectReference* emitter,
     return;
   }
 
+  if (!GreymarchMaySee(emitter, listener)) {
+    return; // GREYMARCH: a hidden GM is not sent to this player
+  }
+
   if (!emitter->pImpl->onInitEventSent &&
       listener->GetChangeForm().profileId != -1) {
     emitter->pImpl->onInitEventSent = true;
@@ -1026,6 +1033,12 @@ void MpObjectReference::Unsubscribe(MpObjectReference* emitter,
   auto actorListener = listener->AsActor();
   bool bothNonActors = !actorEmitter && !actorListener;
   if (bothNonActors) {
+    return;
+  }
+
+  // GREYMARCH: a hidden one that was never sent to this player is not taken away from it either (no stray destroy message)
+  if (emitter->greymarchHidden &&
+      !(emitter->listeners && emitter->listeners->count(listener))) {
     return;
   }
 
@@ -2151,4 +2164,91 @@ float MpObjectReference::GetTotalItemWeight() const
   };
 
   return std::accumulate(entries.begin(), entries.end(), 0.f, calculateWeight);
+}
+
+// GREYMARCH (2026-11-08): who may be told a hidden one exists: itself, anything that is not a player, and players who see hidden ones (staff)
+bool MpObjectReference::GreymarchMaySee(const MpObjectReference* emitter,
+                                        const MpObjectReference* listener)
+{
+  if (!emitter || !listener || !emitter->greymarchHidden ||
+      emitter == listener) {
+    return true;
+  }
+  if (!listener->AsActor()) {
+    return true;
+  }
+  if (listener->GetChangeForm().profileId == -1) {
+    return true; // an NPC, not a player's character
+  }
+  return listener->greymarchSeesHidden;
+}
+
+void MpObjectReference::SetGreymarchHidden(bool hidden)
+{
+  if (greymarchHidden == hidden) {
+    return;
+  }
+  greymarchHidden = hidden;
+  if (hidden) {
+    if (!listeners) {
+      return;
+    }
+    std::vector<MpObjectReference*> away;
+    for (auto listener : *listeners) {
+      if (!GreymarchMaySee(this, listener)) {
+        away.push_back(listener);
+      }
+    }
+    for (auto listener : away) {
+      Unsubscribe(this, listener);
+    }
+    return;
+  }
+  // shown again: everyone near who was left out is told now
+  if (!emitters) {
+    return;
+  }
+  std::vector<MpObjectReference*> back;
+  for (auto other : *emitters) {
+    if (other != this &&
+        !(listeners && listeners->count(other)) && other->AsActor()) {
+      back.push_back(other);
+    }
+  }
+  for (auto other : back) {
+    Subscribe(this, other);
+  }
+}
+
+void MpObjectReference::SetGreymarchSeesHidden(bool sees)
+{
+  if (greymarchSeesHidden == sees) {
+    return;
+  }
+  greymarchSeesHidden = sees;
+  if (!emitters && !listeners) {
+    return;
+  }
+  // the hidden ones near: the ones this one listens to are its emitters, the ones near it are its listeners (a hidden one listens to it)
+  std::vector<MpObjectReference*> change;
+  if (sees && listeners) {
+    for (auto other : *listeners) {
+      if (other != this && other->greymarchHidden &&
+          !(other->listeners && other->listeners->count(this))) {
+        change.push_back(other);
+      }
+    }
+    for (auto other : change) {
+      Subscribe(other, this);
+    }
+  } else if (!sees && emitters) {
+    for (auto other : *emitters) {
+      if (other != this && other->greymarchHidden) {
+        change.push_back(other);
+      }
+    }
+    for (auto other : change) {
+      Unsubscribe(other, this);
+    }
+  }
 }
