@@ -98,12 +98,23 @@ export class WorldCleanerService extends ClientListener {
       }
     }
 
+    // GREYMARCH: STOPPED BEFORE IT GOES, AND A PLACED ONE NEVER DELETED (2026-11-07, a player's crash 25 s after loading in: a Bandit Hedge Wizard of BSHeartland,
+    // deleted and in no cell, read by the movement code, MovementControllerNPC / IMovementMessageInterface; one character crashed on every load where it logged out).
+    // The cleaner disabled a hostile NPC already on its way to the player and deleted it a frame later, its movement still being worked on. Now its AI, combat
+    // and moves are stopped first; an NPC the game placed (a plugin's, under ff000000) is only disabled, never deleted (disabled is gone enough, and the delete
+    // is what crashed); one made in play is deleted a second after it is disabled.
+    try { actor.enableAI(false); } catch (e) { /* it has none */ }
+    try { actor.stopCombat(); } catch (e) { /* not fighting */ }
+    try { actor.stopTranslation(); actor.clearKeepOffsetFromActor(); } catch (e) { /* not moving */ }
     actor.disable(false).then(() => {
-      const ac = this.sp.Actor.from(this.sp.Game.getFormEx(actorId));
-      if (!ac || this.isActorInDialogue(ac)) {
-        return;
-      }
-      ac.delete();
+      if (actorId < 0xff000000) return; // a placed NPC: disabled, not deleted
+      return this.sp.Utility.wait(1).then(() => {
+        const ac = this.sp.Actor.from(this.sp.Game.getFormEx(actorId));
+        if (!ac || this.isActorInDialogue(ac) || !ac.isDisabled()) {
+          return;
+        }
+        ac.delete();
+      });
     });
   }
 
