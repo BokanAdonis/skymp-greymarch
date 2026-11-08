@@ -330,3 +330,8 @@ test("a form's camera height raises the game's third-person camera in race mode 
   assert.match(src, /this\.greymarchShapeOn = 0;\s*this\.greymarchShapeCam\(0\);/);
   assert.match(src, /var sp = this\.sp, keys = \["fOverShoulderPosZ:Camera", "fOverShoulderCombatPosZ:Camera"\];/);
 });
+
+test("in race mode the camera is pointed at the new body again after the change (2026-11-08, the owner: as a Gargoyle the camera sat on the ground)", () => {
+  assert.match(src, /this\.greymarchShapeCamRefresh = \[cnow \+ 600, cnow \+ 1800\];/);
+  assert.match(src, /sp\.Game\.setCameraTarget\(player\); sp\.Game\.forceFirstPerson\(\);/);
+});

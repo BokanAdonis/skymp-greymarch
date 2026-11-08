@@ -3436,6 +3436,11 @@ export class GreymarchBridge {
                     var r = sp.Race.from(sp.Game.getFormEx(want.race));
                     if (r) { player.setRace(r); this.greymarchLog("shape: the race was not the creature's any more: set again"); }
                 }
+                var crf = this.greymarchShapeCamRefresh;
+                if (crf && crf.length && now >= crf[0] && this.greymarchShapeModeOn === "race") {
+                    crf.shift();
+                    try { if (player.is3DLoaded()) { sp.Game.setCameraTarget(player); sp.Game.forceFirstPerson(); var selfC = this; sp.Utility.wait(0.1).then(function () { try { selfC.sp.Game.forceThirdPerson(); } catch (tpErr) { /* the next refresh */ } }); this.greymarchLog("shape: the camera pointed at the new body again"); } else crf.unshift(now + 500); } catch (cfErr) { this.greymarchLog("shape: the camera could not be pointed at the new body: " + cfErr); }
+                }
                 this.greymarchShapeAttackTick(player, want, now);
             } else if (this.greymarchShapeOn) this.greymarchShapeEnd(player, raceId);
             var wearAt = this.greymarchShapeWearAt;
@@ -4186,6 +4191,10 @@ export class GreymarchBridge {
             step = "race"; player.setRace(r); // ONE real race change (remoteServer.ts no longer writes a creature race into the character first)
             step = "animation"; sp.Debug.sendAnimationEvent(player, "IdleForceDefaultState"); // start the new animation set from its idle
             step = "camera height"; this.greymarchShapeCam(want.camZ || 0); // a skeleton with no third-person camera point (greymarchShapeCam)
+            // THE CAMERA ON THE NEW BODY (2026-11-08, the owner: as a Gargoyle in race mode "I am looking from the ground"; raising the third-person heights did
+            // nothing): the camera was put in third person BEFORE the race change and kept the old skeleton's camera point, gone with that body. Once the new body is
+            // loaded it is pointed at the player again (SetCameraTarget) and the third-person view started again (first person, then third), twice
+            var cnow = Date.now(); this.greymarchShapeCamRefresh = [cnow + 600, cnow + 1800];
             this.greymarchShapeOn = want.race;
             var got = player.getRace();
             this.greymarchLog("shape: became " + (want.name || "a creature") + " (race now " + (got ? got.getFormID().toString(16) : "none") + ", will change back to " + (this.greymarchShapeBackRace || 0).toString(16) + ", " + want.normal.length + " attacks, " + want.power.length + " power attacks)");
