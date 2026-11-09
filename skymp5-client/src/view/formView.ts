@@ -34,6 +34,15 @@ const GM_RUN_NEAR = 250;
 const GM_RUN_NUDGE_MS = 8000;
 // Skyrim's own reset of an actor's animation state (its graph goes back to standing, so the AI's next move starts a real run). It moves nothing and changes no gear
 const GM_GRAPH_RESET = "IdleForceDefaultState";
+// GREYMARCH: WEAPON KEPT IN THE STANCE (2026-11-09, the owner: encounter bandits and necromancers "spawn in and not fight at all, their weapons are basically in
+// their hand but down to their sides"). The reset above puts the body in its unarmed idle, but the game still counts a weapon that was out as drawn: DrawWeapon
+// then did nothing, and the NPC stood with its weapon at its side and never attacked (every later nudge reset it again). One whose weapon is out is sent the
+// draw (WeapEquip) right after, so its body takes up its fighting stance again.
+function gmGraphReset(npc: Actor): void {
+  let drawn = false; try { drawn = npc.isWeaponDrawn(); } catch (e) { drawn = false; }
+  Debug.sendAnimationEvent(npc, GM_GRAPH_RESET);
+  if (drawn) { try { Debug.sendAnimationEvent(npc, "WeapEquip"); } catch (e) { /* the next nudge tries again */ } }
+}
 const GM_SIT_WAKE_MS = 2000; // an NPC in furniture that is hurt or fighting is pulled out at most this often (OUT OF THE FURNITURE TO FIGHT)
 const GM_SIT_WAKE_RANGE = 3000; // ... and sent at this game's player when they are this close
 const GM_SIT_NEAR = 1200; // a hostile NPC in furniture gets up and fights once a player is this close (about 17 m), hurt or not; one in an idle too, once it detects them
@@ -747,7 +756,7 @@ export class FormView {
       // its animation state is reset too (2026-10-28, the owner: the armed encounter skeletons ran in place; breadcrumbs: Speed 334, SpeedSampled 0). Until this
       // game ran it, its own animations were held back (setDefaultAnimsDisabled), and a run its AI started then never began in its graph
       let gmReset = false;
-      try { const gmHa = Actor.from(refr); if (gmHa && gmHa.is3DLoaded() && !gmHa.isDead()) { Debug.sendAnimationEvent(gmHa, GM_GRAPH_RESET); gmReset = true; } } catch (e) { /* the stuck-run check resets it later */ }
+      try { const gmHa = Actor.from(refr); if (gmHa && gmHa.is3DLoaded() && !gmHa.isDead()) { gmGraphReset(gmHa); gmReset = true; } } catch (e) { /* the stuck-run check resets it later */ }
       gmCrumb("host start " + gmHex(this.refrId) + ": move stopped" + (gmReset ? ", animation state reset" : ""));
     }
     this.gmWasHost = alreadyHosted;
@@ -1506,7 +1515,7 @@ export class FormView {
   private gmFrozenNudge(npc: Actor, target: Actor): void {
     try {
       if (!npc.is3DLoaded() || npc.isDead() || target.isDead()) return;
-      Debug.sendAnimationEvent(npc, GM_GRAPH_RESET);
+      gmGraphReset(npc);
       npc.startCombat(target);
       if (!npc.isWeaponDrawn()) npc.drawWeapon();
       npc.evaluatePackage();
@@ -1638,7 +1647,7 @@ export class FormView {
               let gmSampled0 = false; try { gmSampled0 = npc.getAnimationVariableFloat("SpeedSampled") < 1; } catch (e) { gmSampled0 = false; }
               let gmLos = "?"; try { gmLos = npc.hasLOS(gmRTarget) ? "yes" : "no"; } catch (e) { gmLos = "?"; }
               gmCrumb("stuck run " + gmHex(this.remoteRefrId as number) + " base " + gmHex(npc.getBaseObject() ? npc.getBaseObject()!.getFormID() : 0) + ": speed " + Math.round(gmRSpeed) + ", moved " + Math.round(gmMoved) + " of " + Math.round(gmExpect) + ", target " + gmHex(gmRTarget.getFormID()) + (gmRTarget.getFormID() === 0x14 ? " (me)" : "") + " " + Math.round(gmRGap) + " away, " + Math.round(gmRTarget.getPositionZ() - npc.getPositionZ()) + " higher, sees it " + gmLos + ", weapon " + (npc.isWeaponDrawn() ? "drawn" : "away") + ", blocking " + gmB("IsBlocking") + ", direction " + gmV("Direction") + ", sampled " + gmV("SpeedSampled") + ", run " + gmB("IsRunning") + ", sprint " + gmB("IsSprinting") + ", speed mult " + Math.round(npc.getActorValue("SpeedMult")) + (gmSampled0 ? "; animation state reset" : ""));
-              if (gmSampled0) { try { Debug.sendAnimationEvent(npc, GM_GRAPH_RESET); } catch (e) { /* the next check tries again */ } }
+              if (gmSampled0) { try { gmGraphReset(npc); } catch (e) { /* the next check tries again */ } }
             }
           } else this.gmRunStuck = 0;
           this.gmRunPos = gmRP; this.gmRunAt = gmRNow;
@@ -1702,7 +1711,7 @@ export class FormView {
               if (!gmTarget || gmTarget.isDead()) { const f = gmFoe || this.gmNearestFoe(npc, gmPlayers, GM_SIT_WAKE_RANGE); gmTarget = f ? f.foe : null; }
               gmCrumb("furniture " + gmHex(this.remoteRefrId as number) + ": out of its furniture (sit state " + gmSitting + ") to fight " + (gmTarget ? gmHex(gmTarget.getFormID()) : "(no one near)"));
               if (gmTarget) this.gmFrozenNudge(npc, gmTarget);
-              else { try { Debug.sendAnimationEvent(npc, GM_GRAPH_RESET); npc.evaluatePackage(); } catch (e) { /* the next check */ } }
+              else { try { gmGraphReset(npc); npc.evaluatePackage(); } catch (e) { /* the next check */ } }
             }
           }
         }
