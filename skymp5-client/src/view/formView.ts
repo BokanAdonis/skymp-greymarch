@@ -45,7 +45,7 @@ const GM_GRAPH_RESET = "IdleForceDefaultState";
 // between, and nothing unlocked it after: the bandit fought locked sheathed. Unlocked when this game starts running it and every GM_WEAPON_FREE_MS while it does
 // (an echo of its own weapon state can lock it again).
 const GM_WEAPON_FREE_MS = 2000;
-const GM_ARMS_CHECK_MS = 3000, GM_ARMS_FIX_MS = 10000, GM_REDRAW_MS = 1200; // ARMS IN A FIGHT (gmArmsCheck)
+const GM_ARMS_CHECK_MS = 3000, GM_ARMS_FIX_MS = 10000, GM_REDRAW_MS = 1200, GM_ARMS_NEAR = 1500; // ARMS IN A FIGHT (gmArmsCheck)
 let gmArmsLines = 200; // "arms" breadcrumbs left in this game
 let gmHandTypesSeen = false; // the graph's hand types read as more than 0 at least once (the variables exist in this game)
 function gmFreeWeapon(refr: ObjectReference): void {
@@ -1569,6 +1569,16 @@ export class FormView {
           TESModPlatform.setWeaponDrawnMode(npc, 0); TESModPlatform.setWeaponDrawnMode(npc, -1); // put away by the engine, then free again
           this.gmRedrawAt = now + GM_REDRAW_MS;
           fix = "; drawn but its body holds nothing: put away to draw again";
+        }
+      } else if (!drawn && (r || l)) {
+        // NEVER DRAWN (2026-11-09, the owner's test: an Orc bandit with a Steel War Pick in his right hand stood 144 units away "drawn false" for 15 s): in a fight,
+        // its target within GM_ARMS_NEAR, still sheathed two checks in a row: drawn by the engine (setWeaponDrawnMode 1, then free again)
+        let near = false; try { const t = npc.getCombatTarget(); near = !!t && npc.getDistance(t) <= GM_ARMS_NEAR; } catch (e) { near = false; }
+        this.gmArmsIdle = near ? this.gmArmsIdle + 1 : 0;
+        if (this.gmArmsIdle >= 2 && now - this.gmArmsFixAt >= GM_ARMS_FIX_MS) {
+          this.gmArmsFixAt = now; this.gmArmsIdle = 0;
+          TESModPlatform.setWeaponDrawnMode(npc, 1); TESModPlatform.setWeaponDrawnMode(npc, -1); // drawn by the engine, then free again
+          fix = "; in a fight and never drawn: drawn";
         }
       } else this.gmArmsIdle = 0;
       if (gmArmsLines > 0 || fix) {
