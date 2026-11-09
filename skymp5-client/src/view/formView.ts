@@ -45,6 +45,9 @@ const GM_GRAPH_RESET = "IdleForceDefaultState";
 // between, and nothing unlocked it after: the bandit fought locked sheathed. Unlocked when this game starts running it and every GM_WEAPON_FREE_MS while it does
 // (an echo of its own weapon state can lock it again).
 const GM_WEAPON_FREE_MS = 2000;
+const GM_ARMS_CHECK_MS = 3000, GM_ARMS_FIX_MS = 10000, GM_REDRAW_MS = 1200; // ARMS IN A FIGHT (gmArmsCheck)
+let gmArmsLines = 200; // "arms" breadcrumbs left in this game
+let gmHandTypesSeen = false; // the graph's hand types read as more than 0 at least once (the variables exist in this game)
 function gmFreeWeapon(refr: ObjectReference): void {
   try { const ac = Actor.from(refr); if (ac) TESModPlatform.setWeaponDrawnMode(ac, -1); } catch (e) { /* the next tick */ }
 }
@@ -1533,6 +1536,48 @@ export class FormView {
     } catch (e) { /* the next check tries again */ }
   }
   private gmWeaponFreedAt = 0; // GREYMARCH: when its weapon was last set free (WEAPON LOCKED BY THE COPY)
+  private gmArmsAt = 0; // GREYMARCH: ARMS IN A FIGHT: when it was last looked at, when it was last put away to be drawn again, when to draw it, idle checks in a row
+  private gmArmsFixAt = 0;
+  private gmRedrawAt = 0;
+  private gmArmsIdle = 0;
+  // GREYMARCH: ARMS IN A FIGHT (2026-11-09, the owner's clips: an Orc bandit held his axe down at his side and never drew it; others fought "with weird weapons and
+  // animations"). Every GM_ARMS_CHECK_MS while this game runs it in a fight: a breadcrumb "arms" (at most GM_ARMS_LINES a game) with what each hand holds, whether
+  // the game counts its weapon as drawn, and what its animation graph holds in each hand (iRightHandType / iLeftHandType). Two cures:
+  //   - a one-handed weapon in the LEFT hand with nothing in the right (its AI fights with the right hand): moved to the right hand;
+  //   - drawn as far as the game knows but its graph holds nothing in the right hand while a weapon is there, and not attacking, two checks in a row: put away
+  //     (setWeaponDrawnMode 0, the engine's own sheathe) and drawn again GM_REDRAW_MS later, at most every GM_ARMS_FIX_MS.
+  private gmArmsCheck(npc: Actor): void {
+    try {
+      if (!npc.isInCombat() || npc.isDead()) { this.gmArmsIdle = 0; return; }
+      const r = npc.getEquippedWeapon(false), l = npc.getEquippedWeapon(true);
+      const drawn = npc.isWeaponDrawn();
+      const iv = (n: string) => { try { return npc.getAnimationVariableInt(n); } catch (e) { return -9; } };
+      const bv = (n: string) => { try { return npc.getAnimationVariableBool(n); } catch (e) { return false; } };
+      const rT = iv("iRightHandType"), lT = iv("iLeftHandType");
+      if (rT > 0 || lT > 0) gmHandTypesSeen = true;
+      const attacking = bv("IsAttacking");
+      let fix = "";
+      const now = Date.now();
+      const lType = l ? l.getWeaponType() : -1;
+      if (!r && l && lType >= 1 && lType <= 4) {
+        npc.unequipItemEx(l, 2, false); npc.equipItemEx(l, 1, false, false);
+        fix = "; its " + l.getName() + " moved to the right hand";
+      } else if (drawn && r && gmHandTypesSeen && rT === 0 && !attacking) {
+        this.gmArmsIdle++;
+        if (this.gmArmsIdle >= 2 && now - this.gmArmsFixAt >= GM_ARMS_FIX_MS) {
+          this.gmArmsFixAt = now; this.gmArmsIdle = 0;
+          TESModPlatform.setWeaponDrawnMode(npc, 0); TESModPlatform.setWeaponDrawnMode(npc, -1); // put away by the engine, then free again
+          this.gmRedrawAt = now + GM_REDRAW_MS;
+          fix = "; drawn but its body holds nothing: put away to draw again";
+        }
+      } else this.gmArmsIdle = 0;
+      if (gmArmsLines > 0 || fix) {
+        if (gmArmsLines > 0) gmArmsLines--;
+        let tg = ""; try { const t = npc.getCombatTarget(); tg = t ? gmHex(t.getFormID()) + " " + Math.round(npc.getDistance(t)) + " away" : "none"; } catch (e) { tg = "?"; }
+        gmCrumb("arms " + gmHex(this.remoteRefrId as number) + " base " + gmHex(npc.getBaseObject() ? npc.getBaseObject()!.getFormID() : 0) + ": right " + (r ? r.getName() : "nothing") + ", left " + (l ? l.getName() : "nothing") + ", drawn " + drawn + ", graph hands " + rT + "/" + lT + ", attacking " + attacking + ", state " + iv("iState") + ", target " + tg + fix);
+      }
+    } catch (e) { /* the next check */ }
+  }
   private gmSitWakeAt = 0; // GREYMARCH: when it was last pulled out of furniture to fight
   private gmIdleWakeAt = 0; // GREYMARCH: when it was last sent out of an idle at a player (OUT OF ITS IDLE)
   // GREYMARCH: the other players' characters this game has loaded in the same place (the host's own player is not one)
@@ -1610,6 +1655,8 @@ export class FormView {
       // A horse someone sits on is left alone: no rebuild, no ground fix, no nudge, no hand-off
       try { if (npc.isBeingRidden()) return ""; } catch (e) { /* checked again next second */ }
       if (Date.now() - this.gmWeaponFreedAt >= GM_WEAPON_FREE_MS) { this.gmWeaponFreedAt = Date.now(); gmFreeWeapon(npc); } // WEAPON LOCKED BY THE COPY: kept free while this game runs it
+      if (Date.now() - this.gmArmsAt >= GM_ARMS_CHECK_MS) { this.gmArmsAt = Date.now(); this.gmArmsCheck(npc); } // ARMS IN A FIGHT
+      if (this.gmRedrawAt && Date.now() >= this.gmRedrawAt) { this.gmRedrawAt = 0; try { npc.drawWeapon(); } catch (e) { /* the next check */ } } // ARMS IN A FIGHT: drawn again
       try { if (npc.is3DLoaded()) { if (!this.gm3DSince) this.gm3DSince = Date.now(); } else this.gm3DSince = 0; } catch (e) { this.gm3DSince = 0; }
       const placeOf = (a: Actor): number => { const w = a.getWorldSpace() || a.getParentCell(); return w ? w.getFormID() : 0; };
       const myPlace = placeOf(me);
