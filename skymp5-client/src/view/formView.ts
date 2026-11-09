@@ -45,7 +45,7 @@ const GM_GRAPH_RESET = "IdleForceDefaultState";
 // between, and nothing unlocked it after: the bandit fought locked sheathed. Unlocked when this game starts running it and every GM_WEAPON_FREE_MS while it does
 // (an echo of its own weapon state can lock it again).
 const GM_WEAPON_FREE_MS = 2000;
-const GM_ARMS_CHECK_MS = 3000, GM_ARMS_FIX_MS = 10000, GM_REDRAW_MS = 1200, GM_ARMS_NEAR = 1500; // ARMS IN A FIGHT (gmArmsCheck)
+const GM_ARMS_CHECK_MS = 3000, GM_ARMS_FIX_MS = 10000, GM_REDRAW_MS = 1200, GM_ARMS_NEAR = 1500, GM_ARMS_DRAW_MS = 6000; // ARMS IN A FIGHT (gmArmsCheck)
 let gmArmsLines = 200; // "arms" breadcrumbs left in this game
 let gmHandTypesSeen = false; // the graph's hand types read as more than 0 at least once (the variables exist in this game)
 function gmFreeWeapon(refr: ObjectReference): void {
@@ -769,9 +769,12 @@ export class FormView {
       // its animation state is reset too (2026-10-28, the owner: the armed encounter skeletons ran in place; breadcrumbs: Speed 334, SpeedSampled 0). Until this
       // game ran it, its own animations were held back (setDefaultAnimsDisabled), and a run its AI started then never began in its graph
       let gmReset = false;
-      try { const gmHa = Actor.from(refr); if (gmHa && gmHa.is3DLoaded() && !gmHa.isDead()) { gmGraphReset(gmHa); gmReset = true; } } catch (e) { /* the stuck-run check resets it later */ }
+      // NOT IN A FIGHT (2026-11-09, the owner's test log: every bandit taken over mid-fight with its weapon away and reset here stood without drawing; those taken
+      // over with it drawn fought): one already fighting is left as it is (a stuck run is still reset by A STUCK RUNNER below)
+      let gmFighting = false; try { gmFighting = !!Actor.from(refr)?.isInCombat(); } catch (e) { gmFighting = false; }
+      try { const gmHa = Actor.from(refr); if (!gmFighting && gmHa && gmHa.is3DLoaded() && !gmHa.isDead()) { gmGraphReset(gmHa); gmReset = true; } } catch (e) { /* the stuck-run check resets it later */ }
       gmFreeWeapon(refr); // its own AI draws and sheathes from now on (WEAPON LOCKED BY THE COPY)
-      gmCrumb("host start " + gmHex(this.refrId) + ": move stopped" + (gmReset ? ", animation state reset" : ""));
+      gmCrumb("host start " + gmHex(this.refrId) + ": move stopped" + (gmReset ? ", animation state reset" : gmFighting ? ", in a fight: no reset" : ""));
     }
     this.gmWasHost = alreadyHosted;
     // GREYMARCH: a peaceful animal this game runs never fights (2026-10-30, the owner: the fox still fought): cowardly is not enough for a fox that is hit, so a
@@ -1575,8 +1578,11 @@ export class FormView {
         // its target within GM_ARMS_NEAR, still sheathed two checks in a row: drawn by the engine (setWeaponDrawnMode 1, then free again)
         let near = false; try { const t = npc.getCombatTarget(); near = !!t && npc.getDistance(t) <= GM_ARMS_NEAR; } catch (e) { near = false; }
         this.gmArmsIdle = near ? this.gmArmsIdle + 1 : 0;
-        if (this.gmArmsIdle >= 2 && now - this.gmArmsFixAt >= GM_ARMS_FIX_MS) {
+        if (this.gmArmsIdle >= 2 && now - this.gmArmsFixAt >= GM_ARMS_DRAW_MS) {
           this.gmArmsFixAt = now; this.gmArmsIdle = 0;
+          // every way to draw at once (the engine's draw alone left two of them sheathed): the draw animation, Papyrus DrawWeapon, the engine's draw
+          try { Debug.sendAnimationEvent(npc, "WeapEquip"); } catch (e) { /* the others */ }
+          try { npc.drawWeapon(); } catch (e) { /* the others */ }
           TESModPlatform.setWeaponDrawnMode(npc, 1); TESModPlatform.setWeaponDrawnMode(npc, -1); // drawn by the engine, then free again
           fix = "; in a fight and never drawn: drawn";
         }
