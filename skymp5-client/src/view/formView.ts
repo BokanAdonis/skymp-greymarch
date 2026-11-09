@@ -38,6 +38,16 @@ const GM_GRAPH_RESET = "IdleForceDefaultState";
 // their hand but down to their sides"). The reset above puts the body in its unarmed idle, but the game still counts a weapon that was out as drawn: DrawWeapon
 // then did nothing, and the NPC stood with its weapon at its side and never attacked (every later nudge reset it again). One whose weapon is out is sent the
 // draw (WeapEquip) right after, so its body takes up its fighting stance again.
+// GREYMARCH: WEAPON LOCKED BY THE COPY (2026-11-09, the owner's clip: an encounter bandit chased them in a fight with his weapon down at his side and never swung;
+// the breadcrumbs: "combat 1", moving, "it holds a weapon"). While another game runs an NPC, this game plays that game's weapon state with
+// TESModPlatform.setWeaponDrawnMode (movementApply.ts applyWeapDrawn), which LOCKS it: drawn, or sheathed, and every draw its own AI tries is turned into that.
+// SkyMP unlocks it (-1) only at the moment this game asks to run the NPC; the server's answer came 1.6 s later, the other game's updates locked it again in
+// between, and nothing unlocked it after: the bandit fought locked sheathed. Unlocked when this game starts running it and every GM_WEAPON_FREE_MS while it does
+// (an echo of its own weapon state can lock it again).
+const GM_WEAPON_FREE_MS = 2000;
+function gmFreeWeapon(refr: ObjectReference): void {
+  try { const ac = Actor.from(refr); if (ac) TESModPlatform.setWeaponDrawnMode(ac, -1); } catch (e) { /* the next tick */ }
+}
 function gmGraphReset(npc: Actor): void {
   let drawn = false; try { drawn = npc.isWeaponDrawn(); } catch (e) { drawn = false; }
   Debug.sendAnimationEvent(npc, GM_GRAPH_RESET);
@@ -757,6 +767,7 @@ export class FormView {
       // game ran it, its own animations were held back (setDefaultAnimsDisabled), and a run its AI started then never began in its graph
       let gmReset = false;
       try { const gmHa = Actor.from(refr); if (gmHa && gmHa.is3DLoaded() && !gmHa.isDead()) { gmGraphReset(gmHa); gmReset = true; } } catch (e) { /* the stuck-run check resets it later */ }
+      gmFreeWeapon(refr); // its own AI draws and sheathes from now on (WEAPON LOCKED BY THE COPY)
       gmCrumb("host start " + gmHex(this.refrId) + ": move stopped" + (gmReset ? ", animation state reset" : ""));
     }
     this.gmWasHost = alreadyHosted;
@@ -1521,6 +1532,7 @@ export class FormView {
       npc.evaluatePackage();
     } catch (e) { /* the next check tries again */ }
   }
+  private gmWeaponFreedAt = 0; // GREYMARCH: when its weapon was last set free (WEAPON LOCKED BY THE COPY)
   private gmSitWakeAt = 0; // GREYMARCH: when it was last pulled out of furniture to fight
   private gmIdleWakeAt = 0; // GREYMARCH: when it was last sent out of an idle at a player (OUT OF ITS IDLE)
   // GREYMARCH: the other players' characters this game has loaded in the same place (the host's own player is not one)
@@ -1597,6 +1609,7 @@ export class FormView {
       // horse passed the LOCKED HEIGHT test (fast, flat) and was rebuilt (disabled and enabled) with its rider on it; the ground word and the hand-off moved it too.
       // A horse someone sits on is left alone: no rebuild, no ground fix, no nudge, no hand-off
       try { if (npc.isBeingRidden()) return ""; } catch (e) { /* checked again next second */ }
+      if (Date.now() - this.gmWeaponFreedAt >= GM_WEAPON_FREE_MS) { this.gmWeaponFreedAt = Date.now(); gmFreeWeapon(npc); } // WEAPON LOCKED BY THE COPY: kept free while this game runs it
       try { if (npc.is3DLoaded()) { if (!this.gm3DSince) this.gm3DSince = Date.now(); } else this.gm3DSince = 0; } catch (e) { this.gm3DSince = 0; }
       const placeOf = (a: Actor): number => { const w = a.getWorldSpace() || a.getParentCell(); return w ? w.getFormID() : 0; };
       const myPlace = placeOf(me);
