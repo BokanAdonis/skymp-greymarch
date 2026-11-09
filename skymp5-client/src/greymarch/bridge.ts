@@ -4721,6 +4721,8 @@ export class GreymarchBridge {
     // call is the fallback. The first outcome is logged once: "talk prompt: hidden (BlockActivation, 2 arguments)" or why not.
     greymarchNoPrompt(actor: any, hide: boolean): any {
         var sp: any = this.sp, how = "";
+        // remembered for movementApply.ts, whose one-argument block on every movement update would otherwise show the prompt again (2026-11-08)
+        try { var npG: any = Function("return this")(); var npMap = npG.__gmNoPrompt || (npG.__gmNoPrompt = {}); var npId = actor.getFormID(); if (hide) npMap[npId] = true; else delete npMap[npId]; } catch (npErr) { /* the 2 s pass still hides it */ }
         try { sp.callNative("ObjectReference", "BlockActivation", actor, hide, hide); how = "BlockActivation, 2 arguments"; }
         catch (nErr) {
             try { (actor as any).blockActivation(hide); how = "blockActivation, 1 argument (the prompt still shows): " + nErr; }
