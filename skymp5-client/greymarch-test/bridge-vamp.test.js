@@ -396,6 +396,22 @@ test("spell damage on the server only (2026-11-03): the listed health damage eff
   assert.deepStrictEqual([recs[0x2b96c], recs[0x12fce]], [[{ dur: 0, mag: 25 }, { dur: 0, mag: 25 }], [{ dur: 0, mag: 25 }, { dur: 3, mag: 2 }]], "turned off: the records' own numbers back");
 });
 
+test("scrolls (2026-11-09): a scroll's listed health damage effects are 0 in this game too (it is no Spell: found as a Scroll); off puts them back", () => {
+  const s = make();
+  // Scroll of Firebolt 96598: fire damage 25 (0) and a 3 s burn (1); the game says it is no Spell
+  const recs = { 0x96598: [{ dur: 0, mag: 25 }, { dur: 3, mag: 2 }] };
+  const scroll = (id) => ({ id, scroll: true, getNumEffects: () => recs[id].length, getNthEffectDuration: (i) => recs[id][i].dur, getNthEffectMagnitude: (i) => recs[id][i].mag,
+    setNthEffectDuration: (i, v) => { recs[id][i].dur = v; }, setNthEffectMagnitude: (i, v) => { recs[id][i].mag = v; } });
+  s.gm.sp.Game.getFormFromFile = (id, file) => (file === "Skyrim.esm" && recs[id] ? scroll(id) : null);
+  s.gm.sp.Spell = { from: (f) => (f && f.scroll ? null : f) };
+  s.gm.sp.Scroll = { from: (f) => (f && f.scroll ? f : null) };
+  const tick = () => { s.gm.greymarchSpellEditNext = 0; s.gm.greymarchSpellEditTick(); };
+  s.say({ customPacketType: "greymarchSpellEdits", edits: { "96598:Skyrim.esm": { zero: [0] } } }); tick();
+  assert.deepStrictEqual(recs[0x96598], [{ dur: 0, mag: 0 }, { dur: 3, mag: 2 }], "the scroll's fire damage is 0 here, its burn kept");
+  s.say({ customPacketType: "greymarchSpellEdits", edits: {} }); tick();
+  assert.deepStrictEqual(recs[0x96598], [{ dur: 0, mag: 25 }, { dur: 3, mag: 2 }], "turned off: its own number back");
+});
+
 test("another player's eyes are not swapped on their character but built into it (__gmVampEyes for formView.ts), so /eyes leaves nothing out of the face (2026-10-30); this player's own head is swapped as before", () => {
   const s = make({ others: { 0xff000002: 0x5000 } });
   const sp = s.gm.sp;
