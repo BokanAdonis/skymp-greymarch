@@ -2,6 +2,8 @@ import { FormModel } from '../view/model';
 import { ObjectReference, Actor, TESModPlatform } from "skyrimPlatform";
 import { NiPoint3, Movement, RunMode } from "./movement";
 import { ObjectReferenceEx } from '../extensions/objectReferenceEx';
+import * as skyrimPlatform from "skyrimPlatform";
+import { ownLookAt } from "../greymarch/headLook";
 
 class PlayerCharacterSpeedCalculator {
   static savePosition(pos: NiPoint3, worldOrCell: number) {
@@ -44,7 +46,10 @@ export const getMovement = (refr: ObjectReference, form?: FormModel): Movement =
   }
 
   let lookAt: undefined | NiPoint3 = undefined;
-  if (refr.getFormID() !== 0x14) {
+  // GREYMARCH: HEAD TRACKING SYNC (greymarch/headLook.ts): the player's own movement carries where their camera looks, so the other games turn their head too
+  if (refr.getFormID() === 0x14) {
+    try { lookAt = ownLookAt(skyrimPlatform, refr); } catch (e) { lookAt = undefined; }
+  } else {
     const combatTarget = ac?.getCombatTarget();
     if (combatTarget) {
       lookAt = [

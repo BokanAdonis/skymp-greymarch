@@ -11,6 +11,8 @@ import { RespawnNeededError } from "../lib/errors";
 import { Movement, RunMode, AnimationVariables, Transform, NiPoint3 } from "./movement";
 import { ObjectReferenceEx } from "../extensions/objectReferenceEx";
 import { SpApiInteractor } from "../services/spApiInteractor";
+import * as skyrimPlatform from "skyrimPlatform";
+import { lookAtPoint } from "../greymarch/headLook";
 
 const sqr = (x: number) => x * x;
 const GM_MIN_TRANSLATE_SPEED = 100; // GREYMARCH: see translateTo
@@ -53,6 +55,9 @@ export const applyMovement = (refr: ObjectReference, m: Movement, isMyClone?: bo
   if (lookAt) {
     ac.setHeadTracking(true);
     ac.setLookAt(lookAt, false);
+  } else if (m.lookAt && refr.getFormID() !== 0x14) {
+    // GREYMARCH: HEAD TRACKING SYNC (greymarch/headLook.ts): no actor at the point (a player's camera direction): the head looks at a marker moved there
+    try { lookAtPoint(skyrimPlatform, ac, m.lookAt as [number, number, number], Date.now()); } catch (e) { ac.setHeadTracking(false); }
   } else {
     ac.setHeadTracking(false);
   }
