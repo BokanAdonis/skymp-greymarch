@@ -5542,13 +5542,14 @@ export class GreymarchBridge {
                         var txt = "";
                         if (under) {
                             var bPaths = ["_root.Menu_mc.inventoryLists.itemList.selectedEntry.text", "_root.Menu_mc.inventoryLists.itemList.selectedEntry.name", "_root.Menu_mc.itemList.selectedEntry.text"];
-                            for (var bp = 0; bp < bPaths.length && !/\[(?:LT|BK)-\d+\]/.test(txt); bp++) { try { txt = String(sp.Ui.getString(under, bPaths[bp]) || ""); } catch (e) { txt = ""; } }
+                            // the first name found is kept (a journal's was lost to a later, empty path); letters, books, journals and torn pages (scribe.js PREFIX_KIND)
+                            for (var bp = 0; bp < bPaths.length && !txt; bp++) { try { txt = String(sp.Ui.getString(under, bPaths[bp]) || ""); } catch (e) { txt = ""; } }
                         }
-                        var bm = /\[((?:LT|BK)-\d{1,7})\]/.exec(txt);
+                        var bm = /\[((?:LT|BK|JN|PG)-\d{1,7})\]/.exec(txt);
                         this.greymarchLog("book: the Book Menu opened" + (under ? " over " + under + " on \"" + txt.slice(0, 80) + "\"" : " (from the world)") + (bm ? ": the scribe's " + bm[1] + ", opened in the scribe window" : ""));
                         if (bm) {
                             var shutB = false; try { shutB = !!sp.callNative("GreymarchCam", "CloseMenu", undefined, "Book Menu"); } catch (e) { shutB = false; }
-                            try { sp.callNative("GreymarchCam", "CloseMenu", undefined, under); } catch (e) { /* it stays open under the window */ }
+                            this.greymarchBookMenus = true; // the inventory (and the Tab menu) are closed below while the window is up, and again when it closes
                             if (!shutB) this.greymarchLog("book: could not close the Book Menu (GreymarchCamera.dll older than 1.3)");
                             this.greymarchBookOpenAt = now + 250; this.greymarchBookOpenId = bm[1]; // once the menus are gone
                         }
@@ -5559,6 +5560,17 @@ export class GreymarchBridge {
         if (this.greymarchBookOpenAt && now >= this.greymarchBookOpenAt) {
             var bid = this.greymarchBookOpenId; this.greymarchBookOpenAt = 0; this.greymarchBookOpenId = "";
             if (bid) this.greymarchScribeShow(bid);
+        }
+        // the menus it was read from go too (2026-11-09, the owner: closing the scribe window left them in the Tab menu): while a window opened from the pack is
+        // up and once more after it closes, the inventory, container, barter, gift and Tab menus still open are closed
+        if (this.greymarchBookMenus && now >= (this.greymarchBookMenusNext || 0)) {
+            this.greymarchBookMenusNext = now + 200;
+            var shutList: string[] = [];
+            ["Book Menu", "InventoryMenu", "ContainerMenu", "BarterMenu", "GiftMenu", "TweenMenu"].forEach(function (m) {
+                try { if (sp.Ui.isMenuOpen(m) && sp.callNative("GreymarchCam", "CloseMenu", undefined, m)) shutList.push(m); } catch (e) { /* next time */ }
+            });
+            if (shutList.length) this.greymarchLog("book: closed " + shutList.join(", "));
+            if (!this.greymarchScribeOn && !this.greymarchBookOpenAt) this.greymarchBookMenus = false; // the window is closed: this was the last look
         }
         if (this.greymarchForgeOn && now >= (this.greymarchForgeMenuNext || 0)) {
             this.greymarchForgeMenuNext = now + 250;
