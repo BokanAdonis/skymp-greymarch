@@ -25,7 +25,8 @@ test("the own look point: LOOK_DIST ahead of the head along the camera; nothing 
   assert.strictEqual(h.ownLookAt(sp, player), undefined, "a camera that reads nothing");
   const h2 = load();
   assert.strictEqual(h2.ownLookAt({ callNative: () => { throw new Error("no DLL"); } }, player), undefined);
-  assert.strictEqual(h2.ownLookAt({ callNative: () => 1 }, player), undefined, "not tried again once the DLL is missing");
+  assert.strictEqual(h2.ownLookAt({ callNative: () => 1 }, player, Date.now() + 1000), undefined, "not tried again right away once the read failed");
+  assert.ok(h2.ownLookAt({ callNative: () => 1 }, player, Date.now() + h2.CAMERA_RETRY_MS + 1000), "tried again after 10 s (it once stayed off for the session)");
 });
 
 function world() {
@@ -33,7 +34,7 @@ function world() {
   const sp = { Game: { getFormEx: (id) => (id === 0x3b ? { xmarker: true } : null) } };
   const copy = (id, place = 0x3c) => ({
     place,
-    getFormID: () => id,
+    getFormID: () => id, isAIEnabled: () => true, getDistance: () => 0,
     getWorldSpace() { return { getFormID: () => this.place }; },
     getParentCell: () => null,
     placeAtMe(base) { assert.ok(base.xmarker); log.placed++; const ref = { setPosition: (x, y, z) => log.moves.push([id, x, y, z]), disable() {}, delete: () => log.deleted++ }; return ref; },

@@ -12,7 +12,8 @@ import { Movement, RunMode, AnimationVariables, Transform, NiPoint3 } from "./mo
 import { ObjectReferenceEx } from "../extensions/objectReferenceEx";
 import { SpApiInteractor } from "../services/spApiInteractor";
 import * as skyrimPlatform from "skyrimPlatform";
-import { lookAtPoint } from "../greymarch/headLook";
+import { lookAtPoint, setSay as headSetSay } from "../greymarch/headLook";
+try { headSetSay((text: string) => { try { (SpApiInteractor.getControllerInstance().emitter as any).emit("greymarchStage", text); } catch (e) { /* diagnostics only */ } }); } catch (e) { /* diagnostics only */ }
 
 const sqr = (x: number) => x * x;
 const GM_MIN_TRANSLATE_SPEED = 100; // GREYMARCH: see translateTo
