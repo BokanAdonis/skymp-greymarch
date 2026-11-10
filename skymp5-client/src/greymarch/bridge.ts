@@ -605,6 +605,7 @@ export class GreymarchBridge {
         this.greymarchRaceMenuTick(Date.now()); // RaceMenu's extra sliders: sent when the race menu closes, put back after a relog (racemenuLook.ts)
         this.greymarchRaceMenuCopiesTick(Date.now()); // and put on the other players' copies (OTHERS SEE THEM)
         this.greymarchRaceMenuHeightsTick(Date.now()); // their Height on at once, the moment a copy is drawn, and kept right (greymarchRaceMenuHeightsTick)
+        this.greymarchOwnHeightTick(Date.now()); // the player's own Height kept at the server's (OWN HEIGHT, greymarchOwnHeightTick)
         this.greymarchDressTick(Date.now()); // a mask hides the beard (and, through the ticks above, a hood the big ears)
         this.greymarchStackNote(Date.now()); // an item in two stacks: what differs between them, to the log (2026-11-06)
         this.greymarchRestackOnce(Date.now()); // the old split stacks of plain items (hides, leather, ingredients) made one again, once a session
@@ -2688,6 +2689,37 @@ export class GreymarchBridge {
             }
         }
     }
+    // GREYMARCH: OWN HEIGHT (2026-11-10, the owner: "/height is not updating for the player having their height changed"; their log: "sliders put back" at
+    // the moment of each /height, the skeleton never changed). The kept look is loaded as a RaceMenu preset, and that does not reliably put the Height
+    // (the NPC node's RSMPlugin scale) on the skeleton; the other players' copies have had their own check for it (greymarchRaceMenuHeightsTick), the
+    // player's own body had none. Once a second, outside the race menu, the own skeleton's Height is set to the one in the server's look (with first person),
+    // so a staff /height (and a race limit) shows on the player's own screen too. Not in a beast or creature body, not in the 10 s after the race menu
+    // closes (the player's new slider is on its way to the server, and its answer comes back as the look), not before the body has been loaded 4 s.
+    greymarchOwnHeightTick(now: number): any {
+        var rm = this.greymarchRmState();
+        if (!rm || rm.want === null || rm.want === undefined || now < (rm.ownHeightNext || 0)) return;
+        rm.ownHeightNext = now + 1000;
+        if (rm.menuWas || rm.sendAt || now < (rm.ownHeightHold || 0) || rm.beast || this.greymarchWolfOn || this.greymarchShapeOn) return;
+        if (!rm.loadedSince || now - rm.loadedSince < 4000) return;
+        var sp = this.sp;
+        try {
+            var player = sp.Game.getPlayer();
+            if (!player || !player.is3DLoaded()) return;
+            var race = player.getRace(), rname = race ? String(race.getName() || "") : "";
+            if (/were|vampire lord|beast/i.test(rname)) return;
+            var want = Math.round(rmMod.heightOfLook(rm.want) * 1000) / 1000;
+            var female = this.greymarchHeightFemale(player);
+            var cur = this.greymarchHeightNow(player, female);
+            if (Math.abs(cur - want) < 0.002) return;
+            this.greymarchHeightPut(player, female, want, true);
+            var after = this.greymarchHeightNow(player, female);
+            rm.ownHeightSaid = (rm.ownHeightSaid || 0) + 1;
+            if (rm.ownHeightSaid <= 20) this.greymarchLog("racemenu: own Height " + cur + " -> " + want + " (the skeleton reads " + after + ")");
+        } catch (err) {
+            rm.ownHeightErr = (rm.ownHeightErr || 0) + 1;
+            if (rm.ownHeightErr <= 5) this.greymarchLog("racemenu: the own Height could not be put on: " + err);
+        }
+    }
     // The Height on a skeleton: RaceMenu's scale on the NPC node (third person; the player's own first person too), 1 taking it off.
     greymarchHeightPut(actor: any, female: boolean, v: number, firstPerson: boolean): any {
         var sp = this.sp, step = (what: string, run: () => any) => this.greymarchHeightStep(what, run);
@@ -2885,7 +2917,7 @@ export class GreymarchBridge {
         var sp = this.sp, rm = this.greymarchRmState(), open = false;
         this.greymarchKeepPartsTick(now);
         try { open = !!sp.Ui.isMenuOpen("RaceSex Menu"); } catch (mErr) { open = false; }
-        if (rm.menuWas && !open) rm.sendAt = now + 1000; // RaceMenu finishes its own work as the menu closes
+        if (rm.menuWas && !open) { rm.sendAt = now + 1000; rm.ownHeightHold = now + 10000; } // RaceMenu finishes its own work as the menu closes (OWN HEIGHT waits for the server's answer)
         rm.menuWas = open;
         if (open) { rm.sendAt = 0; return; } // RaceMenu is the editor while it is open
         if (this.greymarchWolfOn || this.greymarchShapeOn) { rm.beast = true; rm.loadedSince = 0; return; }

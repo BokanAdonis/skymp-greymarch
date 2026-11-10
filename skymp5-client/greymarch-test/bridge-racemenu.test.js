@@ -271,3 +271,39 @@ test("their height at once (2026-11-07, the owner: heights not always right on f
   tick(3000);
   assert.deepStrictEqual(copy.sets, [], "never on a werewolf body");
 });
+
+test("own height (2026-11-10, the owner: /height did not change the player's own body): the server's Height put on the own skeleton with first person, kept there, never in the race menu, in the 10 s after it, or in a beast body", () => {
+  const s = make();
+  const me = { scale: 0, sets: [] };
+  const player = { is3DLoaded: () => true, getRace: () => ({ getName: () => "Nord" }), getBaseObject: () => "base" };
+  s.sp.Game.getPlayer = () => player;
+  s.sp.ActorBase = { from: () => ({ getSex: () => 0 }) };
+  s.sp.callNative = (cls, fn, self, actor, fp, female, node, key, v) => {
+    if (cls !== "NiOverride") return true;
+    assert.strictEqual(actor, player);
+    if (fn === "GetNodeTransformScale") return fp ? 0 : me.scale;
+    if (fn === "AddNodeTransformScale") { me.sets.push([v, fp]); if (!fp) me.scale = v; return; }
+    if (fn === "RemoveNodeTransformScale") { me.sets.push([1, fp]); if (!fp) me.scale = 0; return; }
+    if (fn === "UpdateNodeTransform") return;
+    throw new Error("unexpected " + fn);
+  };
+  const rmS = s.gm.greymarchRmState();
+  rmS.want = { transforms: [{ firstPerson: false, node: "NPC", keys: [{ name: "RSMPlugin", values: [{ data: 2.146, index: 0, key: 20, type: 2 }] }] }] };
+  rmS.loadedSince = 1;
+  let t = 400000;
+  const tick = (ms) => { for (let e = t + ms; t < e; t += 250) s.gm.greymarchOwnHeightTick(t); };
+  tick(1000);
+  assert.deepStrictEqual(me.sets, [[2.146, false], [2.146, true]], "on, third and first person");
+  tick(5000);
+  assert.strictEqual(me.sets.length, 2, "right: left alone");
+  me.scale = 1; tick(1250);
+  assert.strictEqual(me.sets.length, 4, "lost (a load, the preset): put back within a second");
+  rmS.menuWas = true; me.scale = 1; me.sets = []; tick(3000);
+  assert.deepStrictEqual(me.sets, [], "never while the race menu is open");
+  rmS.menuWas = false; rmS.ownHeightHold = t + 10000; tick(9000);
+  assert.deepStrictEqual(me.sets, [], "not in the 10 s after the race menu (the player's own slider is on its way)");
+  tick(2000);
+  assert.strictEqual(me.sets.length, 2, "then the server's again");
+  me.scale = 1; me.sets = []; player.getRace = () => ({ getName: () => "WerewolfBeastRace" }); tick(3000);
+  assert.deepStrictEqual(me.sets, [], "never on a werewolf body");
+});
