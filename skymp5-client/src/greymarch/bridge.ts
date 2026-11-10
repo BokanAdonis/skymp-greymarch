@@ -5087,16 +5087,16 @@ export class GreymarchBridge {
             this.sp.printConsole("[greymarch] could not reach the scribe's desk: " + err);
         }
     }
-    greymarchScribeShow(): any {
+    greymarchScribeShow(read?: string): any {
         if (this.greymarchScreenUp || this.greymarchAdminOn || this.greymarchMenuOn || this.greymarchProfOn || this.greymarchChanceryOn || this.greymarchVampMenuOn || this.greymarchLedgerOn || this.greymarchScribeOn || this.greymarchCraftOn || this.greymarchForgeOn) { // not over the select screen or the other panels
             this.greymarchLog("scribe: not opened, " + [this.greymarchScreenUp ? "the select screen" : "", this.greymarchAdminOn ? "the staff panel" : "", this.greymarchMenuOn ? "the X menu" : "", this.greymarchProfOn ? "the K window" : "", this.greymarchChanceryOn ? "the chancery" : "", this.greymarchVampMenuOn ? "the vampire window" : "", this.greymarchLedgerOn ? "the guard ledger" : "", this.greymarchScribeOn ? "the desk itself" : "", this.greymarchCraftOn ? "the crafting panel" : "", this.greymarchForgeOn ? "the forge window" : ""].filter(Boolean).join(", ") + " is marked open");
             return;
         }
-        this.greymarchLog("scribe: opened");
+        this.greymarchLog("scribe: opened" + (read ? " on " + read : ""));
         this.greymarchScribeOn = true;
         this.sp.browser.setVisible(true);
         this.sp.browser.setFocused(true);
-        this.greymarchScribeToPage("show", true);
+        this.greymarchScribeToPage("show", read ? { read: read } : true);
     }
     greymarchScribeHide(): any {
         if (!this.greymarchScribeOn) return;
@@ -5528,6 +5528,38 @@ export class GreymarchBridge {
         }
         // the game's own crafting menu must never be open under the forge window (it took the pointer, and its E Create made things the window would refuse):
         // closed at once through GreymarchCamera.dll 1.3 (CloseMenu), noted in the log
+        // A WRITING READ FROM THE PACK (2026-11-09, the owner: the words written on a letter should show when it is read): every scribe letter or book is the same
+        // blank item named "<title> [LT-0042]" (gamemode scribe.js), so the game's own book menu shows empty pages. When the game's Book Menu opens over the
+        // inventory or a container on one of them (SkyUI's selected entry), it is closed with the menu under it (GreymarchCamera.dll CloseMenu) and the scribe
+        // window opens on that writing; the server still decides who may read it (scribe.js read: only whoever carries it)
+        if (now >= (this.greymarchBookNext || 0)) {
+            this.greymarchBookNext = now + 100;
+            try {
+                if (sp.Ui.isMenuOpen("Book Menu")) {
+                    if (!this.greymarchBookSeen) {
+                        this.greymarchBookSeen = true;
+                        var under = ["InventoryMenu", "ContainerMenu", "BarterMenu", "GiftMenu"].filter(function (m) { try { return sp.Ui.isMenuOpen(m); } catch (e) { return false; } })[0] || "";
+                        var txt = "";
+                        if (under) {
+                            var bPaths = ["_root.Menu_mc.inventoryLists.itemList.selectedEntry.text", "_root.Menu_mc.inventoryLists.itemList.selectedEntry.name", "_root.Menu_mc.itemList.selectedEntry.text"];
+                            for (var bp = 0; bp < bPaths.length && !/\[(?:LT|BK)-\d+\]/.test(txt); bp++) { try { txt = String(sp.Ui.getString(under, bPaths[bp]) || ""); } catch (e) { txt = ""; } }
+                        }
+                        var bm = /\[((?:LT|BK)-\d{1,7})\]/.exec(txt);
+                        this.greymarchLog("book: the Book Menu opened" + (under ? " over " + under + " on \"" + txt.slice(0, 80) + "\"" : " (from the world)") + (bm ? ": the scribe's " + bm[1] + ", opened in the scribe window" : ""));
+                        if (bm) {
+                            var shutB = false; try { shutB = !!sp.callNative("GreymarchCam", "CloseMenu", undefined, "Book Menu"); } catch (e) { shutB = false; }
+                            try { sp.callNative("GreymarchCam", "CloseMenu", undefined, under); } catch (e) { /* it stays open under the window */ }
+                            if (!shutB) this.greymarchLog("book: could not close the Book Menu (GreymarchCamera.dll older than 1.3)");
+                            this.greymarchBookOpenAt = now + 250; this.greymarchBookOpenId = bm[1]; // once the menus are gone
+                        }
+                    }
+                } else this.greymarchBookSeen = false;
+            } catch (e) { /* next time */ }
+        }
+        if (this.greymarchBookOpenAt && now >= this.greymarchBookOpenAt) {
+            var bid = this.greymarchBookOpenId; this.greymarchBookOpenAt = 0; this.greymarchBookOpenId = "";
+            if (bid) this.greymarchScribeShow(bid);
+        }
         if (this.greymarchForgeOn && now >= (this.greymarchForgeMenuNext || 0)) {
             this.greymarchForgeMenuNext = now + 250;
             try {
