@@ -280,6 +280,19 @@ TEST_CASE("GreymarchBalance: bound weapons and the spells that conjure them",
   REQUIRE_FALSE(t.MayHoldBound(12345, learned));
 }
 
+TEST_CASE("GreymarchBalance: scrolls and the spells they hit as",
+          "[GreymarchBalance]")
+{
+  auto t = GreymarchBalanceTable::FromJson(nlohmann::json::parse(
+    R"({"scrolls": {"615832": 77776, "615836": 372060, "5": "x", "0": 1, "6": 0, "x": 7}})"));
+  REQUIRE(t.scrollSpell.size() == 2);
+  REQUIRE(t.SpellOfScroll(615832) == 77776);
+  REQUIRE(t.SpellOfScroll(615836) == 372060);
+  REQUIRE(t.SpellOfScroll(77776) == 0);
+  REQUIRE(t.SpellOfScroll(5) == 0);
+  REQUIRE(GreymarchBalanceTable::FromJson(nlohmann::json::parse("{}")).scrollSpell.empty());
+}
+
 TEST_CASE("Greymarch: a self-cast armor spell (Oakflesh ...) adds its armor rating until it runs out",
           "[Greymarch]")
 {

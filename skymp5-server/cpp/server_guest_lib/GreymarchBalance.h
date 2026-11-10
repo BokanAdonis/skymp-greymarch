@@ -30,6 +30,9 @@
 //               conjuring spell puts in the caster's hands exists only in their own game, never in the server's inventory. A player may still hold
 //               it (their equipment update is not refused for it) and hit with it while they know one of these spells; a shot with a bound arrow
 //               takes nothing from the inventory.
+//   scrolls   { "<global scroll id>": spell id }   SCROLLS (2026-11-09, the owner: scrolls in the world, damage on the server like spells): a scroll the
+//               caster holds may be cast (the cast is passed on and remembered), and its hits, or hits named as its spell soon after, are dealt as
+//               that spell's (spells, playerSpells ...; never dual cast); a self-cast armor scroll counts as its spell's armor.
 struct GreymarchBalanceTable
 {
   std::unordered_map<uint32_t, float> weaponDamage;
@@ -53,6 +56,14 @@ struct GreymarchBalanceTable
   std::optional<float> pvpArmor;
   std::optional<float> pvpRankKeep;
   std::unordered_map<uint32_t, std::vector<uint32_t>> boundItems; // GREYMARCH: bound weapons and arrows -> the spells that conjure them
+  std::unordered_map<uint32_t, uint32_t> scrollSpell; // GREYMARCH: a scroll -> the spell its hits are dealt as
+
+  // GREYMARCH: the spell a scroll stands for, 0 when it is no scroll on the list
+  uint32_t SpellOfScroll(uint32_t scrollId) const
+  {
+    auto it = scrollSpell.find(scrollId);
+    return it == scrollSpell.end() ? 0u : it->second;
+  }
 
   // GREYMARCH: a bound weapon or arrow the actor may hold: one of its spells is learned (isLearned(spellId))
   template <class F>

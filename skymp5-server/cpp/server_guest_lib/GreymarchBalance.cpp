@@ -98,6 +98,22 @@ GreymarchBalanceTable GreymarchBalanceTable::FromJson(const nlohmann::json& j)
       }
     }
   }
+  if (auto it = j.find("scrolls"); it != j.end() && it->is_object()) {
+    for (auto& [k, v] : it->items()) {
+      try {
+        const unsigned long long id = std::stoull(k);
+        if (id == 0 || id > 0xffffffffull || !v.is_number_unsigned() ||
+            v.get<unsigned long long>() == 0 ||
+            v.get<unsigned long long>() > 0xffffffffull) {
+          continue;
+        }
+        t.scrollSpell[static_cast<uint32_t>(id)] =
+          static_cast<uint32_t>(v.get<unsigned long long>());
+      } catch (...) {
+        // not a form id: skipped
+      }
+    }
+  }
   return t;
 }
 

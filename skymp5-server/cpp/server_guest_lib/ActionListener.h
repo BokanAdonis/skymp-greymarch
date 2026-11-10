@@ -135,6 +135,13 @@ private:
   };
   std::map<std::pair<uint32_t, uint32_t>, LastCast> lastCasts;
 
+  // GREYMARCH: SCROLLS (2026-11-09): (reader, the spell their scroll stands
+  // for) -> when they read it. Its hits, or hits the game names as that spell
+  // (an explosion, a rune going off), count for a while after
+  std::map<std::pair<uint32_t, uint32_t>, std::chrono::steady_clock::time_point>
+    lastScrollReads;
+  bool ReadScrollRecently(uint32_t casterId, uint32_t spellId) const;
+
   // GREYMARCH: CLOAKS ON THE SERVER (2026-11-01, the owner: Frost Cloak did no
   // damage; the game reports no hit for its ticks). A cloak's caster -> its
   // damage spell, radius and end; the server hits everyone that close once a

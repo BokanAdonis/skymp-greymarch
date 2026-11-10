@@ -1410,6 +1410,26 @@ void ActionListener::OnHit(const RawMessageData& rawMsgData,
     return;
   }
 
+  // GREYMARCH: A SCROLL (2026-11-09, the owner: scrolls in the world, damage
+  // on the server like spells). Its hit is dealt as the spell it stands for
+  // (the balance table's scrolls), with that spell's balance. It counts from
+  // an NPC, from someone who read that scroll lately, or who still holds one
+  if (const uint32_t scrollSpell =
+        GreymarchBalance::Get().SpellOfScroll(hitData.source)) {
+    const bool npc = partOne.serverState.UserByActor(aggressor) ==
+      Networking::InvalidUserId;
+    if (npc || ReadScrollRecently(aggressor->GetFormId(), scrollSpell) ||
+        aggressor->GetInventory().GetItemCount(hitData.source) > 0) {
+      HitData asSpell = hitData;
+      asSpell.source = scrollSpell;
+      OnSpellHit(aggressor, targetRef, asSpell);
+    } else {
+      spdlog::info("scroll hit dropped: {:x} has not read scroll {:x}",
+                   aggressor->GetFormId(), hitData.source);
+    }
+    return;
+  }
+
   auto sourceInEspm =
     partOne.GetEspm().GetBrowser().LookupById(hitData.source);
 
@@ -1436,9 +1456,12 @@ void ActionListener::OnHit(const RawMessageData& rawMsgData,
   // the hit, and OnHit has checked that game is its host. Its spells count.
   const bool npcCaster = partOne.serverState.UserByActor(aggressor) ==
     Networking::InvalidUserId;
+  // GREYMARCH: or a scroll of it was read lately (its explosion or rune hit
+  // is named as the spell)
   if (isSourceSpell &&
       (npcCaster || equipment.IsSpellEquipped(hitData.source) ||
-       aggressor->IsSpellLearned(hitData.source))) {
+       aggressor->IsSpellLearned(hitData.source) ||
+       ReadScrollRecently(aggressor->GetFormId(), hitData.source))) {
     OnSpellHit(aggressor, targetRef, hitData);
     return;
   }
@@ -1575,7 +1598,14 @@ void ActionListener::OnSpellCast(const RawMessageData& rawMsgData,
   // cast): a staff casts its own enchantment, never equipped or learned as a
   // spell. Its cast counts when the caster holds a weapon whose enchantment
   // it is (HoldsStaffEnchantment)
-  if (equipment.IsSpellEquipped(spellCastData.spell) == false &&
+  // GREYMARCH: SCROLLS (2026-11-09): a scroll on the list the caster holds
+  // (the gamemode takes the read one out of the pack a few seconds later)
+  const uint32_t scrollSpell =
+    GreymarchBalance::Get().SpellOfScroll(spellCastData.spell);
+  const bool scrollRead = scrollSpell != 0 &&
+    caster->GetInventory().GetItemCount(spellCastData.spell) > 0;
+  if (!scrollRead &&
+      equipment.IsSpellEquipped(spellCastData.spell) == false &&
       caster->IsSpellLearned(spellCastData.spell) == false &&
       HoldsStaffEnchantment(*caster, spellCastData.spell) == false) {
     spdlog::info("ActionListener::OnSpellCast - spell {0:x} not "
@@ -1593,11 +1623,23 @@ void ActionListener::OnSpellCast(const RawMessageData& rawMsgData,
   lastCasts[{ caster->GetFormId(), spellCastData.spell }] = {
     std::chrono::steady_clock::now(), spellCastData.isDualCasting
   };
+  if (scrollRead) {
+    if (lastScrollReads.size() > 4096) {
+      lastScrollReads.clear();
+    }
+    lastScrollReads[{ caster->GetFormId(), scrollSpell }] =
+      std::chrono::steady_clock::now();
+    spdlog::info("ActionListener::OnSpellCast - {:x} read scroll {:x} "
+                 "(hits as {:x})",
+                 caster->GetFormId(), spellCastData.spell, scrollSpell);
+  }
 
   // GREYMARCH: a self-cast armor spell (Oakflesh ... Ebonyflesh): the server
   // counts its armor rating on the caster (or the actor it was cast on) until
   // it runs out (SpellArmorBuff, the damage formula)
-  if (auto [armor, seconds] = SpellArmorBuff(&partOne.worldState, spellCastData.spell);
+  // (a scroll: its spell's)
+  if (auto [armor, seconds] = SpellArmorBuff(
+        &partOne.worldState, scrollRead ? scrollSpell : spellCastData.spell);
       armor > 0.f && seconds > 0.f) {
     MpActor* who = caster;
     if (spellCastData.target != 0 &&
@@ -1860,6 +1902,20 @@ void ActionListener::CloakTick(uint32_t casterId)
   }
   partOne.worldState.SetTimer(std::chrono::seconds(1))
     .Then([this, casterId](Viet::Void) { CloakTick(casterId); });
+}
+
+bool ActionListener::ReadScrollRecently(uint32_t casterId,
+                                        uint32_t spellId) const
+{
+  // a minute: long enough for a rune laid down to go off
+  constexpr float kScrollWindowSeconds = 60.f;
+  auto it = lastScrollReads.find({ casterId, spellId });
+  if (it == lastScrollReads.end()) {
+    return false;
+  }
+  const std::chrono::duration<float> age =
+    std::chrono::steady_clock::now() - it->second;
+  return age.count() <= kScrollWindowSeconds;
 }
 
 bool ActionListener::IsDamageOfRecentCloak(uint32_t casterId,
