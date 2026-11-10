@@ -4,6 +4,7 @@ const GM_PUPPET_MINE_FRESH_MS = 2500; // the server's word that an animal hunts 
 const GM_PUPPET_LOCAL_EVERY_MS = 100; // a hunting animal is moved here this often
 const GM_PUPPET_REPORT_EVERY_MS = 200; // and its place reported this often
 const GM_PUPPET_HOLD = 140; // in a fight it waits until the player is this far past its reach (the server's HOLD, wildlifebrain.js)
+const GM_PUPPET_Z_SLACK = 120; // a hunting animal moved here stays within this of the server's height for it (gmPuppetDriveLocal, 2026-11-09: flying wolves)
 const GM_PUPPET_LUNGE_MS = 1100; // a server-driven animal's lunge: its animation moves it this long, not the frames (gmPuppetMove, 2026-10-28)
 import { Appearance, applyAppearance } from "../sync/appearance";
 import { isBadMenuShown, applyEquipment } from "../sync/equipment";
@@ -1498,6 +1499,11 @@ export class FormView {
       const go = Math.min(d - reach * 0.8, run * 0.2); // a fifth of a second ahead: translateTo gets there at its run speed
       if (go > 5) { moving = true; tx = wx + (dx / d) * go; ty = wy + (dy / d) * go; tz = wz + (pz - wz) * Math.min(1, go / d); }
     }
+    // NEVER UP INTO THE AIR (2026-11-09, the owner: "Wolves teleport around and fly"): the step above heads for the player's height too, and translateTo has no
+    // ground or gravity, so a wolf after a player on a rock, a roof or in a jump ran up into the air. Its height stays within GM_PUPPET_Z_SLACK of the server's
+    // (the server puts every report on its ground map, gamemode wildlifebrain.js drive), standing or running
+    const gz = Number(f.pos && f.pos[2]);
+    if (Number.isFinite(gz)) tz = Math.max(gz - GM_PUPPET_Z_SLACK, Math.min(gz + GM_PUPPET_Z_SLACK, tz));
     const m = { ...model.movement, pos: [tx, ty, tz], rot: [0, 0, heading], runMode: moving ? "Running" : "Standing", direction: 0, speed: 0, isInJumpState: false, isSneaking: false, isBlocking: false, isWeapDrawn: true, ...(typeof f.hp === "number" ? { healthPercentage: Math.max(0.02, f.hp) } : {}) } as Movement;
     this.movState.lastApply = now;
     try {
