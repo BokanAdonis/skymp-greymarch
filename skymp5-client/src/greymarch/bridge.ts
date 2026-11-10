@@ -5,6 +5,7 @@
 import { readStaffCharge, writeStaffCharge } from "./staffCharge";
 import { castAnimStart, castAnimStopEvent, castAnimMode } from "./castAnimMode";
 import { MsgType } from "../messages";
+import { frameWatchTick } from "./frameWatch";
 import * as misc from "../view/worldViewMisc";
 import * as appearanceMod from "../sync/appearance";
 import * as moveGetMod from "../sync/movementGet";
@@ -195,6 +196,7 @@ export class GreymarchBridge {
         try { this.sp.on("modEvent", (e: any) => this.greymarchHeightModEvent(e)); } catch (meErr) { /* no mod events: no Height slider on the Body tab */ } // RaceMenu's menu talks in mod events (the Height slider, greymarchHeightModEvent)
         try { this.sp.on("hit", (e: any) => this.greymarchHit(e)); } catch (hitErr) { /* no hit events: the combat history stays empty */ }
         this.controller.on("update", () => this.greymarchTick()); // Skyrim functions only work in the update phase, never in tick
+        this.controller.on("update", () => frameWatchTick(this.sp, Date.now(), (t: string) => this.greymarchLog(t))); // FRAME-DROP LOG (frameWatch.ts)
         this.greymarchWolfLungeHook();
         try { this.controller.on("loadGame", () => { if (this.greymarchMapState) { this.greymarchMapState.restore = true; this.greymarchMapState.refs = {}; } }); } catch (e) { /* shown once per login */ } // a world load forgets the map: shown again
         this.controller.on("tick", () => this.greymarchConnectCover(Date.now()));

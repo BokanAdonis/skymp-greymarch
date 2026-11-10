@@ -3,6 +3,7 @@ import { FormModel, WorldModel } from "./model";
 import { NiPoint3 } from "../sync/movement";
 import { SpApiInteractor } from "../services/spApiInteractor";
 import { GamemodeUpdateService } from "../services/services/gamemodeUpdateService";
+import { frameWatchForm } from "../greymarch/frameWatch";
 
 export class FormViewArray {
   updateForm(form: FormModel, i: number) {
@@ -68,7 +69,10 @@ export class FormViewArray {
         }
       } else {
         gamemodeUpdateService.setI(i);
+        const gmT0 = Date.now(); // GREYMARCH: FRAME-DROP LOG (frameWatch.ts): the slowest form of a window is named
         this.updateForm(form, i);
+        const gmMs = Date.now() - gmT0;
+        if (gmMs > 0) frameWatchForm(gmMs, form.refrId || 0);
       }
 
       if (offset && form.movement && realPos) {

@@ -7,6 +7,7 @@ import { ClientListener, CombinedController, Sp } from '../services/services/cli
 import { logTrace } from "../logging";
 import { SinglePlayerService } from "../services/services/singlePlayerService";
 import { RemoteServer } from "../services/services/remoteServer";
+import { frameWatchWorld } from "../greymarch/frameWatch";
 
 export class WorldView extends ClientListener {
   constructor(private sp: Sp, private controller: CombinedController) {
@@ -55,7 +56,10 @@ export class WorldView extends ClientListener {
     const singlePlayerService = this.controller.lookupListener(SinglePlayerService);
     if (!singlePlayerService.isSinglePlayer) {
       const modelSource = this.controller.lookupListener(RemoteServer);
-      this.updateWorld(modelSource.getWorldModel());
+      const gmT0 = Date.now(); // GREYMARCH: FRAME-DROP LOG (frameWatch.ts): how long our world update takes a frame
+      const gmModel = modelSource.getWorldModel();
+      this.updateWorld(gmModel);
+      frameWatchWorld(Date.now() - gmT0, gmModel.forms.length);
     }
   }
 
