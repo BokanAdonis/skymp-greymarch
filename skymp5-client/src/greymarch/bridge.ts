@@ -297,10 +297,10 @@ export class GreymarchBridge {
         if (type === "greymarchRaceMenuLookOf") { // OTHERS SEE THEM: another player's kept sliders, for this game's copy of them (greymarchRaceMenuCopiesTick)
             var rmc = this.greymarchRmCopies || (this.greymarchRmCopies = {});
             var rmcId = Number(msg.actorId) >>> 0;
-            if (rmcId) rmc[rmcId] = { actor: rmcId, want: msg.look && typeof msg.look === "object" ? msg.look : {}, done: null, loadedSince: 0, tries: 0 };
+            if (rmcId) rmc[rmcId] = { actor: rmcId, want: msg.look && typeof msg.look === "object" ? msg.look : {}, done: null, loadedSince: 0, tries: 0, hDirty: true };
             return;
         }
-        if (type === "greymarchRaceMenuLook") { var rm0 = this.greymarchRmState(); rm0.want = msg.look && typeof msg.look === "object" ? msg.look : {}; rm0.tries = 0; if (Array.isArray(msg.height) && msg.height.length === 2 && msg.height[0] > 0 && msg.height[1] >= msg.height[0]) this.greymarchHeightRange = [Number(msg.height[0]), Number(msg.height[1])]; return; } // RaceMenu's extra sliders of this character, kept by the server (greymarchRaceMenuTick)
+        if (type === "greymarchRaceMenuLook") { var rm0 = this.greymarchRmState(); rm0.want = msg.look && typeof msg.look === "object" ? msg.look : {}; rm0.tries = 0; rm0.ownHeightDirty = true; if (Array.isArray(msg.height) && msg.height.length === 2 && msg.height[0] > 0 && msg.height[1] >= msg.height[0]) this.greymarchHeightRange = [Number(msg.height[0]), Number(msg.height[1])]; return; } // RaceMenu's extra sliders of this character, kept by the server (greymarchRaceMenuTick)
         if (type === "greymarchVampire") { this.greymarchVampWant = msg.on ? msg : null; this.greymarchVampCostTold = {}; this.greymarchHudToPage("blood", { on: !!msg.on, blood: msg.blood, empty: !!msg.empty }); return; } // a vampire's state: the blood drop and what the game applies (greymarchVampTick)
         if (type === "greymarchVampLooks") { this.greymarchVampLookList = Array.isArray(msg.vampires) ? msg.vampires : []; if (Number(msg.me) > 0) this.greymarchMeActor = Number(msg.me) >>> 0; return; } // (me: which of them is this player: the ghosts and effects packets that also say so may not have come yet, and without it the player's own eyes and fangs were never put on) // how every vampire in the world looks (eyes and fangs)
         if (type === "greymarchIntoxNear") { this.greymarchIntoxOthers = Array.isArray(msg.actors) ? msg.actors.map(function (x: any) { return Number(x) >>> 0; }).filter(function (x: number) { return x > 0; }).slice(0, 200) : []; return; } // who is drunk or high (greymarchIntoxOthersTick)
@@ -2648,6 +2648,7 @@ export class GreymarchBridge {
                 this.greymarchKeepHeadParts(ac, copyParts, Date.now());
                 if (!ok) { this.greymarchRmCopyLog(c.actor, "RaceMenu did not load the sliders on the copy (try " + c.tries + " of 3)"); continue; }
                 c.done = key; c.tries = 0;
+                c.hDirty = true; c.hNext = 0; // HEIGHT DRAWN AFTER A PRESET (greymarchRaceMenuHeightsTick): the preset stores the scale but does not draw it
                 this.greymarchRmCopyLog(c.actor, "sliders put on their copy (" + this.greymarchRaceMenuSay(c.want) + ")");
             } catch (err) {
                 this.greymarchRmCopyLog(c.actor, "the sliders could not be put on the copy (try " + c.tries + " of 3): " + err);
@@ -2679,7 +2680,10 @@ export class GreymarchBridge {
                 var want = Math.round(rmMod.heightOfLook(c.want) * 1000) / 1000;
                 var female = this.greymarchHeightFemale(ac);
                 var cur = this.greymarchHeightNow(ac, female);
-                if (Math.abs(cur - want) < 0.002) continue;
+                // HEIGHT DRAWN AFTER A PRESET (2026-11-10, the owner: a staff /height showed for nobody): NiOverride's stored scale is what is read here, and a
+                // RaceMenu preset load sets it without drawing it, so a new Height read as already on; after a new look or a preset load it is put on (and drawn) once
+                if (!c.hDirty && Math.abs(cur - want) < 0.002) continue;
+                c.hDirty = false;
                 this.greymarchHeightPut(ac, female, want, false);
                 c.hNext = now + 1000; // read back soon: a load that was still going on can drop it
                 var after = this.greymarchHeightNow(ac, female);
@@ -2695,6 +2699,7 @@ export class GreymarchBridge {
     // player's own body had none. Once a second, outside the race menu, the own skeleton's Height is set to the one in the server's look (with first person),
     // so a staff /height (and a race limit) shows on the player's own screen too. Not in a beast or creature body, not in the 10 s after the race menu
     // closes (the player's new slider is on its way to the server, and its answer comes back as the look), not before the body has been loaded 4 s.
+    // NiOverride's stored scale is what can be read, and a preset load sets it without drawing it, so after a new look or a preset load it is put on once anyway.
     greymarchOwnHeightTick(now: number): any {
         var rm = this.greymarchRmState();
         if (!rm || rm.want === null || rm.want === undefined || now < (rm.ownHeightNext || 0)) return;
@@ -2710,7 +2715,8 @@ export class GreymarchBridge {
             var want = Math.round(rmMod.heightOfLook(rm.want) * 1000) / 1000;
             var female = this.greymarchHeightFemale(player);
             var cur = this.greymarchHeightNow(player, female);
-            if (Math.abs(cur - want) < 0.002) return;
+            if (!rm.ownHeightDirty && Math.abs(cur - want) < 0.002) return; // the stored scale can read right while the skeleton is not drawn (a preset load)
+            rm.ownHeightDirty = false;
             this.greymarchHeightPut(player, female, want, true);
             var after = this.greymarchHeightNow(player, female);
             rm.ownHeightSaid = (rm.ownHeightSaid || 0) + 1;
@@ -2945,7 +2951,7 @@ export class GreymarchBridge {
             var ok = sp.callNative("CharGen", "LoadCharacterPresetEx", undefined, player, rmMod.PRESET_NAME, null, rmMod.APPLY_ALL);
             this.greymarchKeepHeadParts(player, partsBefore, now);
             if (!ok) { this.greymarchLog("racemenu: RaceMenu did not load the kept sliders (try " + rm.tries + " of 3)"); return; }
-            rm.done = key; rm.tries = 0; rm.earsDown = want !== rm.want; // the ears are under a hood now (keepEarsUnderHood, when the race menu saves)
+            rm.done = key; rm.tries = 0; rm.earsDown = want !== rm.want; rm.ownHeightDirty = true; // OWN HEIGHT: drawn after the preset load // the ears are under a hood now (keepEarsUnderHood, when the race menu saves)
             if (want !== rm.want || rm.earsSaid) { rm.earsSaid = want !== rm.want; this.greymarchCrumb("racemenu: " + (want !== rm.want ? "hood on, big ears down" : "hood off, ears back")); }
             this.greymarchLog("racemenu: sliders put back (" + this.greymarchRaceMenuSay(rm.want) + ")");
         } catch (err) {

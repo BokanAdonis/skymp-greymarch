@@ -259,6 +259,9 @@ test("their height at once (2026-11-07, the owner: heights not always right on f
   assert.deepStrictEqual(copy.sets, [1.1], "drawn: the Height goes on within a quarter second, no 4 s wait");
   tick(5000);
   assert.deepStrictEqual(copy.sets, [1.1], "right: left alone");
+  s.gm.greymarchRmCopies[0x42].hDirty = true; tick(2250);
+  assert.deepStrictEqual(copy.sets, [1.1, 1.1], "a preset load stored the scale without drawing it (2026-11-10, a staff /height seen by nobody): put on once anyway");
+  copy.sets = [1.1];
   copy.scale = 0; tick(2250);
   assert.deepStrictEqual(copy.sets, [1.1, 1.1], "lost (a rebuild, a load): put back within 2 s");
   s.say({ customPacketType: "greymarchRaceMenuLookOf", actorId: 0x42, look: {} });
@@ -304,6 +307,10 @@ test("own height (2026-11-10, the owner: /height did not change the player's own
   assert.deepStrictEqual(me.sets, [], "not in the 10 s after the race menu (the player's own slider is on its way)");
   tick(2000);
   assert.strictEqual(me.sets.length, 2, "then the server's again");
+  me.sets = []; me.scale = 2.146; rmS.ownHeightDirty = true; tick(1000);
+  assert.strictEqual(me.sets.length, 2, "a preset load stored the scale without drawing it: put on (drawn) once anyway");
+  tick(3000);
+  assert.strictEqual(me.sets.length, 2, "then left alone");
   me.scale = 1; me.sets = []; player.getRace = () => ({ getName: () => "WerewolfBeastRace" }); tick(3000);
   assert.deepStrictEqual(me.sets, [], "never on a werewolf body");
 });
