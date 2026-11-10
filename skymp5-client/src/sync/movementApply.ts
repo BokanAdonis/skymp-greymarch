@@ -4,7 +4,8 @@ import {
   Game,
   TESModPlatform,
   Debug,
-  storage
+  storage,
+  callNative
 } from "skyrimPlatform";
 import { RespawnNeededError } from "../lib/errors";
 import { Movement, RunMode, AnimationVariables, Transform, NiPoint3 } from "./movement";
@@ -57,7 +58,17 @@ export const applyMovement = (refr: ObjectReference, m: Movement, isMyClone?: bo
   }
 
   // ac.stopCombat();
-  ac.blockActivation(true);
+  // GREYMARCH (2026-11-08, the owner: "Invisible GM but I still get the pop up for press E"): the one-argument blockActivation also turns the game's
+  // "hide the prompt" flag off (Papyrus BlockActivation(abBlocked, abHideActivateText = false)), and this runs on every movement update, so the prompt
+  // the bridge hides every 2 s (greymarchNoPrompt: other players, invisible and see-through GMs) came straight back. A body the bridge marked keeps its
+  // prompt hidden here too; everything else is blocked as before.
+  let gmHide = false;
+  try { const gmGlobal: any = Function("return this")(); gmHide = !!(gmGlobal.__gmNoPrompt && gmGlobal.__gmNoPrompt[refr.getFormID()]); } catch (gmErr) { gmHide = false; }
+  if (gmHide) {
+    try { callNative("ObjectReference", "BlockActivation", ac, true, true); } catch (gmErr2) { ac.blockActivation(true); }
+  } else {
+    ac.blockActivation(true);
+  }
 
   keepOffsetFromActor(ac, m);
 
