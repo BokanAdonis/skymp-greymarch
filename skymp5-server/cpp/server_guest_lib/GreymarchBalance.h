@@ -32,7 +32,11 @@
 //               takes nothing from the inventory.
 //   scrolls   { "<global scroll id>": spell id }   SCROLLS (2026-11-09, the owner: scrolls in the world, damage on the server like spells): a scroll the
 //               caster holds may be cast (the cast is passed on and remembered), and its hits, or hits named as its spell soon after, are dealt as
-//               that spell's (spells, playerSpells ...; never dual cast); a self-cast armor scroll counts as its spell's armor.
+//               that spell's (spells, playerSpells ...; never dual cast); a self-cast armor scroll counts as its spell's armor. The caster's
+//               scroll is used up (taken out of the inventory) as the cast comes in.
+//   scrollDamage  { "<scroll id>": multiplier }   the F7 Scrolls tab: the scroll's hit is its spell's record damage times this (in place of the
+//               spell's own multiplier)
+//   scrollSeconds { "<scroll id>": seconds }      the F7 Scrolls tab: how long a self-cast armor scroll's armor lasts
 struct GreymarchBalanceTable
 {
   std::unordered_map<uint32_t, float> weaponDamage;
@@ -57,6 +61,8 @@ struct GreymarchBalanceTable
   std::optional<float> pvpRankKeep;
   std::unordered_map<uint32_t, std::vector<uint32_t>> boundItems; // GREYMARCH: bound weapons and arrows -> the spells that conjure them
   std::unordered_map<uint32_t, uint32_t> scrollSpell; // GREYMARCH: a scroll -> the spell its hits are dealt as
+  std::unordered_map<uint32_t, float> scrollDamage;    // GREYMARCH: the F7 Scrolls tab: a scroll's own multiplier (in place of its spell's)
+  std::unordered_map<uint32_t, float> scrollSeconds;   // GREYMARCH: the F7 Scrolls tab: how long an armor scroll lasts
 
   // GREYMARCH: the spell a scroll stands for, 0 when it is no scroll on the list
   uint32_t SpellOfScroll(uint32_t scrollId) const

@@ -291,6 +291,11 @@ TEST_CASE("GreymarchBalance: scrolls and the spells they hit as",
   REQUIRE(t.SpellOfScroll(77776) == 0);
   REQUIRE(t.SpellOfScroll(5) == 0);
   REQUIRE(GreymarchBalanceTable::FromJson(nlohmann::json::parse("{}")).scrollSpell.empty());
+  auto own = GreymarchBalanceTable::FromJson(nlohmann::json::parse(
+    R"({"scrollDamage": {"615832": 1.5, "7": -1, "8": 500}, "scrollSeconds": {"615836": 90}})"));
+  REQUIRE(own.scrollDamage.size() == 1);
+  REQUIRE(own.scrollDamage.at(615832) == Catch::Approx(1.5f));
+  REQUIRE(own.scrollSeconds.at(615836) == 90.f);
 }
 
 TEST_CASE("Greymarch: a self-cast armor spell (Oakflesh ...) adds its armor rating until it runs out",

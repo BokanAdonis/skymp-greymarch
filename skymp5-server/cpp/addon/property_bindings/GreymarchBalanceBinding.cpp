@@ -15,6 +15,8 @@ Napi::Value GreymarchBalanceBinding::Get(Napi::Env env, ScampServer&,
   result.Set("armor", Napi::Number::New(env, t.armorRating.size()));
   // GREYMARCH: this build does the magic staffs' damage (OnStaffHit): the gamemode then leaves it to the server
   result.Set("staffs", Napi::Number::New(env, t.staffDamage.size()));
+  // GREYMARCH: this build takes a read scroll out of the inventory (OnSpellCast): the gamemode then leaves it to the server
+  result.Set("scrolls", Napi::Number::New(env, t.scrollSpell.size()));
   return result;
 }
 

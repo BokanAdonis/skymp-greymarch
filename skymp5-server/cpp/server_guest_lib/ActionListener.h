@@ -1,5 +1,6 @@
 #pragma once
 #include "AnimationData.h"
+#include <optional>
 #include "ConsoleCommands.h"
 #include "CraftService.h"
 #include "Messages.h"
@@ -93,8 +94,11 @@ public:
   }
 
 private:
+  // multOverride: a scroll's own multiplier (the F7 Scrolls tab), in place of
+  // the spell's
   void OnSpellHit(MpActor* aggressor, MpObjectReference* targetRef,
-                  const HitData& hitData);
+                  const HitData& hitData,
+                  std::optional<float> multOverride = std::nullopt);
   // GREYMARCH: a magic staff's hit (GreymarchBalance staffs): its damage in health points, as a spell's
   void OnStaffHit(MpActor* aggressor, MpObjectReference* targetRef,
                   const HitData& hitData, float damage, bool held);

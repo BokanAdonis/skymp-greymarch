@@ -1422,7 +1422,12 @@ void ActionListener::OnHit(const RawMessageData& rawMsgData,
         aggressor->GetInventory().GetItemCount(hitData.source) > 0) {
       HitData asSpell = hitData;
       asSpell.source = scrollSpell;
-      OnSpellHit(aggressor, targetRef, asSpell);
+      const auto& sb = GreymarchBalance::Get();
+      auto own = sb.scrollDamage.find(hitData.source);
+      OnSpellHit(aggressor, targetRef, asSpell,
+                 own != sb.scrollDamage.end()
+                   ? std::optional<float>(own->second)
+                   : std::nullopt);
     } else {
       spdlog::info("scroll hit dropped: {:x} has not read scroll {:x}",
                    aggressor->GetFormId(), hitData.source);
@@ -1627,11 +1632,21 @@ void ActionListener::OnSpellCast(const RawMessageData& rawMsgData,
     if (lastScrollReads.size() > 4096) {
       lastScrollReads.clear();
     }
-    lastScrollReads[{ caster->GetFormId(), scrollSpell }] =
-      std::chrono::steady_clock::now();
+    const auto now = std::chrono::steady_clock::now();
+    // USED UP (2026-11-09, the owner: "make sure deleted after use"): the
+    // read scroll leaves the caster's inventory here, once a cast (a cast
+    // reported twice within a moment takes one)
+    auto prev = lastScrollReads.find({ caster->GetFormId(), scrollSpell });
+    const bool again = prev != lastScrollReads.end() &&
+      std::chrono::duration<float>(now - prev->second).count() < 0.3f;
+    lastScrollReads[{ caster->GetFormId(), scrollSpell }] = now;
+    if (!again) {
+      caster->RemoveItem(spellCastData.spell, 1, nullptr);
+    }
     spdlog::info("ActionListener::OnSpellCast - {:x} read scroll {:x} "
-                 "(hits as {:x})",
-                 caster->GetFormId(), spellCastData.spell, scrollSpell);
+                 "(hits as {:x}){}",
+                 caster->GetFormId(), spellCastData.spell, scrollSpell,
+                 again ? ", the same cast again: nothing taken" : ", used up");
   }
 
   // GREYMARCH: a self-cast armor spell (Oakflesh ... Ebonyflesh): the server
@@ -1648,6 +1663,14 @@ void ActionListener::OnSpellCast(const RawMessageData& rawMsgData,
         partOne.worldState.LookupFormById(spellCastData.target));
       if (t) {
         who = t.get();
+      }
+    }
+    // a scroll's own time of effect (the F7 Scrolls tab)
+    if (scrollRead) {
+      const auto& sb = GreymarchBalance::Get();
+      if (auto it = sb.scrollSeconds.find(spellCastData.spell);
+          it != sb.scrollSeconds.end() && it->second > 0.f) {
+        seconds = it->second;
       }
     }
     who->SetGreymarchArmorBuff(armor, seconds);
@@ -1689,7 +1712,8 @@ void ActionListener::OnUnknown(const RawMessageData& rawMsgData)
 
 void ActionListener::OnSpellHit(MpActor* aggressor,
                                 MpObjectReference* targetRef,
-                                const HitData& hitData)
+                                const HitData& hitData,
+                                std::optional<float> multOverride)
 {
   SendPapyrusOnHitEvent(aggressor, targetRef, hitData);
 
@@ -1740,8 +1764,11 @@ void ActionListener::OnSpellHit(MpActor* aggressor,
   // GREYMARCH: the F7 Spells balance tab: this spell's multiplier (its number
   // set / the game's, times its school's percent), and the percent for spells
   // cast by players or by NPCs
-  if (auto it = balance.spellMult.find(hitData.source);
-      it != balance.spellMult.end()) {
+  if (multOverride) {
+    damage *= *multOverride;
+    heal *= *multOverride;
+  } else if (auto it = balance.spellMult.find(hitData.source);
+             it != balance.spellMult.end()) {
     damage *= it->second;
     heal *= it->second;
   }
