@@ -34,7 +34,7 @@ function world() {
   const sp = { Game: { getFormEx: (id) => (id === 0x3b ? { xmarker: true } : null) } };
   const copy = (id, place = 0x3c) => ({
     place,
-    getFormID: () => id, isAIEnabled: () => true, getDistance: () => 0,
+    getFormID: () => id, isAIEnabled: () => true, getDistance: () => 0, getAngleZ: () => 0, getPositionX: () => 0, getPositionY: () => 0, getPositionZ: () => 0, clearLookAt: () => log.looks.push([id, "clear"]),
     getWorldSpace() { return { getFormID: () => this.place }; },
     getParentCell: () => null,
     placeAtMe(base) { assert.ok(base.xmarker); log.placed++; const ref = { setPosition: (x, y, z) => log.moves.push([id, x, y, z]), disable() {}, delete: () => log.deleted++ }; return ref; },
@@ -54,7 +54,7 @@ test("a copy looks at a marker at the point: placed once, moved only when the po
   h.lookAtPoint(w.sp, c, [10, 1000, 0], 1300);
   assert.strictEqual(w.log.moves.length, 1, "a small change: not moved");
   h.lookAtPoint(w.sp, c, [500, 1000, 0], 1400);
-  assert.deepStrictEqual(w.log.moves[1], [0xff000010, 500, 1000, 0], "moved");
+  assert.deepStrictEqual(w.log.moves[1], [0xff000010, ...h.clampLook([0, 0, h.HEAD_UP], [500, 1000, 0], 0)], "moved (to the clamped point, seen from the head)");
   h.lookAtPoint(w.sp, c, [900, 1000, 0], 1450);
   assert.strictEqual(w.log.moves.length, 2, "not more often than MOVE_GAP_MS");
   assert.strictEqual(w.log.looks.length, 2, "not pointed again within a second");
@@ -74,4 +74,31 @@ test("a copy in another world gets a new marker; at most MAX_MARKERS, the least 
   assert.strictEqual(w.log.deleted, 1, "the old one deleted");
   for (let i = 0; i < h.MAX_MARKERS + 5; i++) h.lookAtPoint(w.sp, w.copy(0xff000100 + i), [0, 0, 0], 2000 + i);
   assert.strictEqual(h._markers(), h.MAX_MARKERS);
+});
+
+test("no straight up or down (2026-11-10, the owner): from the copy's head the look is clamped to 30 up, 35 down, 70 to a side, put 1000 out; behind them: no look", () => {
+  const h = load();
+  const H = [0, 0, 100];
+  const ang = (p) => [Math.round(Math.atan2(p[0] - H[0], p[1] - H[1]) * 180 / Math.PI), Math.round(Math.atan2(p[2] - H[2], Math.hypot(p[0] - H[0], p[1] - H[1])) * 180 / Math.PI), Math.round(Math.hypot(p[0] - H[0], p[1] - H[1], p[2] - H[2]))];
+  assert.deepStrictEqual(ang(h.clampLook(H, [0, 2048, 100], 0)), [0, 0, 1000], "ahead, level");
+  assert.deepStrictEqual(ang(h.clampLook(H, [0, 1, 5000], 0)), [0, 30, 1000], "straight up: 30 degrees up, no more");
+  assert.deepStrictEqual(ang(h.clampLook(H, [0, 1, -5000], 0)), [0, -35, 1000], "straight down: 35 degrees down, no more");
+  assert.deepStrictEqual(ang(h.clampLook(H, [0, 5, 0], 0)), [0, -35, 1000], "their own feet, right below the head: never flipped");
+  assert.deepStrictEqual(ang(h.clampLook(H, [2048, 0, 100], 0)), [70, 0, 1000], "to the side: 70 at most");
+  assert.deepStrictEqual(ang(h.clampLook(H, [0, 2048, 100], 90)), [20, 0, 1000], "a body facing east looking north: 70 to its left");
+  assert.strictEqual(h.clampLook(H, [0, -2048, 100], 0), null, "behind them: no look");
+  assert.strictEqual(h.clampLook(null, [0, 1, 0], 0), null);
+});
+
+test("a look that goes behind the copy turns its head tracking off once; back in front it is pointed again at once", () => {
+  const h = load();
+  const w = (() => { const log = { looks: [] }; return { log, sp: { Game: { getFormEx: () => ({ xmarker: true }) } } }; })();
+  const c = { getFormID: () => 7, getAngleZ: () => 0, getPositionX: () => 0, getPositionY: () => 0, getPositionZ: () => 0, getWorldSpace: () => ({ getFormID: () => 0x3c }), getParentCell: () => null, isAIEnabled: () => true, getDistance: () => 0,
+    placeAtMe: () => ({ setPosition() {}, disable() {}, delete() {} }), setHeadTracking: (on) => w.log.looks.push(["tracking", on]), setLookAt: () => w.log.looks.push(["look"]), clearLookAt: () => w.log.looks.push(["clear"]) };
+  h.lookAtPoint(w.sp, c, [0, 1000, 120], 1000);
+  assert.strictEqual(h.lookAtPoint(w.sp, c, [0, -1000, 120], 1100), false);
+  assert.deepStrictEqual(w.log.looks.slice(2), [["clear"], ["tracking", false]]);
+  h.lookAtPoint(w.sp, c, [0, -1000, 120], 1200);
+  assert.strictEqual(w.log.looks.length, 4, "turned off only once");
+  assert.strictEqual(h.lookAtPoint(w.sp, c, [0, 1000, 120], 1300), true, "in front again: pointed at once, not a second later");
 });
