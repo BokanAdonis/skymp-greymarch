@@ -27,6 +27,7 @@ import { logTrace } from "../../logging";
 const playerFormId = 0x14;
 
 // TODO: split this service into EquipmentService, MovementService, AnimationService, ActorValueService, HostAttemptsService
+const GM_EQ_SETTLE_MS = 1500; // GREYMARCH: after the last equip or unequip, the gear is sent once more (see sendEquipment)
 export class SendInputsService extends ClientListener {
     constructor(private sp: Sp, private controller: CombinedController) {
         super();
@@ -64,6 +65,7 @@ export class SendInputsService extends ClientListener {
         if (type !== FormType.Book && type !== FormType.Potion && type !== FormType.Ingredient) {
             // Trigger UpdateEquipment only for equips that are not spell tomes, potions, ingredients
             this.equipmentChanged = true;
+            this.gmEqSettleAt = Date.now() + GM_EQ_SETTLE_MS; // and once more when the dressing has settled
             this.gmEquipCrumb("equip", event);
         }
 
@@ -91,6 +93,7 @@ export class SendInputsService extends ClientListener {
 
         if (event.actor.getFormID() === playerFormId) {
             this.equipmentChanged = true;
+            this.gmEqSettleAt = Date.now() + GM_EQ_SETTLE_MS;
             this.gmEquipCrumb("unequip", event);
         }
     }
@@ -294,6 +297,16 @@ export class SendInputsService extends ClientListener {
         if (_refrId) {
           return;
         }
+        // GREYMARCH: SENT AGAIN ONCE SETTLED (2026-11-11, the owner: "people spawn in wearing armor on their screens and on others they are naked; they have to
+        // unequip and reequip for everyone to see it"): at a spawn the game strips and re-dresses the body in a burst (the breadcrumbs: unequip everything, equip it,
+        // unequip, equip again within 0.6 s), and an equip event can come before its piece counts as worn, so the last report could read the body half dressed or
+        // naked; the server kept that and nothing sent it again until a re-equip. Now GM_EQ_SETTLE_MS after the last equip or unequip the gear is sent once more, as
+        // the body really wears it (other games take an unchanged report as seen: no re-dress)
+        if (this.gmEqSettleAt && Date.now() >= this.gmEqSettleAt) {
+            this.gmEqSettleAt = 0;
+            this.equipmentChanged = true;
+            try { writeLogs("greymarch-crumbs", ((Date.now() - this.gmEquipCrumbStart) / 1000).toFixed(1) + "s my gear sent again, settled"); } catch (e) { /* the log only */ }
+        }
         if (this.equipmentChanged) {
             this.equipmentChanged = false;
 
@@ -369,6 +382,7 @@ export class SendInputsService extends ClientListener {
     private actorValuesNeedUpdate = false;
     private isRaceSexMenuShown = false;
     private equipmentChanged = false;
+    private gmEqSettleAt = 0; // GREYMARCH: when to send the gear once more, settled (0: not due)
     private numEquipmentChanges = 0;
     private prevValues: ActorValues = { health: 0, stamina: 0, magicka: 0 };
     private prevActorValuesUpdateTime = 0;
