@@ -97,6 +97,9 @@ const WEATHER_CHECK_MS = 2000, WEATHER_RESET_MS = 60000; // shared weather (grey
 const COPY_IDLE_MOVED = 150; // a copy this far from where its emote began has walked out of it (greymarchCopyIdleTick)
 const RESTACK_AFTER_MS = 20000; // the old split stacks made one, this long after the world is up (greymarchRestackOnce)
 const INTOX_CLEAR_MS = 6000, INTOX_CLEAR_EVERY = 1000, INTOX_DRUNK_ISTATE = 15, INTOX_WALK_AGAIN_MS = 2000, INTOX_POV_BACK_MS = 700; // iState 15: the body is in the drunk walk (its behavior tags it)
+// THE PLAGUE (gamemode plague.js greymarchPlague, 2026-11-11): by stage 1-3, the share of max stamina lost and how much slower stamina and health come back
+// (points off StaminaRateMult and HealRateMult, both 100 at rest); a cough flashes the game's own poison-hit screen (Skyrim.esm PoisonHitImod)
+const PLAGUE_STAMINA = [0, 0.1, 0.2, 0.35], PLAGUE_STAMINA_RATE = [0, 15, 30, 50], PLAGUE_HEAL_RATE = [0, 20, 40, 60], PLAGUE_COUGH_IMOD = 0x10e3d2;
 const INTOX_HIGH_IMOD = 0x0e3cbc, INTOX_STUMBLE_IDLE = 0x0138d5, INTOX_SOFT_EVERY = 1000;
 const INTOX_SOFT: { [k: string]: number } = { tipsy: 0.15, drunk: 0.3 }; // the drunk screen's strength, replayed every second
 const INTOX_SWAY: { [k: string]: { pitch: number; pitchPeriod: number; lean: number } } = { drunk: { pitch: 0.5, pitchPeriod: 4.2, lean: 7 }, high: { pitch: 0.9, pitchPeriod: 3.4, lean: 11 } }; // degrees, seconds, degrees a second
@@ -313,6 +316,7 @@ export class GreymarchBridge {
         if (type === "greymarchVampire") { this.greymarchVampWant = msg.on ? msg : null; this.greymarchVampCostTold = {}; this.greymarchHudToPage("blood", { on: !!msg.on, blood: msg.blood, empty: !!msg.empty }); return; } // a vampire's state: the blood drop and what the game applies (greymarchVampTick)
         if (type === "greymarchVampLooks") { this.greymarchVampLookList = Array.isArray(msg.vampires) ? msg.vampires : []; if (Number(msg.me) > 0) this.greymarchMeActor = Number(msg.me) >>> 0; return; } // (me: which of them is this player: the ghosts and effects packets that also say so may not have come yet, and without it the player's own eyes and fangs were never put on) // how every vampire in the world looks (eyes and fangs)
         if (type === "greymarchIntoxNear") { this.greymarchIntoxOthers = Array.isArray(msg.actors) ? msg.actors.map(function (x: any) { return Number(x) >>> 0; }).filter(function (x: number) { return x > 0; }).slice(0, 200) : []; return; } // who is drunk or high (greymarchIntoxOthersTick)
+        if (type === "greymarchPlague") { var ps = Math.max(0, Math.min(3, Math.floor(Number(msg.stage) || 0))); this.greymarchPlagueWant = ps; if (msg.cough && ps > 0) this.greymarchPlagueCough = true; return; } // the plague: this player's stage (0: well), and a cough now
         if (type === "greymarchIntox") { var il = msg.level === "tipsy" || msg.level === "drunk" || msg.level === "high" ? msg.level : "sober"; this.greymarchIntoxWant = il === "sober" ? null : { level: il, until: Date.now() + Math.max(1000, Math.min(30 * 60000, Number(msg.ms) || 0)) }; this.greymarchIntoxCheckAt = 0; return; } // drunk or high (greymarchIntoxTick)
         if (type === "greymarchWeather") { var wxId = Number(msg.id) >>> 0; this.greymarchWeatherWant = { id: wxId, fast: !!msg.fast, file: typeof msg.file === "string" && msg.file.length < 80 ? msg.file : null }; this.greymarchWeatherCheckAt = 0; if (msg.fast || (this.greymarchWeatherSet && this.greymarchWeatherSet !== wxId)) this.greymarchWeatherSetAt = 0; return; } // the hold's weather (greymarchWeatherTick)
         if (type === "greymarchDrunk") { this.greymarchDrunkWant = msg.on ? { until: Date.now() + Math.max(0, Number(msg.ms) || 0), at: 0 } : { off: true }; return; } // drained to death: the drunk walk after waking (greymarchDrunkTick)
@@ -1833,6 +1837,7 @@ export class GreymarchBridge {
         this.greymarchVampFeedHeld(player, now);
         this.greymarchDrunkTick(player, now);
         this.greymarchIntoxTick(player, now); // drunk or high: the screen, the walk, the stumbles, the pace
+        this.greymarchPlagueTick(player); // the plague: weaker by its stage, and a cough's screen flash
         this.greymarchIntoxOthersTick(now); // other players drunk or high: their copies here keep the drunk walk
         this.greymarchWeatherTick(player, now); // the hold's weather the server picked (greymarch weather.js)
         this.greymarchVampFangsWear(now); // the worn fangs the server gave: put on (SkyMP then shows them to everyone)
@@ -1925,6 +1930,27 @@ export class GreymarchBridge {
     //   high   the Sleeping Tree sap's screen held (Skyrim.esm 0E3CBC), the drunk walk, stumbles more often, slower still, more stamina gone
     // A stumble (the game's own stagger, StaggerStart 0138D5, small) never comes in a fight, with a weapon out, swimming, riding, sitting, in a menu or mid emote.
     // A beast form, a creature's body or the vampire's drained walk (greymarchDrunkTick) pauses the screen and the pace; the stamina stays down.
+    // THE PLAGUE: what the server last said (greymarchPlagueWant 0-3) is put on as differences (modActorValue), so the stats come back exactly when it is cured,
+    // whatever else changed them meanwhile; what is on now: greymarchPlagueHave { stage, stamina, srate, hrate }
+    greymarchPlagueTick(player: any): any {
+        var want = this.greymarchPlagueWant || 0, have = this.greymarchPlagueHave || { stage: 0, stamina: 0, srate: 0, hrate: 0 };
+        if (want !== have.stage) {
+            var lose = 0; if (PLAGUE_STAMINA[want]) { try { lose = Math.round(player.getBaseActorValue("stamina") * PLAGUE_STAMINA[want]); } catch (bErr) { lose = have.stamina; } }
+            try {
+                if (lose !== have.stamina) { player.modActorValue("stamina", have.stamina - lose); have.stamina = lose; }
+                var sr = PLAGUE_STAMINA_RATE[want], hr = PLAGUE_HEAL_RATE[want];
+                if (sr !== have.srate) { player.modActorValue("StaminaRateMult", have.srate - sr); have.srate = sr; }
+                if (hr !== have.hrate) { player.modActorValue("HealRateMult", have.hrate - hr); have.hrate = hr; }
+                this.greymarchLog("plague: stage " + have.stage + " -> " + want + (want ? " (stamina -" + lose + ", stamina regen -" + sr + ", health regen -" + hr + ")" : " (well)"));
+                have.stage = want;
+            } catch (pErr) { /* tried again next frame */ }
+            this.greymarchPlagueHave = have;
+        }
+        if (this.greymarchPlagueCough) {
+            this.greymarchPlagueCough = false;
+            try { var im = sp.ImageSpaceModifier.from(sp.Game.getFormEx(PLAGUE_COUGH_IMOD)); if (im) im.apply(0.35 + 0.2 * want); } catch (cErr) { /* a flash missed */ }
+        }
+    }
     greymarchIntoxTick(player: any, now: number): any {
         var sp = this.sp, w = this.greymarchIntoxWant;
         if (this.greymarchIntoxWalking) this.greymarchIntoxPovKeys(player);
