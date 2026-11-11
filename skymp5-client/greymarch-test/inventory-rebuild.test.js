@@ -40,7 +40,8 @@ function setup(items) {
     Form: class {},
   };
   const mod = { exports: {} };
-  new Function("require", "exports", "module", js)((p) => (p === "skyrimPlatform" ? sp : {}), mod.exports, mod);
+  const wornSwap = (() => { const wj = ts.transpileModule(fs.readFileSync(path.join(__dirname, "..", "src", "greymarch", "wornSwap.ts"), "utf8"), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2019 } }).outputText; const m = { exports: {} }; new Function("require", "exports", "module", wj)(() => ({}), m.exports, m); return m.exports; })();
+  new Function("require", "exports", "module", js)((p) => (p === "skyrimPlatform" ? sp : p === "../greymarch/wornSwap" ? wornSwap : {}), mod.exports, mod);
   const refr = { getFormID: () => 0x1234, getBaseObject: () => ({ getFormID: () => 0x99 }), removeAllItems() {} };
   return { inv: mod.exports, refr, calls, set: (c) => { changes = c; } };
 }

@@ -1,3 +1,4 @@
+import { keepWornOnSwap, swapReason } from '../greymarch/wornSwap';
 import {
   getExtraContainerChanges,
   getContainer,
@@ -440,6 +441,14 @@ export const applyInventory = (
   // GREYMARCH (2026-11-01, bound weapons on the server): a conjured weapon or arrow (Bound Sword, Bound Bow and its arrows) exists only in this game,
   // never in the server's inventory; it is not taken away here, or the spell's weapon vanished a second after the cast. It goes when the spell ends.
   diff = diff.filter((e) => !(e.count < 0 && greymarchIsBoundItem(e.baseId)));
+
+  // GREYMARCH: a worn piece swapped for the server's copy of the same item stays on (greymarch/wornSwap.ts: upgraded armor came off at every login)
+  {
+    const swap = keepWornOnSwap(diff as any);
+    for (const p of swap.pairs) {
+      try { writeLogs("greymarch", "inventory: worn " + p.out.baseId.toString(16) + " replaced by the server's copy, kept on (" + swapReason(p.out, p.in) + ")"); } catch (e) { /* log only */ }
+    }
+  }
 
   // Greymarch: Skyrim cannot be told WHICH of several items of one base to remove: AddItemEx hands RemoveItem a new extra list, which is not one of
   // the container's own, so Skyrim takes whichever comes first. With two guard report papers (one base, each its own name and condition) the wrong
