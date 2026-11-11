@@ -246,6 +246,7 @@ export class AuthService extends ClientListener {
       case 'greymarchVampLooks':
       case 'greymarchRaceMenuLook':
       case 'greymarchRaceMenuLookOf':
+      case 'greymarchStaffRaces': // the staff races this account's race menu may offer (bridge greymarchStaffRacesTick)
       case 'greymarchFavorites': // this character's favorites and hotkeys (gamemode favorites.js)
       case 'greymarchMapMarkers': // every map marker and the ones this character has found (gamemode mapmarkers.js)
       case 'greymarchVampFeed':

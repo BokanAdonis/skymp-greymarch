@@ -304,6 +304,7 @@ export class GreymarchBridge {
             if (rmcId) rmc[rmcId] = { actor: rmcId, want: msg.look && typeof msg.look === "object" ? msg.look : {}, done: null, loadedSince: 0, tries: 0, hDirty: true };
             return;
         }
+        if (type === "greymarchStaffRaces") { this.greymarchStaffRacesWant = Array.isArray(msg.races) ? msg.races.filter(function (x: any) { return typeof x === "number" && x > 0; }).map(function (x: number) { return x >>> 0; }) : []; return; } // RACES FOR STAFF ONLY (greymarchStaffRacesTick)
         if (type === "greymarchRaceMenuLook") { var rm0 = this.greymarchRmState(); rm0.want = msg.look && typeof msg.look === "object" ? msg.look : {}; rm0.tries = 0; rm0.ownHeightDirty = true; if (Array.isArray(msg.height) && msg.height.length === 2 && msg.height[0] > 0 && msg.height[1] >= msg.height[0]) this.greymarchHeightRange = [Number(msg.height[0]), Number(msg.height[1])]; return; } // RaceMenu's extra sliders of this character, kept by the server (greymarchRaceMenuTick)
         if (type === "greymarchVampire") { this.greymarchVampWant = msg.on ? msg : null; this.greymarchVampCostTold = {}; this.greymarchHudToPage("blood", { on: !!msg.on, blood: msg.blood, empty: !!msg.empty }); return; } // a vampire's state: the blood drop and what the game applies (greymarchVampTick)
         if (type === "greymarchVampLooks") { this.greymarchVampLookList = Array.isArray(msg.vampires) ? msg.vampires : []; if (Number(msg.me) > 0) this.greymarchMeActor = Number(msg.me) >>> 0; return; } // (me: which of them is this player: the ghosts and effects packets that also say so may not have come yet, and without it the player's own eyes and fangs were never put on) // how every vampire in the world looks (eyes and fangs)
@@ -610,6 +611,7 @@ export class GreymarchBridge {
         this.greymarchRaceMenuCopiesTick(Date.now()); // and put on the other players' copies (OTHERS SEE THEM)
         this.greymarchRaceMenuHeightsTick(Date.now()); // their Height on at once, the moment a copy is drawn, and kept right (greymarchRaceMenuHeightsTick)
         this.greymarchOwnHeightTick(Date.now()); // the player's own Height kept at the server's (OWN HEIGHT, greymarchOwnHeightTick)
+        this.greymarchStaffRacesTick(); // the staff races offered in the race menu only to staff (RACES FOR STAFF ONLY)
         this.greymarchDressTick(Date.now()); // a mask hides the beard (and, through the ticks above, a hood the big ears)
         this.greymarchStackNote(Date.now()); // an item in two stacks: what differs between them, to the log (2026-11-06)
         this.greymarchRestackOnce(Date.now()); // the old split stacks of plain items (hides, leather, ingredients) made one again, once a session
@@ -2709,6 +2711,33 @@ export class GreymarchBridge {
                 this.greymarchRmCopyLog(c.actor, "the Height could not be put on the copy: " + err);
             }
         }
+    }
+    // RACES FOR STAFF ONLY (2026-11-11, the owner: "make it so only GMs can see it as an option"): the race menu lists the races flagged Playable when it opens.
+    // The server says which staff races this account may have (gamemode staffraces.js: the Dremora for GMs and up, [] for everyone else); those get the
+    // Playable flag for this session (SKSE Race.SetRaceFlag, flag 1), and one this game flagged that is no longer said is cleared again. The server keeps the
+    // rule anyway: a race it did not allow is refused when the race menu closes. Done in the update phase (game calls), once per change.
+    greymarchStaffRacesTick(): any {
+        var want: number[] | undefined = this.greymarchStaffRacesWant;
+        if (want === undefined) return;
+        var key = want.join(",");
+        if (key === this.greymarchStaffRacesDone) return;
+        var sp = this.sp, had: number[] = this.greymarchStaffRacesSet || [], set: number[] = [];
+        try {
+            for (var i = 0; i < want.length; i++) {
+                var r = sp.Race.from(sp.Game.getFormEx(want[i]));
+                if (!r) continue;
+                if (!r.isRaceFlagSet(1)) r.setRaceFlag(1);
+                set.push(want[i]);
+            }
+            for (var j = 0; j < had.length; j++) {
+                if (want.indexOf(had[j]) >= 0) continue;
+                var o = sp.Race.from(sp.Game.getFormEx(had[j]));
+                if (o && o.isRaceFlagSet(1)) o.clearRaceFlag(1);
+            }
+        } catch (err) { this.greymarchLog("staff races: " + err); return; } // tried again next frame
+        this.greymarchStaffRacesSet = set;
+        this.greymarchStaffRacesDone = key;
+        this.greymarchLog("staff races: " + (set.length ? "the race menu offers " + set.map(function (x) { return x.toString(16); }).join(", ") : "none offered"));
     }
     // GREYMARCH: OWN HEIGHT (2026-11-10, the owner: "/height is not updating for the player having their height changed"; their log: "sliders put back" at
     // the moment of each /height, the skeleton never changed). The kept look is loaded as a RaceMenu preset, and that does not reliably put the Height
