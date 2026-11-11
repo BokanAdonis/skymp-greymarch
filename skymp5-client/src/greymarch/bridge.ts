@@ -5398,9 +5398,7 @@ export class GreymarchBridge {
         try {
             var al = Number(ui.getFloat("HUD Menu", clip + "._alpha"));
             if (!isFinite(al)) return; // no HUD yet
-            var fight = false;
-            try { var p = this.sp.Game.getPlayer(); fight = !!p && (!!p.isInCombat() || !!p.isWeaponDrawn()); } catch (e) { fight = false; }
-            var want = fight ? 0 : COMPASS_ALPHA;
+            var want = COMPASS_ALPHA; // UP ALL THE TIME (2026-11-11, the owner: "Leave compass up all the time"): no longer faded out in combat or with a weapon drawn
             var fa = Number(ui.getFloat("HUD Menu", clip + ".Compass.CompassFrame._alpha"));
             if (isFinite(fa) && fa > 0.5) ui.setFloat("HUD Menu", clip + ".Compass.CompassFrame._alpha", 0); // the bar: hidden
             var next = Math.abs(al - want) > 0.5 ? (al > want ? Math.max(want, al - COMPASS_FADE) : Math.min(want, al + COMPASS_FADE)) : al;
