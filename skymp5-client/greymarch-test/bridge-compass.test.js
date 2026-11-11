@@ -37,20 +37,16 @@ function make(hud, who = { combat: false, drawn: false }) {
 const C = "_root.HUDMovieBaseInstance.CompassShoutMeterHolder.";
 const hudAt = () => ({ [C + "_xscale"]: 100, [C + "_yscale"]: 100, [C + "_alpha"]: 100, [C + "_x"]: 640, [C + "Compass.CompassFrame._alpha"]: 100 });
 
-test("the compass loses its bar, shows at 80% a little smaller (85%) in its own place, fades out in combat or with a weapon drawn, and back after", () => {
+test("the compass loses its bar, shows at 80% a little smaller (85%) in its own place, and stays up in combat and with a weapon drawn", () => {
   const s = make(hudAt());
   s.tick(20);
   assert.equal(s.hud[C + "Compass.CompassFrame._alpha"], 0, "the bar hidden");
   assert.equal(s.hud[C + "_alpha"], 80, "faded a little");
   assert.equal(s.hud[C + "_xscale"], 85); assert.equal(s.hud[C + "_yscale"], 85); assert.equal(s.hud[C + "_x"], 640, "a little smaller, never moved");
-  s.who.combat = true; s.tick(1);
-  assert.equal(s.hud[C + "_alpha"], 72, "fading, a step at a time");
-  s.tick(12);
-  assert.equal(s.hud[C + "_alpha"], 0, "gone in combat");
+  s.who.combat = true; s.tick(12);
+  assert.equal(s.hud[C + "_alpha"], 80, "up in combat");
   s.who.combat = false; s.who.drawn = true; s.tick(10);
-  assert.equal(s.hud[C + "_alpha"], 0, "a weapon drawn: still gone");
-  s.who.drawn = false; s.tick(12);
-  assert.equal(s.hud[C + "_alpha"], 80, "back once it is over");
+  assert.equal(s.hud[C + "_alpha"], 80, "up with a weapon drawn");
 });
 
 test("the size the first build set (75%) goes to 85%; no HUD yet: nothing", () => {
@@ -62,12 +58,12 @@ test("the size the first build set (75%) goes to 85%; no HUD yet: nothing", () =
   assert.deepStrictEqual(none.hud, {});
 });
 
-test("the compass's design on the HUD page is told the compass's opacity: shown out of combat, 0 in combat", () => {
+test("the compass's design on the HUD page is told the compass's opacity, the same in combat", () => {
   const s = make(hudAt());
   s.tick(1);
   assert.deepStrictEqual(s.log.page.filter((m) => m.fn === "compass").pop(), { fn: "compass", arg: { a: 0.8 } });
   s.who.combat = true; s.tick(1);
-  assert.deepStrictEqual(s.log.page.filter((m) => m.fn === "compass").pop(), { fn: "compass", arg: { a: 0 } });
+  assert.deepStrictEqual(s.log.page.filter((m) => m.fn === "compass").pop(), { fn: "compass", arg: { a: 0.8 } });
   const n = s.log.page.length; s.tick(3);
   assert.equal(s.log.page.length, n, "not told again while nothing changes");
 });
