@@ -113,7 +113,15 @@ test("RIDDEN AS THEIR OWN (2026-10-31: no game shares the horse any more): the r
   assert.ok(bridge.includes('customPacketType: "greymarchDismount", pos: pos, rot: rot'));
   assert.ok(bridge.includes("if (this.greymarchOwnHorseTick(now)) return;"), "no ride report while on a horse of its own");
   assert.ok(formView.includes("if (ownBase) return this.gmLocalMountStep(ac, model, ownBase, seated);"));
-  assert.ok(formView.includes("applyMovement(horse, model.movement, false)"));
+  // the rider's movement moves the horse, but only where and how fast (2026-11-11): no weapon draw, sneak, block, death, health or look point on the horse
+  assert.ok(formView.includes("const horseMove = { ...m, isWeapDrawn: false, isSneaking: false, isBlocking: false, isDead: false, healthPercentage: 1, lookAt: undefined };"));
+  assert.ok(formView.includes("applyMovement(horse, horseMove, false)"));
+  // a player's character is made without collision from the moment it is switched on while this player rides (2026-11-11: no shove at the spawn)
+  const spawn = fs.readFileSync(path.join(__dirname, "..", "src", "view", "spawnProcess.ts"), "utf8");
+  assert.ok(spawn.includes('const gmRiding = !!appearance && !!(Function("return this")() as any).__gmMyHorse;'));
+  assert.ok(spawn.indexOf("gmSetCollision(refrId, false)") < spawn.indexOf("refr.enable(false)"), "before it is switched on");
+  // no horse of its own could be made: the server is told, so the player does not ride forever (2026-11-11)
+  assert.ok(bridge.includes("if (odone && !this.greymarchOwnHorse) {"));
   assert.ok(formView.includes('this.gmRemoveLocalMount("the rider is gone");'));
   assert.ok(formView.includes("const GM_NPC_BASE_TYPE = 43;"));
 });

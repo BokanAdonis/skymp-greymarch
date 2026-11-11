@@ -2522,7 +2522,9 @@ export class GreymarchBridge {
         if (!oh.mountedAt ? !this.greymarchMountWanted : now - oh.mountedAt > 1500) {
             var href = sp.ObjectReference.from(sp.Game.getFormEx(oh.id)), pos: any = null, rot = 0;
             try { if (href) { pos = [href.getPositionX(), href.getPositionY(), href.getPositionZ()]; rot = href.getAngleZ(); } } catch (e) { pos = null; }
-            var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchDismount", pos: pos, rot: rot }) };
+            // KILLED UNDER ITS RIDER (2026-11-11, the horses check): the server put a living horse down where it fell, so it never waited its hour. It is told it died
+            var hdead = false; try { var hac = href ? sp.Actor.from(href) : null; hdead = !!hac && hac.isDead(); } catch (e) { hdead = false; }
+            var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchDismount", pos: pos, rot: rot, dead: hdead }) };
             this.controller.emitter.emit("sendMessage", { message: message, reliability: "reliable" });
             this.greymarchOwnHorse = null;
             (Function("return this")() as any).__gmMyHorse = 0;
@@ -2569,6 +2571,14 @@ export class GreymarchBridge {
                 }
             } catch (e) { odone = ++mw.tries > 20; this.greymarchCrumb("own horse failed: " + e); }
             if (odone) this.greymarchMountWanted = null;
+            // NO HORSE COULD BE MADE (2026-11-11, the horses check): the server had already taken the horse out of the world and told everyone this player rides;
+            // with no horse of this game's own, greymarchOwnHorseTick never said they got off, so they "rode" until they left. The server is told now (no spot:
+            // it puts the horse down where they stand)
+            if (odone && !this.greymarchOwnHorse) {
+                var nomsg = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchDismount", pos: null, rot: 0 }) };
+                this.controller.emitter.emit("sendMessage", { message: nomsg, reliability: "reliable" });
+                this.greymarchCrumb("own horse: none could be made, the server puts it down here");
+            }
         }
         else if (mw) {
             var mpl = this.sp.Game.getPlayer(), mdone = false;

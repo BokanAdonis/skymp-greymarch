@@ -1353,7 +1353,13 @@ export class FormView {
       return false;
     }
     if (model.movement) {
-      try { applyMovement(horse, model.movement, false); } catch (e) { /* a door or a long way: the rider's own respawn makes it again */ }
+      // ONLY WHERE AND HOW FAST (2026-11-11, the owner: check the horses for anything that will cause a bug): the rider's movement is played on this horse, and
+      // with it went the rider's own state: a drawn weapon became setWeaponDrawnMode on the horse (a draw ordered on a body that has none crashed watching games
+      // with the werewolf, 2026-10-20), sneaking and blocking were put on its graph, the rider's health became the horse's, their death killed it here, and their
+      // look point turned its head. The horse only takes the place, the turn, the gait and the jump.
+      const m = model.movement;
+      const horseMove = { ...m, isWeapDrawn: false, isSneaking: false, isBlocking: false, isDead: false, healthPercentage: 1, lookAt: undefined };
+      try { applyMovement(horse, horseMove, false); } catch (e) { /* a door or a long way: the rider's own respawn makes it again */ }
     }
     return true;
   }

@@ -2,6 +2,7 @@ import { ObjectReference, Game, Actor, MotionType } from "skyrimPlatform";
 import { Appearance, applyTints } from "../sync/appearance";
 import { NiPoint3 } from "../sync/movement";
 import { ObjectReferenceEx } from "../extensions/objectReferenceEx";
+import { gmSetCollision } from "../sync/animation";
 
 // GREYMARCH: SPAWNS ABANDONED MIDWAY (2026-10-21). A spawn runs in steps (placed disabled, moved, enabled, resurrected), and its FormView can remove the actor before it
 // is done, when the look changes again at once (a werewolf change brings several look changes in a row). Its delete then ran on the half-made actor and the spawn
@@ -65,7 +66,16 @@ export class SpawnProcess {
     // GREYMARCH: NO AI SWITCHING FOR A BEAST (2026-10-22, v172 to v174, taken out again). A beast enabled with its AI off never started its animations (other players
     // saw it T-posed in the air) and the watching game crashed in the animation update the moment its AI was switched back on (13:26, #HXBA as the Elder Alpha,
     // SkyrimSE.exe+0A8C5B8). What stopped the crash at the spawn itself was making it at its spot (formView.ts, gmSpawnedAtSpot).
-    refr.enable(false).then(() => this.resurrect(refrId, beastLook, !appearance));
+    // GREYMARCH: NO SHOVE AT THE SPAWN WHILE RIDING (2026-11-11, the owner: "if someone rides into the same cell as a player they won't start floating off into
+    // space on the horse"): formView turns another player's collision off while this player rides (gmNoCollide), but only once the spawn has finished and it
+    // updates the character, several frames after it was switched on here, and a character switched on beside this player's horse could shove it in between.
+    // So a player's character is made without collision from the moment it is switched on, while this player rides; formView keeps it so after.
+    const gmRiding = !!appearance && !!(Function("return this")() as any).__gmMyHorse;
+    if (gmRiding) { try { gmSetCollision(refrId, false); } catch (e) { /* formView sets it on its first update */ } }
+    refr.enable(false).then(() => {
+      if (gmRiding) { try { gmSetCollision(refrId, false); } catch (e) { /* formView sets it on its first update */ } }
+      return this.resurrect(refrId, beastLook, !appearance);
+    });
   }
 
   private resurrect(refrId: number, beastLook = false, serverNpc = false) {
