@@ -28,7 +28,7 @@ import { applyAppearanceToPlayer } from '../../sync/appearance';
 import { applyEquipment, isBadMenuShown } from '../../sync/equipment';
 import { Inventory, applyInventory } from '../../sync/inventory';
 import { Movement } from '../../sync/movement';
-import { learnSpells, removeAllSpells } from '../../sync/spell';
+import { SpellBook, RESTORE_AT_S } from '../../greymarch/spellBook';
 import { ModelApplyUtils } from '../../view/modelApplyUtils';
 import { FormModel, WorldModel } from '../../view/model';
 import { LoadGameService } from './loadGameService';
@@ -161,6 +161,11 @@ const unequipIronHelmet = () => {
 export class RemoteServer extends ClientListener {
   constructor(private sp: Sp, private controller: CombinedController) {
     super();
+
+    // GREYMARCH: the server's spell teaching, for the player's spell book (greymarch/spellBook.ts)
+    (this.controller.emitter as any).on("greymarchSpellSnippet", (e: any) => {
+      try { this.greymarchSpellBook.edit(Number(e.self) || 0, Number(e.id) || 0, !!e.add, Date.now()); } catch (err) { /* only the book */ }
+    });
 
     this.controller.emitter.on("hostStartMessage", (e) => this.onHostStartMessage(e));
     this.controller.emitter.on("hostStopMessage", (e) => this.onHostStopMessage(e));
@@ -547,21 +552,16 @@ export class RemoteServer extends ClientListener {
       }
     };
 
+    // GREYMARCH: the spell list is the server's list plus what it taught since (greymarch/spellBook.ts), and the game's list is made to match it a few
+    // times after the body arrives, not wiped once and learned from a list made before the entry's teaching (Magic and Beast Form lost at launch)
     if (msg.isMe && msg.props && msg.props.learnedSpells) {
-      const learnedSpells = msg.props.learnedSpells;
+      this.greymarchSpellBook.spawned(msg.refrId || 0, msg.props.learnedSpells, Date.now());
+      const gen = ++this.greymarchSpellGen;
 
       once('update', () => {
-        Utility.wait(1).then(() => {
-          const player = Game.getPlayer();
-
-          if (player) {
-            removeAllSpells(player);
-            learnSpells(player, learnedSpells);
-            logTrace(this,
-              `player learnedSpells:`, JSON.stringify(learnedSpells),
-            );
-          }
-        });
+        for (const s of RESTORE_AT_S) {
+          Utility.wait(s).then(() => { if (gen === this.greymarchSpellGen) this.greymarchRestoreSpells(s); });
+        }
       });
     }
 
@@ -981,6 +981,28 @@ export class RemoteServer extends ClientListener {
 
   getMyActorIndex(): number {
     return this.worldModel.playerCharacterFormIdx;
+  }
+
+  private greymarchSpellBook = new SpellBook();
+  private greymarchSpellGen = 0;
+  // make the player's spells (the ones added to the actor, not its race's) match the spell book
+  private greymarchRestoreSpells(afterS: number): void {
+    const player = Game.getPlayer();
+    if (!player) return;
+    const have: number[] = [];
+    const byId = new Map<number, Spell>();
+    for (let i = 0; i < player.getSpellCount(); i++) {
+      const sp = player.getNthSpell(i);
+      if (sp) { const id = sp.getFormID() >>> 0; have.push(id); byId.set(id, sp); }
+    }
+    const plan = this.greymarchSpellBook.plan(have);
+    if (!plan || (!plan.add.length && !plan.remove.length)) return;
+    let added = 0, removed = 0;
+    for (const id of plan.remove) { const sp = byId.get(id); if (sp && player.removeSpell(sp)) removed++; }
+    for (const id of plan.add) { const sp = Spell.from(Game.getFormEx(id)); if (sp && player.addSpell(sp, false)) added++; }
+    try {
+      (this.controller.emitter as any).emit("greymarchStage", "spells: " + added + " put back" + (plan.add.length ? " (" + plan.add.map((x) => x.toString(16)).join(", ") + ")" : "") + ", " + removed + " taken, " + afterS + " s after my body came");
+    } catch (e) { /* diagnostics only */ }
   }
 
   getMyRemoteRefrId(): number {

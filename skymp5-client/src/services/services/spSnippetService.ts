@@ -19,6 +19,18 @@ export class SpSnippetService extends ClientListener {
   private onSpSnippetMessage(event: ConnectionMessage<SpSnippetMessage>): void {
     const msg = event.message;
 
+    // GREYMARCH: the server's spell teaching is also kept by the player's spell book (remoteServer.ts, greymarch/spellBook.ts), which puts back
+    // what a login wipe or a held body lost
+    try {
+      const fn = String(msg.function || "").toLowerCase();
+      if (String(msg.class || "").toLowerCase() === "actor" && (fn === "addspell" || fn === "removespell")) {
+        const arg: any = msg.arguments && msg.arguments[0];
+        if (arg && typeof arg === "object" && typeof arg.formId === "number") {
+          (this.controller.emitter as any).emit("greymarchSpellSnippet", { self: msg.selfId, id: arg.formId, add: fn === "addspell" });
+        }
+      }
+    } catch (e) { /* the snippet itself still runs */ }
+
     this.controller.once('update', async () => {
       this.run(msg)
         .then((res) => {
