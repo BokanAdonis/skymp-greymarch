@@ -352,3 +352,31 @@ test("own height: a server look without a Height never sets one; a body not at 1
   assert.deepStrictEqual(me.sets, [], "never set to 1 from a look that keeps no Height (it reset a player's slider)");
   assert.strictEqual(reports.length, 1, "their Height sent to the server once");
 });
+
+test("HEIGHT HARD SAVED (2026-11-11, the owner: people growing and shrinking): the report keeps the server's Height unless the player moved the Height slider, and then says so", () => {
+  const s = make();
+  const hOf = (h) => ({ transforms: [{ firstPerson: false, node: "NPC", keys: [{ name: "RSMPlugin", values: [{ key: 20, type: 2, index: 0, data: h }] }] }] });
+  s.sp.Game.getPlayer = () => ({});
+  s.gm.greymarchRaceMenuExport = () => hOf(0.97); // the body has a stale 0.97
+  const rmS = s.gm.greymarchRmState();
+  rmS.want = hOf(1.04); // the server's
+  s.gm.greymarchRaceMenuReport();
+  let sent = s.log.sent.filter((c) => c.customPacketType === "greymarchRaceMenuLook").pop();
+  assert.strictEqual(sent.heightMoved, undefined, "no move: not said");
+  assert.strictEqual(sent.look.transforms.find((t) => t.node === "NPC" && !t.firstPerson).keys[0].values[0].data, 1.04, "the server's Height kept, not the body's");
+  assert.strictEqual(rmS.ownHeightDirty, true, "and put back on the body");
+  rmS.heightMoved = 0.99;
+  s.gm.greymarchRaceMenuReport();
+  sent = s.log.sent.filter((c) => c.customPacketType === "greymarchRaceMenuLook").pop();
+  assert.strictEqual(sent.heightMoved, 0.99, "moved: said");
+  assert.strictEqual(rmS.heightMoved, undefined, "said once");
+});
+
+const bridgeSrc = fs.readFileSync(path.join(__dirname, "..", "src", "greymarch", "bridge.ts"), "utf8");
+test("HEIGHT HARD SAVED: a slider move away from where it started is noted; the menu opening forgets it; the saved Height is put on again every 10 s", () => {
+  assert.match(bridgeSrc, /h\.start = Math\.round\(v \* 1000\) \/ 1000;/);
+  assert.match(bridgeSrc, /if \(h\.start === undefined \|\| Math\.abs\(v - h\.start\) > 0\.003\) this\.greymarchRmState\(\)\.heightMoved = v;/);
+  assert.match(bridgeSrc, /if \(!rm\.menuWas && open\) rm\.heightMoved = undefined;/);
+  assert.match(bridgeSrc, /if \(now >= \(c\.hForceAt \|\| 0\)\) c\.hDirty = true;/);
+  assert.match(bridgeSrc, /if \(now >= \(rm\.ownHeightForceAt \|\| 0\)\) rm\.ownHeightDirty = true;/);
+});

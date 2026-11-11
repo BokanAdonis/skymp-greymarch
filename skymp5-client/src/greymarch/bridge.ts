@@ -2693,7 +2693,7 @@ export class GreymarchBridge {
             try {
                 var local = misc.remoteIdToLocalId(c.actor);
                 var ac = local ? sp.Actor.from(sp.Game.getFormEx(local)) : null;
-                if (!ac || !ac.is3DLoaded() || ac.isDisabled()) { c.hNext = now + 250; continue; } // not drawn yet: looked at again in a quarter second, so the first draw gets it
+                if (!ac || !ac.is3DLoaded() || ac.isDisabled()) { c.hNext = now + 250; c.hDirty = true; continue; } // not drawn yet (HEIGHT HARD SAVED: put on at the draw, whatever the stored scale reads): looked at again in a quarter second, so the first draw gets it
                 var race = ac.getRace(), rname = race ? String(race.getName() || "") : "";
                 if (/were|vampire lord|beast/i.test(rname)) continue;
                 var want = Math.round(rmMod.heightOfLook(c.want) * 1000) / 1000;
@@ -2701,12 +2701,14 @@ export class GreymarchBridge {
                 var cur = this.greymarchHeightNow(ac, female);
                 // HEIGHT DRAWN AFTER A PRESET (2026-11-10, the owner: a staff /height showed for nobody): NiOverride's stored scale is what is read here, and a
                 // RaceMenu preset load sets it without drawing it, so a new Height read as already on; after a new look or a preset load it is put on (and drawn) once
+                // HEIGHT HARD SAVED (2026-11-11): the stored scale can read right while the skeleton shows another, so the server's Height is put on again every 10 s
+                if (now >= (c.hForceAt || 0)) c.hDirty = true;
                 if (!c.hDirty && Math.abs(cur - want) < 0.002) continue;
-                c.hDirty = false;
+                c.hDirty = false; c.hForceAt = now + 10000;
                 this.greymarchHeightPut(ac, female, want, false);
                 c.hNext = now + 1000; // read back soon: a load that was still going on can drop it
                 var after = this.greymarchHeightNow(ac, female);
-                this.greymarchRmCopyLog(c.actor, "Height " + cur + " -> " + want + " (the skeleton reads " + after + ")");
+                if (Math.abs(cur - want) >= 0.002) this.greymarchRmCopyLog(c.actor, "Height " + cur + " -> " + want + " (the skeleton reads " + after + ")");
             } catch (err) {
                 this.greymarchRmCopyLog(c.actor, "the Height could not be put on the copy: " + err);
             }
@@ -2779,10 +2781,13 @@ export class GreymarchBridge {
                 return;
             }
             var want = Math.round(kept * 1000) / 1000;
+            if (now >= (rm.ownHeightForceAt || 0)) rm.ownHeightDirty = true; // HEIGHT HARD SAVED: put on again every 10 s
             if (!rm.ownHeightDirty && Math.abs(cur - want) < 0.002) return; // the stored scale can read right while the skeleton is not drawn (a preset load)
-            rm.ownHeightDirty = false;
+            rm.ownHeightDirty = false; rm.ownHeightForceAt = now + 10000;
+            var quiet = Math.abs(cur - want) < 0.002;
             this.greymarchHeightPut(player, female, want, true);
             var after = this.greymarchHeightNow(player, female);
+            if (quiet) return;
             rm.ownHeightSaid = (rm.ownHeightSaid || 0) + 1;
             if (rm.ownHeightSaid <= 20) this.greymarchLog("racemenu: own Height " + cur + " -> " + want + " (the skeleton reads " + after + ")");
         } catch (err) {
@@ -2922,6 +2927,7 @@ export class GreymarchBridge {
         var h = this.greymarchHeightState(), r = this.greymarchHeightLimits(), cur = 1;
         try { cur = this.greymarchHeightNow(player, this.greymarchHeightFemale(player)); } catch (readErr) { this.greymarchLog("racemenu: the Height slider starts at 1, the scale could not be read: " + readErr); }
         var v = Math.min(r[1], Math.max(r[0], cur));
+        h.start = Math.round(v * 1000) / 1000; // HEIGHT HARD SAVED: a move away from this is the player's (greymarchHeightSet)
         var line = "$Height;;4;;" + GM_HEIGHT_CALLBACK + ";;" + r[0] + ";;" + r[1] + ";;0.005;;" + (Math.round(v * 1000) / 1000);
         // ONE STRING, NOT AN ARRAY (2026-11-04, the log: "JsObjectToNativeObject - Invalid _skyrimPlatform_indexInPool: 0" right after RSM_Initialized):
         // this SkyrimPlatform takes invokeStringA's array for a game object. SKSE hands each item of InvokeStringA to the menu's function as an argument of
@@ -2935,6 +2941,9 @@ export class GreymarchBridge {
         if (!player) return;
         var female = this.greymarchHeightFemale(player), h = this.greymarchHeightState();
         var r = this.greymarchHeightLimits(), v = Math.round(Math.min(r[1], Math.max(r[0], value)) * 1000) / 1000;
+        // HEIGHT HARD SAVED (2026-11-11, the owner: "heights should be hard saved people are growing and shrinking on the server"): the server keeps each
+        // character's Height and changes it only when the report after the race menu says the player moved this slider (greymarchRaceMenuReport, heightMoved)
+        if (h.start === undefined || Math.abs(v - h.start) > 0.003) this.greymarchRmState().heightMoved = v;
         var step = (what: string, run: () => any) => this.greymarchHeightStep(what, run);
         if (v === 1) {
             step("NiOverride.RemoveNodeTransformScale", () => sp.callNative("NiOverride", "RemoveNodeTransformScale", undefined, player, false, female, "NPC", "RSMPlugin"));
@@ -2988,6 +2997,7 @@ export class GreymarchBridge {
         this.greymarchKeepPartsTick(now);
         try { open = !!sp.Ui.isMenuOpen("RaceSex Menu"); } catch (mErr) { open = false; }
         if (rm.menuWas && !open) { rm.sendAt = now + 1000; rm.ownHeightHold = now + 10000; } // RaceMenu finishes its own work as the menu closes (OWN HEIGHT waits for the server's answer)
+        if (!rm.menuWas && open) rm.heightMoved = undefined; // HEIGHT HARD SAVED: a new visit to the race menu, no move yet
         rm.menuWas = open;
         if (open) { rm.sendAt = 0; return; } // RaceMenu is the editor while it is open
         if (this.greymarchWolfOn || this.greymarchShapeOn) { rm.beast = true; rm.loadedSince = 0; return; }
@@ -3076,10 +3086,14 @@ export class GreymarchBridge {
             var parts = rmMod.pickRaceMenuParts(current);
             var earsKept = !!rm.earsDown && rm.want; // opened under a hood: the ears were down, the player's own ear sliders are kept (keepEarsUnderHood)
             if (earsKept) parts = rmMod.pickRaceMenuParts(rmMod.keepEarsUnderHood(parts, rm.want));
+            // HEIGHT HARD SAVED: the Height slider not moved: the server's Height stays this game's too (the body's may be a stale one from the save or a preset)
+            var moved = Number(rm.heightMoved); rm.heightMoved = undefined;
+            var movedOk = isFinite(moved) && moved > 0;
+            if (!movedOk && rm.want && rmMod.heightInLook(rm.want) !== null) { parts = rmMod.pickRaceMenuParts(rmMod.keepHeight(parts, rm.want)); rm.ownHeightDirty = true; }
             rm.want = parts; rm.done = earsKept ? null : JSON.stringify(parts); rm.tries = 0; // what the player just made is on the body already (the ears: put right by the next tick)
-            var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchRaceMenuLook", look: parts }) };
+            var message = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify(movedOk ? { customPacketType: "greymarchRaceMenuLook", look: parts, heightMoved: moved } : { customPacketType: "greymarchRaceMenuLook", look: parts }) };
             this.controller.emitter.emit("sendMessage", { message: message, reliability: "reliable" });
-            this.greymarchLog("racemenu: sent after the race menu (" + this.greymarchRaceMenuSay(parts) + ")");
+            this.greymarchLog("racemenu: sent after the race menu (" + this.greymarchRaceMenuSay(parts) + (movedOk ? "; Height slider moved to " + moved : "") + ")");
         } catch (err) {
             this.greymarchLog("racemenu: the sliders could not be read: " + err);
         }
