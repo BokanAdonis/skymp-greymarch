@@ -108,7 +108,8 @@ test("an empty kept look on a body that has nothing is not loaded; one that stil
   t.say({ customPacketType: "greymarchRaceMenuLook", look: {} });
   for (let i = 0; i < 8; i++) t.step();
   assert.strictEqual(loads(t.log).length, 1);
-  assert.deepStrictEqual(rm.pickRaceMenuParts(t.body.live), {});
+  assert.deepStrictEqual(rm.pickRaceMenuParts(rm.withoutHeight(t.body.live)), {}, "every other slider cleared");
+  assert.strictEqual(rm.heightInLook(t.body.live), 1.1, "the Height is left to the Height check (2026-11-10: a preset load no longer writes it)");
 });
 
 test("nothing is loaded while the race menu is open or the body is the werewolf; done again after changing back", () => {
@@ -313,4 +314,41 @@ test("own height (2026-11-10, the owner: /height did not change the player's own
   assert.strictEqual(me.sets.length, 2, "then left alone");
   me.scale = 1; me.sets = []; player.getRace = () => ({ getName: () => "WerewolfBeastRace" }); tick(3000);
   assert.deepStrictEqual(me.sets, [], "never on a werewolf body");
+});
+
+test("height kept apart from presets (2026-11-10, the owner: heights not seen right, a Height slider reset): a preset carries the body's Height as it is, a look without a Height never sets one", () => {
+  const look = { morphs: { custom: [{ name: "NoseTip", value: 0.4 }] }, transforms: [{ firstPerson: false, node: "NPC", keys: [{ name: "RSMPlugin", values: [{ data: 2.1, index: 0, key: 20, type: 2 }] }, { name: "Other", values: [{ data: 3, index: 0, key: 20, type: 2 }] }] }, { firstPerson: false, node: "NPC Head [Head]", keys: [{ name: "RSMPlugin", values: [{ data: 1.2, index: 0, key: 20, type: 2 }] }] }] };
+  assert.strictEqual(rm.heightInLook(look), 2.1);
+  assert.strictEqual(rm.heightInLook({ morphs: {} }), null, "none kept");
+  assert.strictEqual(rm.heightOfLook({ morphs: {} }), 1);
+  const bare = rm.withoutHeight(look);
+  assert.strictEqual(rm.heightInLook(bare), null);
+  assert.deepStrictEqual(bare.transforms.map((t) => [t.node, t.keys.map((k) => k.name)]), [["NPC", ["Other"]], ["NPC Head [Head]", ["RSMPlugin"]]], "only the NPC node's RSMPlugin goes; the head scale stays");
+  const body = { transforms: [{ firstPerson: false, node: "NPC", keys: [{ name: "RSMPlugin", values: [{ data: 0.98, index: 0, key: 20, type: 2 }] }] }] };
+  assert.strictEqual(rm.heightInLook(rm.keepHeight(look, body)), 0.98, "the preset carries the body's Height, not the look's");
+  assert.strictEqual(rm.heightInLook(rm.keepHeight(look, {})), null);
+  assert.strictEqual(rm.sameRaceMenuParts(rm.withoutHeight(look), rm.withoutHeight(rm.keepHeight(look, body))), true, "a Height difference alone loads no preset");
+});
+
+test("own height: a server look without a Height never sets one; a body not at 1 sends its look to the server once (its Height lived only in this game)", () => {
+  const s = make();
+  const me = { scale: 1.085, sets: [] };
+  const player = { is3DLoaded: () => true, getRace: () => ({ getName: () => "Nord" }), getBaseObject: () => "base" };
+  s.sp.Game.getPlayer = () => player;
+  s.sp.ActorBase = { from: () => ({ getSex: () => 0 }) };
+  const reports = [];
+  s.gm.greymarchRaceMenuReport = () => reports.push(1);
+  s.sp.callNative = (cls, fn, self, actor, fp) => {
+    if (cls !== "NiOverride") return true;
+    if (fn === "GetNodeTransformScale") return fp ? 0 : me.scale;
+    if (fn === "AddNodeTransformScale" || fn === "RemoveNodeTransformScale") { me.sets.push(fn); return; }
+    return;
+  };
+  const rmS = s.gm.greymarchRmState();
+  rmS.want = { morphs: { custom: [] } };
+  rmS.loadedSince = 1; rmS.ownHeightDirty = true;
+  let t = 500000;
+  for (let e = t + 5000; t < e; t += 250) s.gm.greymarchOwnHeightTick(t);
+  assert.deepStrictEqual(me.sets, [], "never set to 1 from a look that keeps no Height (it reset a player's slider)");
+  assert.strictEqual(reports.length, 1, "their Height sent to the server once");
 });

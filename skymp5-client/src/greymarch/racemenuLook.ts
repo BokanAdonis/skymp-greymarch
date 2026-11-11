@@ -115,3 +115,47 @@ export function heightOfLook(look: any): number {
     }
     return 1;
 }
+
+// HEIGHT KEPT APART FROM THE PRESETS (2026-11-10, the owner: people not seeing players' proper height, players not seeing their own, one Height slider reset).
+// A kept look is put on with a RaceMenu preset load, and that wrote the Height too (sometimes an older one), while the Height checks wrote the server's: the
+// two took turns (a game's log: a copy at 0.979, then 0.306, then 0.979 ...). Now a preset load carries the body's Height as it is (keepHeight), and only the
+// Height checks change it. heightInLook: the Height a look keeps, null when it keeps none (heightOfLook says 1 then).
+export function heightInLook(look: any): number | null {
+    var ts: any[] = look && Array.isArray(look.transforms) ? look.transforms : [];
+    for (var i = 0; i < ts.length; i++) {
+        var t = ts[i];
+        if (!t || t.node !== HEIGHT_NODE || t.firstPerson) continue;
+        var keys: any[] = Array.isArray(t.keys) ? t.keys : [];
+        for (var j = 0; j < keys.length; j++) {
+            if (!keys[j] || keys[j].name !== HEIGHT_KEY || !Array.isArray(keys[j].values)) continue;
+            for (var v = 0; v < keys[j].values.length; v++) { var x = keys[j].values[v]; if (x && x.key === 20 && typeof x.data === "number" && x.data > 0) return x.data; }
+        }
+    }
+    return null;
+}
+// the look without its Height (the NPC node's RSMPlugin keys, third and first person); a transform left with no keys goes
+export function withoutHeight(look: any): any {
+    if (!look || !Array.isArray(look.transforms)) return look;
+    var out: any = JSON.parse(JSON.stringify(look));
+    out.transforms = out.transforms.map(function (t: any) {
+        if (!t || t.node !== HEIGHT_NODE || !Array.isArray(t.keys)) return t;
+        var c: any = Object.assign({}, t);
+        c.keys = t.keys.filter(function (k: any) { return !(k && k.name === HEIGHT_KEY); });
+        return c;
+    }).filter(function (t: any) { return !(t && t.node === HEIGHT_NODE && Array.isArray(t.keys) && t.keys.length === 0); });
+    return out;
+}
+// the look with the Height entries of `body` (what the body has now) in place of its own: a preset load built from it leaves the Height as it is
+export function keepHeight(look: any, body: any): any {
+    var out: any = withoutHeight(look) || {};
+    out = JSON.parse(JSON.stringify(out));
+    var ts: any[] = body && Array.isArray(body.transforms) ? body.transforms : [];
+    var mine: any[] = [];
+    ts.forEach(function (t: any) {
+        if (!t || t.node !== HEIGHT_NODE || !Array.isArray(t.keys)) return;
+        var keys = t.keys.filter(function (k: any) { return k && k.name === HEIGHT_KEY; });
+        if (keys.length) mine.push(Object.assign({}, t, { keys: JSON.parse(JSON.stringify(keys)) }));
+    });
+    out.transforms = (Array.isArray(out.transforms) ? out.transforms : []).concat(mine);
+    return out;
+}

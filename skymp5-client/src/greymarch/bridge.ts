@@ -2641,8 +2641,9 @@ export class GreymarchBridge {
                 var text = this.greymarchPresetRead(rmMod.COPY_PRESET_NAME);
                 if (!text) { this.greymarchRmCopyLog(c.actor, "RaceMenu wrote no preset for the copy (try " + c.tries + " of 3)"); continue; }
                 var current = JSON.parse(text);
-                if (rmMod.sameRaceMenuParts(current, cwant)) { c.done = key; c.tries = 0; continue; }
-                if (!this.greymarchPresetWrite(rmMod.COPY_PRESET_NAME, JSON.stringify(rmMod.spliceRaceMenuParts(current, cwant)))) continue;
+                // HEIGHT KEPT APART FROM THE PRESETS (racemenuLook.ts keepHeight): the preset carries the copy's Height as it is; greymarchRaceMenuHeightsTick sets it
+                if (rmMod.sameRaceMenuParts(rmMod.withoutHeight(current), rmMod.withoutHeight(cwant))) { c.done = key; c.tries = 0; continue; }
+                if (!this.greymarchPresetWrite(rmMod.COPY_PRESET_NAME, JSON.stringify(rmMod.spliceRaceMenuParts(current, rmMod.keepHeight(cwant, current))))) continue;
                 var copyParts = this.greymarchHeadPartIds(ac);
                 var ok = sp.callNative("CharGen", "LoadCharacterPresetEx", undefined, ac, rmMod.COPY_PRESET_NAME, null, rmMod.APPLY_ALL);
                 this.greymarchKeepHeadParts(ac, copyParts, Date.now());
@@ -2712,9 +2713,21 @@ export class GreymarchBridge {
             if (!player || !player.is3DLoaded()) return;
             var race = player.getRace(), rname = race ? String(race.getName() || "") : "";
             if (/were|vampire lord|beast/i.test(rname)) return;
-            var want = Math.round(rmMod.heightOfLook(rm.want) * 1000) / 1000;
+            var kept = rmMod.heightInLook(rm.want);
             var female = this.greymarchHeightFemale(player);
             var cur = this.greymarchHeightNow(player, female);
+            // THE SERVER KEEPS NO HEIGHT FOR THEM (2026-11-10, the owner: one player's Height slider was reset): their Height lived only in this game (RaceMenu puts
+            // it back from the save) and the server never had it, so this check set them to 1. Now it is never set from a look that keeps none: a body that is
+            // not at 1 sends its look to the server once (greymarchRaceMenuReport), so the server keeps it and every other game is given it.
+            if (kept === null) {
+                if (Math.abs(cur - 1) >= 0.002 && !rm.heightReported) {
+                    rm.heightReported = true;
+                    this.greymarchLog("racemenu: the server keeps no Height for this character; this body's " + cur + " sent to it");
+                    this.greymarchRaceMenuReport();
+                }
+                return;
+            }
+            var want = Math.round(kept * 1000) / 1000;
             if (!rm.ownHeightDirty && Math.abs(cur - want) < 0.002) return; // the stored scale can read right while the skeleton is not drawn (a preset load)
             rm.ownHeightDirty = false;
             this.greymarchHeightPut(player, female, want, true);
@@ -2945,8 +2958,9 @@ export class GreymarchBridge {
             rm.tries++;
             var current = this.greymarchRaceMenuExport(player);
             if (!current) return;
-            if (rmMod.sameRaceMenuParts(current, want)) { rm.done = key; rm.tries = 0; rm.earsDown = want !== rm.want; return; }
-            if (!this.greymarchPresetWrite(rmMod.PRESET_NAME, JSON.stringify(rmMod.spliceRaceMenuParts(current, want)))) { this.greymarchLog("racemenu: the kept sliders could not be written for RaceMenu (try " + rm.tries + " of 3)"); return; }
+            // HEIGHT KEPT APART FROM THE PRESETS (racemenuLook.ts keepHeight): the preset carries the body's Height as it is; greymarchOwnHeightTick sets it
+            if (rmMod.sameRaceMenuParts(rmMod.withoutHeight(current), rmMod.withoutHeight(want))) { rm.done = key; rm.tries = 0; rm.earsDown = want !== rm.want; return; }
+            if (!this.greymarchPresetWrite(rmMod.PRESET_NAME, JSON.stringify(rmMod.spliceRaceMenuParts(current, rmMod.keepHeight(want, current))))) { this.greymarchLog("racemenu: the kept sliders could not be written for RaceMenu (try " + rm.tries + " of 3)"); return; }
             var partsBefore = this.greymarchHeadPartIds(player);
             var ok = sp.callNative("CharGen", "LoadCharacterPresetEx", undefined, player, rmMod.PRESET_NAME, null, rmMod.APPLY_ALL);
             this.greymarchKeepHeadParts(player, partsBefore, now);
