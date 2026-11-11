@@ -107,7 +107,11 @@ const PLAGUE_SHEEN = 0x05d606, /* EnchGreenFXShader: the poison enchantment gree
 // stop (movement, fighting, sneaking, using things and the camera switch locked), the camera goes behind them, PLAGUE_STILL_MS later the cough plays, and after
 // PLAGUE_HOLD_MS the controls come back and a first-person player is put back in first person
 const PLAGUE_STILL_MS = 250, PLAGUE_HOLD_MS = 3800;
-const PLAGUE_STAMINA = [0, 0.1, 0.2, 0.35], PLAGUE_STAMINA_RATE = [0, 15, 30, 50], PLAGUE_HEAL_RATE = [0, 20, 40, 60], PLAGUE_COUGH_IMOD = 0x10e3d2;
+// what each effect the server names (gamemode plague.js EFFECTS, a percent each) changes: a maximum (a share of its base taken off), or a regeneration multiplier (points
+// off, 100 at rest); speed is folded into the base pace (greymarchBaseSpeed) so the drunk walk, a creature's pace and staff speed keep it
+const PLAGUE_MAX: { [k: string]: string } = { stamina: "stamina", health: "health", magicka: "magicka", carry: "CarryWeight" };
+const PLAGUE_RATE: { [k: string]: string } = { staminaRate: "StaminaRateMult", healRate: "HealRateMult", magickaRate: "MagickaRateMult" };
+const PLAGUE_COUGH_IMOD = 0x10e3d2;
 const INTOX_HIGH_IMOD = 0x0e3cbc, INTOX_STUMBLE_IDLE = 0x0138d5, INTOX_SOFT_EVERY = 1000;
 const INTOX_SOFT: { [k: string]: number } = { tipsy: 0.15, drunk: 0.3 }; // the drunk screen's strength, replayed every second
 const INTOX_SWAY: { [k: string]: { pitch: number; pitchPeriod: number; lean: number } } = { drunk: { pitch: 0.5, pitchPeriod: 4.2, lean: 7 }, high: { pitch: 0.9, pitchPeriod: 3.4, lean: 11 } }; // degrees, seconds, degrees a second
@@ -326,7 +330,7 @@ export class GreymarchBridge {
         if (type === "greymarchIntoxNear") { this.greymarchIntoxOthers = Array.isArray(msg.actors) ? msg.actors.map(function (x: any) { return Number(x) >>> 0; }).filter(function (x: number) { return x > 0; }).slice(0, 200) : []; return; } // who is drunk or high (greymarchIntoxOthersTick)
         if (type === "greymarchPlagueSeen") { this.greymarchPlagueSeen = Array.isArray(msg.actors) ? msg.actors.map(function (x: any) { return Number(x) >>> 0; }).filter(function (x: number) { return x > 0; }).slice(0, 200) : []; var gs = Number(msg.glintS), ge = Number(msg.glintEvery); this.greymarchPlagueGlint = { s: Number.isFinite(gs) ? Math.max(0, Math.min(30, gs)) : PLAGUE_SHEEN_S, every: Number.isFinite(ge) && ge >= 3 ? Math.min(600, ge) * 1000 : PLAGUE_SHEEN_EVERY }; this.greymarchPlagueSheenNext = 0; return; } // who looks sick: the glint, and how long and how often (the F7 Plague tab)
         if (type === "greymarchPlagueCough") { var pc = Number(msg.actor) >>> 0; if (pc) (this.greymarchPlagueCoughs || (this.greymarchPlagueCoughs = [])).push(pc); return; } // that character coughs now
-        if (type === "greymarchPlague") { var ps = Math.max(0, Math.min(3, Math.floor(Number(msg.stage) || 0))); this.greymarchPlagueWant = ps; if (msg.cough && ps > 0) this.greymarchPlagueCough = true; return; } // the plague: this player's stage (0: well), and a cough now
+        if (type === "greymarchPlague") { var ps = Math.max(0, Math.min(3, Math.floor(Number(msg.stage) || 0))); this.greymarchPlagueWant = ps; var pfx: any = {}; if (msg.fx && typeof msg.fx === "object") for (var pk in msg.fx) { var pv = Number(msg.fx[pk]); if (Number.isFinite(pv) && pv > 0) pfx[pk] = Math.min(90, pv); } this.greymarchPlagueFx = ps > 0 ? pfx : {}; if (msg.cough && ps > 0) this.greymarchPlagueCough = true; return; } // the plague: this player's stage (0: well), and a cough now
         if (type === "greymarchIntox") { var il = msg.level === "tipsy" || msg.level === "drunk" || msg.level === "high" ? msg.level : "sober"; this.greymarchIntoxWant = il === "sober" ? null : { level: il, until: Date.now() + Math.max(1000, Math.min(30 * 60000, Number(msg.ms) || 0)) }; this.greymarchIntoxCheckAt = 0; return; } // drunk or high (greymarchIntoxTick)
         if (type === "greymarchWeather") { var wxId = Number(msg.id) >>> 0; this.greymarchWeatherWant = { id: wxId, fast: !!msg.fast, file: typeof msg.file === "string" && msg.file.length < 80 ? msg.file : null }; this.greymarchWeatherCheckAt = 0; if (msg.fast || (this.greymarchWeatherSet && this.greymarchWeatherSet !== wxId)) this.greymarchWeatherSetAt = 0; return; } // the hold's weather (greymarchWeatherTick)
         if (type === "greymarchDrunk") { this.greymarchDrunkWant = msg.on ? { until: Date.now() + Math.max(0, Number(msg.ms) || 0), at: 0 } : { off: true }; return; } // drained to death: the drunk walk after waking (greymarchDrunkTick)
@@ -1941,19 +1945,39 @@ export class GreymarchBridge {
     //   high   the Sleeping Tree sap's screen held (Skyrim.esm 0E3CBC), the drunk walk, stumbles more often, slower still, more stamina gone
     // A stumble (the game's own stagger, StaggerStart 0138D5, small) never comes in a fight, with a weapon out, swimming, riding, sitting, in a menu or mid emote.
     // A beast form, a creature's body or the vampire's drained walk (greymarchDrunkTick) pauses the screen and the pace; the stamina stays down.
-    // THE PLAGUE: what the server last said (greymarchPlagueWant 0-3) is put on as differences (modActorValue), so the stats come back exactly when it is cured,
-    // whatever else changed them meanwhile; what is on now: greymarchPlagueHave { stage, stamina, srate, hrate }
+    // the pace everything else starts from: staff speed, less the plague's Move speed (2026-11-11)
+    greymarchBaseSpeed(): number {
+        var staff = (this.greymarchFxHave && this.greymarchFxHave.speed) || 100;
+        return Math.round(staff * (100 - (this.greymarchPlagueSlow || 0)) / 100);
+    }
+    // THE PLAGUE: what the server last said (greymarchPlagueWant 0-3, greymarchPlagueFx { effect: percent }) is put on as differences (modActorValue), so each
+    // stat comes back exactly when it is cured or the GM turns that effect off, whatever else changed it meanwhile; what is on now: greymarchPlagueHave { stage, d: { av: amount } }
     greymarchPlagueTick(player: any): any {
-        var want = this.greymarchPlagueWant || 0, have = this.greymarchPlagueHave || { stage: 0, stamina: 0, srate: 0, hrate: 0 };
-        if (want !== have.stage) {
-            var lose = 0; if (PLAGUE_STAMINA[want]) { try { lose = Math.round(player.getBaseActorValue("stamina") * PLAGUE_STAMINA[want]); } catch (bErr) { lose = have.stamina; } }
+        var sp = this.sp;
+        var want = this.greymarchPlagueWant || 0, fx = this.greymarchPlagueFx || {}, have = this.greymarchPlagueHave || { stage: 0, key: "{}", d: {} };
+        var key = JSON.stringify(fx);
+        if (want !== have.stage || key !== have.key) {
+            var said: string[] = [];
             try {
-                if (lose !== have.stamina) { player.modActorValue("stamina", have.stamina - lose); have.stamina = lose; }
-                var sr = PLAGUE_STAMINA_RATE[want], hr = PLAGUE_HEAL_RATE[want];
-                if (sr !== have.srate) { player.modActorValue("StaminaRateMult", have.srate - sr); have.srate = sr; }
-                if (hr !== have.hrate) { player.modActorValue("HealRateMult", have.hrate - hr); have.hrate = hr; }
-                this.greymarchLog("plague: stage " + have.stage + " -> " + want + (want ? " (stamina -" + lose + ", stamina regen -" + sr + ", health regen -" + hr + ")" : " (well)"));
-                have.stage = want;
+                for (var mk in PLAGUE_MAX) {
+                    var av = PLAGUE_MAX[mk], lose = 0;
+                    if (fx[mk]) { try { lose = Math.round(player.getBaseActorValue(av) * fx[mk] / 100); } catch (bErr) { lose = have.d[av] || 0; } }
+                    if (lose !== (have.d[av] || 0)) { player.modActorValue(av, (have.d[av] || 0) - lose); have.d[av] = lose; }
+                    if (lose) said.push(mk + " -" + lose);
+                }
+                for (var rk in PLAGUE_RATE) {
+                    var rav = PLAGUE_RATE[rk], pts = fx[rk] || 0;
+                    if (pts !== (have.d[rav] || 0)) { player.modActorValue(rav, (have.d[rav] || 0) - pts); have.d[rav] = pts; }
+                    if (pts) said.push(rk + " -" + pts);
+                }
+                var slow = fx.speed || 0;
+                if (slow !== (this.greymarchPlagueSlow || 0)) {
+                    this.greymarchPlagueSlow = slow;
+                    if (this.greymarchIntoxPace === undefined && !this.greymarchShapeOn && !this.greymarchShapeWant) { player.setActorValue("SpeedMult", this.greymarchBaseSpeed()); player.modActorValue("CarryWeight", 0.1); player.modActorValue("CarryWeight", -0.1); }
+                }
+                if (slow) said.push("speed -" + slow + "%");
+                this.greymarchLog("plague: stage " + have.stage + " -> " + want + (want ? " (" + (said.join(", ") || "no effects") + ")" : " (well)"));
+                have.stage = want; have.key = key;
             } catch (pErr) { /* tried again next frame */ }
             this.greymarchPlagueHave = have;
         }
@@ -2097,7 +2121,7 @@ export class GreymarchBridge {
             }
         }
         // the pace (staff speed multiplied in; a creature's body sets its own: greymarchShapeSpeedTick)
-        var staff = (this.greymarchFxHave && this.greymarchFxHave.speed) || 100;
+        var staff = this.greymarchBaseSpeed(); /* staff speed, less the plague's Move speed */
         var pace = INTOX_SPEED[show] || 0;
         if (pace) {
             // DRUNK OR HIGH: A WALK ONLY (2026-11-07, the owner: "they can only slow walk, so they cant sprint or jog"): running or sprinting covers no more ground than
@@ -3725,7 +3749,7 @@ export class GreymarchBridge {
         if (!sp) { this.greymarchShapeSpeedReset(player); return; }
         var gait = "walk";
         try { gait = player.isSprinting() ? "sprint" : player.isRunning() ? "run" : "walk"; } catch (gErr) { gait = "walk"; }
-        var staff = (this.greymarchFxHave && this.greymarchFxHave.speed) || 100;
+        var staff = this.greymarchBaseSpeed(); /* staff speed, less the plague's Move speed */
         var pct = Math.round((sp[gait] || 100) * staff / 100);
         if (this.greymarchShapeSpeedHave === pct) return;
         try {
@@ -3738,7 +3762,7 @@ export class GreymarchBridge {
     greymarchShapeSpeedReset(player: any): any {
         if (this.greymarchShapeSpeedHave === undefined) return;
         this.greymarchShapeSpeedHave = undefined;
-        try { var staff = (this.greymarchFxHave && this.greymarchFxHave.speed) || 100; player.setActorValue("SpeedMult", staff); player.modActorValue("CarryWeight", 0.1); player.modActorValue("CarryWeight", -0.1); } catch (sErr) { /* the next staff speed change puts it right */ }
+        try { var staff = this.greymarchBaseSpeed(); /* staff speed, less the plague's Move speed */ player.setActorValue("SpeedMult", staff); player.modActorValue("CarryWeight", 0.1); player.modActorValue("CarryWeight", -0.1); } catch (sErr) { /* the next staff speed change puts it right */ }
     }
     // A mouse button while a creature (greymarchKey): left = a normal attack, right = a power attack. Played in greymarchShapeTick (Skyrim calls only work in the update phase).
     // WHERE AN ATTACK STOPS (2026-11-08, the owner: as a Gargoyle "you don't do any of the gargoyle's attacks"; the log had no attack line at all): the first
@@ -4699,7 +4723,7 @@ export class GreymarchBridge {
                     // switched off so no walk plays, the body stands, and greymarchNoclipFly moves it with the keys
                     try { if (want.noclip) { sp.Game.disablePlayerControls(true, false, false, false, true, false, false, false, 0); sp.Debug.sendAnimationEvent(player, "IdleForceDefaultState"); } else { this.greymarchNoclipStop(player); if (!have.frozen) sp.Game.enablePlayerControls(true, false, false, false, true, false, false, false, 0); } } catch (ncErr) { this.greymarchLog("staff: noclip flying could not start (" + ncErr + ")"); }
                 }
-                if (want.speed !== have.speed) { player.setActorValue("SpeedMult", want.speed); have.speed = want.speed; this.greymarchLog("staff: speed " + want.speed + "%"); }
+                if (want.speed !== have.speed) { have.speed = want.speed; player.setActorValue("SpeedMult", this.greymarchBaseSpeed()); this.greymarchLog("staff: speed " + want.speed + "%"); }
                 if (!!want.god !== have.god) { try { player.setGhost(!!want.god); } catch (gErr) { this.greymarchLog("staff: setGhost is not available (" + gErr + "), god mode relies on refilling"); } have.god = !!want.god; this.greymarchLog("staff: god " + (want.god ? "on" : "off")); } if (want.god) { try { player.restoreActorValue("health", 100000); player.restoreActorValue("stamina", 100000); player.restoreActorValue("magicka", 100000); } catch (rErr) { /* the invulnerable flag still protects */ } } 
                 // TGM: the game's own god mode, what the console's tgm switches (Debug.SetGodMode): no drain, no shout cooldown, no carry limit, no arrows used. The server still
                 // works out other players' hits, so it never protects against them (God above is the switch that does).
