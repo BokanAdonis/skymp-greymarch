@@ -352,3 +352,62 @@ test("own height: a server look without a Height never sets one; a body not at 1
   assert.deepStrictEqual(me.sets, [], "never set to 1 from a look that keeps no Height (it reset a player's slider)");
   assert.strictEqual(reports.length, 1, "their Height sent to the server once");
 });
+
+test("HEIGHT HARD SAVED (2026-11-11, the owner: people growing and shrinking): the report keeps the server's Height unless the player moved the Height slider, and then says so", () => {
+  const s = make();
+  const hOf = (h) => ({ transforms: [{ firstPerson: false, node: "NPC", keys: [{ name: "RSMPlugin", values: [{ key: 20, type: 2, index: 0, data: h }] }] }] });
+  s.sp.Game.getPlayer = () => ({});
+  s.gm.greymarchRaceMenuExport = () => hOf(0.97); // the body has a stale 0.97
+  const rmS = s.gm.greymarchRmState();
+  rmS.want = hOf(1.04); // the server's
+  s.gm.greymarchRaceMenuReport();
+  let sent = s.log.sent.filter((c) => c.customPacketType === "greymarchRaceMenuLook").pop();
+  assert.strictEqual(sent.heightMoved, undefined, "no move: not said");
+  assert.strictEqual(sent.look.transforms.find((t) => t.node === "NPC" && !t.firstPerson).keys[0].values[0].data, 1.04, "the server's Height kept, not the body's");
+  assert.strictEqual(rmS.ownHeightDirty, true, "and put back on the body");
+  rmS.heightMoved = 0.99;
+  s.gm.greymarchRaceMenuReport();
+  sent = s.log.sent.filter((c) => c.customPacketType === "greymarchRaceMenuLook").pop();
+  assert.strictEqual(sent.heightMoved, 0.99, "moved: said");
+  assert.strictEqual(rmS.heightMoved, undefined, "said once");
+});
+
+const bridgeSrc = fs.readFileSync(path.join(__dirname, "..", "src", "greymarch", "bridge.ts"), "utf8");
+test("HEIGHT HARD SAVED: a slider move away from where it started is noted; the menu opening forgets it; the saved Height is put on again every 10 s", () => {
+  assert.match(bridgeSrc, /h\.start = Math\.round\(v \* 1000\) \/ 1000;/);
+  assert.match(bridgeSrc, /if \(h\.start === undefined \|\| Math\.abs\(v - h\.start\) > 0\.003\) this\.greymarchRmState\(\)\.heightMoved = v;/);
+  assert.match(bridgeSrc, /if \(!rm\.menuWas && open\) rm\.heightMoved = undefined;/);
+  assert.match(bridgeSrc, /if \(now >= \(c\.hForceAt \|\| 0\)\) c\.hDirty = true;/);
+  assert.match(bridgeSrc, /if \(now >= \(rm\.ownHeightForceAt \|\| 0\)\) rm\.ownHeightDirty = true;/);
+});
+
+test("HEIGHT THE MOMENT A BODY LOADS (2026-11-11, the owner: more seamless): the load event puts a copy's Height on the next frame, no wait for the check; other objects ignored", () => {
+  const s = make();
+  const ID = 0xff000042;
+  const copy = { scale: 0, sets: [] };
+  const copyActor = { is3DLoaded: () => true, isDisabled: () => false, getRace: () => ({ getName: () => "Nord" }), getBaseObject: () => "base" };
+  s.sp.Actor = { from: (f) => (f === copy ? copyActor : null) };
+  s.sp.ActorBase = { from: () => ({ getSex: () => 0 }) };
+  s.sp.Game.getFormEx = (id) => (id === ID ? copy : null);
+  s.sp.callNative = (cls, fn, self, actor, fp, female, node, key, v) => {
+    if (fn === "GetNodeTransformScale") return copy.scale;
+    if (fn === "AddNodeTransformScale") { copy.sets.push(v); copy.scale = v; }
+  };
+  s.gm.greymarchRmCopies = null;
+  s.say({ customPacketType: "greymarchRaceMenuLookOf", actorId: ID, look: { transforms: MINE.transforms } });
+  s.gm.greymarchRaceMenuHeightsTick(300000);
+  assert.deepStrictEqual(copy.sets, [1.1]);
+  // drawn again (a door, a rebuild): the skeleton back at the race's own size while NiOverride still reads 1.1
+  copy.sets = [];
+  s.gm.greymarchHeightLoaded({ isLoaded: true, object: { getFormID: () => 0x1234 } });
+  s.gm.greymarchHeightLoaded({ isLoaded: true, object: { getFormID: () => ID } });
+  s.gm.greymarchHeightLoaded({ isLoaded: true, object: { getFormID: () => ID } });
+  assert.deepStrictEqual(s.gm.greymarchHeightLoadQ, [ID], "only SkyMP's copies and the player, once each");
+  s.gm.greymarchHeightLoadedTick(300100);
+  assert.deepStrictEqual(copy.sets, [1.1], "put on at once, though the stored scale read right");
+  s.gm.greymarchHeightLoaded({ isLoaded: false, object: { getFormID: () => ID } });
+  assert.deepStrictEqual(s.gm.greymarchHeightLoadQ, [], "an unload is not a load");
+  const bridgeSrc2 = fs.readFileSync(path.join(__dirname, "..", "src", "greymarch", "bridge.ts"), "utf8");
+  assert.match(bridgeSrc2, /this\.sp\.on\("objectLoaded", \(e: any\) => this\.greymarchHeightLoaded\(e\)\)/);
+  assert.match(bridgeSrc2, /this\.greymarchHeightLoadedTick\(Date\.now\(\)\);[^\n]*\r?\n\s*this\.greymarchRaceMenuHeightsTick\(Date\.now\(\)\);/);
+});
