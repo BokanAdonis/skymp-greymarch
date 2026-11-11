@@ -76,3 +76,23 @@ test("fast draw is a little faster (2026-10-31, the owner): WeaponSpeedMult 1.15
   type = 9; b.greymarchFastDrawApply(2000, player); assert.strictEqual(av, 1.15, "a crossbow too");
   b.greymarchPerksWant = { fastDraw: false }; b.greymarchFastDrawApply(3000, player); assert.strictEqual(av, 0, "the perk gone: put back");
 });
+
+test("two daggers swing 15% slower (2026-11-11, the owner: slow down dual wield daggers a little), put back when one is put away", () => {
+  const src = fs.readFileSync(path.join(__dirname, "..", "src", "greymarch", "bridge.ts"), "utf8");
+  const start = src.indexOf("    greymarchDualDaggerApply(now: number, player: any): any {");
+  const end = src.indexOf("    // STAT MAXIMUMS set by staff");
+  const body = src.slice(start, end).replace(/\(now: number, player: any\): any/g, "(now, player)");
+  const Cls = new Function("GREYMARCH_DUAL_DAGGER_SPEED", "return class {\n" + body + "\n};")(0.85);
+  const b = new Cls();
+  b.greymarchCrumb = () => {};
+  const av = { WeaponSpeedMult: 0, LeftWeaponSpeedMultiply: 1 };
+  let right = 2, left = 2;
+  const player = { getEquippedWeapon: (l) => { const t = l ? left : right; return t === null ? null : { getWeaponType: () => t }; }, getActorValue: (k) => av[k], setActorValue: (k, v) => { av[k] = v; } };
+  b.greymarchDualDaggerApply(0, player);
+  assert.deepStrictEqual(av, { WeaponSpeedMult: 0.85, LeftWeaponSpeedMultiply: 0.85 }, "a dagger in each hand");
+  b.greymarchDualDaggerApply(200, player); assert.strictEqual(av.WeaponSpeedMult, 0.85, "not again within half a second, and not compounded");
+  b.greymarchDualDaggerApply(1000, player); assert.strictEqual(av.WeaponSpeedMult, 0.85, "not compounded");
+  left = null; b.greymarchDualDaggerApply(2000, player);
+  assert.deepStrictEqual(av, { WeaponSpeedMult: 0, LeftWeaponSpeedMultiply: 1 }, "one put away: put back");
+  right = 1; left = 2; b.greymarchDualDaggerApply(3000, player); assert.strictEqual(av.WeaponSpeedMult, 0, "a sword and a dagger: normal");
+});

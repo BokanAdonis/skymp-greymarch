@@ -179,6 +179,7 @@ const GREYMARCH_PERK_QUICK_SHOT = 0x00105F19;
 // the sprinting power attack (the lunge) at rank 5 (2026-10-31, the owner: "whenever you are sprinting it should trigger a lunge attack when you do a heavy"):
 // the game plays it only with these perks; the server makes it hit x2 (combatPerks jumpPower, a power attack while sprinting or jumping)
 const GREYMARCH_PERK_CRITICAL_CHARGE = 0x000CB406;
+const GREYMARCH_DUAL_DAGGER_SPEED = 0.85; // two daggers: each hand swings 15% slower (greymarchDualDaggerApply)
 const GREYMARCH_FAST_DRAW_SPEED = 1.15; // fast draw: the bow drawn 15% faster on top of Quick Shot (greymarchFastDrawApply)
 const GREYMARCH_PERK_GREAT_CRITICAL_CHARGE = 0x000CB407;
 
@@ -4508,7 +4509,7 @@ export class GreymarchBridge {
                 }
             }
             this.greymarchNoHostApply(now, player, !!have.god);
-            this.greymarchGhostApply(now, ghosts || []); this.greymarchNamesApply(now); this.greymarchInvisApply(now); this.greymarchFaintApply(now); this.greymarchNoTalkApply(now); this.greymarchSeenLog(now); this.greymarchStatsApply(player); this.greymarchCombatApply(player); this.greymarchPerksApply(now, player); this.greymarchFastDrawApply(now, player);
+            this.greymarchGhostApply(now, ghosts || []); this.greymarchNamesApply(now); this.greymarchInvisApply(now); this.greymarchFaintApply(now); this.greymarchNoTalkApply(now); this.greymarchSeenLog(now); this.greymarchStatsApply(player); this.greymarchCombatApply(player); this.greymarchPerksApply(now, player); this.greymarchFastDrawApply(now, player); this.greymarchDualDaggerApply(now, player);
         } catch (err) {
             if (!this.greymarchFxErr) { this.greymarchFxErr = true; this.greymarchLog("staff effects error (shown once): " + err); }
         }
@@ -4638,6 +4639,29 @@ export class GreymarchBridge {
         } else if (!want && this.greymarchFastDrawWas !== undefined) {
             try { player.setActorValue("WeaponSpeedMult", this.greymarchFastDrawWas); } catch (e3) { /* tried again next time */ return; }
             this.greymarchFastDrawWas = undefined;
+        }
+    }
+    // TWO DAGGERS, A LITTLE SLOWER (2026-11-11, the owner: "slow down dual wield daggers a little bit"): while a dagger is in each hand, both hands swing
+    // GREYMARCH_DUAL_DAGGER_SPEED of their speed (WeaponSpeedMult, the right hand and both at once; LeftWeaponSpeedMultiply, the left), put back to what they
+    // were when one dagger is put away. A bow never shares the hands with them, so the fast draw above (WeaponSpeedMult too) is never on at the same time.
+    // Looked at twice a second.
+    greymarchDualDaggerApply(now: number, player: any): any {
+        if (now < (this.greymarchDualDaggerNext || 0)) return;
+        this.greymarchDualDaggerNext = now + 500;
+        var dual = false;
+        try { var r = player.getEquippedWeapon(false), l = player.getEquippedWeapon(true); dual = !!r && !!l && r.getWeaponType() === 2 && l.getWeaponType() === 2; } catch (e1) { dual = false; } // 2 dagger
+        if (dual && this.greymarchDualDaggerWas === undefined) {
+            try {
+                var was = { right: player.getActorValue("WeaponSpeedMult"), left: player.getActorValue("LeftWeaponSpeedMultiply") };
+                // 0 counts as the normal speed in the game
+                player.setActorValue("WeaponSpeedMult", (was.right > 0 ? was.right : 1) * GREYMARCH_DUAL_DAGGER_SPEED);
+                player.setActorValue("LeftWeaponSpeedMultiply", (was.left > 0 ? was.left : 1) * GREYMARCH_DUAL_DAGGER_SPEED);
+                this.greymarchDualDaggerWas = was;
+                this.greymarchCrumb("dual daggers: swings at " + GREYMARCH_DUAL_DAGGER_SPEED + " (was " + was.right + " / " + was.left + ")");
+            } catch (e2) { this.greymarchDualDaggerWas = undefined; }
+        } else if (!dual && this.greymarchDualDaggerWas !== undefined) {
+            try { player.setActorValue("WeaponSpeedMult", this.greymarchDualDaggerWas.right); player.setActorValue("LeftWeaponSpeedMultiply", this.greymarchDualDaggerWas.left); } catch (e3) { /* tried again next time */ return; }
+            this.greymarchDualDaggerWas = undefined;
         }
     }
     // STAT MAXIMUMS set by staff (1 to 1000): the base value is set and the stat filled. Done once per value, so the game is never fought with.
