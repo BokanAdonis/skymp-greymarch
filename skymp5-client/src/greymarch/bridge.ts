@@ -102,6 +102,10 @@ const INTOX_CLEAR_MS = 6000, INTOX_CLEAR_EVERY = 1000, INTOX_DRUNK_ISTATE = 15, 
 // what others see (2026-11-11, the owner): the sick from Wasting on wear the Chaurus poison's sheen (Skyrim.esm ChaurusPoisonFXShader), played for PLAGUE_SHEEN_S
 // and again every PLAGUE_SHEEN_EVERY ms so a body that loads in gets it; a cough is the game's doubled-over cough (IdleUncontrollableCough), on whoever coughs
 const PLAGUE_SHEEN = 0x10cc64, PLAGUE_SHEEN_S = 12, PLAGUE_SHEEN_EVERY = 10000, PLAGUE_COUGH_IDLE = 0x0d8736;
+// THIS PLAYER'S OWN COUGH (2026-11-11, the owner: "the player stops moving and goes into third person for the cough to avoid any moving bugs and noclipping"): they
+// stop (movement, fighting, sneaking, using things and the camera switch locked), the camera goes behind them, PLAGUE_STILL_MS later the cough plays, and after
+// PLAGUE_HOLD_MS the controls come back and a first-person player is put back in first person
+const PLAGUE_STILL_MS = 250, PLAGUE_HOLD_MS = 3800;
 const PLAGUE_STAMINA = [0, 0.1, 0.2, 0.35], PLAGUE_STAMINA_RATE = [0, 15, 30, 50], PLAGUE_HEAL_RATE = [0, 20, 40, 60], PLAGUE_COUGH_IMOD = 0x10e3d2;
 const INTOX_HIGH_IMOD = 0x0e3cbc, INTOX_STUMBLE_IDLE = 0x0138d5, INTOX_SOFT_EVERY = 1000;
 const INTOX_SOFT: { [k: string]: number } = { tipsy: 0.15, drunk: 0.3 }; // the drunk screen's strength, replayed every second
@@ -1963,16 +1967,46 @@ export class GreymarchBridge {
         if ((id >>> 0) === (this.greymarchMeActor >>> 0)) return player;
         try { var lid = misc.remoteIdToLocalId(id >>> 0); return lid ? sp.Actor.from(sp.Game.getFormEx(lid)) : null; } catch (lErr) { return null; }
     }
+    // this player's own cough: begin (greymarchPlagueOwn { phase: "still" | "cough", at, first }); not while riding, sitting, dead, with a weapon out, as a beast or
+    // a creature, or held by a feeding (each of those owns the controls), nor while a cough is already on
+    greymarchPlagueOwnCough(player: any, now: number): any {
+        var sp = this.sp;
+        if (this.greymarchPlagueOwn) return;
+        try { if (!player.is3DLoaded() || player.isDead() || player.isOnMount() || player.getSitState() !== 0 || player.isWeaponDrawn()) return; } catch (cErr) { return; }
+        if (this.greymarchWolfOn || this.greymarchShapeOn || this.greymarchShapeWant || this.greymarchVampFeedLocked || this.greymarchVampFeedHold) return;
+        var first = false; try { first = Number(sp.Game.getCameraState()) === 0; } catch (camErr) { first = false; }
+        try {
+            sp.Game.disablePlayerControls(true, true, true, false, true, false, true, false, 0);
+            sp.Game.forceThirdPerson();
+        } catch (lErr) { this.greymarchLog("plague: the cough could not stop the player: " + String(lErr).slice(0, 120)); return; }
+        this.greymarchPlagueOwn = { phase: "still", at: now, first: first };
+    }
+    greymarchPlagueOwnCoughTick(player: any, now: number): any {
+        var sp = this.sp, own = this.greymarchPlagueOwn;
+        if (!own) return;
+        if (own.phase === "still" && now - own.at >= PLAGUE_STILL_MS) {
+            own.phase = "cough"; own.at = now;
+            try { var idle = sp.Idle.from(sp.Game.getFormEx(PLAGUE_COUGH_IDLE)); if (idle) player.playIdle(idle); } catch (iErr) { /* stood still, no cough shown */ }
+            return;
+        }
+        if (own.phase === "cough" && now - own.at >= PLAGUE_HOLD_MS) {
+            this.greymarchPlagueOwn = null;
+            try { sp.Game.enablePlayerControls(true, true, true, false, true, false, true, false, 0); } catch (eErr) { this.greymarchLog("plague: the controls could not be given back: " + String(eErr).slice(0, 120)); }
+            if (own.first) { try { sp.Game.forceFirstPerson(); } catch (fErr) { /* they switch back themselves */ } }
+        }
+    }
     greymarchPlagueSeenTick(player: any, now: number): any {
         var sp = this.sp, coughs: number[] = this.greymarchPlagueCoughs || [];
         if (coughs.length) {
             this.greymarchPlagueCoughs = [];
             var idle: any = null; try { idle = sp.Idle.from(sp.Game.getFormEx(PLAGUE_COUGH_IDLE)); } catch (iErr) { idle = null; }
             for (var c = 0; c < coughs.length && c < 20; c++) {
+                if ((coughs[c] >>> 0) === (this.greymarchMeActor >>> 0)) { this.greymarchPlagueOwnCough(player, now); continue; } // this player: stopped and seen from behind first
                 var ca = this.greymarchPlagueActor(player, coughs[c]);
                 try { if (idle && ca && ca.is3DLoaded() && !ca.isDead() && !ca.isOnMount() && ca.getSitState() === 0 && !ca.isWeaponDrawn()) ca.playIdle(idle); } catch (cErr) { /* not now: the next cough */ }
             }
         }
+        this.greymarchPlagueOwnCoughTick(player, now);
         var seen: number[] = this.greymarchPlagueSeen || [];
         if (!seen.length || now - (this.greymarchPlagueSheenAt || 0) < PLAGUE_SHEEN_EVERY) return;
         this.greymarchPlagueSheenAt = now;
