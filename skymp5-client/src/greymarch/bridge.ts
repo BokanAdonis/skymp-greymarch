@@ -143,6 +143,8 @@ const OPEN_ON_RELEASE = [65, 35, 48, 64, 66, 37]; // F7, H, B, F6, F8, K: their 
 const FORGE_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmForgeRun").split("greymarch-prof").join("greymarch-forge").split("2147483220").join("2147483225"); // the Greymarch forge window: the same loader, another page
 const PAUSE_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmPauseRun").split("greymarch-prof").join("greymarch-pause").split("2147483220").join("2147483230"); // the pause menu (Esc): the same loader, another page, over every other window
 const JOURNAL_MENU = "Journal Menu"; // the game's own pause menu (Esc, J): closed the frame it opens, the pause menu shows instead (greymarchPauseTick)
+const COMPASS_SCALE = 75; // the game's compass at this percent of its size (greymarchCompassTick)
+const COMPASS_ALPHA = 45; // and this opacity
 const VITALS_AWAY_Y = -20000; // the game's own health, magicka and stamina meters are moved this far above the screen while ours show (greymarchVitalsGame)
 const PAUSE_AFTER_MENU_MS = 400; // an Esc this soon after a game menu (inventory, map, a chest ...) was seen open closed that menu: no pause menu (greymarchPauseTick)
 const ESC_KEY = 1;
@@ -615,6 +617,7 @@ export class GreymarchBridge {
         if (this.greymarchWolfOn || this.greymarchWolfLungeClick) { try { var gmLungeP = this.sp.Game.getPlayer(); if (gmLungeP) this.greymarchWolfLungeTick(gmLungeP, Date.now()); } catch (lgErr) { /* next frame */ } } // the lunge, every frame (the wolf tick runs every 250 ms)
         this.greymarchSpellCostTick(); // the Spells balance tab's costs on the spell records (GreymarchCamera.dll 1.5)
         this.greymarchSpellEditTick(); // the Magic balance tab's durations and strengths on the spell records
+        this.greymarchCompassTick(); // the game's compass smaller and faded
         this.greymarchChargeTick(Date.now()); // another player's single-shot charge shown on their copy
         this.greymarchStaffChargeTick(); // a staff's charge reported, and set back when the server says it came back fuller (gamemode staffcharge.js)
         this.greymarchCircleTick(); // the rings of the Circle spells other players cast near (gamemode circles.js)
@@ -5365,6 +5368,34 @@ export class GreymarchBridge {
         if (last && last.h === v.h && last.m === v.m && last.s === v.s && now - (this.greymarchVitalsSentAt || 0) < 2000) return;
         this.greymarchVitalsSent = v; this.greymarchVitalsSentAt = now;
         this.greymarchHudToPage("vitals", v);
+    }
+    // THE QUIET COMPASS (2026-11-11, the owner: "make the compass less intrusive", smaller and faded, always): the game's compass (hudmenu:
+    // HUDMovieBaseInstance.CompassShoutMeterHolder, the compass with the shout meter) at COMPASS_SCALE of its size and COMPASS_ALPHA opacity. Set again
+    // whenever the HUD puts it back (looked at every second). Kept centred: its own place is read at full size, and when the holder turns out to be anchored at
+    // its left edge (its middle, not its x, sits nearest the screen's middle, 640 of the HUD's 1280) it is moved right by the width it lost on each side.
+    greymarchCompassTick(): any {
+        var now = Date.now();
+        if (now < (this.greymarchCompassNext || 0)) return;
+        this.greymarchCompassNext = now + 1000;
+        var ui = this.sp.Ui, clip = "_root.HUDMovieBaseInstance.CompassShoutMeterHolder";
+        try {
+            var xs = Number(ui.getNumber("HUD Menu", clip + "._xscale")), al = Number(ui.getNumber("HUD Menu", clip + "._alpha"));
+            if (!isFinite(xs) || !isFinite(al)) return; // no HUD yet
+            var st = this.greymarchCompass || (this.greymarchCompass = { x: null, w: null, shift: 0 });
+            if (Math.abs(xs - COMPASS_SCALE) < 0.5 && Math.abs(al - COMPASS_ALPHA) < 0.5) return; // as we set it
+            if (Math.abs(xs - 100) < 0.5) { // at full size (first time, or the HUD rebuilt it): its own place and width
+                var x = Number(ui.getNumber("HUD Menu", clip + "._x")), w = Number(ui.getNumber("HUD Menu", clip + "._width"));
+                if (isFinite(x) && isFinite(w) && w > 0) {
+                    var leftAnchored = Math.abs(x + w / 2 - 640) < Math.abs(x - 640);
+                    st.x = x; st.w = w; st.shift = leftAnchored ? (w * (1 - COMPASS_SCALE / 100)) / 2 : 0;
+                    if (!this.greymarchCompassLogged) { this.greymarchCompassLogged = true; this.greymarchLog("compass: x " + x + " width " + w + (leftAnchored ? ", anchored left: moved " + st.shift.toFixed(1) : ", anchored in the middle")); }
+                }
+            }
+            ui.setNumber("HUD Menu", clip + "._xscale", COMPASS_SCALE);
+            ui.setNumber("HUD Menu", clip + "._yscale", COMPASS_SCALE);
+            ui.setNumber("HUD Menu", clip + "._alpha", COMPASS_ALPHA);
+            if (st.x !== null && st.shift) ui.setNumber("HUD Menu", clip + "._x", st.x + st.shift);
+        } catch (e) { /* not in this HUD */ }
     }
     // the game's own Health, Magicka and Stamina meters (hudmenu: HUDMovieBaseInstance.Health / Magica / Stamina): shown (true) or hidden (false)
     greymarchVitalsGame(show: boolean): any {
