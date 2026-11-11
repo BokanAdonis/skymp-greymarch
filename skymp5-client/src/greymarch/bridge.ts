@@ -102,6 +102,10 @@ const INTOX_CLEAR_MS = 6000, INTOX_CLEAR_EVERY = 1000, INTOX_DRUNK_ISTATE = 15, 
 // what others see (2026-11-11, the owner): the sick from Wasting on show the Chaurus poison's green (Skyrim.esm ChaurusPoisonFXShader) as a GLINT ("slightly less
 // obvious ... a green glint on them"): PLAGUE_SHEEN_S seconds at a time, every PLAGUE_SHEEN_EVERY ms plus up to PLAGUE_SHEEN_JITTER (it cannot be dimmed, so it is
 // kept short); a cough is the game's doubled-over cough (IdleUncontrollableCough), on whoever coughs
+// MORA'S AGONY LINGERS (gamemode morazone.js, 2026-11-11, the owner: lingering damage for whoever stands in its tentacles): after this player casts it
+// (GMSpellMorasAgony 060601 GreymarchWorld.esp), for MORA_WATCH_MS the game looks for a tentacle hazard (Dragonborn's MorasGrasp hazards) that was not there at the
+// cast, and tells the server where it is; the server hurts the others standing in it
+const MORA_SPELL = 0x060601, MORA_HAZARDS = [0x03183e, 0x03a3d1, 0x03d54c], MORA_WATCH_MS = 5000, MORA_LOOK_MS = 150, MORA_LOOK_RANGE = 8000;
 const PLAGUE_SHEEN = 0x05d606, /* EnchGreenFXShader: the poison enchantment green, no particles (2026-11-11, the owner: no black smoke around you; ChaurusPoisonFXShader 0x10cc64 had dark wisps) */ PLAGUE_SHEEN_S = 3.5, PLAGUE_SHEEN_EVERY = 12000, PLAGUE_SHEEN_JITTER = 8000, /* 1.2 s never showed (the owner): the shader fades in over its own time first */ PLAGUE_COUGH_IDLE = 0x0d8736;
 // THIS PLAYER'S OWN COUGH (2026-11-11, the owner: "the player stops moving and goes into third person for the cough to avoid any moving bugs and noclipping"): they
 // stop (movement, fighting, sneaking, using things and the camera switch locked), the camera goes behind them, PLAGUE_STILL_MS later the cough plays, and after
@@ -231,6 +235,7 @@ export class GreymarchBridge {
         try { this.controller.on("spellCast", (e: any) => { try { if (e && e.spell && e.caster && e.caster.getFormID() === 0x14) { var castId = e.spell.getFormID(); if (castId === this.greymarchVampForm("lord") || castId === this.greymarchVampForm("mist")) this.greymarchVampSignalFirst("cast", castId); else this.greymarchVampSignal("cast", castId); } } catch (x) { /* not ours */ } }); } catch (vcErr) { /* no cast events: the powers are not reported */ } // a vampire's Mist Form or Vampire Lord (greymarchVampTick)
         try { this.controller.on("spellCast", (e: any) => { try { if (e && e.spell && e.caster && e.caster.getFormID() === 0x14) this.greymarchSummonCast(e.spell); else if (e && e.spell && e.caster) this.greymarchSummonCastBy(e.caster, e.spell); } catch (x) { /* not a summon */ } }); } catch (scErr) { /* no cast events: summons stay in this game */ } // a summon spell: the server places it (greymarchSummonCast)
         try { this.controller.on("spellCast", (e: any) => { try { if (e && e.spell && e.caster && e.caster.getFormID() === 0x14) this.greymarchCastSend(e.spell.getFormID()); } catch (x) { /* not ours */ } }); } catch (hcErr) { /* no cast events: healing spells are not reported */ } // every cast of the player's own spells goes to the server, which applies the healing ones (healing.js); it never applies spell effects itself
+        try { this.controller.on("spellCast", (e: any) => { try { if (e && e.spell && e.caster && e.caster.getFormID() === 0x14) this.greymarchMoraCast(e.spell); } catch (x) { /* not ours */ } }); } catch (mcErr) { /* no cast events: Mora's Agony does not linger */ } // Mora's Agony: where its tentacles come up (greymarchMoraTick)
         try { this.controller.on("magicEffectApply", (e: any) => { try { if (e && e.effect && e.target && e.target.getFormID() === 0x14) { var fxId = e.effect.getFormID(); if (fxId === this.greymarchVampForm("potionFx")) this.greymarchVampSignalFirst("effect", fxId); else this.greymarchVampSignal("effect", fxId); } } catch (x) { /* not ours */ } }); } catch (veErr) { /* no effect events: a Potion of Blood is not reported */ } // a Potion of Blood drunk
         try { this.controller.on("equip", (e: any) => { try { if (e && e.baseObj && e.actor && e.actor.getFormID() === 0x14) { var eqId = e.baseObj.getFormID(); if (eqId === this.greymarchVampForm("potion")) this.greymarchVampSignalFirst("equip", eqId); else this.greymarchVampSignal("equip", eqId); this.greymarchConsumeNote(e.baseObj); } } catch (x) { /* not ours */ } }); } catch (vqErr) { /* the effect event still sees it */ } // a potion is "equipped" when it is drunk
         this.controller.emitter.on("greymarchStage", (text: string) => this.greymarchLog(text)); // other services report where the game is, for the server log
@@ -1853,6 +1858,7 @@ export class GreymarchBridge {
         this.greymarchIntoxTick(player, now); // drunk or high: the screen, the walk, the stumbles, the pace
         this.greymarchPlagueTick(player); // the plague: weaker by its stage, and a cough's screen flash
         this.greymarchPlagueSeenTick(player, now); // the plague others see: the sheen on the badly sick, and their coughs
+        this.greymarchMoraTick(player, now); // Mora's Agony: where its tentacles came up, to the server
         this.greymarchIntoxOthersTick(now); // other players drunk or high: their copies here keep the drunk walk
         this.greymarchWeatherTick(player, now); // the hold's weather the server picked (greymarch weather.js)
         this.greymarchVampFangsWear(now); // the worn fangs the server gave: put on (SkyMP then shows them to everyone)
@@ -1984,6 +1990,45 @@ export class GreymarchBridge {
         if (this.greymarchPlagueCough) {
             this.greymarchPlagueCough = false;
             try { var im = sp.ImageSpaceModifier.from(sp.Game.getFormEx(PLAGUE_COUGH_IMOD)); if (im) im.apply(0.35 + 0.2 * want); } catch (cErr) { /* a flash missed */ }
+        }
+    }
+    // MORA'S AGONY: the tentacle hazards near this player now (their ids), the hazard records once found
+    greymarchMoraBases(): any[] {
+        var sp = this.sp;
+        if (!this.greymarchMoraHaz) { var out: any[] = []; for (var i = 0; i < MORA_HAZARDS.length; i++) { try { var f = sp.Game.getFormFromFile(MORA_HAZARDS[i], "Dragonborn.esm"); if (f) out.push(f); } catch (e) { /* not in this game */ } } this.greymarchMoraHaz = out; }
+        return this.greymarchMoraHaz;
+    }
+    greymarchMoraNear(player: any): any[] {
+        var sp = this.sp, found: any[] = [], bases = this.greymarchMoraBases();
+        for (var i = 0; i < bases.length; i++) { try { var r = sp.Game.findClosestReferenceOfTypeFromRef(bases[i], player, MORA_LOOK_RANGE); if (r) found.push(r); } catch (e) { /* none */ } }
+        return found;
+    }
+    greymarchMoraCast(spell: any): any {
+        var sp = this.sp;
+        if (this.greymarchMoraSpellId === undefined) { try { var f = sp.Game.getFormFromFile(MORA_SPELL, "GreymarchWorld.esp"); this.greymarchMoraSpellId = f ? f.getFormID() >>> 0 : 0; } catch (e) { this.greymarchMoraSpellId = 0; } }
+        if (!this.greymarchMoraSpellId || (spell.getFormID() >>> 0) !== this.greymarchMoraSpellId) return;
+        var player = sp.Game.getPlayer(), old: any = {};
+        try { var near = this.greymarchMoraNear(player); for (var i = 0; i < near.length; i++) old[near[i].getFormID() >>> 0] = true; } catch (e) { /* none */ }
+        this.greymarchMoraWatch = { until: Date.now() + MORA_WATCH_MS, old: old, lookAt: 0 };
+    }
+    greymarchMoraTick(player: any, now: number): any {
+        var w = this.greymarchMoraWatch;
+        if (!w) return;
+        if (now > w.until) { this.greymarchMoraWatch = null; this.greymarchLog("mora: no tentacles found after the cast"); return; }
+        if (now - w.lookAt < MORA_LOOK_MS) return;
+        w.lookAt = now;
+        var near = this.greymarchMoraNear(player);
+        for (var i = 0; i < near.length; i++) {
+            var id = near[i].getFormID() >>> 0;
+            if (w.old[id]) continue;
+            try {
+                var pos = [near[i].getPositionX(), near[i].getPositionY(), near[i].getPositionZ()];
+                var msg = { t: MsgType.CustomPacket, contentJsonDump: JSON.stringify({ customPacketType: "greymarchMoraZone", pos: pos }) };
+                this.controller.emitter.emit("sendMessage", { message: msg, reliability: "reliable" });
+                this.greymarchLog("mora: tentacles at " + pos.map(function (x: number) { return Math.round(x); }).join(",") + ", told the server");
+            } catch (e) { /* the next look */ continue; }
+            this.greymarchMoraWatch = null;
+            return;
         }
     }
     // the server's actor id -> the actor in this game (this player's own body, or SkyMP's copy of another player), or null when it is not here
