@@ -111,8 +111,11 @@ test("GreymarchCamera 1.17 SetHeadLook (2026-11-11, the owner's test: the marker
   const c = { getFormID: () => 9, getAngleZ: () => 0, getPositionX: () => 0, getPositionY: () => 0, getPositionZ: () => 0, getWorldSpace: () => ({ getFormID: () => 0x3c }), getParentCell: () => null, isAIEnabled: () => true, getDistance: () => 0,
     placeAtMe: () => { placed++; return { setPosition() {}, disable() {}, delete() {} }; }, setHeadTracking: (on) => looks.push(["tracking", on]), setLookAt: () => looks.push(["look"]), clearLookAt: () => looks.push(["clear"]) };
   assert.strictEqual(h.lookAtPoint(sp, c, [0, 1000, 120], 1000), true);
-  assert.strictEqual(h.lookAtPoint(sp, c, [0, 1000, 5000], 1016), true);
+  assert.strictEqual(h.lookAtPoint(sp, c, [0, 1000, 5000], 3000), true); // more than a second later: straight there
   assert.deepStrictEqual(calls, [[0, 1000, 120], [0, 866, 620]], "every frame; straight up clamped to 30 degrees");
+  h.lookAtPoint(sp, c, [0, 1000, 120], 3016);
+  const eased = calls[2];
+  assert.ok(eased[2] < 620 && eased[2] > 500, "a frame later it has eased only part of the way down (smooth, not a jump): " + eased);
   assert.strictEqual(placed, 0, "no marker");
   assert.deepStrictEqual(looks, [["clear"], ["tracking", true]], "the script look cleared and head tracking on, once");
   const old = load();

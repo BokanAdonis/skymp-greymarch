@@ -91,6 +91,7 @@ const offIds = new Set<number>(); // copies whose head was turned off because th
 let headNative: boolean | undefined = undefined; // GreymarchCamera.dll 1.17 SetHeadLook there? (asked once)
 const nativeIds = new Set<number>(); // copies pointed by SetHeadLook (their script look and marker cleared once)
 const graphAt = new Map<number, number>(); let graphSaid = 0; // IsNPC looked at once a second per copy; a few log lines
+export const EASE_MS = 120; const shown = new Map<number, { p: P3, at: number }>(); // the point each copy's head is shown at, easing to the sent one
 
 // another game's copy `ac` looks at the point `p` (no actor stands there). Returns true when its head was pointed at the marker this call.
 export function lookAtPoint(sp: any, ac: any, sent: P3, now: number): boolean {
@@ -109,8 +110,14 @@ export function lookAtPoint(sp: any, ac: any, sent: P3, now: number): boolean {
   // GreymarchCamera.dll 1.17 SetHeadLook gives the copy's process the point itself (the game's SetHeadtrackTarget), every call (applyMovement runs every frame).
   // No marker then (a SetLookAt on one would win over it). An older DLL: the marker below, as before.
   if (headNative !== false) {
+    // SMOOTH (2026-11-11, the owner: "it's starting to work but it's very laggy"): a new point comes only with each movement (every 130 ms, and with the
+    // network's jitter), and the head jumped to each. The point shown eases to the newest one every frame, by time (EASE_MS), the same at any frame rate.
+    const was = shown.get(id);
+    let q: P3 = p;
+    if (was && now - was.at < 1000) { const k = 1 - Math.exp(-Math.max(1, now - was.at) / EASE_MS); q = [was.p[0] + (p[0] - was.p[0]) * k, was.p[1] + (p[1] - was.p[1]) * k, was.p[2] + (p[2] - was.p[2]) * k]; }
+    shown.set(id, { p: q, at: now });
     let ok = false;
-    try { ok = !!sp.callNative("GreymarchCam", "SetHeadLook", undefined, ac, p[0], p[1], p[2]); } catch (e) { ok = false; }
+    try { ok = !!sp.callNative("GreymarchCam", "SetHeadLook", undefined, ac, q[0], q[1], q[2]); } catch (e) { ok = false; }
     if (headNative === undefined) { headNative = ok; say("head: GreymarchCamera SetHeadLook " + (ok ? "works: heads are pointed at the point" : "is missing (an older DLL): a marker is used")); }
     if (ok) {
       if (!nativeIds.has(id)) {
@@ -127,7 +134,7 @@ export function lookAtPoint(sp: any, ac: any, sent: P3, now: number): boolean {
         let was: any = "?";
         try { was = ac.getAnimationVariableBool("IsNPC"); } catch (e) { was = "?"; }
         if (was !== true) { try { ac.setAnimationVariableBool("IsNPC", true); } catch (e) { /* no graph */ } }
-        if (graphSaid < 8) {
+        if (graphSaid < 2) {
           graphSaid++;
           let after: any = "?"; try { after = ac.getAnimationVariableBool("IsNPC"); } catch (e) { after = "?"; }
           let spine: any = "?"; try { spine = ac.getAnimationVariableBool("bHeadTrackSpine"); } catch (e) { spine = "?"; }
@@ -170,5 +177,5 @@ export function lookAtPoint(sp: any, ac: any, sent: P3, now: number): boolean {
 }
 
 // for tests
-export function _reset(): void { cameraWorks = null; cameraRetryAt = 0; marks.clear(); offIds.clear(); nativeIds.clear(); headNative = undefined; graphAt.clear(); graphSaid = 0; sentSaid = failSaid = drawSaid = sentSaidAt = 0; }
+export function _reset(): void { cameraWorks = null; cameraRetryAt = 0; marks.clear(); offIds.clear(); nativeIds.clear(); headNative = undefined; graphAt.clear(); graphSaid = 0; shown.clear(); sentSaid = failSaid = drawSaid = sentSaidAt = 0; }
 export function _markers(): number { return marks.size; }
