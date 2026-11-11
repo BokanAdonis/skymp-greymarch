@@ -45,3 +45,11 @@ test("wired into applyInventory", () => {
   assert.match(inv, /keepWornOnSwap\(diff/);
   assert.match(inv, /import \{ keepWornOnSwap, swapReason \} from '\.\.\/greymarch\/wornSwap'/);
 });
+
+test("PUT ON FOR REAL (2026-11-11 evening, the owner's log: kept on, then two unequips each and nothing worn): each swapped piece is equipped after the swap", () => {
+  const src = read("sync/inventory.ts").replace(/\r\n/g, "\n");
+  const swapAt = src.indexOf("swapPairs = swap.pairs;"), equipAt = src.indexOf("if (swapPairs.length && !enableCrashProtection)"), loopAt = src.indexOf("diff.forEach((e, i) => {");
+  assert.ok(swapAt > 0 && equipAt > loopAt && loopAt > swapAt, "the equip comes after the add/remove loop");
+  assert.match(src, /if \(f\.getType\(\) === FormType\.Weapon\) ac\.equipItemEx\(f, p\.in\.wornLeft \? 2 : 1, false, false\);\n\s*else ac\.equipItem\(f, false, true\);/);
+  assert.match(src, /put on again after the swap/);
+});

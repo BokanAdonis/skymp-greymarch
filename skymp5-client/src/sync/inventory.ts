@@ -443,8 +443,10 @@ export const applyInventory = (
   diff = diff.filter((e) => !(e.count < 0 && greymarchIsBoundItem(e.baseId)));
 
   // GREYMARCH: a worn piece swapped for the server's copy of the same item stays on (greymarch/wornSwap.ts: upgraded armor came off at every login)
+  let swapPairs: Array<{ out: any, in: any }> = [];
   {
     const swap = keepWornOnSwap(diff as any);
+    swapPairs = swap.pairs;
     for (const p of swap.pairs) {
       try { writeLogs("greymarch", "inventory: worn " + p.out.baseId.toString(16) + " replaced by the server's copy, kept on (" + swapReason(p.out, p.in) + ")"); } catch (e) { /* log only */ }
     }
@@ -597,6 +599,27 @@ export const applyInventory = (
       }
     }
   });
+
+  // GREYMARCH: PUT ON FOR REAL (2026-11-11 evening, the owner: "Still taking off my upgraded armor when I load in"; their log: "kept on" for all four pieces,
+  // then two unequips of each at once and nothing worn until they put them on by hand). The worn flag the server's copy is added with (pushWornState) marks
+  // it worn but does not dress the body, and the game cleared it again. So each swapped piece is now equipped as the player would: armor with EquipItem
+  // (silent, removable), a weapon in its own hand with EquipItemEx. Only after the swap above, so the server's copy (the upgraded one) is the one put on.
+  if (swapPairs.length && !enableCrashProtection) {
+    const ac = Actor.from(refr);
+    if (ac) {
+      swapPairs.forEach((p) => {
+        const f = Game.getFormEx(p.in.baseId);
+        if (!f) return;
+        try {
+          if (f.getType() === FormType.Weapon) ac.equipItemEx(f, p.in.wornLeft ? 2 : 1, false, false);
+          else ac.equipItem(f, false, true);
+          writeLogs("greymarch", "inventory: " + p.in.baseId.toString(16) + " put on again after the swap");
+        } catch (e) {
+          try { writeLogs("greymarch", "inventory: " + p.in.baseId.toString(16) + " could not be put on again: " + e); } catch (e2) { /* log only */ }
+        }
+      });
+    }
+  }
 
   return res;
 };
