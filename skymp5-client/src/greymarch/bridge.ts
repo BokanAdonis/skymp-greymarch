@@ -324,7 +324,7 @@ export class GreymarchBridge {
         if (type === "greymarchVampire") { this.greymarchVampWant = msg.on ? msg : null; this.greymarchVampCostTold = {}; this.greymarchHudToPage("blood", { on: !!msg.on, blood: msg.blood, empty: !!msg.empty }); return; } // a vampire's state: the blood drop and what the game applies (greymarchVampTick)
         if (type === "greymarchVampLooks") { this.greymarchVampLookList = Array.isArray(msg.vampires) ? msg.vampires : []; if (Number(msg.me) > 0) this.greymarchMeActor = Number(msg.me) >>> 0; return; } // (me: which of them is this player: the ghosts and effects packets that also say so may not have come yet, and without it the player's own eyes and fangs were never put on) // how every vampire in the world looks (eyes and fangs)
         if (type === "greymarchIntoxNear") { this.greymarchIntoxOthers = Array.isArray(msg.actors) ? msg.actors.map(function (x: any) { return Number(x) >>> 0; }).filter(function (x: number) { return x > 0; }).slice(0, 200) : []; return; } // who is drunk or high (greymarchIntoxOthersTick)
-        if (type === "greymarchPlagueSeen") { this.greymarchPlagueSeen = Array.isArray(msg.actors) ? msg.actors.map(function (x: any) { return Number(x) >>> 0; }).filter(function (x: number) { return x > 0; }).slice(0, 200) : []; this.greymarchPlagueSheenNext = 0; return; } // who looks sick: the glint
+        if (type === "greymarchPlagueSeen") { this.greymarchPlagueSeen = Array.isArray(msg.actors) ? msg.actors.map(function (x: any) { return Number(x) >>> 0; }).filter(function (x: number) { return x > 0; }).slice(0, 200) : []; var gs = Number(msg.glintS), ge = Number(msg.glintEvery); this.greymarchPlagueGlint = { s: Number.isFinite(gs) ? Math.max(0, Math.min(30, gs)) : PLAGUE_SHEEN_S, every: Number.isFinite(ge) && ge >= 3 ? Math.min(600, ge) * 1000 : PLAGUE_SHEEN_EVERY }; this.greymarchPlagueSheenNext = 0; return; } // who looks sick: the glint, and how long and how often (the F7 Plague tab)
         if (type === "greymarchPlagueCough") { var pc = Number(msg.actor) >>> 0; if (pc) (this.greymarchPlagueCoughs || (this.greymarchPlagueCoughs = [])).push(pc); return; } // that character coughs now
         if (type === "greymarchPlague") { var ps = Math.max(0, Math.min(3, Math.floor(Number(msg.stage) || 0))); this.greymarchPlagueWant = ps; if (msg.cough && ps > 0) this.greymarchPlagueCough = true; return; } // the plague: this player's stage (0: well), and a cough now
         if (type === "greymarchIntox") { var il = msg.level === "tipsy" || msg.level === "drunk" || msg.level === "high" ? msg.level : "sober"; this.greymarchIntoxWant = il === "sober" ? null : { level: il, until: Date.now() + Math.max(1000, Math.min(30 * 60000, Number(msg.ms) || 0)) }; this.greymarchIntoxCheckAt = 0; return; } // drunk or high (greymarchIntoxTick)
@@ -2009,13 +2009,14 @@ export class GreymarchBridge {
         }
         this.greymarchPlagueOwnCoughTick(player, now);
         var seen: number[] = this.greymarchPlagueSeen || [];
-        if (!seen.length || now < (this.greymarchPlagueSheenNext || 0)) return;
-        this.greymarchPlagueSheenNext = now + PLAGUE_SHEEN_EVERY + Math.random() * PLAGUE_SHEEN_JITTER;
+        var gl = this.greymarchPlagueGlint || { s: PLAGUE_SHEEN_S, every: PLAGUE_SHEEN_EVERY };
+        if (!seen.length || !(gl.s > 0) || now < (this.greymarchPlagueSheenNext || 0)) return;
+        this.greymarchPlagueSheenNext = now + gl.every + Math.random() * gl.every * (PLAGUE_SHEEN_JITTER / PLAGUE_SHEEN_EVERY);
         var fx: any = null; try { fx = sp.EffectShader.from(sp.Game.getFormEx(PLAGUE_SHEEN)); } catch (fErr) { fx = null; }
         if (!fx) return;
         for (var i = 0; i < seen.length; i++) {
             var a = this.greymarchPlagueActor(player, seen[i]);
-            try { if (a && a.is3DLoaded() && !a.isDead()) { fx.play(a, PLAGUE_SHEEN_S); if ((this.greymarchPlagueGlintSaid = (this.greymarchPlagueGlintSaid || 0) + 1) <= 6) this.greymarchLog("plague: green glint on " + (seen[i] >>> 0).toString(16) + " for " + PLAGUE_SHEEN_S + " s"); } else if ((this.greymarchPlagueGlintSaid = (this.greymarchPlagueGlintSaid || 0) + 1) <= 6) this.greymarchLog("plague: no glint on " + (seen[i] >>> 0).toString(16) + (a ? " (not loaded or dead)" : " (not found here)")); } catch (sErr) { this.greymarchLog("plague: the glint failed: " + String(sErr).slice(0, 120)); }
+            try { if (a && a.is3DLoaded() && !a.isDead()) { fx.play(a, gl.s); if ((this.greymarchPlagueGlintSaid = (this.greymarchPlagueGlintSaid || 0) + 1) <= 6) this.greymarchLog("plague: green glint on " + (seen[i] >>> 0).toString(16) + " for " + gl.s + " s"); } else if ((this.greymarchPlagueGlintSaid = (this.greymarchPlagueGlintSaid || 0) + 1) <= 6) this.greymarchLog("plague: no glint on " + (seen[i] >>> 0).toString(16) + (a ? " (not loaded or dead)" : " (not found here)")); } catch (sErr) { this.greymarchLog("plague: the glint failed: " + String(sErr).slice(0, 120)); }
         }
     }
     greymarchIntoxTick(player: any, now: number): any {
