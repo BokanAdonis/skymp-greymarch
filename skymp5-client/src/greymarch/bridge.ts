@@ -99,9 +99,10 @@ const RESTACK_AFTER_MS = 20000; // the old split stacks made one, this long afte
 const INTOX_CLEAR_MS = 6000, INTOX_CLEAR_EVERY = 1000, INTOX_DRUNK_ISTATE = 15, INTOX_WALK_AGAIN_MS = 2000, INTOX_POV_BACK_MS = 700; // iState 15: the body is in the drunk walk (its behavior tags it)
 // THE PLAGUE (gamemode plague.js greymarchPlague, 2026-11-11): by stage 1-3, the share of max stamina lost and how much slower stamina and health come back
 // (points off StaminaRateMult and HealRateMult, both 100 at rest); a cough flashes the game's own poison-hit screen (Skyrim.esm PoisonHitImod)
-// what others see (2026-11-11, the owner): the sick from Wasting on wear the Chaurus poison's sheen (Skyrim.esm ChaurusPoisonFXShader), played for PLAGUE_SHEEN_S
-// and again every PLAGUE_SHEEN_EVERY ms so a body that loads in gets it; a cough is the game's doubled-over cough (IdleUncontrollableCough), on whoever coughs
-const PLAGUE_SHEEN = 0x10cc64, PLAGUE_SHEEN_S = 12, PLAGUE_SHEEN_EVERY = 10000, PLAGUE_COUGH_IDLE = 0x0d8736;
+// what others see (2026-11-11, the owner): the sick from Wasting on show the Chaurus poison's green (Skyrim.esm ChaurusPoisonFXShader) as a GLINT ("slightly less
+// obvious ... a green glint on them"): PLAGUE_SHEEN_S seconds at a time, every PLAGUE_SHEEN_EVERY ms plus up to PLAGUE_SHEEN_JITTER (it cannot be dimmed, so it is
+// kept short); a cough is the game's doubled-over cough (IdleUncontrollableCough), on whoever coughs
+const PLAGUE_SHEEN = 0x10cc64, PLAGUE_SHEEN_S = 1.2, PLAGUE_SHEEN_EVERY = 9000, PLAGUE_SHEEN_JITTER = 6000, PLAGUE_COUGH_IDLE = 0x0d8736;
 // THIS PLAYER'S OWN COUGH (2026-11-11, the owner: "the player stops moving and goes into third person for the cough to avoid any moving bugs and noclipping"): they
 // stop (movement, fighting, sneaking, using things and the camera switch locked), the camera goes behind them, PLAGUE_STILL_MS later the cough plays, and after
 // PLAGUE_HOLD_MS the controls come back and a first-person player is put back in first person
@@ -323,7 +324,7 @@ export class GreymarchBridge {
         if (type === "greymarchVampire") { this.greymarchVampWant = msg.on ? msg : null; this.greymarchVampCostTold = {}; this.greymarchHudToPage("blood", { on: !!msg.on, blood: msg.blood, empty: !!msg.empty }); return; } // a vampire's state: the blood drop and what the game applies (greymarchVampTick)
         if (type === "greymarchVampLooks") { this.greymarchVampLookList = Array.isArray(msg.vampires) ? msg.vampires : []; if (Number(msg.me) > 0) this.greymarchMeActor = Number(msg.me) >>> 0; return; } // (me: which of them is this player: the ghosts and effects packets that also say so may not have come yet, and without it the player's own eyes and fangs were never put on) // how every vampire in the world looks (eyes and fangs)
         if (type === "greymarchIntoxNear") { this.greymarchIntoxOthers = Array.isArray(msg.actors) ? msg.actors.map(function (x: any) { return Number(x) >>> 0; }).filter(function (x: number) { return x > 0; }).slice(0, 200) : []; return; } // who is drunk or high (greymarchIntoxOthersTick)
-        if (type === "greymarchPlagueSeen") { this.greymarchPlagueSeen = Array.isArray(msg.actors) ? msg.actors.map(function (x: any) { return Number(x) >>> 0; }).filter(function (x: number) { return x > 0; }).slice(0, 200) : []; this.greymarchPlagueSheenAt = 0; return; } // who looks sick: the sheen
+        if (type === "greymarchPlagueSeen") { this.greymarchPlagueSeen = Array.isArray(msg.actors) ? msg.actors.map(function (x: any) { return Number(x) >>> 0; }).filter(function (x: number) { return x > 0; }).slice(0, 200) : []; this.greymarchPlagueSheenNext = 0; return; } // who looks sick: the glint
         if (type === "greymarchPlagueCough") { var pc = Number(msg.actor) >>> 0; if (pc) (this.greymarchPlagueCoughs || (this.greymarchPlagueCoughs = [])).push(pc); return; } // that character coughs now
         if (type === "greymarchPlague") { var ps = Math.max(0, Math.min(3, Math.floor(Number(msg.stage) || 0))); this.greymarchPlagueWant = ps; if (msg.cough && ps > 0) this.greymarchPlagueCough = true; return; } // the plague: this player's stage (0: well), and a cough now
         if (type === "greymarchIntox") { var il = msg.level === "tipsy" || msg.level === "drunk" || msg.level === "high" ? msg.level : "sober"; this.greymarchIntoxWant = il === "sober" ? null : { level: il, until: Date.now() + Math.max(1000, Math.min(30 * 60000, Number(msg.ms) || 0)) }; this.greymarchIntoxCheckAt = 0; return; } // drunk or high (greymarchIntoxTick)
@@ -2008,8 +2009,8 @@ export class GreymarchBridge {
         }
         this.greymarchPlagueOwnCoughTick(player, now);
         var seen: number[] = this.greymarchPlagueSeen || [];
-        if (!seen.length || now - (this.greymarchPlagueSheenAt || 0) < PLAGUE_SHEEN_EVERY) return;
-        this.greymarchPlagueSheenAt = now;
+        if (!seen.length || now < (this.greymarchPlagueSheenNext || 0)) return;
+        this.greymarchPlagueSheenNext = now + PLAGUE_SHEEN_EVERY + Math.random() * PLAGUE_SHEEN_JITTER;
         var fx: any = null; try { fx = sp.EffectShader.from(sp.Game.getFormEx(PLAGUE_SHEEN)); } catch (fErr) { fx = null; }
         if (!fx) return;
         for (var i = 0; i < seen.length; i++) {
