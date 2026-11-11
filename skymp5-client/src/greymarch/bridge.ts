@@ -5378,6 +5378,20 @@ export class GreymarchBridge {
         if (now < (this.greymarchCompassNext || 0)) return;
         this.greymarchCompassNext = now + 1000;
         var ui = this.sp.Ui, clip = "_root.HUDMovieBaseInstance.CompassShoutMeterHolder";
+        // DIAGNOSIS (2026-11-11, the owner: "feels the same"): for the first minute of HUD, what the HUD answers before and after, to the server log
+        var hudHere = false; try { var hx = ui.getNumber("HUD Menu", clip + "._xscale"); hudHere = typeof hx === "number" && isFinite(hx); } catch (e) { hudHere = false; }
+        if (hudHere && this.sp.Game.getPlayer()) this.greymarchCompassDiag = (this.greymarchCompassDiag || 0) + 1; // seconds of HUD in the world
+        var diag = !!this.greymarchCompassDiag && this.greymarchCompassDiag <= 60 && this.greymarchCompassDiag % 10 === 1 && this.greymarchCompassDiagAt !== this.greymarchCompassDiag;
+        if (diag) this.greymarchCompassDiagAt = this.greymarchCompassDiag;
+        if (!hudHere && !this.greymarchCompassNoHudSaid && this.sp.Game.getPlayer()) { this.greymarchCompassNoHudSaid = true; try { this.greymarchLog("compass diag: no HUD number for " + clip + "._xscale: " + JSON.stringify(ui.getNumber("HUD Menu", clip + "._xscale"))); } catch (e) { this.greymarchLog("compass diag: getNumber threw " + e); } }
+        if (diag) {
+            try {
+                var q = (t: string) => { try { return JSON.stringify(ui.getNumber("HUD Menu", t)); } catch (e) { return "err " + e; } };
+                var qb = (t: string) => { try { return JSON.stringify(ui.getBool("HUD Menu", t)); } catch (e) { return "err " + e; } };
+                this.greymarchLog("compass diag " + this.greymarchCompassDiag + ": holder xscale " + q(clip + "._xscale") + " alpha " + q(clip + "._alpha") + " x " + q(clip + "._x") + " width " + q(clip + "._width") + " visible " + qb(clip + "._visible")
+                    + " | Compass child xscale " + q(clip + ".Compass._xscale") + " width " + q(clip + ".Compass._width") + " | base xscale " + q("_root.HUDMovieBaseInstance._xscale") + " | hudOpen " + (function (u: any) { try { return u.isMenuOpen("HUD Menu"); } catch (e) { return "?"; } })(ui));
+            } catch (e) { this.greymarchLog("compass diag failed: " + e); }
+        }
         try {
             var xs = Number(ui.getNumber("HUD Menu", clip + "._xscale")), al = Number(ui.getNumber("HUD Menu", clip + "._alpha"));
             if (!isFinite(xs) || !isFinite(al)) return; // no HUD yet
