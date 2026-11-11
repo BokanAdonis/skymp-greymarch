@@ -12,7 +12,7 @@ const js = ts.transpileModule(src, { compilerOptions: { module: ts.ModuleKind.Co
 
 // hud: the HUD's numbers by "<clip>.<prop>"; who: the player's state
 function make(hud, who = { combat: false, drawn: false }) {
-  const log = { lines: [] };
+  const log = { lines: [], page: [] };
   const misc = { remoteIdToLocalId: () => 0, localIdToRemoteId: () => 0, getViewFromStorage: () => null };
   const mods = { "../messages": { MsgType: { CustomPacket: 77 } }, "../view/worldViewMisc": misc, "../sync/appearance": {}, "../services/services/remoteServer": { RemoteServer: {} }, "../services/services/singlePlayerService": { SinglePlayerService: {} } };
   const mod = { exports: {} };
@@ -20,6 +20,7 @@ function make(hud, who = { combat: false, drawn: false }) {
   const player = { isInCombat: () => who.combat, isWeaponDrawn: () => who.drawn };
   const sp = {
     printConsole() {}, writeLogs: (n, l) => log.lines.push(l),
+    browser: { executeJavaScript: (code) => { const m = /__gmHudSend\((\{.*\})\);$/.exec(code); if (m) log.page.push(JSON.parse(m[1])); } },
     Game: { getPlayer: () => player },
     // Skyrim Platform's real Ui: getFloat/setFloat (there is no getNumber/setNumber)
     Ui: { isMenuOpen: () => false, getFloat: (menu, t) => (menu === "HUD Menu" && t in hud ? hud[t] : undefined), setFloat: (menu, t, v) => { if (menu === "HUD Menu") hud[t] = v; } },
@@ -56,4 +57,14 @@ test("the size the first build set is put back to 100%; no HUD yet: nothing", ()
   const none = make({});
   none.tick();
   assert.deepStrictEqual(none.hud, {});
+});
+
+test("the compass's design on the HUD page is told the compass's opacity: shown out of combat, 0 in combat", () => {
+  const s = make(hudAt());
+  s.tick(1);
+  assert.deepStrictEqual(s.log.page.filter((m) => m.fn === "compass").pop(), { fn: "compass", arg: { a: 0.8 } });
+  s.who.combat = true; s.tick(1);
+  assert.deepStrictEqual(s.log.page.filter((m) => m.fn === "compass").pop(), { fn: "compass", arg: { a: 0 } });
+  const n = s.log.page.length; s.tick(3);
+  assert.equal(s.log.page.length, n, "not told again while nothing changes");
 });

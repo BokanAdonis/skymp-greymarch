@@ -5389,7 +5389,11 @@ export class GreymarchBridge {
             var want = fight ? 0 : COMPASS_ALPHA;
             var fa = Number(ui.getFloat("HUD Menu", clip + ".Compass.CompassFrame._alpha"));
             if (isFinite(fa) && fa > 0.5) ui.setFloat("HUD Menu", clip + ".Compass.CompassFrame._alpha", 0); // the bar: hidden
-            if (Math.abs(al - want) > 0.5) ui.setFloat("HUD Menu", clip + "._alpha", al > want ? Math.max(want, al - COMPASS_FADE) : Math.min(want, al + COMPASS_FADE));
+            var next = Math.abs(al - want) > 0.5 ? (al > want ? Math.max(want, al - COMPASS_FADE) : Math.min(want, al + COMPASS_FADE)) : al;
+            if (next !== al) ui.setFloat("HUD Menu", clip + "._alpha", next);
+            // its design on the HUD page (greymarch-hud.html #compassDeco) fades with it: told when the target changes, and again every 5 s
+            var shown = Math.round((want / 100) * 100) / 100;
+            if (shown !== this.greymarchCompassDecoA || now - (this.greymarchCompassDecoAt || 0) > 5000) { this.greymarchCompassDecoA = shown; this.greymarchCompassDecoAt = now; this.greymarchHudToPage("compass", { a: shown }); }
             // the size the first build set (75%, moved right): back to its own
             var xs = Number(ui.getFloat("HUD Menu", clip + "._xscale"));
             if (isFinite(xs) && Math.abs(xs - 100) > 0.5) {
