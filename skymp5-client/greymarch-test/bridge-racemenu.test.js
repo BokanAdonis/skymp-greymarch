@@ -411,3 +411,12 @@ test("HEIGHT THE MOMENT A BODY LOADS (2026-11-11, the owner: more seamless): the
   assert.match(bridgeSrc2, /this\.sp\.on\("objectLoaded", \(e: any\) => this\.greymarchHeightLoaded\(e\)\)/);
   assert.match(bridgeSrc2, /this\.greymarchHeightLoadedTick\(Date\.now\(\)\);[^\n]*\r?\n\s*this\.greymarchRaceMenuHeightsTick\(Date\.now\(\)\);/);
 });
+
+test("PRESETS CARRY THE SERVER'S HEIGHT (2026-11-11, the live log: a copy put at 0.714, back at 1 after its preset load): a look with a Height keeps it; one without takes the body's", () => {
+  const hOf = (h) => ({ transforms: [{ firstPerson: false, node: "NPC", keys: [{ name: "RSMPlugin", values: [{ key: 20, type: 2, index: 0, data: h }] }] }] });
+  assert.strictEqual(rm.heightInLook(rm.withServerHeight(hOf(0.714), hOf(1))), 0.714, "the server's");
+  assert.strictEqual(rm.heightInLook(rm.withServerHeight({ morphs: {} }, hOf(1.05))), 1.05, "none from the server: the body's as it is");
+  const src2 = fs.readFileSync(path.join(__dirname, "..", "src", "greymarch", "bridge.ts"), "utf8");
+  assert.strictEqual((src2.match(/rmMod\.withServerHeight\(/g) || []).length, 2, "the copy's preset and the own preset");
+  assert.match(src2, /": told Height " \+ hNow/);
+});

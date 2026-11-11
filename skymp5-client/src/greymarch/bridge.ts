@@ -303,6 +303,8 @@ export class GreymarchBridge {
         if (type === "greymarchRaceMenuLookOf") { // OTHERS SEE THEM: another player's kept sliders, for this game's copy of them (greymarchRaceMenuCopiesTick)
             var rmc = this.greymarchRmCopies || (this.greymarchRmCopies = {});
             var rmcId = Number(msg.actorId) >>> 0;
+            // HEIGHT TOLD (2026-11-11, the owner: a /height seen by nobody else): each new Height this game is told for another player, in the log
+            if (rmcId) { var hWas = rmc[rmcId] ? rmMod.heightOfLook(rmc[rmcId].want) : null, hNow = rmMod.heightOfLook(msg.look); if (hWas === null || Math.abs(hWas - hNow) >= 0.002) { this.greymarchHeightToldSaid = (this.greymarchHeightToldSaid || 0) + 1; if (this.greymarchHeightToldSaid <= 40) this.greymarchLog("racemenu: " + rmcId.toString(16) + ": told Height " + hNow + (hWas === null ? "" : " (was " + hWas + ")")); } }
             if (rmcId) rmc[rmcId] = { actor: rmcId, want: msg.look && typeof msg.look === "object" ? msg.look : {}, done: null, loadedSince: 0, tries: 0, hDirty: true };
             return;
         }
@@ -2664,7 +2666,7 @@ export class GreymarchBridge {
                 var current = JSON.parse(text);
                 // HEIGHT KEPT APART FROM THE PRESETS (racemenuLook.ts keepHeight): the preset carries the copy's Height as it is; greymarchRaceMenuHeightsTick sets it
                 if (rmMod.sameRaceMenuParts(rmMod.withoutHeight(current), rmMod.withoutHeight(cwant))) { c.done = key; c.tries = 0; continue; }
-                if (!this.greymarchPresetWrite(rmMod.COPY_PRESET_NAME, JSON.stringify(rmMod.spliceRaceMenuParts(current, rmMod.keepHeight(cwant, current))))) continue;
+                if (!this.greymarchPresetWrite(rmMod.COPY_PRESET_NAME, JSON.stringify(rmMod.spliceRaceMenuParts(current, rmMod.withServerHeight(cwant, current))))) continue;
                 var copyParts = this.greymarchHeadPartIds(ac);
                 var ok = sp.callNative("CharGen", "LoadCharacterPresetEx", undefined, ac, rmMod.COPY_PRESET_NAME, null, rmMod.APPLY_ALL);
                 this.greymarchKeepHeadParts(ac, copyParts, Date.now());
@@ -3058,7 +3060,7 @@ export class GreymarchBridge {
             if (!current) return;
             // HEIGHT KEPT APART FROM THE PRESETS (racemenuLook.ts keepHeight): the preset carries the body's Height as it is; greymarchOwnHeightTick sets it
             if (rmMod.sameRaceMenuParts(rmMod.withoutHeight(current), rmMod.withoutHeight(want))) { rm.done = key; rm.tries = 0; rm.earsDown = want !== rm.want; return; }
-            if (!this.greymarchPresetWrite(rmMod.PRESET_NAME, JSON.stringify(rmMod.spliceRaceMenuParts(current, rmMod.keepHeight(want, current))))) { this.greymarchLog("racemenu: the kept sliders could not be written for RaceMenu (try " + rm.tries + " of 3)"); return; }
+            if (!this.greymarchPresetWrite(rmMod.PRESET_NAME, JSON.stringify(rmMod.spliceRaceMenuParts(current, rmMod.withServerHeight(want, current))))) { this.greymarchLog("racemenu: the kept sliders could not be written for RaceMenu (try " + rm.tries + " of 3)"); return; }
             var partsBefore = this.greymarchHeadPartIds(player);
             var ok = sp.callNative("CharGen", "LoadCharacterPresetEx", undefined, player, rmMod.PRESET_NAME, null, rmMod.APPLY_ALL);
             this.greymarchKeepHeadParts(player, partsBefore, now);

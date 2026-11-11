@@ -159,3 +159,9 @@ export function keepHeight(look: any, body: any): any {
     out.transforms = (Array.isArray(out.transforms) ? out.transforms : []).concat(mine);
     return out;
 }
+// PRESETS CARRY THE SERVER'S HEIGHT (2026-11-11, the owner: heights not seen; the live log: a copy put at 0.714, then back at 1 a few seconds later when its
+// preset was loaded, then put on again). The server's Height is the saved one now (HEIGHT HARD SAVED, gamemode racemenulook.js), so a preset built from the
+// server's look carries it; only a look that keeps no Height takes the body's (keepHeight), so a preset load never changes it.
+export function withServerHeight(look: any, body: any): any {
+    return heightInLook(look) !== null ? look : keepHeight(look, body);
+}
