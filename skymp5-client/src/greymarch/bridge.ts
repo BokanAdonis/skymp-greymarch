@@ -143,8 +143,8 @@ const OPEN_ON_RELEASE = [65, 35, 48, 64, 66, 37]; // F7, H, B, F6, F8, K: their 
 const FORGE_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmForgeRun").split("greymarch-prof").join("greymarch-forge").split("2147483220").join("2147483225"); // the Greymarch forge window: the same loader, another page
 const PAUSE_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmPauseRun").split("greymarch-prof").join("greymarch-pause").split("2147483220").join("2147483230"); // the pause menu (Esc): the same loader, another page, over every other window
 const JOURNAL_MENU = "Journal Menu"; // the game's own pause menu (Esc, J): closed the frame it opens, the pause menu shows instead (greymarchPauseTick)
-const COMPASS_SCALE = 75; // the game's compass at this percent of its size (greymarchCompassTick)
-const COMPASS_ALPHA = 45; // and this opacity
+const COMPASS_ALPHA = 35; // the game's compass at this opacity out of combat, gone in combat (greymarchCompassTick)
+const COMPASS_FADE = 8; // opacity a step (every 100 ms): about half a second to fade
 const VITALS_AWAY_Y = -20000; // the game's own health, magicka and stamina meters are moved this far above the screen while ours show (greymarchVitalsGame)
 const PAUSE_AFTER_MENU_MS = 400; // an Esc this soon after a game menu (inventory, map, a chest ...) was seen open closed that menu: no pause menu (greymarchPauseTick)
 const ESC_KEY = 1;
@@ -5369,33 +5369,30 @@ export class GreymarchBridge {
         this.greymarchVitalsSent = v; this.greymarchVitalsSentAt = now;
         this.greymarchHudToPage("vitals", v);
     }
-    // THE QUIET COMPASS (2026-11-11, the owner: "make the compass less intrusive", smaller and faded, always; Skyrim Platform's Ui has getFloat/setFloat, not
-    // getNumber/setNumber: the first build threw on every call and changed nothing): the game's compass (hudmenu:
-    // HUDMovieBaseInstance.CompassShoutMeterHolder, the compass with the shout meter) at COMPASS_SCALE of its size and COMPASS_ALPHA opacity. Set again
-    // whenever the HUD puts it back (looked at every second). Kept centred: its own place is read at full size, and when the holder turns out to be anchored at
-    // its left edge (its middle, not its x, sits nearest the screen's middle, 640 of the HUD's 1280) it is moved right by the width it lost on each side.
+    // THE QUIET COMPASS (2026-11-11, the owner: "make the compass less intrusive"; then "put it back in the middle ... make it transparent and go away in
+    // combat"): the game's compass (hudmenu: HUDMovieBaseInstance.CompassShoutMeterHolder, the compass with the shout meter) stays at its own size and place,
+    // faded to COMPASS_ALPHA, and fades out completely while the player is in combat or has a weapon or spell drawn; it fades back once that ends. Looked at
+    // every 100 ms, COMPASS_FADE of opacity a step (about half a second either way). Skyrim Platform's Ui reads and sets HUD numbers with getFloat/setFloat
+    // (getNumber/setNumber do not exist: the first build changed nothing). A size an earlier build set is put back to 100%.
     greymarchCompassTick(): any {
         var now = Date.now();
         if (now < (this.greymarchCompassNext || 0)) return;
-        this.greymarchCompassNext = now + 1000;
+        this.greymarchCompassNext = now + 100;
         var ui = this.sp.Ui, clip = "_root.HUDMovieBaseInstance.CompassShoutMeterHolder";
         try {
-            var xs = Number(ui.getFloat("HUD Menu", clip + "._xscale")), al = Number(ui.getFloat("HUD Menu", clip + "._alpha"));
-            if (!isFinite(xs) || !isFinite(al)) return; // no HUD yet
-            var st = this.greymarchCompass || (this.greymarchCompass = { x: null, w: null, shift: 0 });
-            if (Math.abs(xs - COMPASS_SCALE) < 0.5 && Math.abs(al - COMPASS_ALPHA) < 0.5) return; // as we set it
-            if (Math.abs(xs - 100) < 0.5) { // at full size (first time, or the HUD rebuilt it): its own place and width
-                var x = Number(ui.getFloat("HUD Menu", clip + "._x")), w = Number(ui.getFloat("HUD Menu", clip + "._width"));
-                if (isFinite(x) && isFinite(w) && w > 0) {
-                    var leftAnchored = Math.abs(x + w / 2 - 640) < Math.abs(x - 640);
-                    st.x = x; st.w = w; st.shift = leftAnchored ? (w * (1 - COMPASS_SCALE / 100)) / 2 : 0;
-                    if (!this.greymarchCompassLogged) { this.greymarchCompassLogged = true; this.greymarchLog("compass: x " + x + " width " + w + (leftAnchored ? ", anchored left: moved " + st.shift.toFixed(1) : ", anchored in the middle")); }
-                }
+            var al = Number(ui.getFloat("HUD Menu", clip + "._alpha"));
+            if (!isFinite(al)) return; // no HUD yet
+            var fight = false;
+            try { var p = this.sp.Game.getPlayer(); fight = !!p && (!!p.isInCombat() || !!p.isWeaponDrawn()); } catch (e) { fight = false; }
+            var want = fight ? 0 : COMPASS_ALPHA;
+            if (Math.abs(al - want) > 0.5) ui.setFloat("HUD Menu", clip + "._alpha", al > want ? Math.max(want, al - COMPASS_FADE) : Math.min(want, al + COMPASS_FADE));
+            // the size the first build set (75%, moved right): back to its own
+            var xs = Number(ui.getFloat("HUD Menu", clip + "._xscale"));
+            if (isFinite(xs) && Math.abs(xs - 100) > 0.5) {
+                ui.setFloat("HUD Menu", clip + "._xscale", 100); ui.setFloat("HUD Menu", clip + "._yscale", 100);
+                var st = this.greymarchCompass;
+                if (st && st.x !== null && st.x !== undefined) ui.setFloat("HUD Menu", clip + "._x", st.x);
             }
-            ui.setFloat("HUD Menu", clip + "._xscale", COMPASS_SCALE);
-            ui.setFloat("HUD Menu", clip + "._yscale", COMPASS_SCALE);
-            ui.setFloat("HUD Menu", clip + "._alpha", COMPASS_ALPHA);
-            if (st.x !== null && st.shift) ui.setFloat("HUD Menu", clip + "._x", st.x + st.shift);
         } catch (e) { if (!this.greymarchCompassErrSaid) { this.greymarchCompassErrSaid = true; this.greymarchLog("compass: " + e); } } // said once, never silent
     }
     // the game's own Health, Magicka and Stamina meters (hudmenu: HUDMovieBaseInstance.Health / Magica / Stamina): shown (true) or hidden (false)
