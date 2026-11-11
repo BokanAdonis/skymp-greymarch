@@ -304,7 +304,7 @@ export class GreymarchBridge {
             if (rmcId) rmc[rmcId] = { actor: rmcId, want: msg.look && typeof msg.look === "object" ? msg.look : {}, done: null, loadedSince: 0, tries: 0, hDirty: true };
             return;
         }
-        if (type === "greymarchStaffRaces") { this.greymarchStaffRacesWant = Array.isArray(msg.races) ? msg.races.filter(function (x: any) { return typeof x === "number" && x > 0; }).map(function (x: number) { return x >>> 0; }) : []; return; } // RACES FOR STAFF ONLY (greymarchStaffRacesTick)
+        if (type === "greymarchStaffRaces") { this.greymarchStaffRacesWant = Array.isArray(msg.races) ? msg.races.filter(function (x: any) { return typeof x === "number" && x > 0; }).map(function (x: number) { return x >>> 0; }) : []; this.greymarchStaffRacesNames = msg.names && typeof msg.names === "object" ? msg.names : {}; return; } // RACES FOR STAFF ONLY (greymarchStaffRacesTick)
         if (type === "greymarchRaceMenuLook") { var rm0 = this.greymarchRmState(); rm0.want = msg.look && typeof msg.look === "object" ? msg.look : {}; rm0.tries = 0; rm0.ownHeightDirty = true; if (Array.isArray(msg.height) && msg.height.length === 2 && msg.height[0] > 0 && msg.height[1] >= msg.height[0]) this.greymarchHeightRange = [Number(msg.height[0]), Number(msg.height[1])]; return; } // RaceMenu's extra sliders of this character, kept by the server (greymarchRaceMenuTick)
         if (type === "greymarchVampire") { this.greymarchVampWant = msg.on ? msg : null; this.greymarchVampCostTold = {}; this.greymarchHudToPage("blood", { on: !!msg.on, blood: msg.blood, empty: !!msg.empty }); return; } // a vampire's state: the blood drop and what the game applies (greymarchVampTick)
         if (type === "greymarchVampLooks") { this.greymarchVampLookList = Array.isArray(msg.vampires) ? msg.vampires : []; if (Number(msg.me) > 0) this.greymarchMeActor = Number(msg.me) >>> 0; return; } // (me: which of them is this player: the ghosts and effects packets that also say so may not have come yet, and without it the player's own eyes and fangs were never put on) // how every vampire in the world looks (eyes and fangs)
@@ -2723,16 +2723,22 @@ export class GreymarchBridge {
         if (key === this.greymarchStaffRacesDone) return;
         var sp = this.sp, had: number[] = this.greymarchStaffRacesSet || [], set: number[] = [];
         try {
+            // NAMES (2026-11-11): several of these have no name in the game files (or "High Elf"); the server's name is shown in the race menu, and the race's
+            // own name comes back when it is no longer offered
+            var names: any = this.greymarchStaffRacesNames || {}, orig: any = this.greymarchStaffRacesOrig || (this.greymarchStaffRacesOrig = {});
             for (var i = 0; i < want.length; i++) {
                 var r = sp.Race.from(sp.Game.getFormEx(want[i]));
                 if (!r) continue;
                 if (!r.isRaceFlagSet(1)) r.setRaceFlag(1);
+                var nm = names[String(want[i])];
+                if (typeof nm === "string" && nm && r.getName() !== nm) { if (orig[want[i]] === undefined) orig[want[i]] = r.getName(); r.setName(nm); }
                 set.push(want[i]);
             }
             for (var j = 0; j < had.length; j++) {
                 if (want.indexOf(had[j]) >= 0) continue;
                 var o = sp.Race.from(sp.Game.getFormEx(had[j]));
                 if (o && o.isRaceFlagSet(1)) o.clearRaceFlag(1);
+                if (o && orig[had[j]] !== undefined) { o.setName(orig[had[j]]); delete orig[had[j]]; }
             }
         } catch (err) { this.greymarchLog("staff races: " + err); return; } // tried again next frame
         this.greymarchStaffRacesSet = set;
