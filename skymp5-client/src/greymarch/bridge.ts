@@ -145,6 +145,8 @@ const PAUSE_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmPauseRun").spli
 const JOURNAL_MENU = "Journal Menu"; // the game's own pause menu (Esc, J): closed the frame it opens, the pause menu shows instead (greymarchPauseTick)
 const COMPASS_ALPHA = 80; // the game's compass (its bar hidden: only letters and markers) at this opacity out of combat, gone in combat (greymarchCompassTick)
 const COMPASS_FADE = 8; // opacity a step (every 100 ms): about half a second to fade
+const COMPASS_SCALE = 85; // the compass a little smaller (the owner, 2026-11-11: "maybe shrink the compass a little more"); its holder turns about the compass's middle, so it stays centred
+const ENEMY_MS = 10000; // our enemy bar (greymarchEnemyTick) shows the one fought this long after the last hit between them and this player
 const VITALS_AWAY_Y = -20000; // the game's own health, magicka and stamina meters are moved this far above the screen while ours show (greymarchVitalsGame)
 const PAUSE_AFTER_MENU_MS = 400; // an Esc this soon after a game menu (inventory, map, a chest ...) was seen open closed that menu: no pause menu (greymarchPauseTick)
 const ESC_KEY = 1;
@@ -618,6 +620,7 @@ export class GreymarchBridge {
         this.greymarchSpellCostTick(); // the Spells balance tab's costs on the spell records (GreymarchCamera.dll 1.5)
         this.greymarchSpellEditTick(); // the Magic balance tab's durations and strengths on the spell records
         this.greymarchCompassTick(); // the game's compass smaller and faded
+        this.greymarchEnemyTick(Date.now()); // the one this player fights: our health bar under the compass instead of the game's
         this.greymarchChargeTick(Date.now()); // another player's single-shot charge shown on their copy
         this.greymarchStaffChargeTick(); // a staff's charge reported, and set back when the server says it came back fuller (gamemode staffcharge.js)
         this.greymarchCircleTick(); // the rings of the Circle spells other players cast near (gamemode circles.js)
@@ -4935,6 +4938,7 @@ export class GreymarchBridge {
         try {
             var now = Date.now();
             if (this.greymarchWolfLungeWatch && e.aggressor && e.target) { try { if (e.aggressor.getFormID() === this.sp.Game.getPlayer().getFormID()) { this.greymarchLog("wolf lunge: hit " + (e.target.getFormID() >>> 0).toString(16) + " " + (now - this.greymarchWolfLungeWatch) + " ms after the leap"); this.greymarchWolfLungeWatch = 0; } } catch (lwErr) { /* the log is a nicety */ } }
+            try { this.greymarchEnemyHit(e, now); } catch (enErr) { /* the enemy bar is a nicety */ }
             if (now - (this.greymarchHitAt || 0) < 100) return; // at most 10 reports a second
             this.greymarchHitAt = now;
             var target = e.target, aggressor = e.aggressor;
@@ -5404,14 +5408,63 @@ export class GreymarchBridge {
             // its design on the HUD page (greymarch-hud.html #compassDeco) fades with it: told when the target changes, and again every 5 s
             var shown = Math.round((want / 100) * 100) / 100;
             if (shown !== this.greymarchCompassDecoA || now - (this.greymarchCompassDecoAt || 0) > 5000) { this.greymarchCompassDecoA = shown; this.greymarchCompassDecoAt = now; this.greymarchHudToPage("compass", { a: shown }); }
-            // the size the first build set (75%, moved right): back to its own
-            var xs = Number(ui.getFloat("HUD Menu", clip + "._xscale"));
-            if (isFinite(xs) && Math.abs(xs - 100) > 0.5) {
-                ui.setFloat("HUD Menu", clip + "._xscale", 100); ui.setFloat("HUD Menu", clip + "._yscale", 100);
-                var st = this.greymarchCompass;
-                if (st && st.x !== null && st.x !== undefined) ui.setFloat("HUD Menu", clip + "._x", st.x);
-            }
+            // A LITTLE SMALLER (2026-11-11, the owner): COMPASS_SCALE. The holder's own point is the compass's middle (hudmenu.swf: the bar runs -181 to 181
+            // about it), so scaling it keeps the compass centred; its x is never touched (the first build's move to the right is what put it off centre)
+            var xs = Number(ui.getFloat("HUD Menu", clip + "._xscale")), ys = Number(ui.getFloat("HUD Menu", clip + "._yscale"));
+            if (isFinite(xs) && Math.abs(xs - COMPASS_SCALE) > 0.5) ui.setFloat("HUD Menu", clip + "._xscale", COMPASS_SCALE);
+            if (isFinite(ys) && Math.abs(ys - COMPASS_SCALE) > 0.5) ui.setFloat("HUD Menu", clip + "._yscale", COMPASS_SCALE);
         } catch (e) { if (!this.greymarchCompassErrSaid) { this.greymarchCompassErrSaid = true; this.greymarchLog("compass: " + e); } } // said once, never silent
+    }
+    // OUR ENEMY BAR (2026-11-11, the owner: "Compass overlaps with enemy health bar, change enemy health bar to our current health bar design and then move
+    // everything so nothing overlaps"). The game's enemy meter (hudmenu: HUDMovieBaseInstance.EnemyHealth_mc) is hidden on every frame while our HUD page shows
+    // (like the game's own health bars, greymarchVitalsGame); the HUD page draws ours (greymarch-hud.html #enemy: the name over a slim glass bar in our health
+    // bar's look), under the compass. Whom it shows: the one this player last hit, or, with nobody yet, the one who hit this player; for ENEMY_MS after the last
+    // hit between them, or a moment after they die. The name is the game's own name of that actor (what the game's meter showed).
+    greymarchEnemyHit(e: any, now: number): any {
+        var target = e.target, aggressor = e.aggressor;
+        if (!target || !aggressor) return;
+        var me = this.sp.Game.getPlayer().getFormID(), tid = target.getFormID(), aid = aggressor.getFormID();
+        if (tid === aid) return;
+        var cur = this.greymarchEnemy;
+        if (aid === me) this.greymarchEnemy = { id: tid, until: now + ENEMY_MS };
+        else if (tid === me) {
+            if (!cur || now > cur.until || cur.id === aid) this.greymarchEnemy = { id: aid, until: now + ENEMY_MS };
+        }
+    }
+    greymarchEnemyTick(now: number): any {
+        var ours = !this.greymarchScreenUp && !!(this.greymarchChatOn || this.greymarchHudOn), ui = this.sp.Ui, clip = "_root.HUDMovieBaseInstance.EnemyHealth_mc";
+        // the game's meter: hidden every frame while ours can show (the HUD shows it again by itself), given back when our page is away
+        try {
+            var al = Number(ui.getFloat("HUD Menu", clip + "._alpha"));
+            if (isFinite(al)) {
+                if (ours && al > 0.5) { ui.setFloat("HUD Menu", clip + "._alpha", 0); this.greymarchEnemyHidden = true; }
+                else if (!ours && this.greymarchEnemyHidden) { ui.setFloat("HUD Menu", clip + "._alpha", 100); this.greymarchEnemyHidden = false; }
+            }
+        } catch (e) { if (!this.greymarchEnemyErrSaid) { this.greymarchEnemyErrSaid = true; this.greymarchLog("enemy bar: " + e); } }
+        if (now < (this.greymarchEnemyNext || 0)) return;
+        this.greymarchEnemyNext = now + 100;
+        var en = this.greymarchEnemy, v: any = null;
+        if (ours && en && now <= en.until) {
+            try {
+                var form = this.sp.Game.getFormEx(en.id), actor = form ? this.sp.Actor.from(form) : null;
+                if (actor) {
+                    var h = Number(actor.getActorValuePercentage("Health")), dead = !!actor.isDead();
+                    var n = ""; try { n = String(actor.getDisplayName() || ""); } catch (e1) { n = ""; }
+                    if (!n) { try { var b = actor.getBaseObject(); n = b ? String(b.getName() || "") : ""; } catch (e2) { n = ""; } }
+                    if (dead) { h = 0; if (!en.dead) { en.dead = true; en.until = Math.min(en.until, now + 1500); } }
+                    if (isFinite(h)) v = { n: n.slice(0, 40), h: Math.round(Math.max(0, Math.min(1, h)) * 1000) / 1000 };
+                }
+            } catch (e3) { v = null; }
+        }
+        if (!v) {
+            if (en && (!ours || now > en.until)) this.greymarchEnemy = null;
+            if (this.greymarchEnemySent) { this.greymarchEnemySent = null; this.greymarchHudToPage("enemy", { off: true }); }
+            return;
+        }
+        var last = this.greymarchEnemySent;
+        if (last && last.n === v.n && last.h === v.h && now - (this.greymarchEnemySentAt || 0) < 2000) return;
+        this.greymarchEnemySent = v; this.greymarchEnemySentAt = now;
+        this.greymarchHudToPage("enemy", v);
     }
     // the game's own Health, Magicka and Stamina meters (hudmenu: HUDMovieBaseInstance.Health / Magica / Stamina): shown (true) or hidden (false)
     greymarchVitalsGame(show: boolean): any {
