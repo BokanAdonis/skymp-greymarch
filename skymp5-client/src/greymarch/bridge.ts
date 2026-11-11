@@ -102,7 +102,7 @@ const INTOX_CLEAR_MS = 6000, INTOX_CLEAR_EVERY = 1000, INTOX_DRUNK_ISTATE = 15, 
 // what others see (2026-11-11, the owner): the sick from Wasting on show the Chaurus poison's green (Skyrim.esm ChaurusPoisonFXShader) as a GLINT ("slightly less
 // obvious ... a green glint on them"): PLAGUE_SHEEN_S seconds at a time, every PLAGUE_SHEEN_EVERY ms plus up to PLAGUE_SHEEN_JITTER (it cannot be dimmed, so it is
 // kept short); a cough is the game's doubled-over cough (IdleUncontrollableCough), on whoever coughs
-const PLAGUE_SHEEN = 0x10cc64, PLAGUE_SHEEN_S = 1.2, PLAGUE_SHEEN_EVERY = 9000, PLAGUE_SHEEN_JITTER = 6000, PLAGUE_COUGH_IDLE = 0x0d8736;
+const PLAGUE_SHEEN = 0x05d606, /* EnchGreenFXShader: the poison enchantment green, no particles (2026-11-11, the owner: no black smoke around you; ChaurusPoisonFXShader 0x10cc64 had dark wisps) */ PLAGUE_SHEEN_S = 3.5, PLAGUE_SHEEN_EVERY = 12000, PLAGUE_SHEEN_JITTER = 8000, /* 1.2 s never showed (the owner): the shader fades in over its own time first */ PLAGUE_COUGH_IDLE = 0x0d8736;
 // THIS PLAYER'S OWN COUGH (2026-11-11, the owner: "the player stops moving and goes into third person for the cough to avoid any moving bugs and noclipping"): they
 // stop (movement, fighting, sneaking, using things and the camera switch locked), the camera goes behind them, PLAGUE_STILL_MS later the cough plays, and after
 // PLAGUE_HOLD_MS the controls come back and a first-person player is put back in first person
@@ -2015,7 +2015,7 @@ export class GreymarchBridge {
         if (!fx) return;
         for (var i = 0; i < seen.length; i++) {
             var a = this.greymarchPlagueActor(player, seen[i]);
-            try { if (a && a.is3DLoaded() && !a.isDead()) fx.play(a, PLAGUE_SHEEN_S); } catch (sErr) { /* the next round */ }
+            try { if (a && a.is3DLoaded() && !a.isDead()) { fx.play(a, PLAGUE_SHEEN_S); if ((this.greymarchPlagueGlintSaid = (this.greymarchPlagueGlintSaid || 0) + 1) <= 6) this.greymarchLog("plague: green glint on " + (seen[i] >>> 0).toString(16) + " for " + PLAGUE_SHEEN_S + " s"); } else if ((this.greymarchPlagueGlintSaid = (this.greymarchPlagueGlintSaid || 0) + 1) <= 6) this.greymarchLog("plague: no glint on " + (seen[i] >>> 0).toString(16) + (a ? " (not loaded or dead)" : " (not found here)")); } catch (sErr) { this.greymarchLog("plague: the glint failed: " + String(sErr).slice(0, 120)); }
         }
     }
     greymarchIntoxTick(player: any, now: number): any {
