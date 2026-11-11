@@ -90,6 +90,7 @@ function headOf(sp: any, ac: any): P3 | null {
 const offIds = new Set<number>(); // copies whose head was turned off because the look went behind them
 let headNative: boolean | undefined = undefined; // GreymarchCamera.dll 1.17 SetHeadLook there? (asked once)
 const nativeIds = new Set<number>(); // copies pointed by SetHeadLook (their script look and marker cleared once)
+const graphAt = new Map<number, number>(); let graphSaid = 0; // IsNPC looked at once a second per copy; a few log lines
 
 // another game's copy `ac` looks at the point `p` (no actor stands there). Returns true when its head was pointed at the marker this call.
 export function lookAtPoint(sp: any, ac: any, sent: P3, now: number): boolean {
@@ -118,6 +119,21 @@ export function lookAtPoint(sp: any, ac: any, sent: P3, now: number): boolean {
         try { ac.clearLookAt(); } catch (e) { /* none */ }
         try { ac.setHeadTracking(true); } catch (e) { /* gone */ }
         if (drawSaid < 6) { drawSaid++; say("head: " + id.toString(16) + " looks at " + p.map(Math.round).join(",") + " (sent " + sent.map(Math.round).join(",") + ")"); }
+      }
+      // IsNPC ON (2026-11-11, the owner's test: SetHeadLook ran for every copy, still no head turned): the game turns a head only for a character whose
+      // animation graph says IsNPC (TDM sets it on the player for its own head tracking); a copy of a player may have it off. Looked at and set every second.
+      if (now - (graphAt.get(id) || 0) >= 1000) {
+        graphAt.set(id, now);
+        let was: any = "?";
+        try { was = ac.getAnimationVariableBool("IsNPC"); } catch (e) { was = "?"; }
+        if (was !== true) { try { ac.setAnimationVariableBool("IsNPC", true); } catch (e) { /* no graph */ } }
+        if (graphSaid < 8) {
+          graphSaid++;
+          let after: any = "?"; try { after = ac.getAnimationVariableBool("IsNPC"); } catch (e) { after = "?"; }
+          let spine: any = "?"; try { spine = ac.getAnimationVariableBool("bHeadTrackSpine"); } catch (e) { spine = "?"; }
+          let ai: any = "?"; try { ai = ac.isAIEnabled() ? "on" : "OFF"; } catch (e) { ai = "?"; }
+          say("head: " + id.toString(16) + " graph IsNPC " + was + " -> " + after + ", bHeadTrackSpine " + spine + ", AI " + ai);
+        }
       }
       return true;
     }
@@ -154,5 +170,5 @@ export function lookAtPoint(sp: any, ac: any, sent: P3, now: number): boolean {
 }
 
 // for tests
-export function _reset(): void { cameraWorks = null; cameraRetryAt = 0; marks.clear(); offIds.clear(); nativeIds.clear(); headNative = undefined; sentSaid = failSaid = drawSaid = sentSaidAt = 0; }
+export function _reset(): void { cameraWorks = null; cameraRetryAt = 0; marks.clear(); offIds.clear(); nativeIds.clear(); headNative = undefined; graphAt.clear(); graphSaid = 0; sentSaid = failSaid = drawSaid = sentSaidAt = 0; }
 export function _markers(): number { return marks.size; }
