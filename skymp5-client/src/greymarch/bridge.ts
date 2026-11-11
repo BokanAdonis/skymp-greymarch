@@ -2688,25 +2688,30 @@ export class GreymarchBridge {
         var copies = this.greymarchRmCopies;
         if (!copies || now < (this.greymarchRmHeightsNext || 0)) return;
         this.greymarchRmHeightsNext = now + 250;
-        var sp = this.sp, budget = 4;
-        for (var k in copies) {
-            if (budget <= 0) break;
-            var c = copies[k];
-            if (now < (c.hNext || 0)) continue;
-            budget--;
-            this.greymarchCopyHeight(c, now);
+        // EVERY COPY GETS ITS TURN (2026-11-11, the owner: a /height seen by nobody else; their log: told Height 1.155 for ff000a62, never put on). The game
+        // is told every player's look, most of them far away; those not drawn were looked at again every quarter second and used up the 4 turns, always
+        // the lowest ids first (ff000005 worked, ff000a62 never did). Now a copy that is not drawn costs no turn, and the look goes round from where it stopped.
+        var keys = Object.keys(copies), n = keys.length;
+        if (!n) return;
+        var start = (this.greymarchRmHeightsAt || 0) % n, budget = 4;
+        for (var i = 0; i < n && budget > 0; i++) {
+            var at = (start + i) % n, c = copies[keys[at]];
+            this.greymarchRmHeightsAt = at + 1;
+            if (!c || now < (c.hNext || 0)) continue;
+            if (this.greymarchCopyHeight(c, now)) budget--;
         }
     }
     // One copy's Height: read, and put on when it is not the kept one (or when due again). From the tick above and the moment its body loads (greymarchHeightLoadedTick).
+    // true when the copy is drawn (a turn used), false when it is not (looked at again in a quarter second)
     greymarchCopyHeight(c: any, now: number): any {
         var sp = this.sp;
         c.hNext = now + 2000;
         try {
             var local = misc.remoteIdToLocalId(c.actor);
             var ac = local ? sp.Actor.from(sp.Game.getFormEx(local)) : null;
-            if (!ac || !ac.is3DLoaded() || ac.isDisabled()) { c.hNext = now + 250; c.hDirty = true; return; } // not drawn yet (HEIGHT HARD SAVED: put on at the draw, whatever the stored scale reads): looked at again in a quarter second, so the first draw gets it
+            if (!ac || !ac.is3DLoaded() || ac.isDisabled()) { c.hNext = now + 250; c.hDirty = true; return false; } // not drawn yet (HEIGHT HARD SAVED: put on at the draw, whatever the stored scale reads): looked at again in a quarter second, so the first draw gets it
             var race = ac.getRace(), rname = race ? String(race.getName() || "") : "";
-            if (/were|vampire lord|beast/i.test(rname)) return;
+            if (/were|vampire lord|beast/i.test(rname)) return true;
             var want = Math.round(rmMod.heightOfLook(c.want) * 1000) / 1000;
             var female = this.greymarchHeightFemale(ac);
             var cur = this.greymarchHeightNow(ac, female);
@@ -2714,7 +2719,7 @@ export class GreymarchBridge {
             // RaceMenu preset load sets it without drawing it, so a new Height read as already on; after a new look or a preset load it is put on (and drawn) once
             // HEIGHT HARD SAVED (2026-11-11): the stored scale can read right while the skeleton shows another, so the server's Height is put on again every 10 s
             if (now >= (c.hForceAt || 0)) c.hDirty = true;
-            if (!c.hDirty && Math.abs(cur - want) < 0.002) return;
+            if (!c.hDirty && Math.abs(cur - want) < 0.002) return true;
             c.hDirty = false; c.hForceAt = now + 10000;
             this.greymarchHeightPut(ac, female, want, false);
             c.hNext = now + 1000; // read back soon: a load that was still going on can drop it
@@ -2723,6 +2728,7 @@ export class GreymarchBridge {
         } catch (err) {
             this.greymarchRmCopyLog(c.actor, "the Height could not be put on the copy: " + err);
         }
+        return true;
     }
     // HEIGHT THE MOMENT A BODY LOADS (2026-11-11, the owner: "Is there a way to make this more seemless?"): a character came into view (or back from a door,
     // a gear change, a rebuild) at the wrong size and snapped to the kept Height at the next check. Now the game's own load event ('objectLoaded') notes it, and

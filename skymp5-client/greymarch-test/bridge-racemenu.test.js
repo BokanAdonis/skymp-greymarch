@@ -420,3 +420,25 @@ test("PRESETS CARRY THE SERVER'S HEIGHT (2026-11-11, the live log: a copy put at
   assert.strictEqual((src2.match(/rmMod\.withServerHeight\(/g) || []).length, 2, "the copy's preset and the own preset");
   assert.match(src2, /": told Height " \+ hNow/);
 });
+
+test("EVERY COPY GETS ITS TURN (2026-11-11, the owner's log: told Height 1.155 for ff000a62, never put on): copies far away use no turn, so a drawn one with a high id is reached", () => {
+  const s = make();
+  const near = { scale: 0, sets: [] };
+  const nearActor = { is3DLoaded: () => true, isDisabled: () => false, getRace: () => ({ getName: () => "Nord" }), getBaseObject: () => "base" };
+  const far = { is3DLoaded: () => false, isDisabled: () => false };
+  const NEAR = 0xff000a62;
+  s.sp.Actor = { from: (f) => (f === near ? nearActor : f ? far : null) };
+  s.sp.ActorBase = { from: () => ({ getSex: () => 0 }) };
+  s.sp.Game.getFormEx = (id) => (id === NEAR ? near : { id });
+  s.sp.callNative = (cls, fn, self, actor, fp, female, node, key, v) => {
+    if (fn === "GetNodeTransformScale") return near.scale;
+    if (fn === "AddNodeTransformScale") { near.sets.push(v); near.scale = v; }
+  };
+  s.gm.greymarchRmCopies = null;
+  for (let i = 1; i <= 30; i++) s.say({ customPacketType: "greymarchRaceMenuLookOf", actorId: 0xff000000 + i, look: {} }); // lower ids, not drawn here
+  s.say({ customPacketType: "greymarchRaceMenuLookOf", actorId: NEAR, look: { transforms: MINE.transforms } });
+  let t = 400000;
+  for (let e = t + 1000; t < e; t += 250) s.gm.greymarchRaceMenuHeightsTick(t);
+  assert.deepStrictEqual(near.sets, [1.1], "put on within a second, though 30 lower ids are far away");
+  assert.ok(s.log.lines.some((l) => /ff000a62: Height 0 -> 1\.1|ff000a62: Height 1 -> 1\.1/.test(l)) || near.sets.length === 1);
+});
