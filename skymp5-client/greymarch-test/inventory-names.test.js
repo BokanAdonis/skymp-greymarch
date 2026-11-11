@@ -16,7 +16,7 @@ const NAMES = { [PAPER]: "Roll of Paper", [SWORD]: "Iron Sword" };
 const mods = { skyrimPlatform: { Game: { getFormEx: (id) => (NAMES[id] ? { getName: () => NAMES[id] } : null) } } };
 const mod = { exports: {} };
 new Function("require", "exports", "module", js)((p) => mods[p], mod.exports, mod);
-const { getDiff, hasExtras, sumInventories, roundHealth, withRoundedHealth } = mod.exports;
+const { getDiff, hasExtras, sumInventories, roundHealth, withRoundedHealth, isGameGradeName } = mod.exports;
 
 const inv = (...entries) => ({ entries });
 
@@ -77,4 +77,15 @@ test("a poisoned weapon is the same as the server's plain one (2026-11-03, the o
   const server = inv({ baseId: SWORD, count: 1, worn: true });
   const game = inv({ baseId: SWORD, count: 1, worn: true, poisonId: 0x73f34, poisonCount: 1 });
   assert.deepStrictEqual(getDiff(server, game, false).entries, [], "nothing to take away or put back: the weapon stays in the hand with its poison");
+});
+
+test("the game's own name with its grade words is no name (2026-11-11: upgraded gear could not be taken from storage and came off at login); a real name stays", () => {
+  assert.strictEqual(isGameGradeName("Iron Sword", "Iron Sword"), true);
+  assert.strictEqual(isGameGradeName("Iron Sword (Fine)", "Iron Sword"), true);
+  assert.strictEqual(isGameGradeName("Iron Sword (Epic) (Epic)", "Iron Sword"), true, "a name written back with its grade twice");
+  assert.strictEqual(isGameGradeName("Iron Sword (Legendary)", "Iron Sword"), true);
+  assert.strictEqual(isGameGradeName("Ulfric's Iron Sword (Fine)", "Iron Sword"), false, "a name of its own is kept");
+  assert.strictEqual(isGameGradeName("Guard Report GR-0042", "Roll of Paper"), false);
+  assert.strictEqual(isGameGradeName("Iron Sword (Rusty)", "Iron Sword"), false, "only the game's grade words");
+  assert.strictEqual(isGameGradeName(undefined, "Iron Sword"), false);
 });

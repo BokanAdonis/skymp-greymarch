@@ -152,6 +152,15 @@ export const roundHealth = (h?: number): number | undefined => {
   return h < 1.1 ? Math.round(h * 100000) / 100000 : Math.round(h * 10) / 10;
 };
 
+// GREYMARCH: THE GRADE IN THE NAME (2026-11-11, the owner: upgraded weapons and armor could not be taken out of storages, and upgraded armor came off at
+// login). An upgraded piece is kept by the server with its grade as "health" (gamemode upgrades.js) and no name; the game, drawing it, writes its name WITH the
+// grade word into the item ("Steel Sword (Fine)"), and that name went back to the server with every take, put and equip. The server's copy has no name, so
+// nothing matched: the take did nothing and the worn piece was not found (left unworn). A name that is only the item's own name and grade words is the game's
+// own: it counts as no name (GRADE_SUFFIX: Skyrim's tempering words, "Legendary" too), read or written.
+export const GRADE_SUFFIX = /(\s\((Fine|Superior|Exquisite|Flawless|Epic|Legendary)\))+$/;
+export const isGameGradeName = (name: string | undefined, formName: string): boolean =>
+  typeof name === "string" && !!formName && (name === formName || (GRADE_SUFFIX.test(name) && name.replace(GRADE_SUFFIX, "") === formName));
+
 const extractExtraData = (
   refr: ObjectReference,
   extraList: BaseExtraList | null,
@@ -208,6 +217,12 @@ const extractExtraData = (
         break;
     }
   });
+  // THE GRADE IN THE NAME (above): the game's own name with its grade is no name
+  if (out.name !== undefined) {
+    let formName = "";
+    try { const f = Game.getFormEx(out.baseId); formName = f ? f.getName() : ""; } catch (e) { formName = ""; }
+    if (isGameGradeName(out.name, formName)) delete out.name;
+  }
 };
 
 const squash = (inv: Inventory): Inventory => {
@@ -400,7 +415,7 @@ export const greymarchStripPoison = (refr: ObjectReference): number => {
     if (!f) return;
     const args = (count: number, poisoned: boolean): [ObjectReference, Form, number, number, Enchantment | null, number, boolean, number, string, number, Potion | null, number] => [
       refr, f, count, e.health ? e.health : 1, e.enchantmentId ? Enchantment.from(Game.getFormEx(e.enchantmentId)) : null, e.maxCharge ? e.maxCharge : 0,
-      !!e.removeEnchantmentOnUnequip, e.chargePercent ? e.chargePercent : 0, e.name ? cropName(e.name) : f.getName(), e.soul ? e.soul : 0,
+      !!e.removeEnchantmentOnUnequip, e.chargePercent ? e.chargePercent : 0, e.name && !isGameGradeName(e.name, f.getName()) ? cropName(e.name) : f.getName(), e.soul ? e.soul : 0,
       poisoned ? Potion.from(Game.getFormEx(e.poisonId as number)) : null, poisoned ? (e.poisonCount ? e.poisonCount : 0) : 0];
     TESModPlatform.pushWornState(!!e.worn, !!e.wornLeft);
     TESModPlatform.addItemEx(...args(-1, true));
@@ -543,7 +558,7 @@ export const applyInventory = (
         e.chargePercent ? e.chargePercent : 0,
         // "": no extra list. A removal of extras (whichever they are), and since 2026-11-07 any item with nothing of its own (the owner: "79 leather and then
         // 2 leather"): given its own name as a custom name it went into a stack of its own, apart from the same item picked up in the game
-        plainRemoval.has(e) ? "" : e.name && e.name !== f.getName() ? cropName(e.name) : hasExtras(e) ? f.getName() : "",
+        plainRemoval.has(e) ? "" : e.name && !isGameGradeName(e.name, f.getName()) ? cropName(e.name) : hasExtras(e) ? f.getName() : "",
         e.soul ? e.soul : 0,
         e.poisonId ? Potion.from(Game.getFormEx(e.poisonId)) : null,
         e.poisonCount ? e.poisonCount : 0

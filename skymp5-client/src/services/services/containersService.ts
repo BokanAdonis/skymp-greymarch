@@ -2,7 +2,7 @@ import { Actor, ContainerChangedEvent, printConsole } from "skyrimPlatform";
 import { ClientListener, CombinedController, Sp } from "./clientListener";
 import { MsgType } from "../../messages";
 import { getPcInventory } from "./remoteServer";
-import { getInventory, getDiff, hasExtras, removeSimpleItemsAsManyAsPossible, sumInventories } from "../../sync/inventory";
+import { getInventory, getDiff, hasExtras, removeSimpleItemsAsManyAsPossible, sumInventories, isGameGradeName } from "../../sync/inventory";
 import { LastInvService } from "./lastInvService";
 
 import { PutItemMessage } from "../messages/putItemMessage";
@@ -69,7 +69,7 @@ export class ContainersService extends ClientListener {
                             // An item moving between a container and the pack is never worn there.
                             delete msg.worn;
                             delete msg.wornLeft;
-                            if (this.sp.Game.getFormEx(entry.baseId)?.getName() === msg.name) {
+                            if (isGameGradeName(msg.name, this.sp.Game.getFormEx(entry.baseId)?.getName() || "")) { // the game's own name, or it with the grade word (inventory.ts THE GRADE IN THE NAME)
                                 delete msg.name;
                             }
                             return msg;
