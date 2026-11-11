@@ -1452,7 +1452,9 @@ export class RemoteServer extends ClientListener {
   private greymarchSprays = new Map<string, { copyId: number, form: number, hand: number, pitch: number, heading: number, wantPitch: number, wantHeading: number }>();
   private greymarchSpray(castKey: string, ac: Actor, form: number, castingSource: number, aimAngle: number, aimHeading: number): boolean {
     if (!Number.isFinite(aimAngle) || !Number.isFinite(aimHeading)) return false;
-    const hand = castingSource === 0 ? 0 : 1;
+    // FROM THE MOUTH (2026-11-11, the owner: breath powers): a cast from the voice slot (2: Breath of Fire, Frost, Poison) is sprayed from the copy's head
+    // (GreymarchCamera 1.18 FireSpellAt source 2); an older DLL that does not know 2 sprays it from the right hand
+    const hand = castingSource === 0 ? 0 : castingSource === 2 ? 2 : 1;
     let ok = false;
     try { ok = !!callNative("GreymarchCam", "FireSpellAt", undefined, ac, Game.getFormEx(form), hand, aimAngle, aimHeading); } catch (e) { ok = false; }
     if (!ok) return false;

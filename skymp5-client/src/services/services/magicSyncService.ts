@@ -159,6 +159,15 @@ export class MagicSyncService extends ClientListener {
                 }
             }
 
+            // GREYMARCH: FROM THE MOUTH (2026-11-11, the owner: breath powers, held on the shout key): a held cast from the voice slot has no hand animation
+            // event to end it (the end above comes from mlh/mrh events), so the player's own one ends when the shout key is let go, and after VOICE_MAX_MS at most
+            if (cast.msg.castingSource === 2 && cast.casterLocalId === this.playerId) {
+                if (!this.shoutKeyHeld() || now - cast.startedAt > MagicSyncService.VOICE_MAX_MS) {
+                    this.sendInterrupt(key, "the shout key let go");
+                    continue;
+                }
+            }
+
             // GREYMARCH: THE AIM WHILE HELD (2026-11-04, the owner: another player's held Frostbite stayed level while they swept it from the ground up; the
             // log: their copy's pitch is always 0, the look up and down never comes with the movement). The cast carries the aim: while the player holds the
             // spell it is sent again with where they look now (the camera), as soon as that moved more than 1.5 degrees, at most 10 times a second
@@ -186,6 +195,20 @@ export class MagicSyncService extends ClientListener {
                 seen.was = on;
             }
         }
+    }
+
+    private static readonly VOICE_MAX_MS = 30000;
+    // the shout key (keyboard, mouse or gamepad, as the player mapped it) held down right now; true when no key can be read, so nothing is ended by mistake
+    private shoutKeyHeld(): boolean {
+        let known = false;
+        for (const device of [0, 1, 2]) {
+            let code = -1;
+            try { code = Number(this.sp.Input.getMappedKey("Shout", device)); } catch (e) { code = -1; }
+            if (!(code > 0) || code === 255) continue;
+            known = true;
+            try { if (this.sp.Input.isKeyPressed(code)) return true; } catch (e) { return true; }
+        }
+        return !known;
     }
 
     private sendInterrupt(key: string, reason: string) {

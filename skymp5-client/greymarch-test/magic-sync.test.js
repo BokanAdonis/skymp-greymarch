@@ -50,7 +50,9 @@ function make() {
     const effect = { getCastingType: () => d.type, getExplosion: () => (d.explosion ? { getFormID: () => d.explosion } : null) };
     return { getFormID: () => id, getNumEffects: () => 1, getNthEffectMagicEffect: (i) => (i === 0 ? effect : null) };
   };
-  const sp = { hooks: { sendAnimationEvent: { add: (h) => { animHook = h; } } }, Spell: { from: (f) => f } };
+  const keys = { shoutDown: false };
+  const sp = { hooks: { sendAnimationEvent: { add: (h) => { animHook = h; } } }, Spell: { from: (f) => f },
+    Input: { getMappedKey: (c, device) => (c === "Shout" && device === 0 ? 44 : -1), isKeyPressed: (k) => k === 44 && keys.shoutDown } };
   const mods = {
     skyrimPlatform,
     "./clientListener": { ClientListener: class {} },
@@ -65,7 +67,7 @@ function make() {
   const frame = (ms = 16) => { now += ms; handlers.update(); onceUpdate.splice(0).forEach((f) => f()); };
   const cast = (spell, castingSource = 1) => handlers.spellCast({ caster: player, target: null, spell: { getFormID: () => spell }, castingSource, isDualCasting: false, aimAngle: 0, aimHeading: 0 });
   const animEvent = (animEventName) => animHook.leave({ animEventName, animationSucceeded: true });
-  return { player, service, sent, logs, frame, cast, animEvent, done: () => { Date.now = realNow; } };
+  return { player, service, sent, logs, frame, cast, animEvent, keys, done: () => { Date.now = realNow; } };
 }
 
 test("Flames: the cast keeps going while the casting variables flicker; the equipped animation event ends it once", () => {
@@ -162,5 +164,21 @@ test("the server log gets at most 40 lines from this service per session", () =>
   for (let i = 0; i < 60; i++) { g.cast(FLAMES); g.animEvent("MRh_Equipped_Event"); g.frame(); }
   assert.strictEqual(g.sent.length, 120); // each: the cast and its end
   assert.strictEqual(g.logs.length, 40);
+  g.done();
+});
+
+
+test("a held breath from the mouth (voice slot) keeps going while the shout key is held and ends when it is let go (2026-11-11, breath powers)", () => {
+  const g = make();
+  g.keys.shoutDown = true;
+  g.cast(FLAMES, 2);
+  for (let i = 0; i < 70; i++) g.frame();
+  assert.ok(g.sent.every((m) => m.interruptCast === false && m.castingSource === 2), "held: no end");
+  assert.ok(g.sent.length >= 2, "reminders while held");
+  g.keys.shoutDown = false;
+  g.frame();
+  const last = g.sent[g.sent.length - 1];
+  assert.strictEqual(last.interruptCast, true, "the key let go: the end goes out");
+  assert.strictEqual(last.castingSource, 2);
   g.done();
 });
