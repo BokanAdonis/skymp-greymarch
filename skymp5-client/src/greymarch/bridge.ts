@@ -333,6 +333,7 @@ export class GreymarchBridge {
         if (type === "greymarchVampire") { this.greymarchVampWant = msg.on ? msg : null; this.greymarchVampCostTold = {}; this.greymarchHudToPage("blood", { on: !!msg.on, blood: msg.blood, empty: !!msg.empty }); return; } // a vampire's state: the blood drop and what the game applies (greymarchVampTick)
         if (type === "greymarchVampLooks") { this.greymarchVampLookList = Array.isArray(msg.vampires) ? msg.vampires : []; if (Number(msg.me) > 0) this.greymarchMeActor = Number(msg.me) >>> 0; return; } // (me: which of them is this player: the ghosts and effects packets that also say so may not have come yet, and without it the player's own eyes and fangs were never put on) // how every vampire in the world looks (eyes and fangs)
         if (type === "greymarchIntoxNear") { this.greymarchIntoxOthers = Array.isArray(msg.actors) ? msg.actors.map(function (x: any) { return Number(x) >>> 0; }).filter(function (x: number) { return x > 0; }).slice(0, 200) : []; return; } // who is drunk or high (greymarchIntoxOthersTick)
+        if (type === "greymarchSunBurn") { this.greymarchSunBurnWant = !!msg.on; return; } // the sun burns this vampire: their own regeneration stops meanwhile
         if (type === "greymarchPlagueSeen") { this.greymarchPlagueSeen = Array.isArray(msg.actors) ? msg.actors.map(function (x: any) { return Number(x) >>> 0; }).filter(function (x: number) { return x > 0; }).slice(0, 200) : []; var gs = Number(msg.glintS), ge = Number(msg.glintEvery); this.greymarchPlagueGlint = { s: Number.isFinite(gs) ? Math.max(0, Math.min(30, gs)) : PLAGUE_SHEEN_S, every: Number.isFinite(ge) && ge >= 3 ? Math.min(600, ge) * 1000 : PLAGUE_SHEEN_EVERY }; this.greymarchPlagueSheenNext = 0; return; } // who looks sick: the glint, and how long and how often (the F7 Plague tab)
         if (type === "greymarchPlagueCough") { var pc = Number(msg.actor) >>> 0; if (pc) (this.greymarchPlagueCoughs || (this.greymarchPlagueCoughs = [])).push(pc); return; } // that character coughs now
         if (type === "greymarchPlague") { var ps = Math.max(0, Math.min(3, Math.floor(Number(msg.stage) || 0))); this.greymarchPlagueWant = ps; var pfx: any = {}; if (msg.fx && typeof msg.fx === "object") for (var pk in msg.fx) { var pv = Number(msg.fx[pk]); if (Number.isFinite(pv) && pv > 0) pfx[pk] = Math.min(90, pv); } this.greymarchPlagueFx = ps > 0 ? pfx : {}; if (msg.cough && ps > 0) this.greymarchPlagueCough = true; return; } // the plague: this player's stage (0: well), and a cough now
@@ -1857,6 +1858,7 @@ export class GreymarchBridge {
         this.greymarchDrunkTick(player, now);
         this.greymarchIntoxTick(player, now); // drunk or high: the screen, the walk, the stumbles, the pace
         this.greymarchPlagueTick(player); // the plague: weaker by its stage, and a cough's screen flash
+        this.greymarchSunBurnTick(player); // a vampire in the sun: no health regeneration of their own
         this.greymarchPlagueSeenTick(player, now); // the plague others see: the sheen on the badly sick, and their coughs
         this.greymarchMoraTick(player, now); // Mora's Agony: where its tentacles came up, to the server
         this.greymarchIntoxOthersTick(now); // other players drunk or high: their copies here keep the drunk walk
@@ -1951,6 +1953,16 @@ export class GreymarchBridge {
     //   high   the Sleeping Tree sap's screen held (Skyrim.esm 0E3CBC), the drunk walk, stumbles more often, slower still, more stamina gone
     // A stumble (the game's own stagger, StaggerStart 0138D5, small) never comes in a fight, with a weapon out, swimming, riding, sitting, in a menu or mid emote.
     // A beast form, a creature's body or the vampire's drained walk (greymarchDrunkTick) pauses the screen and the pace; the stamina stays down.
+    // A VAMPIRE IN THE SUN (gamemode sunburn.js greymarchSunBurn, 2026-11-11, the owner's clip: the health bar bounced): while the server says the sun burns
+    // them, their health regeneration multiplier is taken to 0 (the amount taken is kept and given back exactly when it stops), so the bar does not rise on
+    // their screen only to be taken back by the server a moment later
+    greymarchSunBurnTick(player: any): any {
+        var want = !!this.greymarchSunBurnWant, had = this.greymarchSunBurnTaken || 0;
+        try {
+            if (want && !had) { var cur = Number(player.getActorValue("HealRateMult")); if (cur > 0) { player.modActorValue("HealRateMult", -cur); this.greymarchSunBurnTaken = cur; this.greymarchLog("sun: burning, health regeneration off (" + cur + ")"); } }
+            else if (!want && had) { player.modActorValue("HealRateMult", had); this.greymarchSunBurnTaken = 0; this.greymarchLog("sun: out of it, health regeneration back (" + had + ")"); }
+        } catch (e) { /* tried again next frame */ }
+    }
     // the pace everything else starts from: staff speed, less the plague's Move speed (2026-11-11)
     greymarchBaseSpeed(): number {
         var staff = (this.greymarchFxHave && this.greymarchFxHave.speed) || 100;

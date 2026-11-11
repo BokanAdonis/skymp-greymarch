@@ -251,6 +251,7 @@ export class AuthService extends ClientListener {
       case 'greymarchMapMarkers': // every map marker and the ones this character has found (gamemode mapmarkers.js)
       case 'greymarchVampFeed':
       case 'greymarchDrunk': // drained to death by a vampire: the drunk walk after waking (2026-11-03)
+      case 'greymarchSunBurn': // the sun burns this vampire: no regeneration of their own meanwhile (gamemode sunburn.js, 2026-11-11)
       case 'greymarchPlague': // the GMs' plague event: this player's stage and a cough (gamemode plague.js, 2026-11-11)
       case 'greymarchPlagueSeen': // who looks sick (Wasting and Dying): the sickly sheen on them
       case 'greymarchPlagueCough': // a sick character coughs now: the doubled-over cough on them
