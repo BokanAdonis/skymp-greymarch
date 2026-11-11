@@ -88,6 +88,8 @@ function headOf(sp: any, ac: any): P3 | null {
   try { const f: P3 = [Number(ac.getPositionX()), Number(ac.getPositionY()), Number(ac.getPositionZ()) + HEAD_UP]; return f.every(fin) ? f : null; } catch (e) { return null; }
 }
 const offIds = new Set<number>(); // copies whose head was turned off because the look went behind them
+let headNative: boolean | undefined = undefined; // GreymarchCamera.dll 1.17 SetHeadLook there? (asked once)
+const nativeIds = new Set<number>(); // copies pointed by SetHeadLook (their script look and marker cleared once)
 
 // another game's copy `ac` looks at the point `p` (no actor stands there). Returns true when its head was pointed at the marker this call.
 export function lookAtPoint(sp: any, ac: any, sent: P3, now: number): boolean {
@@ -96,11 +98,30 @@ export function lookAtPoint(sp: any, ac: any, sent: P3, now: number): boolean {
   // NO STRAIGHT UP OR DOWN (clampLook): the sent point, seen from this copy's own head, clamped; looking behind them: the head faces forward
   const p = clampLook(headOf(sp, ac), sent, Number(ac.getAngleZ()));
   if (!p) {
+    nativeIds.delete(id);
     if (!offIds.has(id)) { offIds.add(id); try { ac.clearLookAt(); } catch (e) { /* gone */ } try { ac.setHeadTracking(false); } catch (e) { /* gone */ } }
     if (m) m.lookedAt = 0; // pointed again at once when the look comes back in front
     return false;
   }
   if (offIds.delete(id) && m) m.lookedAt = 0;
+  // THE HEAD POINTED STRAIGHT AT THE POINT (2026-11-11, the owner's test: the marker way did not turn any head; their log: "looks at its marker ... its AI on"):
+  // GreymarchCamera.dll 1.17 SetHeadLook gives the copy's process the point itself (the game's SetHeadtrackTarget), every call (applyMovement runs every frame).
+  // No marker then (a SetLookAt on one would win over it). An older DLL: the marker below, as before.
+  if (headNative !== false) {
+    let ok = false;
+    try { ok = !!sp.callNative("GreymarchCam", "SetHeadLook", undefined, ac, p[0], p[1], p[2]); } catch (e) { ok = false; }
+    if (headNative === undefined) { headNative = ok; say("head: GreymarchCamera SetHeadLook " + (ok ? "works: heads are pointed at the point" : "is missing (an older DLL): a marker is used")); }
+    if (ok) {
+      if (!nativeIds.has(id)) {
+        nativeIds.add(id);
+        if (m) drop(id, m);
+        try { ac.clearLookAt(); } catch (e) { /* none */ }
+        try { ac.setHeadTracking(true); } catch (e) { /* gone */ }
+        if (drawSaid < 6) { drawSaid++; say("head: " + id.toString(16) + " looks at " + p.map(Math.round).join(",") + " (sent " + sent.map(Math.round).join(",") + ")"); }
+      }
+      return true;
+    }
+  }
   const place = placeOf(ac);
   if (m && (m.place !== place || !place)) { drop(id, m); m = undefined; }
   if (!m) {
@@ -133,5 +154,5 @@ export function lookAtPoint(sp: any, ac: any, sent: P3, now: number): boolean {
 }
 
 // for tests
-export function _reset(): void { cameraWorks = null; cameraRetryAt = 0; marks.clear(); offIds.clear(); sentSaid = failSaid = drawSaid = sentSaidAt = 0; }
+export function _reset(): void { cameraWorks = null; cameraRetryAt = 0; marks.clear(); offIds.clear(); nativeIds.clear(); headNative = undefined; sentSaid = failSaid = drawSaid = sentSaidAt = 0; }
 export function _markers(): number { return marks.size; }

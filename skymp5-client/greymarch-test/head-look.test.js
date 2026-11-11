@@ -102,3 +102,21 @@ test("a look that goes behind the copy turns its head tracking off once; back in
   assert.strictEqual(w.log.looks.length, 4, "turned off only once");
   assert.strictEqual(h.lookAtPoint(w.sp, c, [0, 1000, 120], 1300), true, "in front again: pointed at once, not a second later");
 });
+
+test("GreymarchCamera 1.17 SetHeadLook (2026-11-11, the owner's test: the marker turned no head): the clamped point every frame, no marker; an older DLL: the marker", () => {
+  const h = load();
+  const calls = [], looks = [];
+  let placed = 0;
+  const sp = { Game: { getFormEx: () => ({ xmarker: true }) }, callNative: (cls, fn, self, ac, x, y, z) => { if (fn === "SetHeadLook") { calls.push([x, y, z].map(Math.round)); return true; } return 0; } };
+  const c = { getFormID: () => 9, getAngleZ: () => 0, getPositionX: () => 0, getPositionY: () => 0, getPositionZ: () => 0, getWorldSpace: () => ({ getFormID: () => 0x3c }), getParentCell: () => null, isAIEnabled: () => true, getDistance: () => 0,
+    placeAtMe: () => { placed++; return { setPosition() {}, disable() {}, delete() {} }; }, setHeadTracking: (on) => looks.push(["tracking", on]), setLookAt: () => looks.push(["look"]), clearLookAt: () => looks.push(["clear"]) };
+  assert.strictEqual(h.lookAtPoint(sp, c, [0, 1000, 120], 1000), true);
+  assert.strictEqual(h.lookAtPoint(sp, c, [0, 1000, 5000], 1016), true);
+  assert.deepStrictEqual(calls, [[0, 1000, 120], [0, 866, 620]], "every frame; straight up clamped to 30 degrees");
+  assert.strictEqual(placed, 0, "no marker");
+  assert.deepStrictEqual(looks, [["clear"], ["tracking", true]], "the script look cleared and head tracking on, once");
+  const old = load();
+  const sp2 = { Game: sp.Game, callNative: () => undefined };
+  old.lookAtPoint(sp2, c, [0, 1000, 120], 1000);
+  assert.strictEqual(placed, 1, "an older DLL: the marker");
+});
