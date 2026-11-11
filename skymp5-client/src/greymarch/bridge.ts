@@ -143,7 +143,7 @@ const OPEN_ON_RELEASE = [65, 35, 48, 64, 66, 37]; // F7, H, B, F6, F8, K: their 
 const FORGE_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmForgeRun").split("greymarch-prof").join("greymarch-forge").split("2147483220").join("2147483225"); // the Greymarch forge window: the same loader, another page
 const PAUSE_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmPauseRun").split("greymarch-prof").join("greymarch-pause").split("2147483220").join("2147483230"); // the pause menu (Esc): the same loader, another page, over every other window
 const JOURNAL_MENU = "Journal Menu"; // the game's own pause menu (Esc, J): closed the frame it opens, the pause menu shows instead (greymarchPauseTick)
-const COMPASS_ALPHA = 35; // the game's compass at this opacity out of combat, gone in combat (greymarchCompassTick)
+const COMPASS_ALPHA = 80; // the game's compass (its bar hidden: only letters and markers) at this opacity out of combat, gone in combat (greymarchCompassTick)
 const COMPASS_FADE = 8; // opacity a step (every 100 ms): about half a second to fade
 const VITALS_AWAY_Y = -20000; // the game's own health, magicka and stamina meters are moved this far above the screen while ours show (greymarchVitalsGame)
 const PAUSE_AFTER_MENU_MS = 400; // an Esc this soon after a game menu (inventory, map, a chest ...) was seen open closed that menu: no pause menu (greymarchPauseTick)
@@ -5374,6 +5374,8 @@ export class GreymarchBridge {
     // faded to COMPASS_ALPHA, and fades out completely while the player is in combat or has a weapon or spell drawn; it fades back once that ends. Looked at
     // every 100 ms, COMPASS_FADE of opacity a step (about half a second either way). Skyrim Platform's Ui reads and sets HUD numbers with getFloat/setFloat
     // (getNumber/setNumber do not exist: the first build changed nothing). A size an earlier build set is put back to 100%.
+    // NO BAR (2026-11-11, the owner's picture: only the letters and markers): the compass's frame (Compass.CompassFrame, the bar behind it) is hidden, so the
+    // directions and markers float on the world; the holder itself at COMPASS_ALPHA.
     greymarchCompassTick(): any {
         var now = Date.now();
         if (now < (this.greymarchCompassNext || 0)) return;
@@ -5385,6 +5387,8 @@ export class GreymarchBridge {
             var fight = false;
             try { var p = this.sp.Game.getPlayer(); fight = !!p && (!!p.isInCombat() || !!p.isWeaponDrawn()); } catch (e) { fight = false; }
             var want = fight ? 0 : COMPASS_ALPHA;
+            var fa = Number(ui.getFloat("HUD Menu", clip + ".Compass.CompassFrame._alpha"));
+            if (isFinite(fa) && fa > 0.5) ui.setFloat("HUD Menu", clip + ".Compass.CompassFrame._alpha", 0); // the bar: hidden
             if (Math.abs(al - want) > 0.5) ui.setFloat("HUD Menu", clip + "._alpha", al > want ? Math.max(want, al - COMPASS_FADE) : Math.min(want, al + COMPASS_FADE));
             // the size the first build set (75%, moved right): back to its own
             var xs = Number(ui.getFloat("HUD Menu", clip + "._xscale"));

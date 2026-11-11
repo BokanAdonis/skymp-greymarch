@@ -31,21 +31,22 @@ function make(hud, who = { combat: false, drawn: false }) {
   return { gm, log, hud, who, tick };
 }
 const C = "_root.HUDMovieBaseInstance.CompassShoutMeterHolder.";
-const hudAt = () => ({ [C + "_xscale"]: 100, [C + "_yscale"]: 100, [C + "_alpha"]: 100, [C + "_x"]: 640 });
+const hudAt = () => ({ [C + "_xscale"]: 100, [C + "_yscale"]: 100, [C + "_alpha"]: 100, [C + "_x"]: 640, [C + "Compass.CompassFrame._alpha"]: 100 });
 
-test("the compass fades to 35% at its own size and place, fades out in combat or with a weapon drawn, and back after", () => {
+test("the compass loses its bar, shows at 80% at its own size and place, fades out in combat or with a weapon drawn, and back after", () => {
   const s = make(hudAt());
   s.tick(20);
-  assert.equal(s.hud[C + "_alpha"], 35, "faded");
+  assert.equal(s.hud[C + "Compass.CompassFrame._alpha"], 0, "the bar hidden");
+  assert.equal(s.hud[C + "_alpha"], 80, "faded a little");
   assert.equal(s.hud[C + "_xscale"], 100); assert.equal(s.hud[C + "_x"], 640, "its own size and place");
   s.who.combat = true; s.tick(1);
-  assert.equal(s.hud[C + "_alpha"], 27, "fading, a step at a time");
-  s.tick(10);
+  assert.equal(s.hud[C + "_alpha"], 72, "fading, a step at a time");
+  s.tick(12);
   assert.equal(s.hud[C + "_alpha"], 0, "gone in combat");
   s.who.combat = false; s.who.drawn = true; s.tick(10);
   assert.equal(s.hud[C + "_alpha"], 0, "a weapon drawn: still gone");
-  s.who.drawn = false; s.tick(10);
-  assert.equal(s.hud[C + "_alpha"], 35, "back once it is over");
+  s.who.drawn = false; s.tick(12);
+  assert.equal(s.hud[C + "_alpha"], 80, "back once it is over");
 });
 
 test("the size the first build set is put back to 100%; no HUD yet: nothing", () => {
