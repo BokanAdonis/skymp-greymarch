@@ -5369,7 +5369,8 @@ export class GreymarchBridge {
         this.greymarchVitalsSent = v; this.greymarchVitalsSentAt = now;
         this.greymarchHudToPage("vitals", v);
     }
-    // THE QUIET COMPASS (2026-11-11, the owner: "make the compass less intrusive", smaller and faded, always): the game's compass (hudmenu:
+    // THE QUIET COMPASS (2026-11-11, the owner: "make the compass less intrusive", smaller and faded, always; Skyrim Platform's Ui has getFloat/setFloat, not
+    // getNumber/setNumber: the first build threw on every call and changed nothing): the game's compass (hudmenu:
     // HUDMovieBaseInstance.CompassShoutMeterHolder, the compass with the shout meter) at COMPASS_SCALE of its size and COMPASS_ALPHA opacity. Set again
     // whenever the HUD puts it back (looked at every second). Kept centred: its own place is read at full size, and when the holder turns out to be anchored at
     // its left edge (its middle, not its x, sits nearest the screen's middle, 640 of the HUD's 1280) it is moved right by the width it lost on each side.
@@ -5378,38 +5379,24 @@ export class GreymarchBridge {
         if (now < (this.greymarchCompassNext || 0)) return;
         this.greymarchCompassNext = now + 1000;
         var ui = this.sp.Ui, clip = "_root.HUDMovieBaseInstance.CompassShoutMeterHolder";
-        // DIAGNOSIS (2026-11-11, the owner: "feels the same"): for the first minute of HUD, what the HUD answers before and after, to the server log
-        var hudHere = false; try { var hx = ui.getNumber("HUD Menu", clip + "._xscale"); hudHere = typeof hx === "number" && isFinite(hx); } catch (e) { hudHere = false; }
-        if (hudHere && this.sp.Game.getPlayer()) this.greymarchCompassDiag = (this.greymarchCompassDiag || 0) + 1; // seconds of HUD in the world
-        var diag = !!this.greymarchCompassDiag && this.greymarchCompassDiag <= 60 && this.greymarchCompassDiag % 10 === 1 && this.greymarchCompassDiagAt !== this.greymarchCompassDiag;
-        if (diag) this.greymarchCompassDiagAt = this.greymarchCompassDiag;
-        if (!hudHere && !this.greymarchCompassNoHudSaid && this.sp.Game.getPlayer()) { this.greymarchCompassNoHudSaid = true; try { this.greymarchLog("compass diag: no HUD number for " + clip + "._xscale: " + JSON.stringify(ui.getNumber("HUD Menu", clip + "._xscale"))); } catch (e) { this.greymarchLog("compass diag: getNumber threw " + e); } }
-        if (diag) {
-            try {
-                var q = (t: string) => { try { return JSON.stringify(ui.getNumber("HUD Menu", t)); } catch (e) { return "err " + e; } };
-                var qb = (t: string) => { try { return JSON.stringify(ui.getBool("HUD Menu", t)); } catch (e) { return "err " + e; } };
-                this.greymarchLog("compass diag " + this.greymarchCompassDiag + ": holder xscale " + q(clip + "._xscale") + " alpha " + q(clip + "._alpha") + " x " + q(clip + "._x") + " width " + q(clip + "._width") + " visible " + qb(clip + "._visible")
-                    + " | Compass child xscale " + q(clip + ".Compass._xscale") + " width " + q(clip + ".Compass._width") + " | base xscale " + q("_root.HUDMovieBaseInstance._xscale") + " | hudOpen " + (function (u: any) { try { return u.isMenuOpen("HUD Menu"); } catch (e) { return "?"; } })(ui));
-            } catch (e) { this.greymarchLog("compass diag failed: " + e); }
-        }
         try {
-            var xs = Number(ui.getNumber("HUD Menu", clip + "._xscale")), al = Number(ui.getNumber("HUD Menu", clip + "._alpha"));
+            var xs = Number(ui.getFloat("HUD Menu", clip + "._xscale")), al = Number(ui.getFloat("HUD Menu", clip + "._alpha"));
             if (!isFinite(xs) || !isFinite(al)) return; // no HUD yet
             var st = this.greymarchCompass || (this.greymarchCompass = { x: null, w: null, shift: 0 });
             if (Math.abs(xs - COMPASS_SCALE) < 0.5 && Math.abs(al - COMPASS_ALPHA) < 0.5) return; // as we set it
             if (Math.abs(xs - 100) < 0.5) { // at full size (first time, or the HUD rebuilt it): its own place and width
-                var x = Number(ui.getNumber("HUD Menu", clip + "._x")), w = Number(ui.getNumber("HUD Menu", clip + "._width"));
+                var x = Number(ui.getFloat("HUD Menu", clip + "._x")), w = Number(ui.getFloat("HUD Menu", clip + "._width"));
                 if (isFinite(x) && isFinite(w) && w > 0) {
                     var leftAnchored = Math.abs(x + w / 2 - 640) < Math.abs(x - 640);
                     st.x = x; st.w = w; st.shift = leftAnchored ? (w * (1 - COMPASS_SCALE / 100)) / 2 : 0;
                     if (!this.greymarchCompassLogged) { this.greymarchCompassLogged = true; this.greymarchLog("compass: x " + x + " width " + w + (leftAnchored ? ", anchored left: moved " + st.shift.toFixed(1) : ", anchored in the middle")); }
                 }
             }
-            ui.setNumber("HUD Menu", clip + "._xscale", COMPASS_SCALE);
-            ui.setNumber("HUD Menu", clip + "._yscale", COMPASS_SCALE);
-            ui.setNumber("HUD Menu", clip + "._alpha", COMPASS_ALPHA);
-            if (st.x !== null && st.shift) ui.setNumber("HUD Menu", clip + "._x", st.x + st.shift);
-        } catch (e) { /* not in this HUD */ }
+            ui.setFloat("HUD Menu", clip + "._xscale", COMPASS_SCALE);
+            ui.setFloat("HUD Menu", clip + "._yscale", COMPASS_SCALE);
+            ui.setFloat("HUD Menu", clip + "._alpha", COMPASS_ALPHA);
+            if (st.x !== null && st.shift) ui.setFloat("HUD Menu", clip + "._x", st.x + st.shift);
+        } catch (e) { if (!this.greymarchCompassErrSaid) { this.greymarchCompassErrSaid = true; this.greymarchLog("compass: " + e); } } // said once, never silent
     }
     // the game's own Health, Magicka and Stamina meters (hudmenu: HUDMovieBaseInstance.Health / Magica / Stamina): shown (true) or hidden (false)
     greymarchVitalsGame(show: boolean): any {

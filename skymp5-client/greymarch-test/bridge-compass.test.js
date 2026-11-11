@@ -20,9 +20,9 @@ function make(hud) {
     printConsole() {}, writeLogs: (n, l) => log.lines.push(l),
     Game: { getPlayer: () => null },
     Ui: {
-      isMenuOpen: () => false,
-      getNumber: (menu, t) => (menu === "HUD Menu" && t in hud ? hud[t] : undefined),
-      setNumber: (menu, t, v) => { if (menu === "HUD Menu") { hud[t] = v; log.set.push([t.replace("_root.HUDMovieBaseInstance.CompassShoutMeterHolder.", ""), v]); } },
+      isMenuOpen: () => false, // Skyrim Platform's real Ui: getFloat/setFloat (there is no getNumber/setNumber)
+      getFloat: (menu, t) => (menu === "HUD Menu" && t in hud ? hud[t] : undefined),
+      setFloat: (menu, t, v) => { if (menu === "HUD Menu") { hud[t] = v; log.set.push([t.replace("_root.HUDMovieBaseInstance.CompassShoutMeterHolder.", ""), v]); } },
     },
     on() {},
   };
