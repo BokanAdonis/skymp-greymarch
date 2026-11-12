@@ -5948,7 +5948,7 @@ export class GreymarchBridge {
         this.greymarchForgeOn = true;
         this.greymarchForgeStation = station;
         if (station === "forge") this.greymarchForgeAnimStart(msg && msg.forge);
-        else this.greymarchForgeAnimWant = { on: true, forge: Number(msg && msg.ref) >>> 0, station: station, anim: (msg && typeof msg.anim === "string" && /^Idle[A-Za-z]{1,40}$/.test(msg.anim)) ? msg.anim : "", stand: (msg && Array.isArray(msg.stand) && msg.stand.length === 3 && msg.stand.every((v: any) => typeof v === "number" && isFinite(v) && Math.abs(v) <= 400)) ? msg.stand : null };
+        else this.greymarchForgeAnimWant = { on: true, forge: Number(msg && msg.ref) >>> 0, station: station, anim: (msg && typeof msg.anim === "string" && /^Idle[A-Za-z]{1,40}$/.test(msg.anim)) ? msg.anim : "", exit: (msg && typeof msg.exit === "string" && /^Idle[A-Za-z]{1,40}$/.test(msg.exit)) ? msg.exit : "", stand: (msg && Array.isArray(msg.stand) && msg.stand.length === 3 && msg.stand.every((v: any) => typeof v === "number" && isFinite(v) && Math.abs(v) <= 400)) ? msg.stand : null };
         this.sp.browser.setVisible(true);
         this.sp.browser.setFocused(true);
         this.greymarchForgeToPage("show", page);
@@ -5993,7 +5993,9 @@ export class GreymarchBridge {
         this.greymarchForgeAt = { fx: m[0], fy: m[1], fz: m[2], fa: m[3] * 180 / Math.PI, at: now + 1500 }; // where the worker is a moment later goes to the log
         this.greymarchLog("station window: " + want.station + " at " + id.toString(16) + ", the marker " + Math.round(m[0] - fx0) + "," + Math.round(m[1] - fy0) + "," + Math.round(m[2] - fz0) + " from it, facing " + Math.round(m[3] * 180 / Math.PI));
         this.greymarchForgeAnimEvent = want.anim;
-        this.greymarchForgeAnimExit = want.anim.replace(/Enter$/, "Exit"); // IdleSmelterExit, IdleTanningExit ... (the game's own)
+        // the exit EVENT the server names (2026-11-12): the IDLE record's event (IdleChairExitStart, IdleFurnitureExitSlow ...), not its name; the old guess
+        // "<anim minus Enter>Exit" named no event, so the worker stood until the safety snap 2.5 s later
+        this.greymarchForgeAnimExit = want.exit || "IdleChairExitStart";
         this.greymarchForgeAnimGo = now + 350;
         this.greymarchForgeAnim = true; this.greymarchForgeAnimSafety = 0;
     }
