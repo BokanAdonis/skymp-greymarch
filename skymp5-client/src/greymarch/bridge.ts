@@ -136,6 +136,10 @@ const VAMP_FORMS = { mist: 0x38ba, lord: 0x283b, lordFx: 0x283c, potionFx: 0x18e
 // a vampire's eyes, one colour per bloodline (GreymarchCore.esp, made by tools/vampire-eyes.js in the launcher repo): GM_VampEyes{Male,Female}{Colour}0..6, glow 0 (none) to 6 (a Lord)
 const VAMP_EYES: any = { blue: { male: 0x80e, female: 0x815 }, red: { male: 0x81f, female: 0x826 }, yellow: { male: 0x82e, female: 0x835 }, green: { male: 0x83d, female: 0x844 }, purple: { male: 0x84c, female: 0x853 } };
 const VAMP_EYE_RACES = [0x13746, 0x13744, 0x13741, 0x13748, 0x13743, 0x13749, 0x13742, 0x13747]; // Nord, Imperial, Breton, Redguard, High Elf, Wood Elf, Dark Elf, Orc (the human eye shape; khajiit and argonian eyes are not made yet)
+// KHAJIIT AND ARGONIAN EYES (2026-11-11, the owner: their eyes did not show as a vampire; tools/vampire-beast-eyes-esp.js in the launcher repo): from 0x888 in
+// GreymarchCore.esp, per colour (VAMP_BEAST_COLOURS order) 28 parts: Khajiit male 0..6, Khajiit female 0..6, Argonian male 0..6, Argonian female 0..6 (glow 0..6)
+const VAMP_BEAST_EYES = 0x888, VAMP_BEAST_COLOURS = ["blue", "red", "yellow", "green", "purple"];
+const VAMP_BEAST_RACES: any = { 0x13745: 0, 0x88845: 0, 0x13740: 14, 0x8883a: 14 }; // KhajiitRace, KhajiitRaceVampire: 0; ArgonianRace, ArgonianRaceVampire: 14 (then + 7 for a woman)
 const VAMP_FANGS = { male: 0x81c, female: 0x81d }; // GM_VampFangsMale / GM_VampFangsFemale: the human teeth with the upper canines pulled into fangs
 const VAMP_FANG_RACES = [0x13746, 0x13744, 0x13741, 0x13748, 0x13743, 0x13749, 0x13742]; // the human and elf teeth; orcs keep their tusks
 const VAMP_FANG_ITEM = 0x0323fe; // Dragonborn.esm's DLC2ApocryphaBookWarpArmor (slot 61 only, on the server too): GreymarchCore.esp makes it the worn "Vampire Fangs" (DLC2DummyHelmet before: the server's copy covered nearly every armour slot and armour came off) (the server gives it, greymarchVampFangsWear puts it on)
@@ -2334,7 +2338,7 @@ export class GreymarchBridge {
         if (!list.length && !Object.keys(done).length && !Object.keys(this.greymarchVampWaterOn || {}).length) return;
         var gmOff = -1; // GreymarchCore.esp's place in this game's load order
         try { var gmBlue = sp.HeadPart.from(sp.Game.getFormFromFile(VAMP_EYES.blue.male, "GreymarchCore.esp")); if (gmBlue) gmOff = gmBlue.getFormID() - VAMP_EYES.blue.male; } catch (gErr) { gmOff = -1; }
-        var ours = function (id: number) { return gmOff >= 0 && id - gmOff >= 0x80d && id - gmOff <= 0x859; }; // one of Greymarch's vampire eye parts
+        var ours = function (id: number) { var d = id - gmOff; return gmOff >= 0 && ((d >= 0x80d && d <= 0x859) || (d >= VAMP_BEAST_EYES && d < VAMP_BEAST_EYES + 28 * VAMP_BEAST_COLOURS.length)); }; // one of Greymarch's vampire eye parts (beast ones too)
         var skipped = this.greymarchVampEyesSkipped || (this.greymarchVampEyesSkipped = {});
         var others: any = {}; // server actor id -> the eye part their character is built with (formView.ts, __gmVampEyes)
         var waterOn = this.greymarchVampWaterOn || (this.greymarchVampWaterOn = {}); // localId -> true: another vampire's character given water walking here
@@ -2357,7 +2361,8 @@ export class GreymarchBridge {
                     if (walk) waterOn[localId] = true; else delete waterOn[localId];
                 }
                 var race = actor.getRace();
-                if (!race || VAMP_EYE_RACES.indexOf(race.getFormID()) < 0) { // a beast race (khajiit and argonian eyes are not made yet), or in a creature's or the Lord's shape
+                var beast = race ? VAMP_BEAST_RACES[race.getFormID()] : undefined; // khajiit or argonian: their own eye shape (0 or 14), else undefined
+                if (!race || (beast === undefined && VAMP_EYE_RACES.indexOf(race.getFormID()) < 0)) { // another race (a mod's), or in a creature's or the Lord's shape
                     var rid = race ? race.getFormID() : 0;
                     if (skipped[localId] !== rid) { skipped[localId] = rid; this.greymarchLog("vampire: " + localId.toString(16) + " keeps their eyes: no vampire eyes for race " + rid.toString(16) + " yet"); }
                     if (v.fangs) this.greymarchVampFangReport(v.actor, localId, "no vampire eyes or fangs for race " + rid.toString(16));
@@ -2368,7 +2373,9 @@ export class GreymarchBridge {
                 var female = base.getSex() === 1;
                 var glow = Math.max(0, Math.min(6, Number(v.glow) || 0));
                 var colour = VAMP_EYES[v.eyes] ? v.eyes : "blue"; // the bloodline's colour
-                var hp = sp.HeadPart.from(sp.Game.getFormFromFile((female ? VAMP_EYES[colour].female : VAMP_EYES[colour].male) + glow, "GreymarchCore.esp"));
+                var eyeId = beast !== undefined ? VAMP_BEAST_EYES + 28 * Math.max(0, VAMP_BEAST_COLOURS.indexOf(colour)) + beast + (female ? 7 : 0) + glow : (female ? VAMP_EYES[colour].female : VAMP_EYES[colour].male) + glow;
+                var hp = sp.HeadPart.from(sp.Game.getFormFromFile(eyeId, "GreymarchCore.esp"));
+                if (!hp && beast !== undefined) { if (skipped[localId] !== -1) { skipped[localId] = -1; this.greymarchLog("vampire: " + localId.toString(16) + " keeps their eyes: no khajiit or argonian vampire eyes in GreymarchCore.esp (old game files?)"); } continue; }
                 if (!hp) { if (!this.greymarchVampEyesMissing) { this.greymarchVampEyesMissing = true; this.greymarchLog("vampire: the blue eye parts are not in GreymarchCore.esp (old game files?)"); } return; }
                 var cur = this.greymarchVampEyePart(base, 2);
                 var mouth = this.greymarchVampEyePart(base, 0);

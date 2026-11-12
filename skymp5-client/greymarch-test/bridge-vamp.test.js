@@ -125,7 +125,7 @@ test("blue eyes: every listed vampire gets the eye part for their glow, their ow
   const worn = { me: { 2: 0x111, 0: 0x333 }, them: { 2: 0x222, 0: 0x444 } }; // name -> type -> head part id
   const body = (name, race, sex) => ({ name, getRace: () => ({ getFormID: () => race }), getBaseObject: () => ({ name, sex }), changeHeadPart: (hp) => { if (hp.getType() === 0 && worn[name][0]) throw new Error("changeHeadPart only adds a second Misc part: the teeth stay"); worn[name][hp.getType()] = hp.getFormID(); }, regenerateHead: () => {} });
   Object.assign(sp.Game.getPlayer(), body("me", 0x13746, 1));
-  const them = body("them", 0x13745, 0); // a Khajiit: not made yet
+  const them = body("them", 0x13745, 0); // a Khajiit: another player, built with the eyes (formView), never changed here
   sp.Game.getFormEx = (id) => (id === 0x5000 ? them : { id });
   sp.Actor.from = (f) => f;
   sp.Game.getFormFromFile = (id, file) => (file === "GreymarchCore.esp" ? { id: GM + id } : file === "Dawnguard.esm" ? { getFormID: () => DG + id } : null);
@@ -138,7 +138,7 @@ test("blue eyes: every listed vampire gets the eye part for their glow, their ow
     look([{ actor: 0xff000001, glow: 3, fangs: true }, { actor: 0xff000002, glow: 2, fangs: true }]);
     assert.strictEqual(worn.me[2], GM + 0x815 + 3, "a woman at glow 3: GM_VampEyesFemaleBlue3");
     assert.strictEqual(worn.me[0], 0x333, "their own teeth: the fangs are the worn item the server puts on");
-    assert.deepStrictEqual(worn.them, { 2: 0x222, 0: 0x444 }, "a Khajiit keeps their eyes and teeth (not made yet)");
+    assert.deepStrictEqual(worn.them, { 2: 0x222, 0: 0x444 }, "another player's head parts are not changed here (they are built with the eyes)");
     look([{ actor: 0xff000001, glow: 0, fangs: false }]);
     assert.strictEqual(worn.me[2], 0x111, "/eyes off: their own eyes");
     look([{ actor: 0xff000001, glow: 2, fangs: true }]);
@@ -246,18 +246,46 @@ test("a bloodline change turns the eyes at once; a game that starts with one of 
   } finally { Date.now = realNow; }
 });
 
-test("a vampire of a race without vampire eyes (khajiit, argonian) keeps their eyes, and the log says why once", () => {
-  const s = make({ others: { 0xff000002: 0x5000 } });
+test("a vampire of a race without vampire eyes (a mod's race) keeps their eyes, and the log says why once; old game files without the beast eyes: a khajiit keeps theirs", () => {
+  const s = make({ others: { 0xff000002: 0x5000, 0xff000003: 0x6000 } });
   const sp = s.gm.sp;
-  const them = { getRace: () => ({ getFormID: () => 0x13745 }), getBaseObject: () => ({}) };
-  sp.Game.getFormEx = (id) => (id === 0x5000 ? them : { id });
+  const them = { getRace: () => ({ getFormID: () => 0x123456 }), getBaseObject: () => ({}) };
+  const cat = { getRace: () => ({ getFormID: () => 0x13745 }), getBaseObject: () => ({ sex: 0 }) };
+  sp.Game.getFormEx = (id) => (id === 0x5000 ? them : id === 0x6000 ? cat : { id });
   sp.Actor.from = (f) => f;
-  sp.HeadPart = { from: () => null };
+  sp.ActorBase = { from: (b) => (b ? { getSex: () => b.sex, getNumHeadParts: () => 0, getNthHeadPart: () => null } : null) };
+  sp.Game.getFormFromFile = (id, file) => (file === "GreymarchCore.esp" && id < 0x860 ? { id: 0x0a000000 + id } : null); // the human eyes only
+  sp.HeadPart = { from: (f) => (f ? { getFormID: () => f.id, getType: () => 2 } : null) };
   let t = 9_000_000; const realNow = Date.now; Date.now = () => t;
   try {
-    s.say({ customPacketType: "greymarchVampLooks", vampires: [{ actor: 0xff000002, glow: 2, fangs: true, eyes: "red" }] });
+    s.say({ customPacketType: "greymarchVampLooks", vampires: [{ actor: 0xff000002, glow: 2, fangs: true, eyes: "red" }, { actor: 0xff000003, glow: 2, fangs: false, eyes: "red" }] });
     s.tick(); t += 2500; s.tick();
-    assert.strictEqual(s.log.lines.filter((l) => /keeps their eyes: no vampire eyes for race 13745/.test(l)).length, 1);
+    assert.strictEqual(s.log.lines.filter((l) => /keeps their eyes: no vampire eyes for race 123456/.test(l)).length, 1);
+    assert.strictEqual(s.log.lines.filter((l) => /6000 keeps their eyes: no khajiit or argonian vampire eyes/.test(l)).length, 1);
+  } finally { Date.now = realNow; }
+});
+
+test("khajiit and argonian eyes (2026-11-11, the owner: their eyes did not show as a vampire): their own eye shape in the bloodline's colour and glow", () => {
+  const s = make({ others: { 0xff000002: 0x5000, 0xff000003: 0x6000 } });
+  const sp = s.gm.sp;
+  const GM = 0x0a000000;
+  const worn = {};
+  const actor = (race, sex) => ({ getRace: () => ({ getFormID: () => race }), getBaseObject: () => ({ sex }), changeHeadPart: (hp) => { worn.me = hp.getFormID(); }, regenerateHead() {} });
+  Object.assign(sp.Game.getPlayer(), actor(0x13740, 1)); // an Argonian woman: this player
+  const cat = actor(0x13745, 1), lizard = actor(0x8883a, 0); // a Khajiit woman, an Argonian man (in the vampire race)
+  sp.Game.getFormEx = (id) => (id === 0x5000 ? cat : id === 0x6000 ? lizard : { id });
+  sp.Actor.from = (f) => f;
+  sp.ActorBase = { from: (b) => (b ? { getSex: () => b.sex, getNumHeadParts: () => 0, getNthHeadPart: () => null } : null) };
+  sp.Game.getFormFromFile = (id, file) => (file === "GreymarchCore.esp" ? { id: GM + id } : null);
+  sp.HeadPart = { from: (f) => (f ? { getFormID: () => f.id, getType: () => 2 } : null) };
+  let t = 7_000_000; const realNow = Date.now; Date.now = () => t;
+  try {
+    s.say({ customPacketType: "greymarchVampLooks", me: 0xff000001, vampires: [{ actor: 0xff000001, glow: 6, eyes: "purple" }, { actor: 0xff000002, glow: 3, eyes: "red" }, { actor: 0xff000003, glow: 1, eyes: "blue" }] });
+    s.tick();
+    assert.strictEqual(worn.me, GM + 0x888 + 28 * 4 + 14 + 7 + 6, "GM_VampEyesArgonianFemalePurple6 (0x913)");
+    const others = (Function("return this")()).__gmVampEyes;
+    assert.strictEqual(others[0xff000002], GM + 0x8ae, "GM_VampEyesKhajiitFemaleRed3");
+    assert.strictEqual(others[0xff000003], GM + 0x888 + 14 + 1, "GM_VampEyesArgonianMaleBlue1");
   } finally { Date.now = realNow; }
 });
 
