@@ -675,6 +675,8 @@ export class RemoteServer extends ClientListener {
             }
 
             logTrace(this, `loading game in world/cell`, msg.transform.worldOrCell.toString(16));
+            // GREYMARCH: the player's own head parts as the server keeps them (their chosen eyes among them), for a vampire's /eyes (bridge.ts greymarchVampEyes)
+            try { (Function("return this")() as any).__gmOwnLookParts = (msg.appearance && Array.isArray(msg.appearance.headpartIds)) ? msg.appearance.headpartIds.slice() : []; } catch (e) { /* none */ }
             const loadGameService = this.controller.lookupListener(LoadGameService);
             loadGameService.loadGame(
               msg.transform.pos,

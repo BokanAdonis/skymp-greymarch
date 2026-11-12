@@ -2380,8 +2380,15 @@ export class GreymarchBridge {
                 var cur = this.greymarchVampEyePart(base, 2);
                 var mouth = this.greymarchVampEyePart(base, 0);
                 var rec = done[localId];
-                if (!rec) rec = done[localId] = { orig: 0, key: "", mouth: 0, fangs: false };
+                if (!rec) rec = done[localId] = { orig: 0, key: "", mouth: 0, fangs: false, ownSaid: false };
                 if (cur && !ours(cur.getFormID())) rec.orig = cur.getFormID(); // what they wear that is not ours is their own eyes (SkyMP may have put their look back)
+                // THEIR OWN EYES FROM THEIR LOOK (2026-11-11, the owner: an argonian's /eyes only stopped the glow, their own eyes never came back): the character
+                // did not name its own eyes (none, or ours already), so /eyes put on our no-glow eye. The look the server sent at login names them.
+                if (!rec.orig && localId === 0x14) {
+                    var lookParts: any[] = []; try { lookParts = (Function("return this")() as any).__gmOwnLookParts || []; } catch (lErr) { lookParts = []; }
+                    for (var lp = 0; lp < lookParts.length && !rec.orig; lp++) { try { var lh = sp.HeadPart.from(sp.Game.getFormEx(Number(lookParts[lp]))); if (lh && lh.getType() === 2 && !ours(lh.getFormID())) rec.orig = lh.getFormID(); } catch (lpErr) { /* not loaded */ } }
+                    if (!rec.ownSaid) { rec.ownSaid = true; this.greymarchLog("vampire: 14 own eyes " + (rec.orig ? rec.orig.toString(16) + " (from their look; the character wore " + (cur ? cur.getFormID().toString(16) : "none") + ")" : "not known: the character wore " + (cur ? cur.getFormID().toString(16) : "none") + ", their look names " + lookParts.length + " parts and no eyes of their own")); }
+                }
                 var own = glow === 0 && rec.orig ? sp.HeadPart.from(sp.Game.getFormEx(rec.orig)) : null; // /eyes hides them: their own eyes
                 var wantEyes = own || hp, key = own ? "own" : colour + glow;
                 if (localId !== 0x14) { // another player: built with the eyes (formView.ts); glow 0 is their own look as it is

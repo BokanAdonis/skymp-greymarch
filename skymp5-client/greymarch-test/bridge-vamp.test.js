@@ -580,3 +580,26 @@ test("the held feeding: a refused replay is tried again within a second, and aft
     assert.ok(v.log.lines.some((l) => /plays again after 3 refusal/.test(l)));
   } finally { Date.now = realNow; }
 });
+
+test("/eyes brings back the eyes their look names when the character does not name its own (2026-11-11, the owner: an argonian's eyes only stopped glowing)", () => {
+  const s = make();
+  const sp = s.gm.sp;
+  const GM = 0x0a000000; let worn = 0;
+  Object.assign(sp.Game.getPlayer(), { getRace: () => ({ getFormID: () => 0x13740 }), getBaseObject: () => ({ sex: 0 }), changeHeadPart: (hp) => { worn = hp.getFormID(); }, regenerateHead() {} });
+  sp.ActorBase = { from: (b) => (b ? { getSex: () => 0, getNumHeadParts: () => 0, getNthHeadPart: () => null } : null) }; // the character names no eyes
+  sp.Game.getFormFromFile = (id, file) => (file === "GreymarchCore.esp" ? { id: GM + id } : null);
+  sp.Game.getFormEx = (id) => ({ id });
+  sp.HeadPart = { from: (f) => (f ? { getFormID: () => f.id, getType: () => (f.id === 0x9d749 || f.id >= GM ? 2 : 1) } : null) };
+  const g = Function("return this")(); g.__gmOwnLookParts = [0x51111, 0x9d749]; // their look: a scale part and MaleEyesArgonianBlue
+  let t = 8_000_000; const realNow = Date.now; Date.now = () => t;
+  try {
+    s.say({ customPacketType: "greymarchVampLooks", me: 0xff000001, vampires: [{ actor: 0xff000001, glow: 3, eyes: "red" }] });
+    s.tick();
+    assert.strictEqual(worn, GM + 0x888 + 28 + 14 + 3, "the vampire eyes");
+    t += 2500;
+    s.say({ customPacketType: "greymarchVampLooks", me: 0xff000001, vampires: [{ actor: 0xff000001, glow: 0, eyes: "red" }] });
+    s.tick();
+    assert.strictEqual(worn, 0x9d749, "/eyes: the eyes their look names, not our no-glow eye");
+    assert.ok(s.log.lines.some((l) => /14 own eyes 9d749 \(from their look/.test(l)));
+  } finally { Date.now = realNow; delete g.__gmOwnLookParts; }
+});
