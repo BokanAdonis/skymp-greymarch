@@ -2959,12 +2959,18 @@ export class GreymarchBridge {
             // RaceMenu preset load sets it without drawing it, so a new Height read as already on; after a new look or a preset load it is put on (and drawn) once
             // HEIGHT HARD SAVED (2026-11-11): the stored scale can read right while the skeleton shows another, so the server's Height is put on again every 10 s
             if (now >= (c.hForceAt || 0)) c.hDirty = true;
-            if (!c.hDirty && Math.abs(cur - want) < 0.002) return true;
+            // THE DRAWN SIZE (2026-11-12, the owner: XMCG saw them shorter; XMCG's log said "Height 1 -> 1.165 (the skeleton reads 1.165)"): that read is
+            // NiOverride's STORED scale, not the skeleton. The NPC node's own scale (NetImmerse) is what is on screen: a copy drawn at another size is put right
+            // even when the stored scale reads right, and when NiOverride's put does not reach the skeleton, the node is scaled directly
+            var drawn = this.greymarchHeightDrawn(ac), off = drawn > 0 && Math.abs(drawn - want) >= 0.002;
+            if (!c.hDirty && !off && Math.abs(cur - want) < 0.002) return true;
             c.hDirty = false; c.hForceAt = now + 10000;
             this.greymarchHeightPut(ac, female, want, false);
             c.hNext = now + 1000; // read back soon: a load that was still going on can drop it
             var after = this.greymarchHeightNow(ac, female);
-            if (Math.abs(cur - want) >= 0.002) this.greymarchRmCopyLog(c.actor, "Height " + cur + " -> " + want + " (the skeleton reads " + after + ")");
+            var drawnAfter = this.greymarchHeightFix(ac, want, off);
+            if (Math.abs(cur - want) >= 0.002) this.greymarchRmCopyLog(c.actor, "Height " + cur + " -> " + want + " (stored " + after + ", drawn " + drawnAfter + ")");
+            else if (off) this.greymarchHeightDrawnLog((c.actor >>> 0).toString(16), drawn, cur, want, drawnAfter);
         } catch (err) {
             this.greymarchRmCopyLog(c.actor, "the Height could not be put on the copy: " + err);
         }
@@ -3067,18 +3073,38 @@ export class GreymarchBridge {
             }
             var want = Math.round(kept * 1000) / 1000;
             if (now >= (rm.ownHeightForceAt || 0)) rm.ownHeightDirty = true; // HEIGHT HARD SAVED: put on again every 10 s
-            if (!rm.ownHeightDirty && Math.abs(cur - want) < 0.002) return; // the stored scale can read right while the skeleton is not drawn (a preset load)
+            var drawn = this.greymarchHeightDrawn(player), off = drawn > 0 && Math.abs(drawn - want) >= 0.002; // THE DRAWN SIZE (greymarchCopyHeight)
+            if (!rm.ownHeightDirty && !off && Math.abs(cur - want) < 0.002) return; // the stored scale can read right while the skeleton is not drawn (a preset load)
             rm.ownHeightDirty = false; rm.ownHeightForceAt = now + 10000;
             var quiet = Math.abs(cur - want) < 0.002;
             this.greymarchHeightPut(player, female, want, true);
             var after = this.greymarchHeightNow(player, female);
-            if (quiet) return;
+            var drawnAfter = this.greymarchHeightFix(player, want, off);
+            if (quiet) { if (off) this.greymarchHeightDrawnLog("own", drawn, cur, want, drawnAfter); return; }
             rm.ownHeightSaid = (rm.ownHeightSaid || 0) + 1;
             if (rm.ownHeightSaid <= 20) this.greymarchLog("racemenu: own Height " + cur + " -> " + want + " (the skeleton reads " + after + ")");
         } catch (err) {
             rm.ownHeightErr = (rm.ownHeightErr || 0) + 1;
             if (rm.ownHeightErr <= 5) this.greymarchLog("racemenu: the own Height could not be put on: " + err);
         }
+    }
+    // The size a body is drawn at: the NPC node's own scale on its skeleton (third person), -1 when it cannot be read
+    greymarchHeightDrawn(actor: any): any {
+        try { var v = Number(this.sp.NetImmerse.getNodeScale(actor, "NPC", false)); return v > 0 ? v : -1; } catch (e) { return -1; }
+    }
+    // After a put: the drawn size read again; when it was off before and still is, the NPC node is scaled straight on the skeleton (NiOverride's put did not
+    // reach it). -> the drawn size now
+    greymarchHeightFix(actor: any, want: number, wasOff: boolean): any {
+        var d = this.greymarchHeightDrawn(actor);
+        if (wasOff && d > 0 && Math.abs(d - want) >= 0.002) {
+            try { this.sp.NetImmerse.setNodeScale(actor, "NPC", want, false); } catch (e) { /* not drawn now */ }
+            d = this.greymarchHeightDrawn(actor);
+        }
+        return Math.round(d * 1000) / 1000;
+    }
+    greymarchHeightDrawnLog(who: string, drawn: number, stored: number, want: number, now: number): any {
+        this.greymarchHeightDrawnSaid = (this.greymarchHeightDrawnSaid || 0) + 1;
+        if (this.greymarchHeightDrawnSaid <= 40) this.greymarchLog("racemenu: " + who + ": drawn at " + (Math.round(drawn * 1000) / 1000) + " while stored " + (Math.round(stored * 1000) / 1000) + "; Height " + want + " put on again, drawn now " + now);
     }
     // The Height on a skeleton: RaceMenu's scale on the NPC node (third person; the player's own first person too), 1 taking it off.
     greymarchHeightPut(actor: any, female: boolean, v: number, firstPerson: boolean): any {

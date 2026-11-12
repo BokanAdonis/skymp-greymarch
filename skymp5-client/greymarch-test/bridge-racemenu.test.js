@@ -442,3 +442,32 @@ test("EVERY COPY GETS ITS TURN (2026-11-11, the owner's log: told Height 1.155 f
   assert.deepStrictEqual(near.sets, [1.1], "put on within a second, though 30 lower ids are far away");
   assert.ok(s.log.lines.some((l) => /ff000a62: Height 0 -> 1\.1|ff000a62: Height 1 -> 1\.1/.test(l)) || near.sets.length === 1);
 });
+
+test("the drawn size (2026-11-12, the owner: XMCG saw them shorter while XMCG's game said the stored scale was right): a copy drawn at another size is put right, and scaled on the skeleton when NiOverride's put does not reach it", () => {
+  const s = make();
+  const copy = { loaded: true, id: 0x43, scale: 0, sets: [], drawn: 1, reaches: false, direct: [] };
+  const copyActor = { is3DLoaded: () => copy.loaded, isDisabled: () => false, getRace: () => ({ getName: () => "Nord" }), getBaseObject: () => "base" };
+  s.sp.Actor = { from: (f) => (f === copy ? copyActor : null) };
+  s.sp.ActorBase = { from: () => ({ getSex: () => 0 }) };
+  s.sp.Game.getFormEx = (id) => (id === copy.id ? copy : null);
+  s.sp.NetImmerse = { getNodeScale: (a, node) => { assert.strictEqual(node, "NPC"); return copy.drawn; }, setNodeScale: (a, node, v) => { copy.direct.push(v); copy.drawn = v; } };
+  s.sp.callNative = (cls, fn, self, actor, fp, female, node, key, v) => {
+    if (fn === "GetNodeTransformScale") return copy.scale;
+    if (fn === "AddNodeTransformScale") { copy.sets.push(v); copy.scale = v; if (copy.reaches) copy.drawn = v; return; }
+    if (fn === "UpdateNodeTransform") return;
+    throw new Error("unexpected " + fn);
+  };
+  s.gm.greymarchRmCopies = null;
+  s.say({ customPacketType: "greymarchRaceMenuLookOf", actorId: 0x43, look: { transforms: [{ firstPerson: false, node: "NPC", keys: [{ name: "RSMPlugin", values: [{ data: 1.165, index: 0, key: 20, type: 2 }] }] }] } });
+  let t = 500000;
+  const tick = (ms) => { for (let e = t + ms; t < e; t += 250) s.gm.greymarchRaceMenuHeightsTick(t); };
+  tick(250);
+  assert.deepStrictEqual(copy.direct, [1.165], "the put did not reach the skeleton: the NPC node scaled directly");
+  copy.scale = 1.165; copy.drawn = 1; copy.sets = []; copy.direct = []; copy.reaches = true;
+  tick(2250);
+  assert.deepStrictEqual([copy.sets, copy.direct], [[1.165], []], "stored right but drawn short: put on again, which reached it");
+  assert.ok(s.log.lines.some((l) => /drawn at 1 while stored 1\.165; Height 1\.165 put on again, drawn now 1\.165/.test(l)), "said in the log");
+  copy.sets = [];
+  tick(5000);
+  assert.deepStrictEqual(copy.sets, [], "drawn and stored right: left alone until the 10 s put");
+});
