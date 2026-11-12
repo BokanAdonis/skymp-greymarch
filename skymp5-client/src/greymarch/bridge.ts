@@ -184,6 +184,7 @@ const ENEMY_MS = 10000; // our enemy bar (greymarchEnemyTick) shows the one foug
 const VITALS_AWAY_Y = -20000; // the game's own health, magicka and stamina meters are moved this far above the screen while ours show (greymarchVitalsGame)
 const PAUSE_AFTER_MENU_MS = 400; // an Esc this soon after a game menu (inventory, map, a chest ...) was seen open closed that menu: no pause menu (greymarchPauseTick)
 const ESC_KEY = 1;
+const FREECAM_KEY = 68; // F10: the free camera a GM gave for a recording (greymarchFreecamTick)
 const CRAFT_SCRIPT = PROF_SCRIPT.split("__gmProfSend").join("__gmCraftRun").split("greymarch-prof").join("greymarch-craft").split("2147483220").join("2147483224"); // the crafting panel (a station was used): the same loader, another page
 const CLICK_GUARD_MS = 400; // after a window closes, attacks and drawing a weapon are ignored this long: the click on its X is not a swing (greymarchClickGuard)
 const MINI_KEEP_MS = 3500; // a mini game window kept up between logs (the chopping block) closes if the next does not come within this
@@ -376,6 +377,7 @@ export class GreymarchBridge {
         if (type === "greymarchMinigame") { this.greymarchMiniShow(msg); return; } // a profession mini game before the work (gamemode minigames.js)
         if (type === "greymarchMinigameDone") { this.greymarchMiniDone(msg); return; }
         if (type === "greymarchPoisoned") { this.greymarchPoisonedWant = Array.isArray(msg.actors) ? msg.actors.map((a: any) => Number(a) >>> 0).filter((a: number) => a > 0).slice(0, 64) : []; return; } // THE GLOW (greymarchPoisonGlowTick)
+        if (type === "greymarchFreecam") { this.greymarchFreecamGrant(Number(msg.seconds)); return; } // a GM gave this player the free camera for a while, or it ended (gamemode freecam.js)
         if (type === "greymarchCastAnim") { var cm = Number(msg.mode), cf = Number(msg.ffMs); if (cm >= 1 && cm <= 6) this.sp.storage["greymarchCastAnimMode"] = cm; if (cf >= 200 && cf <= 3000) this.sp.storage["greymarchCastAnimFfMs"] = cf; this.greymarchLog("magic: cast animation mode " + cm + ", single shot " + cf + " ms (/castanim)"); return; } // how other players' casts are animated (castAnimMode.ts)
         if (type === "greymarchCastCharge") { if (Number(msg.actor) > 0) (this.greymarchChargeQ || (this.greymarchChargeQ = [])).push({ actor: Number(msg.actor), hand: msg.hand === 0 ? 0 : 1, on: msg.on === true }); return; } // ANOTHER PLAYER CHARGES A SINGLE SHOT (greymarchChargeTick)
         if (type === "greymarchStaffSetCharge") { var scHand = msg.hand === 0 ? 0 : 1, scV = Number(msg.charge); if (scV >= 0 && isFinite(scV)) (this.greymarchStaffChargeSet || (this.greymarchStaffChargeSet = [])).push({ hand: scHand, base: Number(msg.base) >>> 0, charge: scV }); return; } // STAFF CHARGE (greymarchStaffChargeTick)
@@ -631,6 +633,7 @@ export class GreymarchBridge {
         this.greymarchStandUpTick(Date.now()); // the server asked the player to get up from their furniture (the end of a won mining game)
         this.greymarchBuildAngleTick(); // a piece a GM placed was turned: this game turns its copy
         this.greymarchBuildCamTick(Date.now()); // the build system's free camera: the preview where the camera looks
+        this.greymarchFreecamTick(Date.now()); // the free camera a GM gave for a recording (F10)
         this.greymarchChopTick(Date.now()); // sitting at a chopping block: the server counts the chops (XP, firewood)
         this.greymarchForgeTick(Date.now()); // after the forge window closed: the smith is surely out of the forge's animation
         this.greymarchChestGlowTick(Date.now()); // a dungeon's boss chest shines while its loot waits
@@ -1023,6 +1026,7 @@ export class GreymarchBridge {
         if (e && e.code >= 2 && e.code <= 9) { try { var nDown2 = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); var nWas = !!this["greymarchFavNum" + e.code]; this["greymarchFavNum" + e.code] = nDown2 && e.isUp !== true; var inFav = false; try { inFav = this.sp.Ui.isMenuOpen("FavoritesMenu"); } catch (ifErr) { inFav = false; } if (nDown2 && e.isUp !== true && !nWas && (e.code <= 3 || inFav)) { var uev = ""; try { uev = String(e.userEventName || ""); } catch (ueErr) { uev = "?"; } this.greymarchLog("favorites: key " + (e.code - 1) + " pressed " + (inFav ? "in the Favorites menu" : "in the world") + " (device " + e.device + ", code " + e.code + ", the game's action: " + (uev || "none") + ")"); if (inFav) this.greymarchFavScanSlot = e.code - 2; else if (e.code === 2 && !uev && !this.greymarchChatTyping) this.greymarchHotkey1Use = Date.now(); } } catch (fkErr) { /* only a log line */ } } // key 1 with no game action, in the world: its favorite is used here (greymarchFavTick)
         if (e && e.code === ESC_KEY && e.device !== undefined && e.device !== 0) return; // code 1 from the mouse is its right button, not Esc (2026-11-05: right click opened the pause menu); only the keyboard's Esc counts
         if (this.greymarchBuildCam && this.greymarchBuildCamKey(e)) return; // the build system's free camera has the keys it uses
+        if (e.code === FREECAM_KEY) { var fcDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (e.isUp === true) fcDown = false; var fcWas = !!this.greymarchFreecamKeyDown; this.greymarchFreecamKeyDown = fcDown; if (fcDown && !fcWas && !this.greymarchChatTyping) this.greymarchFreecamWanted = Date.now(); return; } // F10: the free camera for a recording, turned in the update phase
         if (e.code === EMOTE_EXIT_KEY) { var xDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (e.isUp === true) xDown = false; if (xDown && !this.greymarchKeyExit && !this.greymarchChatTyping && !this.greymarchPanelHasKeys()) this.greymarchEmoteExitWanted = Date.now(); this.greymarchKeyExit = xDown; } // Backspace: out of the emote or pose (greymarchEmoteExitTick)
         if (this.greymarchEmoteOnce && (e.code === 17 || e.code === 30 || e.code === 31 || e.code === 32)) { var oDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (oDown && e.isUp !== true) this.greymarchEmoteOnce.moved = true; } // W A S D during a one-off emote (greymarchEmoteExitTick)
         if (this.greymarchEmoteNow && this.greymarchEmoteNow.kind === "loop" && !this.greymarchEmoteNow.meal && (e.code === 17 || e.code === 30 || e.code === 31 || e.code === 32 || e.code === 57)) { var mvDown = typeof e.isDown === "function" ? e.isDown() : (e.isDown === true || e.isPressed === true); if (mvDown && e.isUp !== true) this.greymarchEmoteStopWanted = Date.now(); } // W A S D or Space ends an emote that lasts (greymarchEmoteTick); no jump with it: movement is off while it lasts (greymarchEmoteMoveTick)
@@ -4914,6 +4918,53 @@ export class GreymarchBridge {
         }
     }
     // POP-UP (warnings, announcements): a box on the middle right of the screen, drawn by the staff page. The browser layer is shown just long enough, then put back the way it was.
+    // ---- FREE CAMERA FOR TRAILERS (2026-11-12, the owner: "a way GMs can give people temporary access to freecam so people can record stuff for trailers").
+    // A GM gives a character the free camera for some minutes (/freecam, gamemode freecam.js); the server tells this game the seconds left every 3 s
+    // ({ customPacketType: "greymarchFreecam", seconds }, 0 = none). While it lasts, F10 turns the game's own free camera on and off (GreymarchCamera.dll
+    // SetFreeCamera, as the Build tab's); our overlays (chat, bars, logo, notices) are hidden while it is on, for clean footage, and come back after. When the time
+    // runs out or a GM takes it back the camera comes back to the body at once. The body stays where it was: the camera moves in this game only.
+    greymarchFreecamGrant(seconds: number): any {
+        var now = Date.now(), had = (this.greymarchFreecamUntil || 0) > now;
+        var s = isFinite(seconds) && seconds > 0 ? Math.min(seconds, 4 * 3600) : 0;
+        this.greymarchFreecamUntil = s > 0 ? now + s * 1000 : 0;
+        if (s > 0 && !had) { this.greymarchFreecamWarned = false; this.greymarchToast({ title: "Free camera", text: "A GM gave you the free camera for " + Math.ceil(s / 60) + " min to record. Press F10 to fly it (WASD and the mouse), F10 again to come back. The interface hides while it is on.", kind: "info", ms: 9000 }); this.greymarchLog("freecam: given for " + s + " s"); }
+        if (!s && had) { this.greymarchLog("freecam: ended by the server"); this.greymarchFreecamEndWanted = "a GM ended it or it ran out"; }
+    }
+    greymarchFreecamTick(now: number): any {
+        var sp = this.sp, st = this.greymarchFreecamOn, until = this.greymarchFreecamUntil || 0;
+        var w = this.greymarchFreecamWanted;
+        if (w) {
+            this.greymarchFreecamWanted = 0;
+            if (now - w <= 2000) {
+                if (st) { this.greymarchFreecamStop("F10"); return; }
+                if (until <= now) { this.greymarchToast({ title: "Free camera", text: "You do not have the free camera. A GM can give it to you for a recording (/freecam).", kind: "info", ms: 5000 }); return; }
+                if (this.greymarchBuildCam) { this.greymarchToast({ title: "Free camera", text: "Leave the Build camera first (B or Esc).", kind: "info", ms: 4000 }); return; }
+                var on = false;
+                try { on = !!sp.callNative("GreymarchCam", "SetFreeCamera", undefined, true); } catch (e) { on = false; this.greymarchLog("freecam: no free camera (" + e + ")"); }
+                if (!on) { this.greymarchToast({ title: "Free camera", text: "The free camera needs the latest game files (GreymarchCamera.dll). Relaunch through the launcher.", kind: "info", ms: 6000 }); return; }
+                var vis = true; try { vis = !!sp.browser.isVisible(); } catch (e2) { vis = true; }
+                this.greymarchFreecamOn = { at: now, hideAt: now + 2500, wasVisible: vis, next: 0 };
+                this.greymarchToast({ title: "Free camera on", text: "F10 to come back. " + Math.max(1, Math.ceil((until - now) / 60000)) + " min left. The interface hides in a moment.", kind: "info", ms: 2500 });
+                this.greymarchLog("freecam: on");
+                return;
+            }
+        }
+        if (this.greymarchFreecamEndWanted) { var why = this.greymarchFreecamEndWanted; this.greymarchFreecamEndWanted = ""; if (st) { this.greymarchFreecamStop(why); this.greymarchToast({ title: "Free camera", text: "Your free camera time is over.", kind: "info", ms: 5000 }); } return; }
+        if (!st || now < st.next) return;
+        st.next = now + 250;
+        if (until <= now) { this.greymarchFreecamStop("the time ran out"); this.greymarchToast({ title: "Free camera", text: "Your free camera time is over.", kind: "info", ms: 5000 }); return; }
+        var still = true; try { still = !!sp.callNative("GreymarchCam", "IsFreeCamera", undefined); } catch (e3) { still = true; }
+        if (!still) { this.greymarchFreecamStop("the game left the free camera"); return; }
+        if (!this.greymarchFreecamWarned && until - now <= 60000) { this.greymarchFreecamWarned = true; try { sp.Debug.notification("Free camera: 1 minute left"); } catch (e4) { /* a hint is a nicety */ } }
+        if (now >= st.hideAt && !this.greymarchChatTyping) { try { if (sp.browser.isVisible()) sp.browser.setVisible(false); } catch (e5) { /* nothing to hide */ } }
+    }
+    greymarchFreecamStop(why: string): any {
+        var st = this.greymarchFreecamOn;
+        this.greymarchFreecamOn = null;
+        try { if (this.sp.callNative("GreymarchCam", "IsFreeCamera", undefined)) this.sp.callNative("GreymarchCam", "SetFreeCamera", undefined, false); } catch (e) { /* the camera is the player's again on the next view change */ }
+        try { this.sp.browser.setVisible(st ? st.wasVisible !== false : true); } catch (e2) { /* the next window shows it */ }
+        this.greymarchLog("freecam: off (" + why + ")");
+    }
     greymarchToast(msg: any): any {
         var ms = Math.max(2000, Math.min(20000, Number(msg.ms) || 9000));
         this.greymarchToastUntil = Date.now() + ms + 1500;
