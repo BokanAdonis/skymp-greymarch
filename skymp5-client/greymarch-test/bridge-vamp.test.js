@@ -275,8 +275,9 @@ test("khajiit and argonian eyes (2026-11-11, the owner: their eyes did not show 
   const cat = actor(0x13745, 1), lizard = actor(0x8883a, 0); // a Khajiit woman, an Argonian man (in the vampire race)
   sp.Game.getFormEx = (id) => (id === 0x5000 ? cat : id === 0x6000 ? lizard : { id });
   sp.Actor.from = (f) => f;
-  sp.ActorBase = { from: (b) => (b ? { getSex: () => b.sex, getNumHeadParts: () => 0, getNthHeadPart: () => null } : null) };
+  sp.ActorBase = { from: (b) => (b ? { getSex: () => b.sex, getNumHeadParts: () => 1, getNthHeadPart: () => ({ getFormID: () => 0x777, getType: () => 2 }) } : null) }; // their own eyes: 0x777
   sp.Game.getFormFromFile = (id, file) => (file === "GreymarchCore.esp" ? { id: GM + id } : null);
+  sp.Game.getFormEx = ((prev) => (id) => (id === 0x777 ? { id: 0x777 } : prev(id)))(sp.Game.getFormEx);
   sp.HeadPart = { from: (f) => (f ? { getFormID: () => f.id, getType: () => 2 } : null) };
   let t = 7_000_000; const realNow = Date.now; Date.now = () => t;
   try {
@@ -286,6 +287,11 @@ test("khajiit and argonian eyes (2026-11-11, the owner: their eyes did not show 
     const others = (Function("return this")()).__gmVampEyes;
     assert.strictEqual(others[0xff000002], GM + 0x8ae, "GM_VampEyesKhajiitFemaleRed3");
     assert.strictEqual(others[0xff000003], GM + 0x888 + 14 + 1, "GM_VampEyesArgonianMaleBlue1");
+    t += 2500;
+    s.say({ customPacketType: "greymarchVampLooks", me: 0xff000001, vampires: [{ actor: 0xff000001, glow: 0, eyes: "purple" }, { actor: 0xff000002, glow: 0, eyes: "red" }] });
+    s.tick();
+    assert.strictEqual(worn.me, 0x777, "/eyes hides them: an argonian's own eyes come back");
+    assert.strictEqual((Function("return this")()).__gmVampEyes[0xff000002], undefined, "/eyes: another khajiit is built with their own eyes");
   } finally { Date.now = realNow; }
 });
 
