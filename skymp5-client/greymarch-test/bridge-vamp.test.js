@@ -649,3 +649,24 @@ test("the player's own vampire eyes wait 6 s after a world load and for their bo
     drawn = true; look(); assert.strictEqual(worn, GM + 0x80e + 2, "drawn: on");
   } finally { Date.now = realNow; }
 });
+
+test("the player's own vampire eyes are not put on again and again when the character names no eyes (2026-11-12, the owner's clip: a Fledgling's eyes flickered)", () => {
+  const s = make();
+  const sp = s.gm.sp;
+  const GM = 0x0a000000; let changes = 0;
+  Object.assign(sp.Game.getPlayer(), { getRace: () => ({ getFormID: () => 0x13746 }), getBaseObject: () => ({ sex: 0 }), changeHeadPart: () => { changes++; }, regenerateHead() {}, is3DLoaded: () => true });
+  sp.ActorBase = { from: (b) => (b ? { getSex: () => 0, getNumHeadParts: () => 0, getNthHeadPart: () => null } : null) }; // names no eyes, before or after
+  sp.Game.getFormFromFile = (id, file) => (file === "GreymarchCore.esp" ? { id: GM + id } : null);
+  sp.Game.getFormEx = (id) => ({ id });
+  sp.HeadPart = { from: (f) => (f ? { getFormID: () => f.id, getType: () => 2 } : null) };
+  let t = 20_000_000; const realNow = Date.now; Date.now = () => t;
+  const look = (glow) => { s.say({ customPacketType: "greymarchVampLooks", me: 0xff000001, vampires: [{ actor: 0xff000001, glow, eyes: "blue" }] }); s.tick(); t += 2500; };
+  try {
+    look(1); assert.strictEqual(changes, 1, "on");
+    for (let i = 0; i < 4; i++) look(1);
+    assert.strictEqual(changes, 1, "10 s later: not put on again every pass");
+    for (let i = 0; i < 2; i++) look(1);
+    assert.strictEqual(changes, 2, "after 15 s: once more");
+    look(2); assert.strictEqual(changes, 3, "a new glow: at once");
+  } finally { Date.now = realNow; }
+});

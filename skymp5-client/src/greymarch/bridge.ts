@@ -143,7 +143,8 @@ const VAMP_EYES: any = { blue: { male: 0x80e, female: 0x815 }, red: { male: 0x81
 const VAMP_EYE_RACES = [0x13746, 0x13744, 0x13741, 0x13748, 0x13743, 0x13749, 0x13742, 0x13747]; // Nord, Imperial, Breton, Redguard, High Elf, Wood Elf, Dark Elf, Orc (the human eye shape; khajiit and argonian eyes are not made yet)
 // KHAJIIT AND ARGONIAN EYES (2026-11-11, the owner: their eyes did not show as a vampire; tools/vampire-beast-eyes-esp.js in the launcher repo): from 0x888 in
 // GreymarchCore.esp, per colour (VAMP_BEAST_COLOURS order) 28 parts: Khajiit male 0..6, Khajiit female 0..6, Argonian male 0..6, Argonian female 0..6 (glow 0..6)
-const VAMP_EYES_SETTLE_MS = 6000; // the player's own eyes wait this long after a world load
+const VAMP_EYES_SETTLE_MS = 6000;
+const VAMP_EYES_AGAIN_MS = 15000; // the player's own unchanged vampire eyes are put on again at most this often (a character naming no eyes, 2026-11-12) // the player's own eyes wait this long after a world load
 const VAMP_BEAST_EYES = 0x888, VAMP_BEAST_COLOURS = ["blue", "red", "yellow", "green", "purple"];
 const VAMP_BEAST_RACES: any = { 0x13745: 0, 0x88845: 0, 0x13740: 14, 0x8883a: 14 }; // KhajiitRace, KhajiitRaceVampire: 0; ArgonianRace, ArgonianRaceVampire: 14 (then + 7 for a woman)
 // A RACE'S OWN EYES (Skyrim.esm RACE head data): a character who kept their race's default eyes names none (not on the character, not in their look), so /eyes
@@ -2446,9 +2447,17 @@ export class GreymarchBridge {
                     if (glow > 0) others[v.actor] = hp.getFormID();
                     if (rec.key !== key) { this.greymarchLog("vampire: " + localId.toString(16) + (glow === 0 ? " is built with their own eyes (/eyes)" : " is built with " + colour + " eyes, glow " + glow)); rec.key = key; }
                 } else if (!(rec.key === key && cur && cur.getFormID() === wantEyes.getFormID())) {
-                    actor.changeHeadPart(wantEyes); // the player's own head: the game shapes it
-                    if (rec.key !== key) this.greymarchLog("vampire: " + localId.toString(16) + (own ? " shows their own eyes (/eyes)" : " has " + colour + " eyes, glow " + glow));
-                    rec.key = key;
+                    // NOT AGAIN AND AGAIN (2026-11-12, the owner's clip: a Fledgling's eyes flickered and disappeared): a character that kept their race's default eyes
+                    // names no eye part, even after the change, so every 2 s pass found "not ours" and changed the head again, the eyes gone between. The same look is
+                    // put on again at most every VAMP_EYES_AGAIN_MS (SkyMP putting their look back is still undone, a little later); a new look at once.
+                    var sameLook = rec.key === key;
+                    if (!sameLook || now - (rec.appliedAt || 0) >= VAMP_EYES_AGAIN_MS) {
+                        actor.changeHeadPart(wantEyes); // the player's own head: the game shapes it
+                        rec.appliedAt = now;
+                        if (!sameLook) this.greymarchLog("vampire: " + localId.toString(16) + (own ? " shows their own eyes (/eyes)" : " has " + colour + " eyes, glow " + glow));
+                        else { rec.again = (rec.again || 0) + 1; if (rec.again === 1 || rec.again % 20 === 0) this.greymarchLog("vampire: 14 eyes put on again (" + rec.again + "x; the character names " + (cur ? cur.getFormID().toString(16) : "no eyes") + ")"); }
+                        rec.key = key;
+                    }
                 }
                 // THE FANGS are a worn item now: the server puts GreymarchCore's "Vampire Fangs" on a vampire while their fangs show (vampire.js fangsWorn), and every
                 // game shows it like any worn gear, with no redraw. Changing the head parts in each game (earlier builds) never reached other players' games: SkyMP draws
