@@ -50,6 +50,18 @@ test("PUT ON FOR REAL (2026-11-11 evening, the owner's log: kept on, then two un
   const src = read("sync/inventory.ts").replace(/\r\n/g, "\n");
   const swapAt = src.indexOf("swapPairs = swap.pairs;"), equipAt = src.indexOf("if (swapPairs.length && !enableCrashProtection)"), loopAt = src.indexOf("diff.forEach((e, i) => {");
   assert.ok(swapAt > 0 && equipAt > loopAt && loopAt > swapAt, "the equip comes after the add/remove loop");
-  assert.match(src, /if \(f\.getType\(\) === FormType\.Weapon\) ac\.equipItemEx\(f, p\.in\.wornLeft \? 2 : 1, false, false\);\n\s*else ac\.equipItem\(f, false, true\);/);
+  assert.match(src, /if \(f\.getType\(\) === FormType\.Weapon\) ac\.equipItemEx\(f, entry\.wornLeft \? 2 : 1, false, false\);\n\s*else ac\.equipItemEx\(f, 0, false, false\);/);
   assert.match(src, /put on again after the swap/);
+});
+
+test("CHECKED AGAIN (2026-11-11 night, the owner's log: put on again, yet only the weapon came back): each swapped piece is rechecked later in the update phase", () => {
+  const src = read("sync/inventory.ts").replace(/\r\n/g, "\n");
+  for (const bit of [
+    "const REDRESS_AFTER_MS = [300, 1000, 2000, 3500];",
+    "redressLater(refr.getFormID(), p.in);",
+    'on("update", () => {',
+    "if (ac.isEquipped(f)) {",
+    '" ms after the swap, put on again"',
+    '  Form,\n  on,\n} from "skyrimPlatform";',
+  ]) assert.ok(src.includes(bit), bit);
 });

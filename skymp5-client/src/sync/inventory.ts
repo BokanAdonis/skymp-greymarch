@@ -23,6 +23,7 @@ import {
   ActorBase,
   FormType,
   Form,
+  on,
 } from "skyrimPlatform";
 
 export interface Extra {
@@ -611,15 +612,59 @@ export const applyInventory = (
         const f = Game.getFormEx(p.in.baseId);
         if (!f) return;
         try {
-          if (f.getType() === FormType.Weapon) ac.equipItemEx(f, p.in.wornLeft ? 2 : 1, false, false);
-          else ac.equipItem(f, false, true);
+          equipLike(ac, f, p.in);
           writeLogs("greymarch", "inventory: " + p.in.baseId.toString(16) + " put on again after the swap");
         } catch (e) {
           try { writeLogs("greymarch", "inventory: " + p.in.baseId.toString(16) + " could not be put on again: " + e); } catch (e2) { /* log only */ }
         }
+        redressLater(refr.getFormID(), p.in);
       });
     }
   }
 
   return res;
+};
+
+// GREYMARCH: CHECKED AGAIN AFTER THE SWAP (2026-11-11 night, the owner: still off; their log: "put on again after the swap" for all five, yet the game took each
+// piece off twice in that same moment and only the warhammer (EquipItemEx) came back; the armor's EquipItem in the frame of the removal did nothing). Each
+// swapped piece is now looked at again 0.3, 1, 2 and 3.5 s later, in the update phase, and put on with EquipItemEx if the game does not have it worn.
+const REDRESS_AFTER_MS = [300, 1000, 2000, 3500];
+let redressQueue: Array<{ refrId: number, entry: any, step: number, at: number }> = [];
+let redressHooked = false;
+
+const equipLike = (ac: Actor, f: Form, entry: any) => {
+  if (f.getType() === FormType.Weapon) ac.equipItemEx(f, entry.wornLeft ? 2 : 1, false, false);
+  else ac.equipItemEx(f, 0, false, false);
+};
+
+const redressLater = (refrId: number, entry: any) => {
+  redressQueue = redressQueue.filter((r) => !(r.refrId === refrId && r.entry.baseId === entry.baseId));
+  redressQueue.push({ refrId, entry, step: 0, at: Date.now() + REDRESS_AFTER_MS[0] });
+  if (redressHooked) return;
+  redressHooked = true;
+  on("update", () => {
+    if (!redressQueue.length) return;
+    const now = Date.now();
+    redressQueue = redressQueue.filter((r) => {
+      if (now < r.at) return true;
+      const id = r.entry.baseId.toString(16);
+      try {
+        const ac = Actor.from(Game.getFormEx(r.refrId));
+        const f = Game.getFormEx(r.entry.baseId);
+        if (!ac || !f || ac.getItemCount(f) <= 0) return false;
+        if (ac.isEquipped(f)) {
+          if (r.step > 0) writeLogs("greymarch", "inventory: " + id + " worn " + REDRESS_AFTER_MS[r.step] + " ms after the swap");
+          return false;
+        }
+        equipLike(ac, f, r.entry);
+        writeLogs("greymarch", "inventory: " + id + " was off " + REDRESS_AFTER_MS[r.step] + " ms after the swap, put on again");
+      } catch (e) {
+        try { writeLogs("greymarch", "inventory: " + id + " recheck failed: " + e); } catch (e2) { /* log only */ }
+      }
+      r.step++;
+      if (r.step >= REDRESS_AFTER_MS.length) return false;
+      r.at = now + REDRESS_AFTER_MS[r.step] - REDRESS_AFTER_MS[r.step - 1];
+      return true;
+    });
+  });
 };
