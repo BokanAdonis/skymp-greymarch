@@ -6970,6 +6970,8 @@ export class GreymarchBridge {
         if (!viaIdle) this.sp.Debug.sendAnimationEvent(ac, "HowlStart");
         this.greymarchCrumb("beast: howl on " + (localId >>> 0).toString(16) + (viaIdle ? " (idle)" : " (event)") + " isHowling " + howlingBefore);
         (this.greymarchWolfOtherRelease || (this.greymarchWolfOtherRelease = {}))[localId] = now + WOLF_HOWL_OTHER_RELEASE_MS; // not 200 ms: that cut the copy's howl to nothing
+        // and the copy stands still for the howl (formView.ts gmHowlingNow): the next movement update pulled it straight out of the howl on the watcher's screen
+        try { var howlingMap: any = (Function("return this")() as any).__gmBeastHowling || ((Function("return this")() as any).__gmBeastHowling = {}); howlingMap[localId] = Date.now() + WOLF_HOWL_OTHER_RELEASE_MS + 300; } catch (mErr) { /* it howls, maybe cut short */ }
         (this.greymarchWolfHowlCheck || (this.greymarchWolfHowlCheck = {}))[localId] = { at: now + 400, before: howlingBefore, viaIdle: viaIdle };
         return true;
     }

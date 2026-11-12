@@ -183,6 +183,9 @@ export const getScreenResolution = (): ScreenResolution => {
   return _screenResolution;
 }
 
+// GREYMARCH: the bridge marks another player's werewolf copy as howling until a time (greymarchWolfHowlOther): no movement or relayed animation is played on it until then
+const gmHowlingNow = (formId: number): boolean => { try { const m = (Function("return this")() as any).__gmBeastHowling; return !!(m && m[formId] > Date.now()); } catch (e) { return false; } };
+
 export class FormView {
   constructor(private remoteRefrId?: number) { }
 
@@ -862,10 +865,16 @@ export class FormView {
           if (d) (SpApiInteractor.getControllerInstance().emitter as any).emit("greymarchStage", "wolf walk (theirs " + gmHex(this.getRemoteRefrId()) + " as " + gmHex(refr.getFormID()) + "): told " + m.runMode + " speed " + Math.round(m.speed || 0) + " dir " + Math.round(m.direction || 0) + ", " + off + " units off | NPC: SpeedSampled " + Math.round(d.getAnimationVariableFloat("SpeedSampled")) + ", Speed " + Math.round(d.getAnimationVariableFloat("Speed")) + ", AI " + d.isAIEnabled() + ", combat " + d.isInCombat() + ", weapon drawn " + d.isWeaponDrawn() + ", animation driven " + d.getAnimationVariableBool("bAnimationDriven") + ", race " + gmHex(d.getRace() ? d.getRace()!.getFormID() : 0) + ", held " + gmHoldStill);
         } catch (e) { /* diagnostics only */ }
       }
+      // GREYMARCH: A HOWLING COPY STANDS STILL (2026-11-11, the owner: the watcher still did not see the roar; their log said the idle took, isHowling 0 -> 1): the
+      // next movement update (translateTo, and the forced re-apply every 2 s) pulled the copy out of its howl at once. While the bridge says it howls
+      // (__gmBeastHowling, greymarchWolfHowlOther) no movement is played on it; it catches up when the howl is over.
+      const gmHowling = gmHowlingNow(refr.getFormID());
+      if (gmHowling && !this.gmHowlSaid) { this.gmHowlSaid = true; gmCrumb("howl hold " + gmHex(refr.getFormID())); }
+      if (!gmHowling) this.gmHowlSaid = false;
       if (gmHoldStill && !this.gmHeldSaid) { this.gmHeldSaid = true; gmCrumb("hold still " + gmHex(refr.getFormID()) + " beast (fresh)"); }
       if (!gmHoldStill) this.gmHeldSaid = false;
       if (
-        !gmHoldStill && (
+        !gmHoldStill && !gmHowling && (
         +(model.numMovementChanges as number) !==
         this.movState.lastNumChanges ||
         Date.now() - this.movState.lastApply > 2000)
@@ -975,7 +984,7 @@ export class FormView {
       } else if (model.animation) {
         // and never a howl on a beast: played into a remote beast's graph without the howl shout behind it, "WW Howl.hkx" crashed the watching game (2026-10-19 #SZGE)
         // nor its feeding (2026-11-11): the server tells every game near to play it on the copy itself (greymarchWolfFeedSeen, the bridge), so it is never played twice
-        if (gmBeastLook && (this.animState.useAnimOverrides || beastHeld(this.gmBeast, Date.now()) || String(model.animation.animEventName || "").toLowerCase().startsWith("howl") || /feeding/i.test(String(model.animation.animEventName || "")) || /^skympfake/i.test(String(model.animation.animEventName || "")))) this.animState.lastNumChanges = model.animation.numChanges; // and never SkyMP's equip / unequip (it draws the weapon: see "NO WEAPON DRAW" above)
+        if (gmBeastLook && (this.animState.useAnimOverrides || beastHeld(this.gmBeast, Date.now()) || gmHowlingNow(refr.getFormID()) || String(model.animation.animEventName || "").toLowerCase().startsWith("howl") || /feeding/i.test(String(model.animation.animEventName || "")) || /^skympfake/i.test(String(model.animation.animEventName || "")))) this.animState.lastNumChanges = model.animation.numChanges; // and never SkyMP's equip / unequip (it draws the weapon: see "NO WEAPON DRAW" above)
         else {
           if (this.animState.lastNumChanges !== model.animation.numChanges && (gmBeastLook || /^idle/i.test(String(model.animation.animEventName || "")))) gmCrumb("anim " + gmHex(refr.getFormID()) + " " + String(model.animation.animEventName).slice(0, 40) + (gmBeastLook ? " beast" : ""));
           applyAnimation(refr, model.animation, this.animState);
@@ -1994,6 +2003,7 @@ export class FormView {
   private gmSpawnedBeast = false;
   private gmSpawnedNoLook = false; // GREYMARCH: an NPC built from its own record (no look sent): see destroy()
   private gmHeldSaid = false;
+  private gmHowlSaid = false;
   private gmHoldSince = 0; // GREYMARCH: since when nobody hosts this NPC (0: someone does)
   private gmHoldGaveUp = false;
   private gmWolfRacePending = 0; // GREYMARCH: a new race from __gmWolfRace not built yet, and since when (see the settle rule)

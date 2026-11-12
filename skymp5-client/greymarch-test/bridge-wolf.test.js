@@ -701,3 +701,16 @@ test("watchers: another player's werewolf feeding (greymarchWolfFeedSeen) plays 
   const fv = fs.readFileSync(path.join(__dirname, "..", "src", "view", "formView.ts"), "utf8");
   assert.ok(fv.includes("/feeding/i.test(String(model.animation.animEventName"), "SkyMP's own relay of the feeding is dropped on a beast copy");
 });
+
+test("watchers: a howling copy stands still for the howl (no movement or relayed animation pulls it out; 2026-11-11, the idle took but the watcher saw nothing)", () => {
+  const s = make({ others: { 761: 0xff001301 }, actors: {} });
+  roarNpc(s, 0xff001301, { v: 0 });
+  const g = Function("return this")();
+  delete g.__gmBeastHowling;
+  s.say({ customPacketType: "greymarchWolfRoar", actor: 761, bear: false }); s.tick();
+  assert.ok(g.__gmBeastHowling && g.__gmBeastHowling[0xff001301] > 0, "marked as howling for the howl's length");
+  const fv = fs.readFileSync(path.join(__dirname, "..", "src", "view", "formView.ts"), "utf8");
+  assert.ok(fv.includes("!gmHoldStill && !gmHowling && ("), "no movement played while it howls");
+  assert.ok(fv.includes("beastHeld(this.gmBeast, Date.now()) || gmHowlingNow(refr.getFormID()) ||"), "nor a relayed animation");
+  delete g.__gmBeastHowling;
+});
