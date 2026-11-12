@@ -84,6 +84,9 @@ const WOLF_HOWL_SHOUT = 0x0ce218;
 const NIGHT_EYE_IMOD = 0x06b108, NIGHT_EYE_INTRO = 0x06b10a, NIGHT_EYE_OUTRO = 0x06b10b, NIGHT_EYE_ON_SOUND = 0x07c723, NIGHT_EYE_OFF_SOUND = 0x07c722; // Skyrim.esm
 const REST_HEAL_REGEN = 50; // percent on HealRateMult out of combat (greymarchRestRegenTick)
 const SCENT_IMOD = 0x02fb1d; // DetectLifeImod, Skyrim.esm
+const WOLF_HOWL_WAIT_MS = 3000; // another player's roar waits this long for their copy here to settle (beastSwitch.ts hold) before it is the sound only
+const WOLF_FEED_WAIT_MS = 6000; // and their feeding, this long
+const WOLF_HOWL_OTHER_RELEASE_MS = 1800; // HowlRelease on another player's copy this long after HowlStart (the howl's length)
 const WOLF_HOWL_IDLE = 0x0cdd9f; // the idle HowlStart (Skyrim.esm), WerewolfBehavior.hkx, needs isHowling == 0: played on other players' werewolves (greymarchWolfHowlOther)
 const WOLF_ROAR_SOUND = 0x101008, BEAR_ROAR_SOUND = 0x0f95bb; // NPCWerewolfShout (the werewolf's howl) and NPCBearAggroWarning01 (a bear's warning roar), Skyrim.esm
 // vampires (gamemode vampire.js): the game's own records, inside Dawnguard.esm (read from the game files); the real IDs are looked up with Game.getFormFromFile
@@ -322,7 +325,8 @@ export class GreymarchBridge {
         if (type === "greymarchWolfForm") { if (this.greymarchWolfWant !== !!msg.on) this.greymarchLog("wolf: the server says " + (msg.on ? "changed" : "no (change back)")); this.greymarchWolfWant = !!msg.on; if (msg.on) { this.greymarchWolfWordAt = Date.now(); this.greymarchWolfAlpha = !!msg.alpha; this.greymarchWolfPup = !msg.alpha && !!msg.pup; this.greymarchWolfKind = msg.kind && GM_WOLF_FORMS[msg.kind] && msg.kind !== "black" && msg.kind !== "polar" ? String(msg.kind) : this.greymarchWolfAlpha ? "alpha" : this.greymarchWolfPup ? "pup" : ""; this.greymarchWolfBearRace = msg.bear && Number(msg.race) > 0 ? Number(msg.race) >>> 0 : 0; if (this.greymarchWolfBearRace) this.greymarchWolfBearSeen = this.greymarchWolfBearRace; this.greymarchWolfBlack = !!this.greymarchWolfBearRace && !!msg.black; this.greymarchWolfPolar = !!this.greymarchWolfBearRace && !!msg.polar; } return; } // (logged only when it changes: the server repeats it every 5 seconds) // the werewolf form (greymarchWolfTick)
         if (type === "greymarchWolfPerks") { this.greymarchWolfPerks = { carrier: !!msg.carrier, diseaseResist: Math.max(0, Math.min(100, Number(msg.diseaseResist) || 0)), healRegen: Math.max(0, Math.min(200, Number(msg.healRegen) || 0)), nightEye: !!msg.nightEye, scent: !!msg.scent, scentReadyIn: Math.max(0, Number(msg.scentReadyIn) || 0) }; return; } // what this carrier has (greymarchWolfPerksTick)
         if (type === "greymarchWolfScent") { this.greymarchWolfScentWant = { ms: Math.max(1000, Math.min(30000, Number(msg.ms) || 10000)), range: Math.max(500, Math.min(8000, Number(msg.range) || 4200)) }; return; } // the server gave the scent (greymarchWolfPerksTick)
-        if (type === "greymarchWolfRoar") { if (Number(msg.actor) > 0) (this.greymarchWolfRoarQueue || (this.greymarchWolfRoarQueue = [])).push({ actor: Number(msg.actor), bear: !!msg.bear }); return; } // another player roared nearby: the sound on their NPC (greymarchWolfTick)
+        if (type === "greymarchWolfRoar") { if (Number(msg.actor) > 0) (this.greymarchWolfRoarQueue || (this.greymarchWolfRoarQueue = [])).push({ actor: Number(msg.actor), bear: !!msg.bear, at: Date.now() }); return; }
+        if (type === "greymarchWolfFeedSeen") { if (Number(msg.actor) > 0) (this.greymarchWolfFeedSeenQueue || (this.greymarchWolfFeedSeenQueue = [])).push({ actor: Number(msg.actor), at: Date.now() }); return; } // another player's werewolf fed nearby: the feeding on their NPC here (greymarchWolfTick) // another player roared nearby: the sound on their NPC (greymarchWolfTick)
         if (type === "greymarchWolfAlphas") { var lists: any = {}; for (var lk in GM_WOLF_LISTS) lists[lk] = Array.isArray(msg[GM_WOLF_LISTS[lk]]) ? msg[GM_WOLF_LISTS[lk]] : []; this.greymarchWolfLists = lists; return; } // the other players in the Alpha form: drawn white (greymarchWolfAlphaOthers)
         if (type === "greymarchSpellCosts") { this.greymarchSpellCostWant = msg.costs && typeof msg.costs === "object" ? msg.costs : {}; this.greymarchSpellCostTold = {}; return; } // the Spells balance tab's costs (greymarchSpellCostTick)
         if (type === "greymarchCircle") { this.greymarchLog("circle: word from the server " + String(msg.key) + (msg.off ? " off" : " " + String(msg.hazard))); if (typeof msg.key === "string" && msg.key.length < 64) (this.greymarchCircleQueue || (this.greymarchCircleQueue = [])).push(msg); return; } // a Circle spell someone cast near (gamemode circles.js): its ring here too (greymarchCircleTick)
@@ -1216,19 +1220,46 @@ export class GreymarchBridge {
             // other players' roars: the howl on their NPC here once it has settled (greymarchWolfHowlOther), else the sound only. ONE HOWL, ONE SOUND (2026-10-27):
             // the howl brings its own sound, so a werewolf NPC that howls gets no second one (played on top it was heard as a repeat); a werebear adds the bear's
             // roar, as in the roarer's own game. One roar per NPC per tick (R has no wait, so two can come at once: HowlStart twice in a frame).
+            // WAIT FOR THE BODY (2026-11-11, the owner: "others don't see the howl"): a copy still settling after its race switch (the first ~10 s after a change,
+            // when most roars come) used to get the sound only. Now the roar waits up to WOLF_HOWL_WAIT_MS for the body to settle and howls then (with its sound);
+            // only past that is it the sound alone. A copy whose last howl never ended (isHowling stuck at 1) is released and tried again a moment later.
             var roars = this.greymarchWolfRoarQueue;
             if (roars && roars.length) {
                 this.greymarchWolfRoarQueue = [];
-                var roarSeen: any = {};
+                var roarSeen: any = {}, roarLater: any[] = [];
                 for (var ri = 0; ri < roars.length && ri < 8; ri++) {
                     try {
                         var rl = misc.remoteIdToLocalId(roars[ri].actor); var who = rl ? sp.ObjectReference.from(sp.Game.getFormEx(rl)) : null;
                         if (!who || roarSeen[rl]) continue;
                         roarSeen[rl] = true;
-                        var howled = this.greymarchWolfHowlOther(rl, now);
-                        if (!howled || roars[ri].bear) this.greymarchWolfRoarSound(who, roars[ri].bear);
+                        var age = now - (roars[ri].at || now);
+                        var howled = this.greymarchWolfHowlOther(rl, now, age < WOLF_HOWL_WAIT_MS);
+                        if (howled === "wait") { roarLater.push(roars[ri]); continue; }
+                        if (howled !== true || roars[ri].bear) this.greymarchWolfRoarSound(who, roars[ri].bear);
                     } catch (rErr) { /* not drawn here: not heard */ }
                 }
+                if (roarLater.length) this.greymarchWolfRoarQueue = roarLater.concat(this.greymarchWolfRoarQueue);
+            }
+            // ANOTHER PLAYER'S WEREWOLF FED NEARBY (2026-11-11, the owner: "sometimes watchers don't see it"): SkyMP's relay of the feeding was dropped while the copy
+            // settled; the server now says so (greymarchWolfFeedSeen) and the idle SpecialFeeding is played on the copy here, waiting up to WOLF_FEED_WAIT_MS for it to settle
+            var feedsSeen = this.greymarchWolfFeedSeenQueue;
+            if (feedsSeen && feedsSeen.length) {
+                this.greymarchWolfFeedSeenQueue = [];
+                var feedLater: any[] = [];
+                for (var fi = 0; fi < feedsSeen.length && fi < 8; fi++) {
+                    try {
+                        var fl = misc.remoteIdToLocalId(feedsSeen[fi].actor);
+                        var fa = fl ? sp.Actor.from(sp.Game.getFormEx(fl)) : null;
+                        if (!fa) continue;
+                        var fHeld: any = (Function("return this")() as any).__gmBeastHeld || {};
+                        if (fHeld[fl] && now - feedsSeen[fi].at < WOLF_FEED_WAIT_MS) { feedLater.push(feedsSeen[fi]); continue; }
+                        var fIdle = sp.Idle.from(sp.Game.getFormEx(0xd23b7));
+                        var fPlayed = !!fIdle && !!fa.playIdle(fIdle);
+                        if (!fPlayed) sp.Debug.sendAnimationEvent(fa, "SpecialFeeding");
+                        this.greymarchLog("wolf: feeding on " + (fl >>> 0).toString(16) + (fPlayed ? " played (idle)" : " via the event (the idle was refused)") + (fHeld[fl] ? ", its body still settling" : ""));
+                    } catch (fErr) { /* not drawn here */ }
+                }
+                if (feedLater.length) this.greymarchWolfFeedSeenQueue = feedLater.concat(this.greymarchWolfFeedSeenQueue || []);
             }
             // the server says the wolf fed (a kill or a corpse): the vanilla feeding animation (PlayerWerewolfChangeScript.Feed plays the idle SpecialFeeding)
             var feedAt = this.greymarchWolfFeedAt;
@@ -6911,9 +6942,10 @@ export class GreymarchBridge {
     // to cast, and only once that NPC has settled after its race switch (__gmBeastHeld, formView.ts). SkyMP's own relay of the howl stays dropped (formView.ts).
     // Its voice recovery is cleared first, as the roarer's own game does: after one howl the NPC's voice was recovering and the next HowlStart had nothing to
     // cast, so watchers saw the first roar, then a half-played start that snapped out at the copy's next movement (2026-10-27). True when the howl was played.
-    greymarchWolfHowlOther(localId: number, now: number): boolean {
+    // true: howled; false: not (the sound only); "wait": its body is still settling and canWait, so the caller tries again next tick
+    greymarchWolfHowlOther(localId: number, now: number, canWait?: boolean): any {
         var held: any = (Function("return this")() as any).__gmBeastHeld || {};
-        if (held[localId]) { this.greymarchLog("wolf: a roar from " + (localId >>> 0).toString(16) + ": the sound only (its body is still settling)"); return false; }
+        if (held[localId]) { if (canWait) return "wait"; this.greymarchLog("wolf: a roar from " + (localId >>> 0).toString(16) + ": the sound only (its body was still settling)"); return false; }
         var ac = this.sp.Actor.from(this.sp.Game.getFormEx(localId));
         if (!ac || !this.greymarchIsBeastBody(ac)) return false;
         var howl = this.sp.Shout.from(this.sp.Game.getFormEx(WOLF_HOWL_SHOUT));
@@ -6925,11 +6957,13 @@ export class GreymarchBridge {
         // on an NPC can be thrown away by its idle handling. The game's own idle HowlStart (0x0CDD9F, condition isHowling == 0) goes through it, so it is played
         // first, the raw event only when the idle is refused. isHowling before and 400 ms after goes to the log: stuck at 1 means the last howl never ended.
         var howlingBefore = -1; try { howlingBefore = ac.getAnimationVariableInt("isHowling"); } catch (hErr) { /* unknown */ }
+        // the last howl never ended: release it and try again next tick (the idle needs isHowling == 0)
+        if (howlingBefore === 1 && canWait) { this.sp.Debug.sendAnimationEvent(ac, "HowlRelease"); this.greymarchLog("wolf: " + (localId >>> 0).toString(16) + " was still howling: released, the roar again next tick"); return "wait"; }
         var viaIdle = false;
         try { var hIdle = this.sp.Idle.from(this.sp.Game.getFormEx(WOLF_HOWL_IDLE)); viaIdle = !!hIdle && !!ac.playIdle(hIdle); } catch (iErr) { viaIdle = false; }
         if (!viaIdle) this.sp.Debug.sendAnimationEvent(ac, "HowlStart");
         this.greymarchCrumb("beast: howl on " + (localId >>> 0).toString(16) + (viaIdle ? " (idle)" : " (event)") + " isHowling " + howlingBefore);
-        (this.greymarchWolfOtherRelease || (this.greymarchWolfOtherRelease = {}))[localId] = now + 200;
+        (this.greymarchWolfOtherRelease || (this.greymarchWolfOtherRelease = {}))[localId] = now + WOLF_HOWL_OTHER_RELEASE_MS; // not 200 ms: that cut the copy's howl to nothing
         (this.greymarchWolfHowlCheck || (this.greymarchWolfHowlCheck = {}))[localId] = { at: now + 400, before: howlingBefore, viaIdle: viaIdle };
         return true;
     }

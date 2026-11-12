@@ -471,7 +471,7 @@ test("the howl shout: while changed the body has the vanilla werewolf howl in it
   assert.ok(s.log.lines.some((l) => /the howl is in the voice slot \(their voice 13e07 is put back after\)/.test(l)));
 });
 
-test("another player's roar: the sound, and the howl on their werewolf NPC here once it has settled (the howl shout in its voice slot); a settling one gets the sound only", () => {
+test("another player's roar: the howl on their werewolf NPC here once it has settled (the howl shout in its voice slot); a settling one waits up to 3 s, then the sound only", () => {
   const s = make({ others: { 501: 0xff000a01 }, actors: {} });
   const events = [], shouts = [];
   const npc = { id: 0xff000a01, getFormID: () => 0xff000a01, getRace: () => ({ getFormID: () => BEAST }), getBaseObject: () => null, getEquippedShout: () => null, addShout: (sh) => shouts.push("add " + sh.id.toString(16)), equipShout: (sh) => shouts.push("equip " + sh.id.toString(16)) };
@@ -481,10 +481,12 @@ test("another player's roar: the sound, and the howl on their werewolf NPC here 
   const g = Function("return this")();
   g.__gmBeastHeld = { [0xff000a01]: true };
   s.say({ customPacketType: "greymarchWolfRoar", actor: 501, bear: false }); s.tick();
-  assert.deepStrictEqual(events, [], "still settling: the sound only");
-  assert.ok(s.log.lines.some((l) => /the sound only \(its body is still settling\)/.test(l)));
+  assert.deepStrictEqual(events, [], "still settling: it waits");
+  s.tick(3100);
+  assert.deepStrictEqual(events, [], "settling past 3 s: no howl");
+  assert.ok(s.log.lines.some((l) => /the sound only \(its body was still settling\)/.test(l)));
   g.__gmBeastHeld = {};
-  s.say({ customPacketType: "greymarchWolfRoar", actor: 501, bear: false }); s.tick(); s.tick(300);
+  s.say({ customPacketType: "greymarchWolfRoar", actor: 501, bear: false }); s.tick(); s.tick(1900);
   assert.deepStrictEqual(events, ["HowlStart", "HowlRelease"], "settled: the howl plays on it");
   assert.deepStrictEqual(shouts, ["add ce218", "equip ce218"], "with the howl shout in its voice slot");
   delete g.__gmBeastHeld;
@@ -505,9 +507,9 @@ test("watchers: every roar of another player plays the howl on their NPC, its vo
   const s = make({ others: { 701: 0xff000d01 }, actors: {} });
   const recovery = { v: 0 };
   const order = roarNpc(s, 0xff000d01, recovery);
-  s.say({ customPacketType: "greymarchWolfRoar", actor: 701, bear: false }); s.tick(); s.tick(300);
+  s.say({ customPacketType: "greymarchWolfRoar", actor: 701, bear: false }); s.tick(); s.tick(1900);
   recovery.v = 30; // the first howl left the NPC's voice recovering
-  s.say({ customPacketType: "greymarchWolfRoar", actor: 701, bear: false }); s.tick(); s.tick(300);
+  s.say({ customPacketType: "greymarchWolfRoar", actor: 701, bear: false }); s.tick(); s.tick(1900);
   assert.deepStrictEqual(order, ["recovery 0", "HowlStart", "HowlRelease", "recovery 0", "HowlStart", "HowlRelease"], "cleared just before each HowlStart; one start, one release per roar");
   assert.strictEqual(recovery.v, 0);
 });
@@ -523,7 +525,9 @@ test("watchers: a werewolf NPC that howls gets no second howl sound (the howl br
   g.__gmBeastHeld = { [0xff000e01]: true };
   s.log.sounds.length = 0;
   s.say({ customPacketType: "greymarchWolfRoar", actor: 711, bear: false }); s.tick();
-  assert.deepStrictEqual(s.log.sounds, [[0x101008, 0xff000e01]], "still settling: no howl, so the sound is played");
+  assert.deepStrictEqual(s.log.sounds, [], "still settling: it waits for the body");
+  s.tick(3100);
+  assert.deepStrictEqual(s.log.sounds, [[0x101008, 0xff000e01]], "still settling after 3 s: no howl, so the sound is played");
   delete g.__gmBeastHeld;
 });
 
@@ -532,7 +536,7 @@ test("watchers: two roars of one player in the same tick (R mashed, no wait) are
   const order = roarNpc(s, 0xff000f01, { v: 0 });
   s.say({ customPacketType: "greymarchWolfRoar", actor: 721, bear: false });
   s.say({ customPacketType: "greymarchWolfRoar", actor: 721, bear: false });
-  s.tick(); s.tick(300);
+  s.tick(); s.tick(1900);
   assert.deepStrictEqual(order.filter((e) => /^howl/i.test(e)), ["HowlStart", "HowlRelease"]);
 });
 
@@ -588,7 +592,9 @@ test("watchers: the howl on another player's NPC is the game's idle HowlStart (0
   s.say({ customPacketType: "greymarchWolfRoar", actor: 731, bear: false });
   s.say({ customPacketType: "greymarchWolfRoar", actor: 732, bear: false });
   s.tick(); s.tick(500);
-  assert.deepStrictEqual(order.filter((e) => /^(idle|howl)/i.test(e)), ["idle cdd9f", "HowlRelease"], "the idle, no raw HowlStart on top");
+  assert.deepStrictEqual(order.filter((e) => /^(idle|howl)/i.test(e)), ["idle cdd9f"], "the idle, no raw HowlStart on top, and not released at once");
+  s.tick(1400);
+  assert.deepStrictEqual(order.filter((e) => /^(idle|howl)/i.test(e)), ["idle cdd9f", "HowlRelease"], "released after the howl's length");
   assert.deepStrictEqual(order2.filter((e) => /^howl/i.test(e)), ["HowlStart", "HowlRelease"], "refused: the raw event");
   assert.ok(s.log.lines.some((l) => l.endsWith("wolf: howl on ff001001 via idle, isHowling 0 -> 1")), s.log.lines.join("\n"));
   assert.ok(s.log.lines.some((l) => /wolf: howl on ff001002 via event/.test(l)));
@@ -658,4 +664,40 @@ test("N while changed asks the server for the scent (once a second at most); the
   const real = Date.now; const t0 = real(); Date.now = () => t0 + 10500;
   try { s.gm.greymarchWolfPerksTick(); } finally { Date.now = real; }
   assert.strictEqual(av.DetectLifeRange, 0, "put back after its time");
+});
+
+
+test("watchers: a copy still howling (isHowling stuck at 1) is released and howls again next tick", () => {
+  const s = make({ others: { 741: 0xff001101 }, actors: {} });
+  const order = roarNpc(s, 0xff001101, { v: 0 });
+  const a = s.sp.Actor.from({ id: 0xff001101 });
+  let howling = 1;
+  a.getAnimationVariableInt = (n) => (n === "isHowling" ? howling : 0);
+  a.playIdle = (idle) => { order.push("idle " + idle.id.toString(16)); return true; };
+  s.sp.Idle = { from: (f) => (f ? { id: f.id } : null) };
+  s.say({ customPacketType: "greymarchWolfRoar", actor: 741, bear: false });
+  s.tick();
+  assert.deepStrictEqual(order.filter((e) => /^(idle|howl)/i.test(e)), ["HowlRelease"], "released first");
+  howling = 0; s.tick(300);
+  assert.deepStrictEqual(order.filter((e) => /^(idle|howl)/i.test(e)), ["HowlRelease", "idle cdd9f"], "then the howl");
+});
+
+test("watchers: another player's werewolf feeding (greymarchWolfFeedSeen) plays the idle SpecialFeeding on their copy, waiting while it settles", () => {
+  const s = make({ others: { 751: 0xff001201 }, actors: {} });
+  const order = roarNpc(s, 0xff001201, { v: 0 });
+  const a = s.sp.Actor.from({ id: 0xff001201 });
+  a.playIdle = (idle) => { order.push("idle " + idle.id.toString(16)); return true; };
+  s.sp.Idle = { from: (f) => (f ? { id: f.id } : null) };
+  const g = Function("return this")();
+  g.__gmBeastHeld = { [0xff001201]: true };
+  s.say({ customPacketType: "greymarchWolfFeedSeen", actor: 751 });
+  s.tick();
+  assert.deepStrictEqual(order, [], "settling: it waits");
+  g.__gmBeastHeld = {};
+  s.tick(500);
+  assert.deepStrictEqual(order, ["idle d23b7"]);
+  assert.ok(s.log.lines.some((l) => /wolf: feeding on ff001201 played \(idle\)/.test(l)));
+  delete g.__gmBeastHeld;
+  const fv = fs.readFileSync(path.join(__dirname, "..", "src", "view", "formView.ts"), "utf8");
+  assert.ok(fv.includes("/feeding/i.test(String(model.animation.animEventName"), "SkyMP's own relay of the feeding is dropped on a beast copy");
 });

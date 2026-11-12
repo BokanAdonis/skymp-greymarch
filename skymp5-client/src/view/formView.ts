@@ -974,7 +974,8 @@ export class FormView {
         }
       } else if (model.animation) {
         // and never a howl on a beast: played into a remote beast's graph without the howl shout behind it, "WW Howl.hkx" crashed the watching game (2026-10-19 #SZGE)
-        if (gmBeastLook && (this.animState.useAnimOverrides || beastHeld(this.gmBeast, Date.now()) || String(model.animation.animEventName || "").toLowerCase().startsWith("howl") || /^skympfake/i.test(String(model.animation.animEventName || "")))) this.animState.lastNumChanges = model.animation.numChanges; // and never SkyMP's equip / unequip (it draws the weapon: see "NO WEAPON DRAW" above)
+        // nor its feeding (2026-11-11): the server tells every game near to play it on the copy itself (greymarchWolfFeedSeen, the bridge), so it is never played twice
+        if (gmBeastLook && (this.animState.useAnimOverrides || beastHeld(this.gmBeast, Date.now()) || String(model.animation.animEventName || "").toLowerCase().startsWith("howl") || /feeding/i.test(String(model.animation.animEventName || "")) || /^skympfake/i.test(String(model.animation.animEventName || "")))) this.animState.lastNumChanges = model.animation.numChanges; // and never SkyMP's equip / unequip (it draws the weapon: see "NO WEAPON DRAW" above)
         else {
           if (this.animState.lastNumChanges !== model.animation.numChanges && (gmBeastLook || /^idle/i.test(String(model.animation.animEventName || "")))) gmCrumb("anim " + gmHex(refr.getFormID()) + " " + String(model.animation.animEventName).slice(0, 40) + (gmBeastLook ? " beast" : ""));
           applyAnimation(refr, model.animation, this.animState);
