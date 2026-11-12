@@ -6995,16 +6995,20 @@ export class GreymarchBridge {
         var howlingBefore = -1; try { howlingBefore = ac.getAnimationVariableInt("isHowling"); } catch (hErr) { /* unknown */ }
         // the last howl never ended: release it and try again next tick (the idle needs isHowling == 0)
         if (howlingBefore === 1 && canWait) { this.sp.Debug.sendAnimationEvent(ac, "HowlRelease"); this.greymarchLog("wolf: " + (localId >>> 0).toString(16) + " was still howling: released, the roar again next tick"); return "wait"; }
+        // THE COPY CASTS ITS HOWL (GreymarchCamera.dll 1.22, 2026-11-12): three ways, one per roar in turn (1, 2, 3, 1 ...), so one test shows which the game
+        // takes. Mode 1 is set before HowlStart (the graph's voice annotations then find the spell); 2 and 3 act after it (below).
+        var roarN = ((this.greymarchWolfRoarCount || (this.greymarchWolfRoarCount = {}))[localId] = ((this.greymarchWolfRoarCount[localId] || 0) + 1));
+        var voiceMode = ((roarN - 1) % 3) + 1, voiced = false;
+        var callVoice = (): boolean => { try { var hSpell = this.sp.Game.getFormEx(WOLF_HOWL_SPELL), hShout = this.sp.Game.getFormEx(WOLF_HOWL_SHOUT); return !!hSpell && !!this.sp.callNative("GreymarchCam", "BeastVoice", undefined, ac, hSpell, hShout, voiceMode); } catch (vcErr) { return false; } };
+        if (voiceMode === 1) voiced = callVoice();
         this.greymarchBeastDiag(localId, "howl", [0, 300, 1000]);
         var viaIdle = false;
         try { var hIdle = this.sp.Idle.from(this.sp.Game.getFormEx(WOLF_HOWL_IDLE)); viaIdle = !!hIdle && !!ac.playIdle(hIdle); } catch (iErr) { viaIdle = false; }
         if (!viaIdle) this.sp.Debug.sendAnimationEvent(ac, "HowlStart");
+        if (voiceMode !== 1) voiced = callVoice();
+        this.greymarchLog("wolf: roar " + roarN + " on " + (localId >>> 0).toString(16) + ": voice mode " + voiceMode + " " + (voiced ? "asked" : "not asked (no plugin)"));
         // THE DRIVE TEST (GreymarchCamera.dll 1.20, 2026-11-11): the watcher's graph plays the howl clip yet the body showed nothing. Every other roar of a
         // copy, its animation is also stepped by the plugin for the howl's length; the log says which roars were driven, the watcher says which they saw.
-        var roarN = ((this.greymarchWolfRoarCount || (this.greymarchWolfRoarCount = {}))[localId] = ((this.greymarchWolfRoarCount[localId] || 0) + 1));
-        // 1.21 (2026-11-11, the watcher saw the howl start and stop, heard nothing): the copy casts the howl from its voice, as an NPC werewolf's does
-        var voiced = false; try { var hSpell = this.sp.Game.getFormEx(WOLF_HOWL_SPELL); voiced = !!hSpell && !!this.sp.callNative("GreymarchCam", "BeastVoice", undefined, ac, hSpell); } catch (vcErr) { voiced = false; }
-        this.greymarchLog("wolf: roar " + roarN + " on " + (localId >>> 0).toString(16) + ": voice cast " + (voiced ? "asked" : "not asked (no plugin)"));
         if (voiced) (this.greymarchBeastDiagQueue || (this.greymarchBeastDiagQueue = [])).push({ id: localId, tag: "voice +300 ms", at: Date.now() + 500, readAt: Date.now() + 500, voice: true });
         this.greymarchCrumb("beast: howl on " + (localId >>> 0).toString(16) + (viaIdle ? " (idle)" : " (event)") + " isHowling " + howlingBefore);
         (this.greymarchWolfOtherRelease || (this.greymarchWolfOtherRelease = {}))[localId] = now + WOLF_HOWL_OTHER_RELEASE_MS; // not 200 ms: that cut the copy's howl to nothing
