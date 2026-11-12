@@ -140,6 +140,11 @@ const VAMP_EYE_RACES = [0x13746, 0x13744, 0x13741, 0x13748, 0x13743, 0x13749, 0x
 // GreymarchCore.esp, per colour (VAMP_BEAST_COLOURS order) 28 parts: Khajiit male 0..6, Khajiit female 0..6, Argonian male 0..6, Argonian female 0..6 (glow 0..6)
 const VAMP_BEAST_EYES = 0x888, VAMP_BEAST_COLOURS = ["blue", "red", "yellow", "green", "purple"];
 const VAMP_BEAST_RACES: any = { 0x13745: 0, 0x88845: 0, 0x13740: 14, 0x8883a: 14 }; // KhajiitRace, KhajiitRaceVampire: 0; ArgonianRace, ArgonianRaceVampire: 14 (then + 7 for a woman)
+// A RACE'S OWN EYES (Skyrim.esm RACE head data): a character who kept their race's default eyes names none (not on the character, not in their look), so /eyes
+// puts these back (2026-11-11, the owner: a khajiit's eyes did not switch back). [male, female]; the vampire races use their living race's.
+const RACE_DEFAULT_EYES: any = { 0x13746: [0xe7aee, 0x51548], 0x13744: [0x51632, 0x51548], 0x13741: [0x51632, 0x51548], 0x13748: [0x51632, 0x51548], 0x13743: [0x51627, 0x5153f],
+    0x13749: [0x51626, 0x51510], 0x13742: [0x51625, 0x51540], 0x13747: [0x9250a, 0x40222], 0x13745: [0x5150b, 0x2ddc1], 0x13740: [0x5150a, 0x9250c] };
+const VAMPIRE_RACE_OF: any = { 0x88794: 0x13746, 0x88844: 0x13744, 0x8883c: 0x13741, 0x88846: 0x13748, 0x88840: 0x13743, 0x88884: 0x13749, 0x8883d: 0x13742, 0xa82b9: 0x13747, 0x88845: 0x13745, 0x8883a: 0x13740 };
 const VAMP_FANGS = { male: 0x81c, female: 0x81d }; // GM_VampFangsMale / GM_VampFangsFemale: the human teeth with the upper canines pulled into fangs
 const VAMP_FANG_RACES = [0x13746, 0x13744, 0x13741, 0x13748, 0x13743, 0x13749, 0x13742]; // the human and elf teeth; orcs keep their tusks
 const VAMP_FANG_ITEM = 0x0323fe; // Dragonborn.esm's DLC2ApocryphaBookWarpArmor (slot 61 only, on the server too): GreymarchCore.esp makes it the worn "Vampire Fangs" (DLC2DummyHelmet before: the server's copy covered nearly every armour slot and armour came off) (the server gives it, greymarchVampFangsWear puts it on)
@@ -2387,7 +2392,12 @@ export class GreymarchBridge {
                 if (!rec.orig && localId === 0x14) {
                     var lookParts: any[] = []; try { lookParts = (Function("return this")() as any).__gmOwnLookParts || []; } catch (lErr) { lookParts = []; }
                     for (var lp = 0; lp < lookParts.length && !rec.orig; lp++) { try { var lh = sp.HeadPart.from(sp.Game.getFormEx(Number(lookParts[lp]))); if (lh && lh.getType() === 2 && !ours(lh.getFormID())) rec.orig = lh.getFormID(); } catch (lpErr) { /* not loaded */ } }
-                    if (!rec.ownSaid) { rec.ownSaid = true; this.greymarchLog("vampire: 14 own eyes " + (rec.orig ? rec.orig.toString(16) + " (from their look; the character wore " + (cur ? cur.getFormID().toString(16) : "none") + ")" : "not known: the character wore " + (cur ? cur.getFormID().toString(16) : "none") + ", their look names " + lookParts.length + " parts and no eyes of their own")); }
+                    var fromRace = false;
+                    if (!rec.orig) { // their race's own eyes: they kept the default
+                        var rid0 = race.getFormID(), def = RACE_DEFAULT_EYES[VAMPIRE_RACE_OF[rid0] || rid0];
+                        if (def) { try { var dh = sp.HeadPart.from(sp.Game.getFormEx(female ? def[1] : def[0])); if (dh) { rec.orig = dh.getFormID(); fromRace = true; } } catch (dErr) { /* not loaded */ } }
+                    }
+                    if (!rec.ownSaid) { rec.ownSaid = true; this.greymarchLog("vampire: 14 own eyes " + (rec.orig ? rec.orig.toString(16) + (fromRace ? " (their race's default" : " (from their look") + "; the character wore " + (cur ? cur.getFormID().toString(16) : "none") + ")" : "not known: the character wore " + (cur ? cur.getFormID().toString(16) : "none") + ", their look names " + lookParts.length + " parts and no eyes of their own")); }
                 }
                 var own = glow === 0 && rec.orig ? sp.HeadPart.from(sp.Game.getFormEx(rec.orig)) : null; // /eyes hides them: their own eyes
                 var wantEyes = own || hp, key = own ? "own" : colour + glow;

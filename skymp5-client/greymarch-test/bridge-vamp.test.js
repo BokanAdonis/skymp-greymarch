@@ -236,7 +236,7 @@ test("a bloodline change turns the eyes at once; a game that starts with one of 
     look({ glow: 3, eyes: "red" });
     assert.strictEqual(worn[2], GM + 0x81f + 3, "Volkihar: red at once");
     look({ glow: 0, eyes: "red" });
-    assert.strictEqual(worn[2], GM + 0x81f, "no own eyes known yet (ours were on from the start): red without glow rather than nothing");
+    assert.strictEqual(worn[2], 0xe7aee, "no own eyes known yet (ours were on from the start): the race's own (a Nord man: MaleEyesHumanLightBlue), not our eye without glow (2026-11-11)");
     worn[2] = 0x111; // SkyMP puts the character's saved look back: their own eyes
     look({ glow: 0, eyes: "red" });
     assert.strictEqual(worn[2], 0x111, "now their own eyes are known and shown while /eyes hides them");
@@ -601,5 +601,28 @@ test("/eyes brings back the eyes their look names when the character does not na
     s.tick();
     assert.strictEqual(worn, 0x9d749, "/eyes: the eyes their look names, not our no-glow eye");
     assert.ok(s.log.lines.some((l) => /14 own eyes 9d749 \(from their look/.test(l)));
+  } finally { Date.now = realNow; delete g.__gmOwnLookParts; }
+});
+
+test("/eyes brings back the race's own eyes when neither the character nor their look names any (2026-11-11, the owner: a khajiit's eyes did not switch back)", () => {
+  const s = make();
+  const sp = s.gm.sp;
+  const GM = 0x0a000000; let worn = 0;
+  Object.assign(sp.Game.getPlayer(), { getRace: () => ({ getFormID: () => 0x13745 }), getBaseObject: () => ({ sex: 1 }), changeHeadPart: (hp) => { worn = hp.getFormID(); }, regenerateHead() {} });
+  sp.ActorBase = { from: (b) => (b ? { getSex: () => 1, getNumHeadParts: () => 0, getNthHeadPart: () => null } : null) };
+  sp.Game.getFormFromFile = (id, file) => (file === "GreymarchCore.esp" ? { id: GM + id } : null);
+  sp.Game.getFormEx = (id) => ({ id });
+  sp.HeadPart = { from: (f) => (f ? { getFormID: () => f.id, getType: () => (f.id === 0x2ddc1 || f.id >= GM ? 2 : 1) } : null) };
+  const g = Function("return this")(); g.__gmOwnLookParts = [0x51111, 0x51112]; // no eyes in their look
+  let t = 8_500_000; const realNow = Date.now; Date.now = () => t;
+  try {
+    s.say({ customPacketType: "greymarchVampLooks", me: 0xff000001, vampires: [{ actor: 0xff000001, glow: 2, eyes: "blue" }] });
+    s.tick();
+    assert.strictEqual(worn, GM + 0x888 + 7 + 2, "GM_VampEyesKhajiitFemaleBlue2");
+    t += 2500;
+    s.say({ customPacketType: "greymarchVampLooks", me: 0xff000001, vampires: [{ actor: 0xff000001, glow: 0, eyes: "blue" }] });
+    s.tick();
+    assert.strictEqual(worn, 0x2ddc1, "/eyes: FemaleEyesKhajiitBase, the race's own");
+    assert.ok(s.log.lines.some((l) => /14 own eyes 2ddc1 \(their race's default/.test(l)));
   } finally { Date.now = realNow; delete g.__gmOwnLookParts; }
 });
