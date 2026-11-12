@@ -141,6 +141,7 @@ const VAMP_EYES: any = { blue: { male: 0x80e, female: 0x815 }, red: { male: 0x81
 const VAMP_EYE_RACES = [0x13746, 0x13744, 0x13741, 0x13748, 0x13743, 0x13749, 0x13742, 0x13747]; // Nord, Imperial, Breton, Redguard, High Elf, Wood Elf, Dark Elf, Orc (the human eye shape; khajiit and argonian eyes are not made yet)
 // KHAJIIT AND ARGONIAN EYES (2026-11-11, the owner: their eyes did not show as a vampire; tools/vampire-beast-eyes-esp.js in the launcher repo): from 0x888 in
 // GreymarchCore.esp, per colour (VAMP_BEAST_COLOURS order) 28 parts: Khajiit male 0..6, Khajiit female 0..6, Argonian male 0..6, Argonian female 0..6 (glow 0..6)
+const VAMP_EYES_SETTLE_MS = 6000; // the player's own eyes wait this long after a world load
 const VAMP_BEAST_EYES = 0x888, VAMP_BEAST_COLOURS = ["blue", "red", "yellow", "green", "purple"];
 const VAMP_BEAST_RACES: any = { 0x13745: 0, 0x88845: 0, 0x13740: 14, 0x8883a: 14 }; // KhajiitRace, KhajiitRaceVampire: 0; ArgonianRace, ArgonianRaceVampire: 14 (then + 7 for a woman)
 // A RACE'S OWN EYES (Skyrim.esm RACE head data): a character who kept their race's default eyes names none (not on the character, not in their look), so /eyes
@@ -235,6 +236,7 @@ export class GreymarchBridge {
         this.controller.on("update", () => this.greymarchTick()); // Skyrim functions only work in the update phase, never in tick
         this.controller.on("update", () => frameWatchTick(this.sp, Date.now(), (t: string) => this.greymarchLog(t))); // FRAME-DROP LOG (frameWatch.ts)
         this.greymarchWolfLungeHook();
+        try { this.controller.on("loadGame", () => { this.greymarchLastLoadAt = Date.now(); }); } catch (e) { /* the eyes then wait for the 3D only */ } // a world load: the player's own vampire eyes wait (greymarchVampEyes)
         try { this.controller.on("loadGame", () => { if (this.greymarchMapState) { this.greymarchMapState.restore = true; this.greymarchMapState.refs = {}; } }); } catch (e) { /* shown once per login */ } // a world load forgets the map: shown again
         this.controller.on("tick", () => this.greymarchConnectCover(Date.now()));
         this.controller.on("tick", () => this.greymarchChoiceTick(Date.now()));
@@ -2387,6 +2389,10 @@ export class GreymarchBridge {
             try {
                 var actor = localId === 0x14 ? sp.Game.getPlayer() : sp.Actor.from(sp.Game.getFormEx(localId));
                 if (!actor) continue;
+                // NOT WHILE THE WORLD LOADS (2026-11-11, the owner: invisible to themselves after spawning, until a house and back): the player's eyes were
+                // changed 35 ms before the game's second load report, with their look not yet on ("the character wore none"), and their body was not drawn
+                // until the next cell. Their own head is left alone until VAMP_EYES_SETTLE_MS after the last world load and while their body is drawn.
+                if (localId === 0x14 && (Date.now() - (this.greymarchLastLoadAt || 0) < VAMP_EYES_SETTLE_MS || (typeof actor.is3DLoaded === "function" && !actor.is3DLoaded()))) continue;
                 // ANOTHER VAMPIRE ON WATER (2026-11-03, the owner: they swam in the air and, standing still, sank and popped back up over and over). Water walking was
                 // on only in the vampire's own game (greymarchVampire above), so here their character was an ordinary swimmer held at their height on the surface.
                 // The server says who walks on water (v.water); their character here gets it too, checked every pass (a rebuilt character starts without it).
