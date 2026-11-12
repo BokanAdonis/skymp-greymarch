@@ -6996,6 +6996,11 @@ export class GreymarchBridge {
         var viaIdle = false;
         try { var hIdle = this.sp.Idle.from(this.sp.Game.getFormEx(WOLF_HOWL_IDLE)); viaIdle = !!hIdle && !!ac.playIdle(hIdle); } catch (iErr) { viaIdle = false; }
         if (!viaIdle) this.sp.Debug.sendAnimationEvent(ac, "HowlStart");
+        // THE DRIVE TEST (GreymarchCamera.dll 1.20, 2026-11-11): the watcher's graph plays the howl clip yet the body showed nothing. Every other roar of a
+        // copy, its animation is also stepped by the plugin for the howl's length; the log says which roars were driven, the watcher says which they saw.
+        var roarN = ((this.greymarchWolfRoarCount || (this.greymarchWolfRoarCount = {}))[localId] = ((this.greymarchWolfRoarCount[localId] || 0) + 1));
+        if (roarN % 2 === 0) { var drove = false; try { drove = !!this.sp.callNative("GreymarchCam", "BeastDrive", undefined, ac, WOLF_HOWL_OTHER_RELEASE_MS + 300); } catch (dvErr) { drove = false; } this.greymarchLog("wolf: roar " + roarN + " on " + (localId >>> 0).toString(16) + ": driven by the plugin " + (drove ? "yes" : "no (no plugin)")); }
+        else this.greymarchLog("wolf: roar " + roarN + " on " + (localId >>> 0).toString(16) + ": not driven");
         this.greymarchCrumb("beast: howl on " + (localId >>> 0).toString(16) + (viaIdle ? " (idle)" : " (event)") + " isHowling " + howlingBefore);
         (this.greymarchWolfOtherRelease || (this.greymarchWolfOtherRelease = {}))[localId] = now + WOLF_HOWL_OTHER_RELEASE_MS; // not 200 ms: that cut the copy's howl to nothing
         // and the copy stands still for the howl (formView.ts gmHowlingNow): the next movement update pulled it straight out of the howl on the watcher's screen
