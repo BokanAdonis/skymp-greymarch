@@ -69,7 +69,7 @@ test("formView.ts: a beast look gets no full model refresh when it comes on scre
   assert.ok(fv.includes("if (gmBeastMove) { try { const gmAc = Actor.from(refr); if (gmAc) forcedWeapDrawn = gmAc.isWeaponDrawn(); }"), "a beast's NPC is never ordered to draw (ActionDraw played WerewolfDraw and crashed the watching game)");
   assert.ok(fv.indexOf("forcedWeapDrawn = gmAc.isWeaponDrawn()") < fv.indexOf("applyMovement(refr, model.movement"), "decided before the movement is applied");
   assert.ok(fv.includes("/^skympfake/i.test("), "nor given SkyMP's fake equip");
-  assert.ok(/ {6}if \(refrId >= 0xff000000\) \{[\s\S]{0,1500}refr\.disable\(false\)\.then\(\(\) => \{[\s\S]{0,120}gone\.delete\(\);[\s\S]{0,200}return;/.test(fv), "every copy (a beast, a server NPC, a player: 2026-11-02) is disabled, then deleted, and given nothing after");
+  assert.ok(/ {6}if \(refrId >= 0xff000000\) \{[\s\S]{0,2500}refr\.disable\(false\)\.then\(\(\) => \{[\s\S]{0,200}gone\.delete\(\);[\s\S]{0,300}return;/.test(fv), "every copy (a beast, a server NPC, a player: 2026-11-02) is disabled, then deleted (a few frames later since 2026-11-12), and given nothing after");
   assert.ok(!/refr\.delete\(\);\s*\}\s*SpApiInteractor/.test(fv), "no copy is deleted while still enabled any more (a player's copy crashed the movement code, 2026-11-02)");
 });
 
@@ -114,7 +114,10 @@ test("no AI switching for anyone (a beast with its AI off never started its anim
   await spawn({ raceId: 0x13746, headpartIds: [1], tints: [] });
   assert.ok(!spawn.calls.some((c) => c.startsWith("ai ")), "a person: no AI change");
   const fv = fs.readFileSync(path.join(__dirname, "..", "src", "view", "formView.ts"), "utf8");
-  assert.ok(!fv.includes("enableAI("), "formView.ts switches no AI");
+  // the one exception (2026-11-12, Deer crash): a copy being removed has its AI turned off just before its disable and is deleted after; it never comes back on
+  assert.deepStrictEqual(fv.match(/enableAI\([^)]*\)/g), ["enableAI(false)"], "formView.ts switches no AI on, and off only once");
+  const rm = fv.slice(fv.indexOf("  destroy(): void {"), fv.indexOf("private lastHarvestedApply"));
+  assert.ok(rm.includes("gmStill.enableAI(false)"), "and that one is in destroy()");
 });
 
 test("an actor made at its spot (a beast look, formView.ts) is not moved before it is enabled; everything else still is", async () => {

@@ -184,6 +184,9 @@ export const getScreenResolution = (): ScreenResolution => {
 }
 
 // GREYMARCH: the bridge marks another player's werewolf copy as howling until a time (greymarchWolfHowlOther): no movement or relayed animation is played on it until then
+// GREYMARCH: a removed copy is deleted this many frames after its disable is done (see destroy(), 2026-11-12 Deer crash)
+export const GM_DELETE_AFTER_FRAMES = 3;
+const gmAfterFrames = (frames: number, fn: () => void): void => { if (frames <= 0) { fn(); return; } once("update", () => gmAfterFrames(frames - 1, fn)); };
 const gmHowlingNow = (formId: number): boolean => { try { const m = (Function("return this")() as any).__gmBeastHowling; return !!(m && m[formId] > Date.now()); } catch (e) { return false; } };
 
 export class FormView {
@@ -627,11 +630,18 @@ export class FormView {
         // ITS MOVES STOPPED FIRST (2026-10-30, crash: a wildlife Deer deleted while a movement order SkyMP gave it was still queued, MovementControllerNPC
         // reading the deleted actor, IMovementMessageInterface): the translateTo and keepOffsetFromActor orders are cancelled before it is disabled and deleted
         try { const gmMover = Actor.from(refr); if (gmMover) { gmMover.stopTranslation(); gmMover.clearKeepOffsetFromActor(); } } catch (e) { /* it was not moving */ }
+        // ITS AI OFF TOO, AND THE DELETE A FEW FRAMES AFTER THE DISABLE (2026-11-12, the same crash again: a wildlife Deer, kDeleted with no cell, its
+        // MovementControllerNPC stepped on a job thread after the delete, IMovementMessageInterface). Stopping SkyMP's moves was not enough: the engine's own AI
+        // still queued movement for it, and a job already queued in the frame of the disable could run after a delete made in that same frame. Its AI is turned
+        // off and it is held in place before the disable, and the delete waits GM_DELETE_AFTER_FRAMES frames so no queued job is left for it.
+        try { const gmStill = Actor.from(refr); if (gmStill) { gmStill.enableAI(false); gmStill.setDontMove(true); } } catch (e) { /* not an actor */ }
         refr.disable(false).then(() => {
-          const gone = ObjectReference.from(Game.getFormEx(refrId));
-          if (gone) gone.delete();
-          gmCrumb("removed " + gmHex(refrId) + " (disabled first)");
-          unprotect();
+          gmAfterFrames(GM_DELETE_AFTER_FRAMES, () => {
+            const gone = ObjectReference.from(Game.getFormEx(refrId));
+            if (gone) gone.delete();
+            gmCrumb("removed " + gmHex(refrId) + " (AI off, disabled first)");
+            unprotect();
+          });
         });
         return;
       }
