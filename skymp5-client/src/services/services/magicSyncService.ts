@@ -11,6 +11,8 @@ import { SpellCastMsgData, SpellCastMessage } from "../messages/spellCastMessage
 import { UpdateAnimVariablesMessageMsgData } from "../messages/updateAnimVariablesMessage";
 import { sanitizeAim, sanitizeAimFloats, lookFromAngles, wrapAngle } from "./spellAim";
 import { readStaffCharge } from "../../greymarch/staffCharge";
+import { scrollReads, serverCount, ScrollSeen } from "../../greymarch/scrollUse";
+import { isBadMenuShown } from "../../sync/equipment";
 
 export class MagicSyncService extends ClientListener {
     constructor(private sp: Sp, private controller: CombinedController) {
@@ -33,6 +35,7 @@ export class MagicSyncService extends ClientListener {
         this.checkActiveCasts();
         this.checkStaffFire();
         this.checkCharge();
+        this.checkScrollReads();
 
         if (this.isAnyMagicStuffEquiped() === false) {
             return;
@@ -312,6 +315,46 @@ export class MagicSyncService extends ClientListener {
         if (me) this.staffSend(me, st.ench, hand, true);
         this.diag(`magic: staff end ${st.ench.toString(16)} hand ${hand} (${reason})`);
     }
+    // GREYMARCH: SCROLLS READ (2026-11-12, greymarch/scrollUse.ts): the game sends no spell cast event for a scroll, so the server never heard of a read and
+    // never took the scroll out (it came back 5 s later). Every 100 ms the scrolls in the player's hands are looked at; one whose count dropped by one (no
+    // menu open, the server's count unchanged) was read: its cast is sent as the game would have (the server program takes the scroll out as it comes in,
+    // and its hits count as its spell's), unless the game did send a cast of it in the last 1.5 s
+    private scrollSeen: { [id: string]: ScrollSeen } = {};
+    private scrollCheckAt = 0;
+    private checkScrollReads() {
+        const now = Date.now();
+        if (now - this.scrollCheckAt < 100) return;
+        this.scrollCheckAt = now;
+        const me = Game.getPlayer();
+        if (!me) return;
+        const seen: { [id: string]: ScrollSeen } = {};
+        const pcInv = storage["pcInv"];
+        const look = (id: number, hand: number) => {
+            const key = String(id >>> 0);
+            if (seen[key]) { if (seen[key].hand < 0) seen[key].hand = hand; return; }
+            const form = Game.getFormEx(id);
+            if (!form) return;
+            seen[key] = { count: me.getItemCount(form), hand, server: serverCount(pcInv, id) };
+        };
+        try {
+            for (const hand of [1, 0]) {
+                const f = me.getEquippedObject(hand);
+                if (f && this.sp.Scroll.from(f)) look(f.getFormID(), hand);
+            }
+            for (const key of Object.keys(this.scrollSeen)) if (this.scrollSeen[key].hand >= 0) look(Number(key), -1);
+        } catch (e) { return; }
+        let menu = false;
+        try { menu = isBadMenuShown() || this.sp.Ui.isMenuOpen("BarterMenu") || this.sp.Ui.isMenuOpen("GiftMenu"); } catch (e) { menu = true; }
+        const reads = scrollReads(this.scrollSeen, seen, menu);
+        this.scrollSeen = seen;
+        for (const r of reads) {
+            if (this.recentCasts.some((c) => c.casterLocalId === this.playerId && c.spell === r.id && now - c.at <= 1500)) continue; // the game sent it
+            this.staffSend(me, r.id, r.hand, false);
+            this.diag(`magic: scroll ${r.id.toString(16)} read from hand ${r.hand} (the game sent no cast): its cast sent to the server`);
+            try { this.sp.writeLogs("greymarch", "scroll: " + r.id.toString(16) + " read from hand " + r.hand + ", its cast sent to the server"); } catch (e) { /* log only */ }
+        }
+    }
+
     private staffSend(me: Actor, ench: number, hand: number, end: boolean) {
         let aimAngle = 0, aimHeading = 0;
         const look = this.getPlayerLook(me);
