@@ -1195,7 +1195,7 @@ export class GreymarchBridge {
                     // its sound, 2026-10-23). Roars have no wait here (WOLF_ROAR_MS), so the recovery is cleared first.
                     var gmVoiceWas = -1; try { gmVoiceWas = player.getVoiceRecoveryTime(); player.setVoiceRecoveryTime(0); } catch (vErr) { /* the howl as before */ }
                     if ((this.greymarchRoarLogged = (this.greymarchRoarLogged || 0) + 1) <= 10) this.greymarchLog("wolf: roar: the voice was recovering for " + (Math.round(gmVoiceWas * 10) / 10) + " s (cleared)");
-                    this.greymarchCrumb("beast: howl"); sp.Debug.sendAnimationEvent(player, "HowlStart"); this.greymarchWolfRoarRelease = now + 200; // released at once: a short howl, as a quick tap of the shout key does it
+                    this.greymarchCrumb("beast: howl"); sp.Debug.sendAnimationEvent(player, "HowlStart"); try { this.greymarchBeastDiag(player.getFormID(), "own howl", [300, 1000]); } catch (dErr) { /* diagnostics only */ } this.greymarchWolfRoarRelease = now + 200; // released at once: a short howl, as a quick tap of the shout key does it
                     if (this.greymarchWolfBearRace) { this.greymarchWolfRoarSound(player, true); this.greymarchLog("wolf: roar (R, the werebear's howl and roar)"); }
                     else this.greymarchLog("wolf: roar (R, the howl)");
                     // reported: the server sends it to every player near enough to hear it (werewolf.js howl; it keeps the same wait)
@@ -1209,6 +1209,7 @@ export class GreymarchBridge {
                 this.greymarchWalkDiagNext = now + 2000; this.greymarchWalkDiagLeft--;
                 try { this.greymarchLog("wolf walk (mine): SpeedSampled " + Math.round(player.getAnimationVariableFloat("SpeedSampled")) + ", Speed " + Math.round(player.getAnimationVariableFloat("Speed")) + ", Direction " + (Math.round(player.getAnimationVariableFloat("Direction") * 100) / 100) + ", sprinting " + player.isSprinting() + ", running " + player.isRunning() + ", weapon drawn " + player.isWeaponDrawn() + ", animation driven " + player.getAnimationVariableBool("bAnimationDriven")); } catch (dErr) { /* diagnostics only */ }
             }
+            this.greymarchBeastDiagTick(now);
             var otherRel = this.greymarchWolfOtherRelease;
             if (otherRel) for (var orl in otherRel) { if (now >= otherRel[orl]) { delete otherRel[orl]; try { var oa = sp.Actor.from(sp.Game.getFormEx(Number(orl))); if (oa) sp.Debug.sendAnimationEvent(oa, "HowlRelease"); } catch (oErr) { /* gone */ } } }
             var howlCheck = this.greymarchWolfHowlCheck;
@@ -1257,6 +1258,7 @@ export class GreymarchBridge {
                         if (fHeld[fl] && now - feedsSeen[fi].at < WOLF_FEED_WAIT_MS) { feedLater.push(feedsSeen[fi]); continue; }
                         var fIdle = sp.Idle.from(sp.Game.getFormEx(0xd23b7));
                         var fPlayed = !!fIdle && !!fa.playIdle(fIdle);
+                        this.greymarchBeastDiag(fl, "feed", [0, 500, 1500]);
                         if (!fPlayed) sp.Debug.sendAnimationEvent(fa, "SpecialFeeding");
                         this.greymarchLog("wolf: feeding on " + (fl >>> 0).toString(16) + (fPlayed ? " played (idle)" : " via the event (the idle was refused)") + (fHeld[fl] ? ", its body still settling" : ""));
                     } catch (fErr) { /* not drawn here */ }
@@ -6948,6 +6950,31 @@ export class GreymarchBridge {
     // to cast, and only once that NPC has settled after its race switch (__gmBeastHeld, formView.ts). SkyMP's own relay of the howl stays dropped (formView.ts).
     // Its voice recovery is cleared first, as the roarer's own game does: after one howl the NPC's voice was recovering and the next HowlStart had nothing to
     // cast, so watchers saw the first roar, then a half-played start that snapped out at the copy's next movement (2026-10-27). True when the howl was played.
+    // BEAST GRAPH READINGS (2026-11-11, GreymarchCamera.dll 1.19): where a werewolf's animation graph is, read natively and sent to the log, at the given delays.
+    // Used on another player's copy around a howl or a feeding, and on our own body when we howl, so the two can be compared. Without the plugin: once logged, nothing.
+    greymarchBeastDiag(localId: number, what: string, delays: number[]): void {
+        var list = this.greymarchBeastDiagQueue || (this.greymarchBeastDiagQueue = []);
+        if (list.length > 40) return;
+        var t0 = Date.now();
+        for (var i = 0; i < delays.length; i++) list.push({ id: localId, tag: what + "+" + delays[i], at: t0 + delays[i], readAt: 0 });
+    }
+    greymarchBeastDiagTick(now: number): void {
+        var list = this.greymarchBeastDiagQueue;
+        if (!list || !list.length || this.greymarchBeastDiagNoDll) return;
+        var keep: any[] = [];
+        for (var i = 0; i < list.length; i++) {
+            var d = list[i];
+            try {
+                var ac = this.sp.Actor.from(this.sp.Game.getFormEx(d.id));
+                if (!ac) continue;
+                if (!d.readAt) { if (now < d.at) { keep.push(d); continue; } this.sp.callNative("GreymarchCam", "BeastGraphLog", undefined, ac, d.tag); d.readAt = now + 150; keep.push(d); continue; }
+                if (now < d.readAt) { keep.push(d); continue; }
+                var path = String(this.sp.callNative("GreymarchCam", "BeastGraphLast", undefined, ac, d.tag) || "");
+                this.greymarchLog("wolf: graph " + (d.id >>> 0).toString(16) + " " + d.tag + ": " + (path || "(not read yet)"));
+            } catch (e) { this.greymarchBeastDiagNoDll = true; this.greymarchLog("wolf: no graph readings (GreymarchCamera.dll 1.19 is not here): " + e); return; }
+        }
+        this.greymarchBeastDiagQueue = keep;
+    }
     // true: howled; false: not (the sound only); "wait": its body is still settling and canWait, so the caller tries again next tick
     greymarchWolfHowlOther(localId: number, now: number, canWait?: boolean): any {
         var held: any = (Function("return this")() as any).__gmBeastHeld || {};
@@ -6965,6 +6992,7 @@ export class GreymarchBridge {
         var howlingBefore = -1; try { howlingBefore = ac.getAnimationVariableInt("isHowling"); } catch (hErr) { /* unknown */ }
         // the last howl never ended: release it and try again next tick (the idle needs isHowling == 0)
         if (howlingBefore === 1 && canWait) { this.sp.Debug.sendAnimationEvent(ac, "HowlRelease"); this.greymarchLog("wolf: " + (localId >>> 0).toString(16) + " was still howling: released, the roar again next tick"); return "wait"; }
+        this.greymarchBeastDiag(localId, "howl", [0, 300, 1000]);
         var viaIdle = false;
         try { var hIdle = this.sp.Idle.from(this.sp.Game.getFormEx(WOLF_HOWL_IDLE)); viaIdle = !!hIdle && !!ac.playIdle(hIdle); } catch (iErr) { viaIdle = false; }
         if (!viaIdle) this.sp.Debug.sendAnimationEvent(ac, "HowlStart");
