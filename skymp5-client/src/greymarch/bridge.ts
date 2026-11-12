@@ -86,7 +86,9 @@ const REST_HEAL_REGEN = 50; // percent on HealRateMult out of combat (greymarchR
 const SCENT_IMOD = 0x02fb1d; // DetectLifeImod, Skyrim.esm
 const WOLF_HOWL_WAIT_MS = 3000; // another player's roar waits this long for their copy here to settle (beastSwitch.ts hold) before it is the sound only
 const WOLF_FEED_WAIT_MS = 6000; // and their feeding, this long
-const WOLF_HOWL_OTHER_RELEASE_MS = 1800; // HowlRelease on another player's copy this long after HowlStart (the howl's length)
+const WOLF_HOWL_OTHER_RELEASE_MS = 200; // HowlRelease on another player's copy this long after HowlStart, as the roarer's own game does (1.21: the cast plays the rest)
+const WOLF_HOWL_HOLD_MS = 2500; // the copy stands still this long for its howl (formView.ts gmHowlingNow)
+const WOLF_HOWL_SPELL = 0x0ce217; // HowlWerewolfDetectLife1, the spell of the howl shout in the copy's voice slot (WOLF_HOWL_SHOUT): the copy casts it (GreymarchCamera.dll 1.21)
 const WOLF_HOWL_IDLE = 0x0cdd9f; // the idle HowlStart (Skyrim.esm), WerewolfBehavior.hkx, needs isHowling == 0: played on other players' werewolves (greymarchWolfHowlOther)
 const WOLF_ROAR_SOUND = 0x101008, BEAR_ROAR_SOUND = 0x0f95bb; // NPCWerewolfShout (the werewolf's howl) and NPCBearAggroWarning01 (a bear's warning roar), Skyrim.esm
 // vampires (gamemode vampire.js): the game's own records, inside Dawnguard.esm (read from the game files); the real IDs are looked up with Game.getFormFromFile
@@ -1238,7 +1240,7 @@ export class GreymarchBridge {
                         var age = now - (roars[ri].at || now);
                         var howled = this.greymarchWolfHowlOther(rl, now, age < WOLF_HOWL_WAIT_MS);
                         if (howled === "wait") { roarLater.push(roars[ri]); continue; }
-                        if (howled !== true || roars[ri].bear) this.greymarchWolfRoarSound(who, roars[ri].bear);
+                        this.greymarchWolfRoarSound(who, roars[ri].bear); // always (2026-11-11: the watcher heard nothing; the copy's howl brought no sound of its own)
                     } catch (rErr) { /* not drawn here: not heard */ }
                 }
                 if (roarLater.length) this.greymarchWolfRoarQueue = roarLater.concat(this.greymarchWolfRoarQueue);
@@ -6967,6 +6969,7 @@ export class GreymarchBridge {
             try {
                 var ac = this.sp.Actor.from(this.sp.Game.getFormEx(d.id));
                 if (!ac) continue;
+                if (d.voice && now < d.at) { keep.push(d); continue; }
                 if (!d.readAt) { if (now < d.at) { keep.push(d); continue; } this.sp.callNative("GreymarchCam", "BeastGraphLog", undefined, ac, d.tag); d.readAt = now + 150; keep.push(d); continue; }
                 if (now < d.readAt) { keep.push(d); continue; }
                 var path = String(this.sp.callNative("GreymarchCam", "BeastGraphLast", undefined, ac, d.tag) || "");
@@ -6999,12 +7002,14 @@ export class GreymarchBridge {
         // THE DRIVE TEST (GreymarchCamera.dll 1.20, 2026-11-11): the watcher's graph plays the howl clip yet the body showed nothing. Every other roar of a
         // copy, its animation is also stepped by the plugin for the howl's length; the log says which roars were driven, the watcher says which they saw.
         var roarN = ((this.greymarchWolfRoarCount || (this.greymarchWolfRoarCount = {}))[localId] = ((this.greymarchWolfRoarCount[localId] || 0) + 1));
-        if (roarN % 2 === 0) { var drove = false; try { drove = !!this.sp.callNative("GreymarchCam", "BeastDrive", undefined, ac, WOLF_HOWL_OTHER_RELEASE_MS + 300); } catch (dvErr) { drove = false; } this.greymarchLog("wolf: roar " + roarN + " on " + (localId >>> 0).toString(16) + ": driven by the plugin " + (drove ? "yes" : "no (no plugin)")); }
-        else this.greymarchLog("wolf: roar " + roarN + " on " + (localId >>> 0).toString(16) + ": not driven");
+        // 1.21 (2026-11-11, the watcher saw the howl start and stop, heard nothing): the copy casts the howl from its voice, as an NPC werewolf's does
+        var voiced = false; try { var hSpell = this.sp.Game.getFormEx(WOLF_HOWL_SPELL); voiced = !!hSpell && !!this.sp.callNative("GreymarchCam", "BeastVoice", undefined, ac, hSpell); } catch (vcErr) { voiced = false; }
+        this.greymarchLog("wolf: roar " + roarN + " on " + (localId >>> 0).toString(16) + ": voice cast " + (voiced ? "asked" : "not asked (no plugin)"));
+        if (voiced) (this.greymarchBeastDiagQueue || (this.greymarchBeastDiagQueue = [])).push({ id: localId, tag: "voice +300 ms", at: Date.now() + 500, readAt: Date.now() + 500, voice: true });
         this.greymarchCrumb("beast: howl on " + (localId >>> 0).toString(16) + (viaIdle ? " (idle)" : " (event)") + " isHowling " + howlingBefore);
         (this.greymarchWolfOtherRelease || (this.greymarchWolfOtherRelease = {}))[localId] = now + WOLF_HOWL_OTHER_RELEASE_MS; // not 200 ms: that cut the copy's howl to nothing
         // and the copy stands still for the howl (formView.ts gmHowlingNow): the next movement update pulled it straight out of the howl on the watcher's screen
-        try { var howlingMap: any = (Function("return this")() as any).__gmBeastHowling || ((Function("return this")() as any).__gmBeastHowling = {}); howlingMap[localId] = Date.now() + WOLF_HOWL_OTHER_RELEASE_MS + 300; } catch (mErr) { /* it howls, maybe cut short */ }
+        try { var howlingMap: any = (Function("return this")() as any).__gmBeastHowling || ((Function("return this")() as any).__gmBeastHowling = {}); howlingMap[localId] = Date.now() + WOLF_HOWL_HOLD_MS; } catch (mErr) { /* it howls, maybe cut short */ }
         (this.greymarchWolfHowlCheck || (this.greymarchWolfHowlCheck = {}))[localId] = { at: now + 400, before: howlingBefore, viaIdle: viaIdle };
         return true;
     }

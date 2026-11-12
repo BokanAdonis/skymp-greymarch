@@ -514,13 +514,13 @@ test("watchers: every roar of another player plays the howl on their NPC, its vo
   assert.strictEqual(recovery.v, 0);
 });
 
-test("watchers: a werewolf NPC that howls gets no second howl sound (the howl brings its own); a werebear adds the bear's roar; a settling one the sound only", () => {
+test("watchers: every roar plays its sound on the copy (2026-11-11: the copy's howl brought none), the werebear's its own; a settling one the sound only", () => {
   const s = make({ others: { 711: 0xff000e01, 712: 0xff000e02 }, actors: {} });
   roarNpc(s, 0xff000e01, { v: 0 }); roarNpc(s, 0xff000e02, { v: 0 });
   s.say({ customPacketType: "greymarchWolfRoar", actor: 711, bear: false });
   s.say({ customPacketType: "greymarchWolfRoar", actor: 712, bear: true });
   s.tick();
-  assert.deepStrictEqual(s.log.sounds, [[0x0f95bb, 0xff000e02]], "the werewolf's howl sound comes from its howl only; the werebear also roars");
+  assert.deepStrictEqual(s.log.sounds, [[0x101008, 0xff000e01], [0x0f95bb, 0xff000e02]], "the werewolf's howl sound and the werebear's roar");
   const g = Function("return this")();
   g.__gmBeastHeld = { [0xff000e01]: true };
   s.log.sounds.length = 0;
@@ -592,9 +592,7 @@ test("watchers: the howl on another player's NPC is the game's idle HowlStart (0
   s.say({ customPacketType: "greymarchWolfRoar", actor: 731, bear: false });
   s.say({ customPacketType: "greymarchWolfRoar", actor: 732, bear: false });
   s.tick(); s.tick(500);
-  assert.deepStrictEqual(order.filter((e) => /^(idle|howl)/i.test(e)), ["idle cdd9f"], "the idle, no raw HowlStart on top, and not released at once");
-  s.tick(1400);
-  assert.deepStrictEqual(order.filter((e) => /^(idle|howl)/i.test(e)), ["idle cdd9f", "HowlRelease"], "released after the howl's length");
+  assert.deepStrictEqual(order.filter((e) => /^(idle|howl)/i.test(e)), ["idle cdd9f", "HowlRelease"], "the idle, no raw HowlStart on top, released 200 ms later as the roarer's own game does");
   assert.deepStrictEqual(order2.filter((e) => /^howl/i.test(e)), ["HowlStart", "HowlRelease"], "refused: the raw event");
   assert.ok(s.log.lines.some((l) => l.endsWith("wolf: howl on ff001001 via idle, isHowling 0 -> 1")), s.log.lines.join("\n"));
   assert.ok(s.log.lines.some((l) => /wolf: howl on ff001002 via event/.test(l)));
