@@ -401,7 +401,7 @@ export class GreymarchBridge {
         if (type === "greymarchMenuEvent" && msg.type === "body" && Number(msg.looking) > 0 && !this.greymarchMenuOn) { this.greymarchMenuShow({ mode: "open", looking: Number(msg.looking) }); return; } // E on the body of a dead wild animal (gamemode wildlifesystem.js): the menu opens on it to take what is on it
         if (type === "greymarchMenuEvent") { if ((msg.type === "trade_invite" || msg.type === "trade" || msg.type === "feed_invite" || msg.type === "frisk_invite" || msg.type === "guard_view") && !this.greymarchMenuOn) this.greymarchMenuShow({ mode: "invite", looking: 0 }); /* a trade, a vampire's request to feed, a guard's request to frisk or what the frisk found opens the menu by itself */ this.greymarchMenuToPage("event", msg); return; }
         if (type === "greymarchFx") { this.greymarchFxWant = { noclip: !!msg.noclip, speed: Number(msg.speed) || 100, frozen: !!msg.frozen, god: !!msg.god, tgm: !!msg.tgm }; if (msg.me) this.greymarchMeActor = msg.me; return; }
-        if (type === "greymarchGhosts") { this.greymarchGhostList = Array.isArray(msg.ghosts) ? msg.ghosts : []; if (msg.me) this.greymarchMeActor = msg.me; this.greymarchOthers = Array.isArray(msg.others) ? msg.others : []; if (msg.stats !== undefined) this.greymarchStatsWant = msg.stats && typeof msg.stats === "object" ? msg.stats : null; var inv = Array.isArray(msg.invisible) ? msg.invisible : []; this.greymarchInvisList = inv; this.greymarchFaintList = Array.isArray(msg.faint) ? msg.faint : []; var invMap = {}; for (var q = 0; q < inv.length; q++) if (inv[q] !== msg.me) invMap[inv[q]] = true; try { Function("return this")().__gmInvisible = invMap; } catch (gErr) { /* names stay visible */ } var dis = Array.isArray(msg.disguised) ? msg.disguised : []; var disMap = {}; for (var dq = 0; dq < dis.length; dq++) if (dis[dq] !== msg.me) disMap[dis[dq]] = true; try { Function("return this")().__gmDisguised = disMap; } catch (gErr2) { /* names stay visible */ } return; }
+        if (type === "greymarchGhosts") { this.greymarchGhostList = Array.isArray(msg.ghosts) ? msg.ghosts : []; if (msg.me) this.greymarchMeActor = msg.me; this.greymarchOthers = Array.isArray(msg.others) ? msg.others : []; if (msg.stats !== undefined) this.greymarchStatsWant = msg.stats && typeof msg.stats === "object" ? msg.stats : null; var inv = Array.isArray(msg.invisible) ? msg.invisible : []; this.greymarchInvisList = inv; this.greymarchFaintList = Array.isArray(msg.faint) ? msg.faint : []; this.greymarchSelfFaint = !!msg.selfFaint; var invMap = {}; for (var q = 0; q < inv.length; q++) if (inv[q] !== msg.me) invMap[inv[q]] = true; try { Function("return this")().__gmInvisible = invMap; } catch (gErr) { /* names stay visible */ } var dis = Array.isArray(msg.disguised) ? msg.disguised : []; var disMap = {}; for (var dq = 0; dq < dis.length; dq++) if (dis[dq] !== msg.me) disMap[dis[dq]] = true; try { Function("return this")().__gmDisguised = disMap; } catch (gErr2) { /* names stay visible */ } return; }
         this.sp.printConsole("[greymarch] got " + type + (msg.characters ? " with " + msg.characters.length + " character(s)" : ""));
         if (type === "greymarchHold") {
             // Select before the world (bodyHold.ts): keep our body until a character is chosen, and tell the server, so it binds the chosen body even when it is the one we stand in
@@ -4893,7 +4893,7 @@ export class GreymarchBridge {
                 }
             }
             this.greymarchNoHostApply(now, player, !!have.god);
-            this.greymarchGhostApply(now, ghosts || []); this.greymarchNamesApply(now); this.greymarchInvisApply(now); this.greymarchFaintApply(now); this.greymarchNoTalkApply(now); this.greymarchSeenLog(now); this.greymarchStatsApply(player); this.greymarchCombatApply(player); this.greymarchPerksApply(now, player); this.greymarchFastDrawApply(now, player); this.greymarchDualDaggerApply(now, player);
+            this.greymarchGhostApply(now, ghosts || []); this.greymarchNamesApply(now); this.greymarchInvisApply(now); this.greymarchFaintApply(now); this.greymarchSelfFaintApply(now, player); this.greymarchNoTalkApply(now); this.greymarchSeenLog(now); this.greymarchStatsApply(player); this.greymarchCombatApply(player); this.greymarchPerksApply(now, player); this.greymarchFastDrawApply(now, player); this.greymarchDualDaggerApply(now, player);
         } catch (err) {
             if (!this.greymarchFxErr) { this.greymarchFxErr = true; this.greymarchLog("staff effects error (shown once): " + err); }
         }
@@ -5242,6 +5242,24 @@ export class GreymarchBridge {
             delete applied[key];
             var gone: any = null; try { gone = sp.Actor.from(sp.Game.getFormEx(Number(key))); } catch (e2) { gone = null; }
             if (gone) { try { gone.setAlpha(1, false); } catch (e3) { /* gone */ } } // (one gone invisible to everyone is set to 0 again by greymarchInvisApply)
+        }
+    }
+    // AN INVISIBLE GM SEES THEMSELVES SEE-THROUGH (2026-11-12, the owner: "GMs also see themselves a little transparent when they are invisible"). The server
+    // says so (gamemode admin.js greymarchGhosts.selfFaint, staff invisibility only, not the spell or the ring). The own body is drawn at the same 0.35 as
+    // other staff see them, replayed every 2 s (a 3D reload is solid again), solid again when they show. A creature form hides the own body itself
+    // (greymarchShapeOn): left alone then.
+    greymarchSelfFaintApply(now: any, player: any): any {
+        if (!player) return;
+        var want = !!this.greymarchSelfFaint && !this.greymarchShapeOn;
+        if (want) {
+            if (this.greymarchSelfFaintAt && now - this.greymarchSelfFaintAt < 2000) return;
+            try { player.setAlpha(0.35, false); } catch (aErr) { return; }
+            if (!this.greymarchSelfFaintAt) this.greymarchLog("staff: invisible, own body drawn see-through");
+            this.greymarchSelfFaintAt = now;
+        } else if (this.greymarchSelfFaintAt) {
+            this.greymarchSelfFaintAt = 0;
+            if (!this.greymarchShapeOn) { try { player.setAlpha(1, false); } catch (aErr2) { /* solid on the next 3D load */ } }
+            this.greymarchLog("staff: visible, own body solid again");
         }
     }
     greymarchInvisApply(now: any): any {
