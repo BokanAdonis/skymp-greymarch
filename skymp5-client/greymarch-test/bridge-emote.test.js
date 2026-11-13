@@ -489,7 +489,7 @@ test("the forge window: the game says it has it on entering the world; the serve
 test("the station windows: a smelter opens the forge window in its station mode; the worker is put at the furniture's marker, facing its way, and does the smelter's own animation; requests name the station", () => {
   const s = make();
   s.state.marker = [520, 640, 12, Math.PI / 2];
-  s.say({ customPacketType: "greymarchForgeOpen", station: "smelter", title: "Smelter", ref: 0xc4321, anim: "IdleSmelterEnter" });
+  s.say({ customPacketType: "greymarchForgeOpen", station: "smelter", title: "Smelter", ref: 0xc4321, anim: "IdleSmelterEnter", exit: "IdleFurnitureExitSlow" });
   assert.strictEqual(s.gm.greymarchForgeOn, true);
   assert.deepStrictEqual(s.log.forge.pop(), { fn: "show", arg: { station: "smelter", title: "Smelter" } }, "the page opens as the smelter");
   s.at(() => s.gm.greymarchForgeTick(Date.now()));
@@ -500,7 +500,7 @@ test("the station windows: a smelter opens the forge window in its station mode;
   s.page({ type: "forge", rid: 4, op: "craft", args: { station: "smelter", id: 2, qty: 1, tab: "ingots" } });
   assert.deepStrictEqual(s.log.sent.pop(), { customPacketType: "greymarchForge", rid: 4, op: "craft", args: { station: "smelter", id: 2, qty: 1, tab: "ingots" } });
   s.key(1, true); s.key(1, false); s.at(() => s.gm.greymarchForgeTick(Date.now()));
-  assert.strictEqual(s.log.events.pop(), "IdleSmelterExit", "steps out with the smelter's own exit");
+  assert.strictEqual(s.log.events.pop(), "IdleFurnitureExitSlow", "steps out with the smelter's own exit event, as the server names it");
   const k = make(); // the kiln: no marker, no animation, only the window
   k.say({ customPacketType: "greymarchForgeOpen", station: "kiln", title: "Charcoal Kiln", ref: 0x1234, anim: "" });
   k.at(() => k.gm.greymarchForgeTick(Date.now()));
