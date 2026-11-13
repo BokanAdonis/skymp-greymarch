@@ -205,6 +205,7 @@ export class AuthService extends ClientListener {
       case 'greymarchProfReply':
       case 'greymarchChanceryReply':
       case 'greymarchChanceryOpen':
+      case 'greymarchFreecam': // a GM's free camera grant for a recording (bridge greymarchFreecamGrant)
       case 'greymarchForgeOpen':
       case 'greymarchForgeReply':
       case 'greymarchCraftOpen':
