@@ -78,10 +78,10 @@ export const EMOTE_GROUPS: EmoteGroup[] = [
     { id: "carry", name: "Carry", items: [
         e("pot", "Carry a pot", 0x101044, "walk", OFFSET_STOP), e("potserve", "Serve from the pot", 0x101045, "once"), e("tray", "Carry a tray", 0x107110, "walk", OFFSET_STOP),
         e("basket", "Carry a basket", 0x19925, "walk", OFFSET_STOP), e("scatter", "Scatter feed", 0xf1225, "loop"),
-// 2026-11-14 (the owner: "is there no log carry emote?"): the game's own firewood and bucket idles, for town work (gamemode labour.js) and the wheel.
-// The put-down and the pour end the carry first (not "once": a one-off keeps a carry going), then play once and stand up when the server's time is up.
-e("woodcarry", "Carry firewood", 0xbcd51, "walk", 0x10fde1), e("wooddown", "Put down firewood", 0xbcd52, "loop"), // IdleWoodPickUpEnter / IdleWoodPickUpExit, IdlewoodputdownEnter
-e("bucket", "Carry a bucket", 0x1e1b6, "walk", OFFSET_STOP), e("bucketpour", "Pour the bucket", 0x1e374, "loop"), // IdleCarryBucketFillEnter, IdleCarryBucketPourEnter
+// CARRY LOGS (2026-11-14, the owner: "is there no log carry emote?"): the game's firewood and bucket idles (IdleWoodPickUpEnter, IdlewoodputdownEnter,
+// IdleCarryBucketFillEnter ...) are refused for a player (the owner's log: "refused by the game"; they belong to an NPC at a woodpile or well marker), so the
+// logs are carried in the basket's pose under their own name, which keeps its own pace (bridge.ts CARRY_PACE: a walk only). Town work's log job uses it.
+e("logcarry", "Carry logs", 0x19925, "walk", OFFSET_STOP),
     ] },
     { id: "grim", name: "Grim", items: [
         e("beat", "Beat a prisoner", 0x105d46, "once"), e("cleansword", "Clean a sword", 0x3ea33, "once"), e("cutpalm", "Cut your palm", 0xaf886, "once"),
