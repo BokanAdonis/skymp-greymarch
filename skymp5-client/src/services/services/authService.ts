@@ -255,6 +255,7 @@ export class AuthService extends ClientListener {
       case 'greymarchSunBurn': // the sun burns this vampire: no regeneration of their own meanwhile (gamemode sunburn.js, 2026-11-11)
       case 'greymarchPlague': // the GMs' plague event: this player's stage and a cough (gamemode plague.js, 2026-11-11)
       case 'greymarchPlagueSeen': // who looks sick (Wasting and Dying): the sickly sheen on them
+      case 'greymarchWorkMark': // the object that is this player's town work: the blue glow on it (gamemode labour.js, 2026-11-14)
       case 'greymarchPlagueCough': // a sick character coughs now: the doubled-over cough on them
       case 'greymarchIntox': // drunk or high from drinks and skooma (2026-11-07)
       case 'greymarchIntoxNear': // who is drunk or high: their copies keep the drunk walk (2026-11-07)

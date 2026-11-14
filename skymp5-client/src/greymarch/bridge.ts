@@ -42,6 +42,7 @@ function shapeSpeedOf(v: any): any { if (!v || typeof v !== "object") return nul
 const SHAPE_LAND_MS = 450; // a creature's swing is reported this long after it starts (about when it lands)
 const SHAPE_NPC_READY_MS = 8000; // a creature NPC that is not ready this long after it was placed is placed again
 const SHAPE_SILENCE_MS = 20000; // a creature form: with no word from the server for this long the player changes back by themselves (the server repeats "on" every 5 seconds)
+const WORK_MARK_SHADER = 0x5d608; // EnchBlueFXShader (Skyrim.esm): the blue glow on the object that is this player's town work (greymarchWorkMarkTick)
 const POISON_GLOW_SHADER = 0x5d606; // EnchGreenFXShader (Skyrim.esm): the green glow the game puts on an enchanted weapon, for a poisoned blade (greymarchPoisonGlowTick)
 const SIT_RESET_MS = 2000; // standing up from the wheel's sitting: the body is put back to normal this long after the stand-up starts (greymarchSitResetTick)
 const WORK_SHEATHE_MS = 1500; // profession work: the kneel waits this long after the weapon is put away (the put-away animation ends first)
@@ -377,6 +378,7 @@ export class GreymarchBridge {
         if (type === "greymarchEmote") { if (typeof msg.emote === "string" && msg.emote.length < 40) this.greymarchServerEmote = { id: msg.emote, ms: Math.max(500, Math.min(30000, Number(msg.ms) || 4000)), at: Date.now() }; return; } // the server asks for an emote (a Harvester or Chef kneeling at a salt deposit): played in greymarchEmoteTick
         if (type === "greymarchMinigame") { this.greymarchMiniShow(msg); return; } // a profession mini game before the work (gamemode minigames.js)
         if (type === "greymarchMinigameDone") { this.greymarchMiniDone(msg); return; }
+        if (type === "greymarchWorkMark") { this.greymarchWorkMarkWant = Number(msg.ref) >>> 0; return; } // THE JOB'S GLOW (gamemode labour.js; greymarchWorkMarkTick)
         if (type === "greymarchPoisoned") { this.greymarchPoisonedWant = Array.isArray(msg.actors) ? msg.actors.map((a: any) => Number(a) >>> 0).filter((a: number) => a > 0).slice(0, 64) : []; return; } // THE GLOW (greymarchPoisonGlowTick)
         if (type === "greymarchFreecam") { this.greymarchFreecamGrant(Number(msg.seconds)); return; } // a GM gave this player the free camera for a while, or it ended (gamemode freecam.js)
         if (type === "greymarchCastAnim") { var cm = Number(msg.mode), cf = Number(msg.ffMs); if (cm >= 1 && cm <= 6) this.sp.storage["greymarchCastAnimMode"] = cm; if (cf >= 200 && cf <= 3000) this.sp.storage["greymarchCastAnimFfMs"] = cf; this.greymarchLog("magic: cast animation mode " + cm + ", single shot " + cf + " ms (/castanim)"); return; } // how other players' casts are animated (castAnimMode.ts)
@@ -6649,6 +6651,7 @@ export class GreymarchBridge {
         this.greymarchEmoteExitTick(now); // Backspace, and moving during a one-off emote
         this.greymarchPoisonTick(now);
         this.greymarchPoisonGlowTick(now);
+        this.greymarchWorkMarkTick(now);
         this.greymarchEmotePovLock(!!this.greymarchEmoteNow || now < (this.greymarchEmotePovUntil || 0) || !!this.greymarchMiniOn || !!this.greymarchForgeAnim || !!this.greymarchForgeOn || now - (this.greymarchWorkStartAt || -1e12) < 1500 || !!this.greymarchSitResetAt || !!this.greymarchForgeAnimSafety, now); // ...and out of a forge or station until its exit has played and the body is back to normal (greymarchForgeAnimSafety; 2026-11-08, the owner: out of the Karthwasten forge in first person they walked through walls: first person came back the moment the window closed, mid exit) // standing up from sitting: third person until the body is back to normal, THEN first person (2026-11-02, the owner: going back to first person mid stand-up made them fall and float) // a meal too, and profession work (2026-11-02, the owner)
         if (this.greymarchMealLocked && !(this.greymarchEmoteNow && this.greymarchEmoteNow.meal)) this.greymarchMealLock(false, "the meal ended another way"); // never left frozen (a beast form, an emote dropped elsewhere)
         var cur = this.greymarchEmoteNow;
@@ -6862,6 +6865,25 @@ export class GreymarchBridge {
     // A POISONED BLADE GLOWS (2026-11-03, the owner: on the sword only). The server says who carries one (greymarchPoisoned); each of them that this game draws
     // gets the game's green enchantment glow (EnchGreenFXShader) on the weapon alone, through GreymarchCamera.dll 1.10 (GreymarchCam.SetWeaponGlow). Asked
     // again when they draw or sheathe it and every 5 s (a body drawn again loses it); taken off when the poison is used. Without the DLL: nothing, said once.
+    // THE JOB'S GLOW (2026-11-14, the owner: "make it easy to tell what is part of the player's job"): the server names the object that is this player's town
+    // work (greymarchWorkMark { ref }, 0 for none; gamemode labour.js) and only this game puts the blue enchantment glow (EnchBlueFXShader) on it. Put on again
+    // when the object is drawn again (its 3D comes and goes with distance and cells), taken off when the job ends or changes. Looked at once a second.
+    greymarchWorkMarkTick(now: number): any {
+        if (now < (this.greymarchWorkMarkAt || 0)) return;
+        this.greymarchWorkMarkAt = now + 1000;
+        var sp = this.sp, want = this.greymarchWorkMarkWant || 0, shown = this.greymarchWorkMarkShown || null;
+        if (!want && !shown) return;
+        var shader: any = null; try { shader = sp.EffectShader.from(sp.Game.getFormEx(WORK_MARK_SHADER)); } catch (e) { shader = null; }
+        if (!shader) return;
+        var refOf = function (id: number): any { try { var local = id >= 0xff000000 ? misc.remoteIdToLocalId(id) : id; return local ? sp.ObjectReference.from(sp.Game.getFormEx(local)) : null; } catch (e) { return null; } };
+        if (shown && shown.ref !== want) { var old = refOf(shown.ref); try { if (old) shader.stop(old); } catch (e) { /* gone */ } shown = this.greymarchWorkMarkShown = null; }
+        if (!want) return;
+        var o = refOf(want);
+        var loaded = false; try { loaded = !!o && (typeof o.is3DLoaded === "function" ? !!o.is3DLoaded() : true); } catch (e) { loaded = false; }
+        if (!loaded) { if (shown) shown.loaded = false; return; }
+        if (shown && shown.loaded) return;
+        try { shader.play(o, -1); this.greymarchWorkMarkShown = { ref: want, loaded: true }; if ((this.greymarchWorkMarkSaid = (this.greymarchWorkMarkSaid || 0) + 1) <= 10) this.greymarchLog("work: glow on " + want.toString(16)); } catch (e) { if (!this.greymarchWorkMarkErr) { this.greymarchWorkMarkErr = true; this.greymarchLog("work: the glow could not be put on: " + e); } }
+    }
     greymarchPoisonGlowTick(now: number): any {
         if (now < (this.greymarchPoisonGlowAt || 0)) return;
         this.greymarchPoisonGlowAt = now + 500;
