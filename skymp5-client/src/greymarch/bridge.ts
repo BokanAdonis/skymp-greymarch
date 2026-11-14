@@ -355,7 +355,7 @@ export class GreymarchBridge {
         if (type === "greymarchSunBurn") { this.greymarchSunBurnWant = !!msg.on; return; } // the sun burns this vampire: their own regeneration stops meanwhile
         if (type === "greymarchPlagueSeen") { this.greymarchPlagueSeen = Array.isArray(msg.actors) ? msg.actors.map(function (x: any) { return Number(x) >>> 0; }).filter(function (x: number) { return x > 0; }).slice(0, 200) : []; var gs = Number(msg.glintS), ge = Number(msg.glintEvery); this.greymarchPlagueGlint = { s: Number.isFinite(gs) ? Math.max(0, Math.min(30, gs)) : PLAGUE_SHEEN_S, every: Number.isFinite(ge) && ge >= 3 ? Math.min(600, ge) * 1000 : PLAGUE_SHEEN_EVERY }; this.greymarchPlagueSheenNext = 0; return; } // who looks sick: the glint, and how long and how often (the F7 Plague tab)
         if (type === "greymarchPlagueCough") { var pc = Number(msg.actor) >>> 0; if (pc) (this.greymarchPlagueCoughs || (this.greymarchPlagueCoughs = [])).push(pc); return; } // that character coughs now
-        if (type === "greymarchPlague") { var ps = Math.max(0, Math.min(3, Math.floor(Number(msg.stage) || 0))); this.greymarchPlagueWant = ps; var pfx: any = {}; if (msg.fx && typeof msg.fx === "object") for (var pk in msg.fx) { var pv = Number(msg.fx[pk]); if (Number.isFinite(pv) && pv > 0) pfx[pk] = Math.min(90, pv); } this.greymarchPlagueFx = ps > 0 ? pfx : {}; if (msg.cough && ps > 0) this.greymarchPlagueCough = true; return; } // the plague: this player's stage (0: well), and a cough now
+        if (type === "greymarchPlague") { if (Number(msg.me) > 0) this.greymarchMeActor = Number(msg.me) >>> 0; /* which character is this player (2026-11-13: a sick player's own cough was taken for someone else's and never shown when no other packet had told it) */ var ps = Math.max(0, Math.min(3, Math.floor(Number(msg.stage) || 0))); this.greymarchPlagueWant = ps; var pfx: any = {}; if (msg.fx && typeof msg.fx === "object") for (var pk in msg.fx) { var pv = Number(msg.fx[pk]); if (Number.isFinite(pv) && pv > 0) pfx[pk] = Math.min(90, pv); } this.greymarchPlagueFx = ps > 0 ? pfx : {}; if (msg.cough && ps > 0) this.greymarchPlagueCough = true; return; } // the plague: this player's stage (0: well), and a cough now
         if (type === "greymarchIntox") { var il = msg.level === "tipsy" || msg.level === "drunk" || msg.level === "high" ? msg.level : "sober"; this.greymarchIntoxWant = il === "sober" ? null : { level: il, until: Date.now() + Math.max(1000, Math.min(30 * 60000, Number(msg.ms) || 0)) }; this.greymarchIntoxCheckAt = 0; return; } // drunk or high (greymarchIntoxTick)
         if (type === "greymarchWeather") { var wxId = Number(msg.id) >>> 0; this.greymarchWeatherWant = { id: wxId, fast: !!msg.fast, file: typeof msg.file === "string" && msg.file.length < 80 ? msg.file : null }; this.greymarchWeatherCheckAt = 0; if (msg.fast || (this.greymarchWeatherSet && this.greymarchWeatherSet !== wxId)) this.greymarchWeatherSetAt = 0; return; } // the hold's weather (greymarchWeatherTick)
         if (type === "greymarchDrunk") { this.greymarchDrunkWant = msg.on ? { until: Date.now() + Math.max(0, Number(msg.ms) || 0), at: 0 } : { off: true }; return; } // drained to death: the drunk walk after waking (greymarchDrunkTick)
@@ -2105,8 +2105,11 @@ export class GreymarchBridge {
     greymarchPlagueOwnCough(player: any, now: number): any {
         var sp = this.sp;
         if (this.greymarchPlagueOwn) return;
-        try { if (!player.is3DLoaded() || player.isDead() || player.isOnMount() || player.getSitState() !== 0 || player.isWeaponDrawn()) return; } catch (cErr) { return; }
-        if (this.greymarchWolfOn || this.greymarchShapeOn || this.greymarchShapeWant || this.greymarchVampFeedLocked || this.greymarchVampFeedHold) return;
+        var why = "";
+        try { why = !player.is3DLoaded() ? "not loaded" : player.isDead() ? "dead" : player.isOnMount() ? "riding" : player.getSitState() !== 0 ? "sitting" : player.isWeaponDrawn() ? "weapon out" : ""; } catch (cErr) { why = "unreadable"; }
+        if (!why && (this.greymarchWolfOn || this.greymarchShapeOn || this.greymarchShapeWant)) why = "a beast or creature";
+        if (!why && (this.greymarchVampFeedLocked || this.greymarchVampFeedHold)) why = "feeding";
+        if (why) { this.greymarchPlagueCoughLog("own cough skipped: " + why); return; }
         var first = false; try { first = Number(sp.Game.getCameraState()) === 0; } catch (camErr) { first = false; }
         try {
             sp.Game.disablePlayerControls(true, true, true, false, true, false, true, false, 0);
@@ -2119,7 +2122,8 @@ export class GreymarchBridge {
         if (!own) return;
         if (own.phase === "still" && now - own.at >= PLAGUE_STILL_MS) {
             own.phase = "cough"; own.at = now;
-            try { var idle = sp.Idle.from(sp.Game.getFormEx(PLAGUE_COUGH_IDLE)); if (idle) player.playIdle(idle); } catch (iErr) { /* stood still, no cough shown */ }
+            var okOwn = false; try { var idle = sp.Idle.from(sp.Game.getFormEx(PLAGUE_COUGH_IDLE)); okOwn = !!idle && !!player.playIdle(idle); } catch (iErr) { okOwn = false; }
+            this.greymarchPlagueCoughLog("own cough " + (okOwn ? "played" : "NOT played (the game refused the idle)"));
             return;
         }
         if (own.phase === "cough" && now - own.at >= PLAGUE_HOLD_MS) {
@@ -2128,6 +2132,7 @@ export class GreymarchBridge {
             if (own.first) { try { sp.Game.forceFirstPerson(); } catch (fErr) { /* they switch back themselves */ } }
         }
     }
+    greymarchPlagueCoughLog(text: string): any { if ((this.greymarchPlagueCoughSaid = (this.greymarchPlagueCoughSaid || 0) + 1) <= 40) this.greymarchLog("plague: " + text); } // the first 40 coughs of a session, to see why one is not shown
     greymarchPlagueSeenTick(player: any, now: number): any {
         var sp = this.sp, coughs: number[] = this.greymarchPlagueCoughs || [];
         if (coughs.length) {
@@ -2135,8 +2140,13 @@ export class GreymarchBridge {
             var idle: any = null; try { idle = sp.Idle.from(sp.Game.getFormEx(PLAGUE_COUGH_IDLE)); } catch (iErr) { idle = null; }
             for (var c = 0; c < coughs.length && c < 20; c++) {
                 if ((coughs[c] >>> 0) === (this.greymarchMeActor >>> 0)) { this.greymarchPlagueOwnCough(player, now); continue; } // this player: stopped and seen from behind first
-                var ca = this.greymarchPlagueActor(player, coughs[c]);
-                try { if (idle && ca && ca.is3DLoaded() && !ca.isDead() && !ca.isOnMount() && ca.getSitState() === 0 && !ca.isWeaponDrawn()) ca.playIdle(idle); } catch (cErr) { /* not now: the next cough */ }
+                var ca = this.greymarchPlagueActor(player, coughs[c]), res = "";
+                try {
+                    if (!idle) res = "no idle"; else if (!ca) res = "not found here"; else if (!ca.is3DLoaded()) res = "not loaded"; else if (ca.isDead()) res = "dead"; else if (ca.isOnMount()) res = "riding";
+                    else if (ca.getSitState() !== 0) res = "sitting"; else if (ca.isWeaponDrawn()) res = "weapon out";
+                    else res = ca.playIdle(idle) ? "played" : "NOT played (the game refused the idle)";
+                } catch (cErr) { res = "error " + String(cErr).slice(0, 80); }
+                this.greymarchPlagueCoughLog("cough on " + (coughs[c] >>> 0).toString(16) + ": " + res);
             }
         }
         this.greymarchPlagueOwnCoughTick(player, now);
