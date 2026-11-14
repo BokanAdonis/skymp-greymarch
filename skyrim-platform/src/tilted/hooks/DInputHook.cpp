@@ -6,6 +6,7 @@
 #include <dinput.h>
 
 #include <FunctionHook.hpp>
+#include "KeyReleaseFilter.h"
 #include <array>
 #include <iostream>
 
@@ -305,9 +306,19 @@ HRESULT _stdcall FakeIDirectInputDevice8A::GetDeviceData(
       ProcessKeyboardData(rawData);
       memset(rawData, 0, 256);
     }
-    if (DInputHook::ChromeFocus()) {
+    // GREYMARCH: while a page has the keyboard the game still gets the release of a key it saw go down (KeyReleaseFilter.h); before, every event was
+    // dropped and such a key stayed held in the game. A peek (DIGDD_PEEK) leaves the events in the buffer, so it never changes what the filter knows.
+    static KeyReleaseFilter s_keyReleases;
+    const bool focused = DInputHook::ChromeFocus();
+    const bool peek = (flags & DIGDD_PEEK) != 0;
+    if (outDataLen && !peek &&
+        (result == DI_OK || result == DI_BUFFEROVERFLOW)) {
+      *outDataLen =
+        s_keyReleases.Filter(outData, *outDataLen, dataSize, focused);
+    } else if (outDataLen && focused) {
       *outDataLen = 0;
-
+    }
+    if (focused) {
       return result;
     }
   }

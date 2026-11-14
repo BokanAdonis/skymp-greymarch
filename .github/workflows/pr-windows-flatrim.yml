@@ -1,6 +1,7 @@
 name: PR Windows Flatrim (AE/SE)
 
 on:
+  workflow_dispatch: # GREYMARCH: build any branch on demand (a SkyrimPlatform change is shipped from this build)
   push:
     branches: [ main ]
   pull_request:
