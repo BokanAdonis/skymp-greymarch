@@ -647,3 +647,48 @@ TEST_CASE("Regress: LvlGiant mustn't have Fox race health", "[PartOne][espm]")
 
   REQUIRE(baseActorValues.health == 250.f);
 }
+
+// GREYMARCH (2026-11-02): a dungeon chest emptied by the gamemode showed its plugin contents (Iron Arrows) in the player's game, because an
+// empty inventory was left out of the create message; every take was refused and the arrows stayed in that game only
+TEST_CASE("An emptied container is sent with an empty inventory",
+          "[PartOne][espm]")
+{
+  auto& partOne = GetPartOne();
+  const auto refrId = 0x20570;
+  auto& ref = partOne.worldState.GetFormAt<MpObjectReference>(refrId);
+  const auto saved = ref.GetChangeForm();
+
+  // never touched: left out, the game's own contents stay
+  REQUIRE(!saved.baseContainerAdded);
+  partOne.Messages().clear();
+  DoConnect(partOne, 0);
+  partOne.CreateActor(0xff000000, { 21272.0000, -7816.0000, -3608.0000 }, 0,
+                      0x1a26f);
+  partOne.SetUserActor(0, 0xff000000);
+  {
+    auto res = FindRefrMessage<CreateActorMessage>(partOne, refrId);
+    REQUIRE(res.filteredMessages.size() == 1);
+    REQUIRE(!res.filteredMessages[0].props.inventory.has_value());
+  }
+  DoDisconnect(partOne, 0);
+  partOne.DestroyActor(0xff000000);
+
+  // emptied by the server: sent, as an empty list
+  ref.SetInventory(Inventory());
+  partOne.Messages().clear();
+  DoConnect(partOne, 0);
+  partOne.CreateActor(0xff000000, { 21272.0000, -7816.0000, -3608.0000 }, 0,
+                      0x1a26f);
+  partOne.SetUserActor(0, 0xff000000);
+  {
+    auto res = FindRefrMessage<CreateActorMessage>(partOne, refrId);
+    REQUIRE(res.filteredMessages.size() == 1);
+    REQUIRE(res.filteredMessages[0].props.inventory.has_value());
+    REQUIRE(res.filteredMessages[0].props.inventory->IsEmpty());
+  }
+  DoDisconnect(partOne, 0);
+  partOne.DestroyActor(0xff000000);
+
+  ref.ApplyChangeForm(saved);
+  REQUIRE(!ref.GetChangeForm().baseContainerAdded);
+}
