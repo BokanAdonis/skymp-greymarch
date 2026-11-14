@@ -130,7 +130,7 @@ const INTOX_SPEED: { [k: string]: number } = { tipsy: 95, drunk: 85, high: 80 };
 const INTOX_WALK_ONLY: { [k: string]: number } = { walk: 1, run: 0.33, sprint: 0.22 }; // drunk or high: a run or a sprint goes at walking pace
 // CARRYING SLOWS YOU (2026-11-14, the owner: "carry logs: forced to walk; carry a basket: can't sprint, but may jog"): while a carry emote is on, the share of the
 // pace each gait gets (greymarchCarryPaceTick). A run is about three times a walk and a sprint about four and a half, so 0.67 makes a sprint a jog.
-const CARRY_PACE: { [id: string]: { [k: string]: number } } = { logcarry: INTOX_WALK_ONLY, basket: { walk: 1, run: 1, sprint: 0.67 } }; // logs: a walk; a basket: no sprint
+const CARRY_PACE: { [id: string]: { [k: string]: number } } = { woodcarry: INTOX_WALK_ONLY, basket: { walk: 1, run: 1, sprint: 0.67 } }; // firewood: a walk; a basket: no sprint
 const INTOX_STAMINA: { [k: string]: number } = { drunk: 0.2, high: 0.3 };
 // THE HELD FEEDING LOOP (2026-11-03, the owner: "It's still not locking into the animation"; the game log showed the bite play once, then the replay 6 s later
 // refused 4 times while both stood): the standing feed is one paired bite of about 5 s. It is now played again the moment it ends (bIsSynced off, checked every
@@ -7066,6 +7066,7 @@ export class GreymarchBridge {
         var n = this.greymarchEmoteLogged = (this.greymarchEmoteLogged || 0) + 1;
         if (n <= 20) this.greymarchLog("emote: " + em.id + " (idle " + em.idle.toString(16) + ", " + em.kind + ") " + (ok ? "played" : "refused by the game"));
         if (!ok) { this.greymarchEmoteSay("You cannot do that right now"); return; }
+        if (em.ends && this.greymarchEmoteNow && this.greymarchEmoteNow.id === em.ends) { this.greymarchEmoteNow = null; this.greymarchServerEmoteEnd = null; } // putting the firewood down finishes the carry
         this.greymarchEmoteNow = em.kind === "once" ? null : { id: em.id, kind: em.kind, stop: em.stop || emoteMod.IDLE_STOP, stopEvent: em.stopEvent, at: Date.now() };
         if (em.kind === "once") this.greymarchEmotePovUntil = Date.now() + EMOTE_ONCE_POV_MS; // a one-off emote plays for a few seconds: first person stays off meanwhile
         this.greymarchEmoteOnce = em.kind === "once" ? { id: em.id, at: Date.now(), until: Date.now() + EMOTE_ONCE_POV_MS, moved: false } : null; // moving cuts it short (greymarchEmoteExitTick)

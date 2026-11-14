@@ -10,7 +10,7 @@
 
 export type EmoteKind = "once" | "loop" | "walk" | "face";
 export interface Face { mood?: number; strength?: number; phonemes?: number[][] } // phonemes: [index, 0-1] (0 Aah, 1 BigAah, 5 Eee ...)
-export interface Emote { id: string; name: string; idle: number; kind: EmoteKind; stop?: number; face?: Face; event?: string; stopEvent?: string } // event / stopEvent: sent when the game refuses the idle (see SITTING)
+export interface Emote { id: string; name: string; idle: number; kind: EmoteKind; stop?: number; face?: Face; event?: string; stopEvent?: string; ends?: string } // ends: a one-off that finishes this carry (no stop sent) // event / stopEvent: sent when the game refuses the idle (see SITTING)
 export interface EmoteGroup { id: string; name: string; items: Emote[] }
 
 export const IDLE_STOP = 0x10d9ee;       // IdleStop_Loose (event IdleStop): ends a loop
@@ -78,10 +78,12 @@ export const EMOTE_GROUPS: EmoteGroup[] = [
     { id: "carry", name: "Carry", items: [
         e("pot", "Carry a pot", 0x101044, "walk", OFFSET_STOP), e("potserve", "Serve from the pot", 0x101045, "once"), e("tray", "Carry a tray", 0x107110, "walk", OFFSET_STOP),
         e("basket", "Carry a basket", 0x19925, "walk", OFFSET_STOP), e("scatter", "Scatter feed", 0xf1225, "loop"),
-// CARRY LOGS (2026-11-14, the owner: "is there no log carry emote?"): the game's firewood and bucket idles (IdleWoodPickUpEnter, IdlewoodputdownEnter,
-// IdleCarryBucketFillEnter ...) are refused for a player (the owner's log: "refused by the game"; they belong to an NPC at a woodpile or well marker), so the
-// logs are carried in the basket's pose under their own name, which keeps its own pace (bridge.ts CARRY_PACE: a walk only). Town work's log job uses it.
-e("logcarry", "Carry logs", 0x19925, "walk", OFFSET_STOP),
+// CARRY FIREWOOD (2026-11-14, the owner: "I want the firelog carrying fixed"): the game's own log carry is the animation event OffsetCarryLogStart (behind
+// WoodPickUpInstantExit, 0xe90), but its idle records ask for an NPC using a woodpile, so the game refuses them for a player ("You cannot do that right now").
+// The event itself is sent instead (as the sitting emotes do), ended like any carry (OffsetStop). Putting it down is the game's IdlewoodputdownEnter event,
+// a one-off that finishes the carry. Town work's log job uses both; the pace while carrying is a walk only (bridge.ts CARRY_PACE).
+{ id: "woodcarry", name: "Carry firewood", idle: 0xe90, kind: "walk", stop: OFFSET_STOP, event: "OffsetCarryLogStart", stopEvent: "OffsetStop" },
+{ id: "wooddown", name: "Put down firewood", idle: 0xbcd52, kind: "once", event: "IdlewoodputdownEnter", ends: "woodcarry" },
     ] },
     { id: "grim", name: "Grim", items: [
         e("beat", "Beat a prisoner", 0x105d46, "once"), e("cleansword", "Clean a sword", 0x3ea33, "once"), e("cutpalm", "Cut your palm", 0xaf886, "once"),
