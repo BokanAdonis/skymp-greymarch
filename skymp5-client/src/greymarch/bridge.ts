@@ -128,6 +128,9 @@ const INTOX_SWAY: { [k: string]: { pitch: number; pitchPeriod: number; lean: num
 const INTOX_STUMBLE: { [k: string]: number } = { drunk: 40000, high: 20000 };
 const INTOX_SPEED: { [k: string]: number } = { tipsy: 95, drunk: 85, high: 80 };
 const INTOX_WALK_ONLY: { [k: string]: number } = { walk: 1, run: 0.33, sprint: 0.22 }; // drunk or high: a run or a sprint goes at walking pace
+// CARRYING SLOWS YOU (2026-11-14, the owner: "carry logs: forced to walk; carry a basket: can't sprint, but may jog"): while a carry emote is on, the share of the
+// pace each gait gets (greymarchCarryPaceTick). A run is about three times a walk and a sprint about four and a half, so 0.67 makes a sprint a jog.
+const CARRY_PACE: { [id: string]: { [k: string]: number } } = { woodcarry: INTOX_WALK_ONLY, basket: { walk: 1, run: 1, sprint: 0.67 }, bucket: { walk: 1, run: 1, sprint: 0.67 } };
 const INTOX_STAMINA: { [k: string]: number } = { drunk: 0.2, high: 0.3 };
 // THE HELD FEEDING LOOP (2026-11-03, the owner: "It's still not locking into the animation"; the game log showed the bite play once, then the replay 6 s later
 // refused 4 times while both stood): the standing feed is one paired bite of about 5 s. It is now played again the moment it ends (bIsSynced off, checked every
@@ -1910,6 +1913,7 @@ export class GreymarchBridge {
         this.greymarchVampFeedHeld(player, now);
         this.greymarchDrunkTick(player, now);
         this.greymarchIntoxTick(player, now); // drunk or high: the screen, the walk, the stumbles, the pace
+        this.greymarchCarryPaceTick(player, now); // carrying firewood: a walk; a basket or a bucket: no sprint
         this.greymarchPlagueTick(player); // the plague: weaker by its stage, and a cough's screen flash
         this.greymarchSunBurnTick(player); // a vampire in the sun: no health regeneration of their own
         this.greymarchPlagueSeenTick(player, now); // the plague others see: the sheen on the badly sick, and their coughs
@@ -2017,6 +2021,27 @@ export class GreymarchBridge {
         } catch (e) { /* tried again next frame */ }
     }
     // the pace everything else starts from: staff speed, less the plague's Move speed (2026-11-11)
+    // CARRYING SLOWS YOU (CARRY_PACE): the carry emote this player is in (town work's, or the wheel's) sets the pace a run or a sprint gets, as the drunk walk
+    // does; drunk, high or in a creature's body their own pace rules instead. Let go when the carry ends (Stop, the server's time, a drawn weapon, another emote).
+    greymarchCarryPaceTick(player: any, now: number): any {
+        if (now - (this.greymarchCarryPaceAt || 0) < 100) return;
+        this.greymarchCarryPaceAt = now;
+        if (this.greymarchIntoxPace !== undefined || this.greymarchShapeOn || this.greymarchShapeWant) { this.greymarchCarryPace = undefined; return; }
+        var cur = this.greymarchEmoteNow, rule = cur && cur.kind === "walk" ? CARRY_PACE[cur.id] : null;
+        var staff = this.greymarchBaseSpeed();
+        if (rule) {
+            var gait = "walk"; try { gait = player.isSprinting() ? "sprint" : player.isRunning() ? "run" : "walk"; } catch (gErr) { gait = "walk"; }
+            var pct = Math.round(staff * (rule[gait] || 1)), was = -1;
+            try { was = player.getActorValue("SpeedMult"); } catch (vErr) { was = -1; }
+            if (was !== pct) { try { player.setActorValue("SpeedMult", pct); player.modActorValue("CarryWeight", 0.1); player.modActorValue("CarryWeight", -0.1); } catch (sErr) { /* again in a moment */ } }
+            if (this.greymarchCarryPace === undefined) this.greymarchLog("carry: " + cur.id + " sets the pace");
+            this.greymarchCarryPace = pct;
+        } else if (this.greymarchCarryPace !== undefined) {
+            this.greymarchCarryPace = undefined;
+            try { player.setActorValue("SpeedMult", staff); player.modActorValue("CarryWeight", 0.1); player.modActorValue("CarryWeight", -0.1); } catch (rErr) { /* the next speed change puts it right */ }
+            this.greymarchLog("carry: the pace is back");
+        }
+    }
     greymarchBaseSpeed(): number {
         var staff = (this.greymarchFxHave && this.greymarchFxHave.speed) || 100;
         return Math.round(staff * (100 - (this.greymarchPlagueSlow || 0)) / 100);
