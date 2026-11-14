@@ -43,6 +43,7 @@ const SHAPE_LAND_MS = 450; // a creature's swing is reported this long after it 
 const SHAPE_NPC_READY_MS = 8000; // a creature NPC that is not ready this long after it was placed is placed again
 const SHAPE_SILENCE_MS = 20000; // a creature form: with no word from the server for this long the player changes back by themselves (the server repeats "on" every 5 seconds)
 const WORK_MARK_SHADER = 0x5d608; // EnchBlueFXShader (Skyrim.esm): the blue glow on the object that is this player's town work (greymarchWorkMarkTick)
+const WORK_MARK_SHADER_2 = 0x03b6cb; // and the ghostly blue over it (2026-11-14, the owner: "make the jobs marked a little brighter"): the two together
 const POISON_GLOW_SHADER = 0x5d606; // EnchGreenFXShader (Skyrim.esm): the green glow the game puts on an enchanted weapon, for a poisoned blade (greymarchPoisonGlowTick)
 const SIT_RESET_MS = 2000; // standing up from the wheel's sitting: the body is put back to normal this long after the stand-up starts (greymarchSitResetTick)
 const WORK_SHEATHE_MS = 1500; // profession work: the kneel waits this long after the weapon is put away (the put-away animation ends first)
@@ -6910,8 +6911,10 @@ export class GreymarchBridge {
         this.greymarchWorkMarkAt = now + 1000;
         var sp = this.sp, want = this.greymarchWorkMarkWant || 0, shown = this.greymarchWorkMarkShown || null;
         if (!want && !shown) return;
-        var shader: any = null; try { shader = sp.EffectShader.from(sp.Game.getFormEx(WORK_MARK_SHADER)); } catch (e) { shader = null; }
-        if (!shader) return;
+        var shaders: any[] = [];
+        [WORK_MARK_SHADER, WORK_MARK_SHADER_2].forEach(function (f) { try { var sh = sp.EffectShader.from(sp.Game.getFormEx(f)); if (sh) shaders.push(sh); } catch (e) { /* the other one */ } });
+        if (!shaders.length) return;
+        var shader = { play: function (o: any, d: number) { shaders.forEach(function (sh) { sh.play(o, d); }); }, stop: function (o: any) { shaders.forEach(function (sh) { try { sh.stop(o); } catch (e) { /* not on */ } }); } };
         var refOf = function (id: number): any { try { var local = id >= 0xff000000 ? misc.remoteIdToLocalId(id) : id; return local ? sp.ObjectReference.from(sp.Game.getFormEx(local)) : null; } catch (e) { return null; } };
         if (shown && shown.ref !== want) { var old = refOf(shown.ref); try { if (old) shader.stop(old); } catch (e) { /* gone */ } shown = this.greymarchWorkMarkShown = null; }
         if (!want) return;
