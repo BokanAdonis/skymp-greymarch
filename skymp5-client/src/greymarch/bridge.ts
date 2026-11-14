@@ -6677,6 +6677,7 @@ export class GreymarchBridge {
         this.greymarchPoisonTick(now);
         this.greymarchPoisonGlowTick(now);
         this.greymarchWorkMarkTick(now);
+        this.greymarchEmotePendingTick(now);
         this.greymarchEmotePovLock(!!this.greymarchEmoteNow || now < (this.greymarchEmotePovUntil || 0) || !!this.greymarchMiniOn || !!this.greymarchForgeAnim || !!this.greymarchForgeOn || now - (this.greymarchWorkStartAt || -1e12) < 1500 || !!this.greymarchSitResetAt || !!this.greymarchForgeAnimSafety, now); // ...and out of a forge or station until its exit has played and the body is back to normal (greymarchForgeAnimSafety; 2026-11-08, the owner: out of the Karthwasten forge in first person they walked through walls: first person came back the moment the window closed, mid exit) // standing up from sitting: third person until the body is back to normal, THEN first person (2026-11-02, the owner: going back to first person mid stand-up made them fall and float) // a meal too, and profession work (2026-11-02, the owner)
         if (this.greymarchMealLocked && !(this.greymarchEmoteNow && this.greymarchEmoteNow.meal)) this.greymarchMealLock(false, "the meal ended another way"); // never left frozen (a beast form, an emote dropped elsewhere)
         var cur = this.greymarchEmoteNow;
@@ -6893,6 +6894,17 @@ export class GreymarchBridge {
     // THE JOB'S GLOW (2026-11-14, the owner: "make it easy to tell what is part of the player's job"): the server names the object that is this player's town
     // work (greymarchWorkMark { ref }, 0 for none; gamemode labour.js) and only this game puts the blue enchantment glow (EnchBlueFXShader) on it. Put on again
     // when the object is drawn again (its 3D comes and goes with distance and cells), taken off when the job ends or changes. Looked at once a second.
+    // an emote's second step (emotes.ts preEvent): its event once the first has played, if the emote is still on
+    greymarchEmotePendingTick(now: number): any {
+        var q = this.greymarchEmoteAfterQ;
+        while (q && q.length && now >= q[0].at) { var a = q.shift(); try { this.sp.Debug.sendAnimationEvent(this.sp.Game.getPlayer(), a.event); } catch (e) { /* the next one */ } this.greymarchLog("emote: after, " + a.event); }
+        var pend = this.greymarchEmotePending;
+        if (!pend || now < pend.at) return;
+        this.greymarchEmotePending = null;
+        if (pend.id && (!this.greymarchEmoteNow || this.greymarchEmoteNow.id !== pend.id)) return;
+        var ok = false; try { ok = !!this.sp.Debug.sendAnimationEvent(this.sp.Game.getPlayer(), pend.event); } catch (e) { ok = false; }
+        this.greymarchLog("emote: " + pend.id + " then " + pend.event + (ok ? " accepted" : " not accepted"));
+    }
     greymarchWorkMarkTick(now: number): any {
         if (now < (this.greymarchWorkMarkAt || 0)) return;
         this.greymarchWorkMarkAt = now + 1000;
@@ -7058,10 +7070,17 @@ export class GreymarchBridge {
             if (player.isWeaponDrawn()) { this.greymarchEmoteSay("Sheathe your weapon first"); return; }
             if (this.greymarchEmoteNow && this.greymarchEmoteNow.kind === "walk" && em.kind !== "once") this.greymarchEmoteEnd("another emote"); // a carry ends before a new pose starts (a serve or a throw keeps it)
             this.greymarchEmotePovNote(); try { sp.Game.forceThirdPerson(); } catch (tpErr) { /* the emote still plays */ }
-            var idle = sp.Idle.from(sp.Game.getFormEx(em.idle));
+            var idle = em.idle ? sp.Idle.from(sp.Game.getFormEx(em.idle)) : null; // idle 0: the event only
             this.greymarchCrumb("emote " + em.id + " idle " + (Number(em.idle) >>> 0).toString(16));
             ok = !!idle && !!player.playIdle(idle);
-            if (!ok && em.event) { sp.Debug.sendAnimationEvent(player, em.event); ok = true; } // a sitting idle asks for a seat: its own event sits anywhere (emotes.ts, SITTING DOWN)
+            if (!ok && em.event && em.preEvent) { // picked up first, then the event (greymarchEmotePendingTick)
+                var pre = false; try { pre = !!sp.Debug.sendAnimationEvent(player, em.preEvent); } catch (pErr) { pre = false; }
+                this.greymarchLog("emote: " + em.id + " first " + em.preEvent + (pre ? " accepted" : " not accepted"));
+                this.greymarchEmotePending = { event: em.event, id: em.id, at: Date.now() + (em.preMs || 2000) };
+                ok = true;
+            }
+            else if (!ok && em.event) { sp.Debug.sendAnimationEvent(player, em.event); ok = true; }
+            if (ok && em.afterEvents) { var q = this.greymarchEmoteAfterQ || (this.greymarchEmoteAfterQ = []); for (var ai = 0; ai < em.afterEvents.length; ai++) q.push({ event: em.afterEvents[ai][0], at: Date.now() + em.afterEvents[ai][1] }); } // sent whatever is on then // a sitting idle asks for a seat: its own event sits anywhere (emotes.ts, SITTING DOWN)
         } catch (err) { ok = false; }
         var n = this.greymarchEmoteLogged = (this.greymarchEmoteLogged || 0) + 1;
         if (n <= 20) this.greymarchLog("emote: " + em.id + " (idle " + em.idle.toString(16) + ", " + em.kind + ") " + (ok ? "played" : "refused by the game"));
@@ -7069,7 +7088,7 @@ export class GreymarchBridge {
         if (em.ends && this.greymarchEmoteNow && this.greymarchEmoteNow.id === em.ends) { this.greymarchEmoteNow = null; this.greymarchServerEmoteEnd = null; } // putting the firewood down finishes the carry
         this.greymarchEmoteNow = em.kind === "once" ? null : { id: em.id, kind: em.kind, stop: em.stop || emoteMod.IDLE_STOP, stopEvent: em.stopEvent, at: Date.now() };
         if (em.kind === "once") this.greymarchEmotePovUntil = Date.now() + EMOTE_ONCE_POV_MS; // a one-off emote plays for a few seconds: first person stays off meanwhile
-        this.greymarchEmoteOnce = em.kind === "once" ? { id: em.id, at: Date.now(), until: Date.now() + EMOTE_ONCE_POV_MS, moved: false } : null; // moving cuts it short (greymarchEmoteExitTick)
+        this.greymarchEmoteOnce = em.kind === "once" && !em.ends ? { id: em.id, at: Date.now(), until: Date.now() + EMOTE_ONCE_POV_MS, moved: false } : null; // moving cuts it short (greymarchEmoteExitTick); not a put-down (the owner: "it goes down but I stand back up immediately": they arrive walking), which ends by itself
         if (!this.greymarchEmoteExitHinted && em.kind !== "once") { this.greymarchEmoteExitHinted = true; this.greymarchEmoteSay("Backspace stops an emote"); } // said once a session
     }
     // ---- FACES (the wheel's Face group). The face is put on the player's own body here and reported to the server, which passes it to everyone else (gamemode faces.js);

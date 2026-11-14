@@ -10,7 +10,7 @@
 
 export type EmoteKind = "once" | "loop" | "walk" | "face";
 export interface Face { mood?: number; strength?: number; phonemes?: number[][] } // phonemes: [index, 0-1] (0 Aah, 1 BigAah, 5 Eee ...)
-export interface Emote { id: string; name: string; idle: number; kind: EmoteKind; stop?: number; face?: Face; event?: string; stopEvent?: string; ends?: string } // ends: a one-off that finishes this carry (no stop sent) // event / stopEvent: sent when the game refuses the idle (see SITTING)
+export interface Emote { id: string; name: string; idle: number; kind: EmoteKind; stop?: number; face?: Face; event?: string; stopEvent?: string; ends?: string; preEvent?: string; preMs?: number; afterEvents?: [string, number][] } // afterEvents: [event, ms] sent that long after the emote, whatever is on then // preEvent: sent first, the event preMs later (the firewood is picked up, then carried) // ends: a one-off that finishes this carry (no stop sent) // event / stopEvent: sent when the game refuses the idle (see SITTING)
 export interface EmoteGroup { id: string; name: string; items: Emote[] }
 
 export const IDLE_STOP = 0x10d9ee;       // IdleStop_Loose (event IdleStop): ends a loop
@@ -82,8 +82,13 @@ export const EMOTE_GROUPS: EmoteGroup[] = [
 // WoodPickUpInstantExit, 0xe90), but its idle records ask for an NPC using a woodpile, so the game refuses them for a player ("You cannot do that right now").
 // The event itself is sent instead (as the sitting emotes do), ended like any carry (OffsetStop). Putting it down is the game's IdlewoodputdownEnter event,
 // a one-off that finishes the carry. Town work's log job uses both; the pace while carrying is a walk only (bridge.ts CARRY_PACE).
-{ id: "woodcarry", name: "Carry firewood", idle: 0xe90, kind: "walk", stop: OFFSET_STOP, event: "OffsetCarryLogStart", stopEvent: "OffsetStop" },
-{ id: "wooddown", name: "Put down firewood", idle: 0xbcd52, kind: "once", event: "IdlewoodputdownEnter", ends: "woodcarry" },
+// THE LOGS IN HAND (the owner's picture: the arm on the shoulder, holding nothing): the log model (AnimObjectCarryFirewood) is put in the hand by the game's
+// picking-up animation, which the carry goes on from, so the pick-up (IdleWoodPickUpEnter) is played first and the carry PICKUP_MS later.
+{ id: "woodcarry", name: "Carry firewood", idle: 0xe90, kind: "walk", stop: OFFSET_STOP, event: "OffsetCarryLogStart", stopEvent: "OffsetStop", preEvent: "IdleWoodPickUpEnter", preMs: 2500 },
+// PUTTING IT DOWN (the owner: "still no animation when putting down"): the game's put-down (IdlewoodputdownEnter) exists only at a woodpile, so it is made of
+// pieces the game plays for a player: the kneel (Search a chest's idle), the logs leaving the hand (AnimObjectUnequip, the firewood's own unequip event) once
+// down, then the carry and the kneel ended (OffsetStop, IdleStop).
+{ id: "wooddown", name: "Put down firewood", idle: 0x6ff14, kind: "once", ends: "woodcarry", afterEvents: [["AnimObjectUnequip", 1500], ["OffsetStop", 2300], ["IdleStop", 2500]] },
     ] },
     { id: "grim", name: "Grim", items: [
         e("beat", "Beat a prisoner", 0x105d46, "once"), e("cleansword", "Clean a sword", 0x3ea33, "once"), e("cutpalm", "Cut your palm", 0xaf886, "once"),
